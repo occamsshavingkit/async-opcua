@@ -30,18 +30,18 @@ D4. All status codes exist. No new dep; warning-free in ALL feature legs. Deferr
 events, persistence, non-in-memory managers.
 
 ## Phase 1: Setup
-- [ ] T001 Confirm impl point (`memory_mgr_impl.rs` defaults), the `AddressSpace` mutation API + node
+- [X] T001 Confirm impl point (`memory_mgr_impl.rs` defaults), the `AddressSpace` mutation API + node
   builders (`async-opcua-nodes`), `AddNodeItem`/`AddReferenceItem` getters/`set_result`, and the exact
   `context.info.config` → limits path for the gate. No code change.
 
 ## Phase 2: Foundational
-- [ ] T002 codex: add `pub clients_can_modify_address_space: bool` (`#[serde(default)]`=false) to `Limits`
+- [X] T002 codex: add `pub clients_can_modify_address_space: bool` (`#[serde(default)]`=false) to `Limits`
   in `async-opcua-server/src/config/limits.rs` (+ `defaults`/`Default`); ensure the sample
   `samples/demo-server/sample.server.test.conf` + `samples/server.conf` still parse (the field already
   appears in YAML). Warning-free. (depends T001)
 
 ## Phase 3: US1 — AddNodes + DeleteNodes (P1) 🎯 MVP
-- [ ] T003 [US1] codex: implement `add_nodes` + `delete_nodes` in the in-memory impl defaults (helpers in
+- [X] T003 [US1] codex: implement `add_nodes` + `delete_nodes` in the in-memory impl defaults (helpers in
   a new `memory/node_management_impl.rs` if cleaner). Gate off → set every item `BadServiceUnsupported`.
   On: AddNodes — honor any pre-set bad status; else validate parent exists (`BadParentNodeIdInvalid`),
   requested id free or assign (`BadNodeIdExists`), build the node from `node_class`+`AddNodeAttributes`
@@ -49,12 +49,12 @@ events, persistence, non-in-memory managers.
   as applicable), `insert` with parent + type-def refs, `set_result(assigned_id, Good)`. DeleteNodes —
   `delete(id, delete_target_references)`; `None`→`BadNodeIdUnknown` else `Good`. No panic on any input.
   (depends T002)
-- [ ] T004 [P] [US1] Claude: e2e tests in `async-opcua/tests/integration/node_management.rs` (extend/add;
+- [X] T004 [P] [US1] Claude: e2e tests in `async-opcua/tests/integration/node_management.rs` (extend/add;
   register `mod node_management;` if new) driving the real service via the harness with the gate ENABLED:
   AddNodes→Browse/Read sees it; dup id→`BadNodeIdExists`; missing parent→`BadParentNodeIdInvalid`;
   DeleteNodes→Browse-absent; unknown→`BadNodeIdUnknown`; mixed valid/invalid batch→per-item status; gate
   OFF→every op `BadServiceUnsupported`; crafted/oversized batch→no panic. Anchored to Part 4 §5.7. (depends T003)
-- [ ] T005 [US1] Gate; **commit US1** (`feat(022 US1): writable address space — AddNodes/DeleteNodes (gated)`).
+- [X] T005 [US1] Gate; **commit US1** (`feat(022 US1): writable address space — AddNodes/DeleteNodes (gated)`).
 
 ## Phase 4: US2 — AddReferences + DeleteReferences (P2)
 - [ ] T006 [US2] codex: implement `add_references` + `delete_references` in the in-memory impl defaults:

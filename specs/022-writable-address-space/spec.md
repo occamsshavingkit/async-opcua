@@ -187,8 +187,12 @@ statuses with no crash.
   currently only present in the sample config file and is not yet a wired configuration field, so this
   feature adds/wires it (additive, default OFF). When OFF, the operations return the same
   "unsupported/not-allowed" status they do today (no behavior change).
-- **Node identifier assignment**: if a client requests a specific (free) identifier it is used; if it
-  requests "server-assigned," the server allocates one. Duplicate requested identifiers are rejected.
+- **Node identifier assignment**: a client requests a specific (free) identifier in a namespace the
+  in-memory manager owns; duplicate requested identifiers are rejected (`BadNodeIdExists`). NOTE:
+  fully **server-assigned** (null) identifiers route only to a manager that opts in via the existing
+  `handle_new_node` extension point (the `TestNodeManager` demonstrates this); the standard in-memory
+  default does not claim null-id adds (to avoid intercepting other managers' namespaces), so a client
+  specifies the new id. This is a refinement of the original "or server-assigned" intent.
 - **Verification division** (established): the production mutation logic + config gating + demo wiring may
   be implemented by the code-generation assistant; ALL tests are authored and run independently, anchored
   to OPC UA Part 4 §5.7 status-code semantics and real address-space round-trips (add→browse/read,

@@ -27,33 +27,33 @@ only (documented FR-004 refinement). New module `async-opcua-server/src/node_man
 re-exported. No new dep; must build warning-free in ALL feature legs.
 
 ## Phase 1: Setup
-- [ ] T001 Confirm the registration signatures + `RequestContext` import path + `TryFromVariant` /
+- [X] T001 Confirm the registration signatures + `RequestContext` import path + `TryFromVariant` /
   `Variant: Clone` / `From<Error> for StatusCode` / the 4 Call status codes, and the `node_manager`
   re-export point in `async-opcua-server/src/node_manager/mod.rs` + `lib.rs`. No code change.
 
 ## Phase 2: Foundational (blocking — the traits everything builds on)
-- [ ] T002 codex: create `async-opcua-server/src/node_manager/method_typed.rs` with the `MethodArg`
+- [X] T002 codex: create `async-opcua-server/src/node_manager/method_typed.rs` with the `MethodArg`
   trait + blanket `impl<T: TryFromVariant> MethodArg for T` (map `Error`→`StatusCode`), and the
   `IntoMethodOutputs` trait with a macro generating tuple impls `()`,`(A,)`,…,`(A..F)` (each
   `: Into<Variant>`). Register `mod method_typed;` and re-export `MethodArg`/`IntoMethodOutputs` from
   `node_manager/mod.rs`. Warning-free under `-D warnings`. (depends T001)
 
 ## Phase 3: US1 — Typed method registration (P1) 🎯 MVP
-- [ ] T003 [US1] codex: in `method_typed.rs`, add `MethodHandler<Args>` + a macro impl for
+- [X] T003 [US1] codex: in `method_typed.rs`, add `MethodHandler<Args>` + a macro impl for
   `F: Fn(A1..An)->Result<O,E>` (n=0..=6; `Aᵢ: MethodArg`, `O: IntoMethodOutputs`, `E: Into<StatusCode>`)
   doing arity-check (`<`→BadArgumentsMissing, `>`→BadTooManyArguments), per-arg clone+decode (fail→
   BadInvalidArgument, log index), invoke, marshal. Add `pub fn typed_method<F,Args>(f)->impl
   Fn(&[Variant])->Result<Vec<Variant>,StatusCode>+Send+Sync+'static`. Re-export `typed_method`. (depends T002)
-- [ ] T004 [P] [US1] Claude: unit tests in `async-opcua-server/src/node_manager/method_typed.rs`
+- [X] T004 [P] [US1] Claude: unit tests in `async-opcua-server/src/node_manager/method_typed.rs`
   (`#[cfg(test)]`) — anchored to Part 4 status semantics + real Variant round-trips: each supported arg
   type decodes; arity-too-few→BadArgumentsMissing; arity-too-many→BadTooManyArguments; wrong-type arg→
   BadInvalidArgument; user `Err(StatusCode)` and `Err(Error)` both surface; 0-in/0-out, 1-out `(x,)`,
   multi-out marshaling. NO panics on any bad input. (depends T003)
-- [ ] T005 [US1] Claude: end-to-end test in `async-opcua/tests/integration/methods.rs` (extend or add) —
+- [X] T005 [US1] Claude: end-to-end test in `async-opcua/tests/integration/methods.rs` (extend or add) —
   register a typed method on a `SimpleNodeManager`, invoke it through the **Call service**, assert
   correct outputs for a valid call and the reject StatusCode for a bad-arity / bad-type call. Register
   `mod methods;` if new. (depends T003)
-- [ ] T006 [US1] Gate (fmt + clippy all-features + the json-off/no-default legs + the two test cmds);
+- [X] T006 [US1] Gate (fmt + clippy all-features + the json-off/no-default legs + the two test cmds);
   **commit US1** (`feat(021 US1): typed method-call framework (MethodArg/IntoMethodOutputs/typed_method)`).
 
 ## Phase 4: US2 — demo-server adoption + before/after (P2)

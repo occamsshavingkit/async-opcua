@@ -28,25 +28,25 @@ semaphore_file_path,is_online}, RegisterServer2Request.discovery_configuration:O
 Client already has register_server/find_servers. Additive; no new dep; warning-free all legs; e2e single-threaded.
 
 ## Phase 1: Setup
-- [ ] T001 Confirm: RegisterServer(2)Request/Response + RegisteredServer + MdnsDiscoveryConfiguration
+- [X] T001 Confirm: RegisterServer(2)Request/Response + RegisteredServer + MdnsDiscoveryConfiguration
   types; the FindServers handler's `desc`/filter code; where to add the registry on `ServerInfo`; the
   RegisteredServer→ApplicationDescription field mapping. No code change.
 
 ## Phase 2: US1 — RegisterServer + FindServers integration (P1) 🎯 MVP
-- [ ] T002 [US1] codex: add a bounded in-memory registry to `ServerInfo` (`async-opcua-server/src/info.rs`)
+- [X] T002 [US1] codex: add a bounded in-memory registry to `ServerInfo` (`async-opcua-server/src/info.rs`)
   — `RwLock<HashMap<UAString, RegisteredServer>>` + `MAX_REGISTERED_SERVERS` cap; methods to apply a
   RegisterServer call (upsert if `is_online`, remove if not; reject null/empty server_uri; reject when at
   cap), and to list registered servers as `ApplicationDescription`s (with the documented field mapping,
   locale-aware name). No panic on crafted input. (depends T001)
-- [ ] T003 [US1] codex: rewrite the `RegisterServer` handler in `session/controller.rs` to update the
+- [X] T003 [US1] codex: rewrite the `RegisterServer` handler in `session/controller.rs` to update the
   registry and send `RegisterServerResponse` (Good / appropriate status) instead of the fault; and extend
   the `FindServers` handler to append the registry's ApplicationDescriptions before applying the existing
   filters. Empty registry → byte-identical to today. (depends T002)
-- [ ] T004 [P] [US1] Claude: integration tests in `async-opcua/tests/integration/discovery.rs` (register
+- [X] T004 [P] [US1] Claude: integration tests in `async-opcua/tests/integration/discovery.rs` (register
   `mod discovery;`) via the existing client — register(online)→FindServers includes it with the right
   ApplicationDescription fields; register(offline)→FindServers excludes it; re-register/update→single
   entry; empty-registry FindServers unchanged. Anchored to Part 4 §5.4.5. (depends T003)
-- [ ] T005 [US1] Gate; **commit US1** (`feat(024 US1): RegisterServer + FindServers integration (LDS registry)`).
+- [X] T005 [US1] Gate; **commit US1** (`feat(024 US1): RegisterServer + FindServers integration (LDS registry)`).
 
 ## Phase 3: US2 — RegisterServer2 + discovery configuration results (P2)
 - [ ] T006 [US2] codex: rewrite the `RegisterServer2` handler — update the same registry, build

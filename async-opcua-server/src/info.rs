@@ -4,6 +4,7 @@
 
 //! Provides server state information, such as status, configuration, running servers and so on.
 
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicU16, AtomicU8, Ordering};
 use std::sync::Arc;
 
@@ -42,6 +43,8 @@ use crate::config::{ServerConfig, ServerEndpoint};
 use super::authenticator::{AuthManager, UserToken};
 use super::identity_token::{IdentityToken, POLICY_ID_ANONYMOUS, POLICY_ID_X509};
 use super::{OperationalLimits, ServerCapabilities, ANONYMOUS_USER_TOKEN_ID};
+
+const MAX_REGISTERED_SERVERS: usize = 1000;
 
 /// Server state is any configuration associated with the server as a whole that individual sessions might
 /// be interested in.
@@ -94,6 +97,8 @@ pub struct ServerInfo {
     pub port: AtomicU16,
     /// List of active type loaders
     pub type_loaders: RwLock<TypeLoaderCollection>,
+    /// Registered servers advertised by this server when acting as a Local Discovery Server.
+    pub(crate) registered_servers: RwLock<HashMap<UAString, RegisteredServer>>,
     /// Current server diagnostics.
     pub diagnostics: ServerDiagnostics,
     /// Performance metrics for this server instance.
@@ -198,6 +203,51 @@ impl ServerInfo {
         locale_ids: &Option<Vec<UAString>>,
     ) -> bool {
         self.supports_locale_ids(locale_ids) && self.matches_discovery_endpoint_url(endpoint_url)
+    }
+
+    /// Applies a RegisterServer request to the in-memory discovery registry.
+    pub(crate) fn apply_register_server(&self, server: RegisteredServer) -> StatusCode {
+        if server.server_uri.is_null() || server.server_uri.is_empty() {
+            return StatusCode::BadServerUriInvalid;
+        }
+
+        let server_uri = server.server_uri.clone();
+        let mut registered_servers = self.registered_servers.write();
+
+        if !server.is_online {
+            registered_servers.remove(&server_uri);
+            return StatusCode::Good;
+        }
+
+        if !registered_servers.contains_key(&server_uri)
+            && registered_servers.len() >= MAX_REGISTERED_SERVERS
+        {
+            return StatusCode::BadTooManyOperations;
+        }
+
+        registered_servers.insert(server_uri, server);
+        StatusCode::Good
+    }
+
+    /// Returns registered servers as application descriptions for FindServers.
+    pub(crate) fn registered_application_descriptions(
+        &self,
+        _endpoint_url: &UAString,
+        locale_ids: &Option<Vec<UAString>>,
+    ) -> Vec<ApplicationDescription> {
+        self.registered_servers
+            .read()
+            .values()
+            .map(|server| ApplicationDescription {
+                application_uri: server.server_uri.clone(),
+                product_uri: server.product_uri.clone(),
+                application_name: registered_server_application_name(server, locale_ids),
+                application_type: server.server_type,
+                gateway_server_uri: server.gateway_server_uri.clone(),
+                discovery_profile_uri: UAString::null(),
+                discovery_urls: server.discovery_urls.clone(),
+            })
+            .collect()
     }
 
     fn supports_locale_ids(&self, locale_ids: &Option<Vec<UAString>>) -> bool {
@@ -855,6 +905,31 @@ fn locale_id_matches(supported: &str, requested: &str) -> bool {
 
     (supported_is_neutral && requested.starts_with(&format!("{supported}-")))
         || (requested_is_neutral && supported.starts_with(&format!("{requested}-")))
+}
+
+fn registered_server_application_name(
+    server: &RegisteredServer,
+    locale_ids: &Option<Vec<UAString>>,
+) -> LocalizedText {
+    let Some(server_names) = server.server_names.as_ref() else {
+        return LocalizedText::null();
+    };
+
+    if let Some(locale_ids) = locale_ids {
+        for requested in locale_ids {
+            if let Some(name) = server_names
+                .iter()
+                .find(|name| locale_id_matches(name.locale.as_ref(), requested.as_ref()))
+            {
+                return name.clone();
+            }
+        }
+    }
+
+    server_names
+        .first()
+        .cloned()
+        .unwrap_or_else(LocalizedText::null)
 }
 
 #[cfg(test)]

@@ -61,9 +61,9 @@ smoke is the Linux proxy. User can run the real UACTT on a Windows VM (US3 = tur
 - [X] T011 [US3] Gate; **commit US3** (`docs(020 US3): UACTT run guide + launch/cert script`).
 
 ## Phase 5: Polish
-- [ ] T012 Update `specs/conformance-gap-backlog.md`: note the CTT harness (smoke + demo profiles + guide)
+- [X] T012 Update `specs/conformance-gap-backlog.md`: note the CTT harness (smoke + demo profiles + guide)
   shipped; link the known-gaps table.
-- [ ] T013 Final gate: fmt + clippy --all-targets --all-features + the conformance smoke (isolated) +
+- [X] T013 Final gate: fmt + clippy --all-targets --all-features + the conformance smoke (isolated) +
   `cargo run -p async-opcua-demo-server -- --help` (config selection) + existing integration suite spot-check.
 
 ---

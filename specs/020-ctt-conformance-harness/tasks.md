@@ -39,14 +39,14 @@ smoke is the Linux proxy. User can run the real UACTT on a Windows VM (US3 = tur
   (`test(020 US1): CI conformance smoke across the full security/token matrix`).
 
 ## Phase 3: US2 — demo-server ECC profile + RSA coverage (P2)
-- [ ] T006 [US2] codex: add `samples/demo-server/sample.server.ecc.conf` (ECC_nistP256/P384 Sign+
+- [X] T006 [US2] codex: add `samples/demo-server/sample.server.ecc.conf` (ECC_nistP256/P384 Sign+
   SignAndEncrypt; ANONYMOUS + user + x509 token ids; ECC discovery url). Mirror the RSA conf shape.
-- [ ] T007 [US2] codex: `samples/demo-server/src/main.rs` — select the config via an arg/env (e.g.
+- [X] T007 [US2] codex: `samples/demo-server/src/main.rs` — select the config via an arg/env (e.g.
   `--config <path>` or `OPCUA_DEMO_CONFIG`), default = existing RSA conf (byte-identical default
   behavior); for the ECC profile provision an EC application cert (`X509::cert_and_pkey_ecc`,
   `create_sample_keypair(false)`) into the PKI `own/` dir. Verify the RSA conf has a `None` endpoint + all
   3 token types (fill gaps if any). (depends T006)
-- [ ] T008 [US2] Claude: a small test/assertion that both configs parse + build a server (RSA default
+- [X] T008 [US2] Claude: a small test/assertion that both configs parse + build a server (RSA default
   unchanged; ECC profile loads with EC cert) — or verify via `cargo run -- --help`/a smoke build. Gate;
   **commit US2** (`feat(020 US2): demo-server ECC profile (separate EC cert) + config selection`).
 

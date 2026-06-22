@@ -65,10 +65,10 @@ re-exported. No new dep; must build warning-free in ALL feature legs.
   test). Gate; **commit US2** (`feat(021 US2): demo-server adopts the typed method framework`).
 
 ## Phase 5: US3 — context-aware variant (P3, optional — only if clean)
-- [ ] T009 [US3] codex: add `MethodHandlerWithContext<Args>` (`Fn(&RequestContext,A1..An)->Result<O,E>`)
+- [X] T009 [US3] codex: add `MethodHandlerWithContext<Args>` (`Fn(&RequestContext,A1..An)->Result<O,E>`)
   + `typed_method_with_context(..)->impl Fn(&RequestContext,&[Variant])->…` reusing the same arity/decode
   /marshal logic; re-export. Skip if it doesn't fall out cleanly from the macro. (depends T003)
-- [ ] T010 [US3] Claude: unit + (optional) e2e test for the context variant (context readable + same
+- [X] T010 [US3] Claude: unit + (optional) e2e test for the context variant (context readable + same
   validation). Gate; **commit US3** (`feat(021 US3): context-aware typed method variant`). (depends T009)
 
 ## Phase 6: Polish

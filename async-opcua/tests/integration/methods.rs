@@ -7,7 +7,10 @@ use crate::utils::ChannelNotifications;
 
 use super::utils::setup;
 use opcua::{
-    server::{address_space::MethodBuilder, node_manager::typed_method},
+    server::{
+        address_space::MethodBuilder,
+        node_manager::{typed_method, typed_method_with_context, RequestContext},
+    },
     types::{
         AttributeId, CallMethodRequest, DataTypeId, NodeId, ObjectId, StatusCode, Variant,
         VariantTypeId,
@@ -403,4 +406,59 @@ async fn call_typed_method_user_error_propagates() {
         .await
         .unwrap();
     assert_eq!(err.status_code, StatusCode::BadOutOfRange);
+}
+
+/// US3: a context-aware typed method receives both the `RequestContext` and decoded typed args, and
+/// runs end-to-end through the Call service. The handler reads the context (session id) and the typed
+/// argument, proving both are threaded correctly.
+#[tokio::test]
+async fn call_typed_method_with_context() {
+    let (_tester, nm, session) = setup().await;
+
+    let id = nm.inner().next_node_id();
+    let input_id = nm.inner().next_node_id();
+    let output_id = nm.inner().next_node_id();
+    {
+        let mut sp = nm.address_space().write();
+        MethodBuilder::new(&id, "TypedCtx", "TypedCtx")
+            .component_of(ObjectId::ObjectsFolder)
+            .input_args(&mut *sp, &input_id, &[("Addend", DataTypeId::Int64).into()])
+            .output_args(
+                &mut *sp,
+                &output_id,
+                &[("SessionPlusAddend", DataTypeId::Int64).into()],
+            )
+            .insert(&mut *sp);
+    }
+
+    // Context-aware typed handler: reads the session id from the context AND a decoded i64 argument.
+    nm.inner().add_method_cb_with_context(
+        id.clone(),
+        typed_method_with_context(
+            |ctx: &RequestContext, addend: i64| -> Result<(i64,), StatusCode> {
+                Ok((ctx.session_id as i64 + addend,))
+            },
+        ),
+    );
+
+    let r = session
+        .call_one(CallMethodRequest {
+            object_id: ObjectId::ObjectsFolder.into(),
+            method_id: id.clone(),
+            input_arguments: Some(vec![Variant::Int64(1000)]),
+        })
+        .await
+        .unwrap();
+    assert_eq!(r.status_code, StatusCode::Good);
+    let outputs = r.output_arguments.unwrap();
+    assert_eq!(outputs.len(), 1);
+    let Variant::Int64(v) = outputs[0] else {
+        panic!("wrong output type");
+    };
+    // A real activated session has a positive numeric id, so the context was threaded through
+    // (output = session_id + 1000 > 1000) and the typed argument decoded correctly.
+    assert!(
+        v > 1000,
+        "context session id should be threaded through, got {v}"
+    );
 }

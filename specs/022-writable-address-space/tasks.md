@@ -76,9 +76,9 @@ events, persistence, non-in-memory managers.
   async-opcua-demo-server` clean. Gate; **commit US3** (`feat(022 US3): demo writable address space + edge/gating tests`).
 
 ## Phase 6: Polish
-- [ ] T011 Update `specs/conformance-gap-backlog.md` (Tier 3 #6 → implemented, opt-in/gated; note
+- [X] T011 Update `specs/conformance-gap-backlog.md` (Tier 3 #6 → implemented, opt-in/gated; note
   model-change events still deferred). Doc-comment the gate + the deferred GeneralModelChangeEventType.
-- [ ] T012 Final gate: fmt + clippy --all-targets --all-features + json-off/no-default legs +
+- [X] T012 Final gate: fmt + clippy --all-targets --all-features + json-off/no-default legs +
   `cargo test -p async-opcua --test integration_tests node_management -- --test-threads=1` +
   `cargo build -p async-opcua-demo-server` + existing-suite spot-check.
 

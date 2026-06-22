@@ -72,9 +72,9 @@ re-exported. No new dep; must build warning-free in ALL feature legs.
   validation). Gate; **commit US3** (`feat(021 US3): context-aware typed method variant`). (depends T009)
 
 ## Phase 6: Polish
-- [ ] T011 Update `TODO.md` — mark the method-call framework done (or note it shipped); update
+- [X] T011 Update `TODO.md` — mark the method-call framework done (or note it shipped); update
   `docs/` if a method section exists. Doc-comment the `argumentResults` limitation on `typed_method`.
-- [ ] T012 Final gate: fmt + clippy --all-targets --all-features + json-off/no-default legs +
+- [X] T012 Final gate: fmt + clippy --all-targets --all-features + json-off/no-default legs +
   `cargo test -p async-opcua-server method_typed` + `cargo test -p async-opcua --test integration_tests
   methods` + `cargo build -p async-opcua-demo-server`; existing suites spot-check.
 

@@ -57,10 +57,10 @@ re-exported. No new dep; must build warning-free in ALL feature legs.
   **commit US1** (`feat(021 US1): typed method-call framework (MethodArg/IntoMethodOutputs/typed_method)`).
 
 ## Phase 4: US2 — demo-server adoption + before/after (P2)
-- [ ] T007 [US2] codex: rewrite `samples/demo-server/src/methods.rs` — express `HelloX` (1-in/1-out) and
+- [X] T007 [US2] codex: rewrite `samples/demo-server/src/methods.rs` — express `HelloX` (1-in/1-out) and
   a multi-arg method via `typed_method`, KEEP at least one raw-Variant method (e.g. `NoOp`) to prove the
   low-level path still works. No behavior change to the methods themselves. (depends T006)
-- [ ] T008 [US2] Claude: verify — `cargo build -p async-opcua-demo-server` clean + a small assertion or
+- [X] T008 [US2] Claude: verify — `cargo build -p async-opcua-demo-server` clean + a small assertion or
   manual check that the rewritten methods still produce identical results (reuse the demo or a focused
   test). Gate; **commit US2** (`feat(021 US2): demo-server adopts the typed method framework`).
 

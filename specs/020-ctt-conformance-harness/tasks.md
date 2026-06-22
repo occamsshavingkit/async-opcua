@@ -19,23 +19,23 @@ token)`, `client_user_token()` (sample1), `client_x509_token()`. ECC = separate 
 smoke is the Linux proxy. User can run the real UACTT on a Windows VM (US3 = turnkey).
 
 ## Phase 1: Setup
-- [ ] T001 Confirm the `Tester` API + `default_server` policy/token set + `connect`/`client_user_token`/
+- [X] T001 Confirm the `Tester` API + `default_server` policy/token set + `connect`/`client_user_token`/
   `client_x509_token` + `new_ecc`; identify a Read node (`Server_ServiceLevel`), a Browse target
   (RootFolder), a writable node (TestNodeManager/setup), and the subscription/monitored-item pattern from
   `core_tests.rs`/`ecc.rs`. No code change.
 
 ## Phase 2: US1 — CI conformance smoke (P1) 🎯 MVP
-- [ ] T002 [US1] Claude: `async-opcua/tests/integration/conformance.rs` — a sequential `#[tokio::test]`
+- [X] T002 [US1] Claude: `async-opcua/tests/integration/conformance.rs` — a sequential `#[tokio::test]`
   iterating the RSA matrix (`Tester::new(default_server())`, every policy×mode) and ECC matrix
   (`new_ecc(P256)`, `new_ecc(P384)`, Sign+SignAndEncrypt) × {Anonymous, UserName(sample1), X509}; per
   valid cell: connect+`wait_for_connection`, Read(ServiceLevel), Browse(RootFolder), Subscribe+MI receive
   a data change, (Write if a writable node is available), disconnect — assert each. Surface (fail on) any
   broken cell. Register `mod conformance;` in the integration entry. (depends T001)
-- [ ] T003 [US1] Claude: negative cells — wrong-password UserName → activation `Err` (BadUserAccessDenied/
+- [X] T003 [US1] Claude: negative cells — wrong-password UserName → activation `Err` (BadUserAccessDenied/
   BadIdentityTokenRejected); a token/policy-mismatch case → documented StatusCode. No silent skips.
-- [ ] T004 [US4] Claude: module doc-comment in conformance.rs — proxy nature (our own client, not an
+- [X] T004 [US4] Claude: module doc-comment in conformance.rs — proxy nature (our own client, not an
   independent authority), services exercised, UACTT areas not covered.
-- [ ] T005 [US1] Gate (`-- --test-threads=1`, verify in isolation per flakiness practice); **commit US1+US4**
+- [X] T005 [US1] Gate (`-- --test-threads=1`, verify in isolation per flakiness practice); **commit US1+US4**
   (`test(020 US1): CI conformance smoke across the full security/token matrix`).
 
 ## Phase 3: US2 — demo-server ECC profile + RSA coverage (P2)

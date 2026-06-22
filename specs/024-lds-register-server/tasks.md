@@ -62,15 +62,15 @@ Client already has register_server/find_servers. Additive; no new dep; warning-f
 - [X] T009 [US3] Claude: security/edge tests — registering beyond `MAX_REGISTERED_SERVERS` is bounded (no
   unbounded growth, no panic); crafted/malformed RegisteredServer (null server_uri, empty names, large
   discovery_urls) handled without panic; FindServersOnNetwork still returns BadServiceUnsupported. (depends T003)
-- [ ] T010 [US3] codex/Claude: a short doc note (where discovery is documented, or a code doc-comment on
+- [X] T010 [US3] codex/Claude: a short doc note (where discovery is documented, or a code doc-comment on
   the registry) that the server can act as an LDS for registration and that FindServersOnNetwork
   (multicast/mDNS) is intentionally unsupported (no new dependency). Gate; **commit US3**
   (`docs(024 US3): LDS registration bound/edge tests + mDNS deferral note`).
 
 ## Phase 5: Polish
-- [ ] T011 Update `specs/conformance-gap-backlog.md` Tier 3 #8 → RegisterServer/RegisterServer2 + LDS
+- [X] T011 Update `specs/conformance-gap-backlog.md` Tier 3 #8 → RegisterServer/RegisterServer2 + LDS
   registry done; FindServersOnNetwork/mDNS documented deferral (no new dep).
-- [ ] T012 Final gate: fmt + clippy --all-targets --all-features + json-off/no-default legs +
+- [X] T012 Final gate: fmt + clippy --all-targets --all-features + json-off/no-default legs +
   `cargo test -p async-opcua --test integration_tests discovery -- --test-threads=1` + existing-suite spot-check.
 
 ---

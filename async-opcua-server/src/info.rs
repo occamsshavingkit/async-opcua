@@ -935,9 +935,90 @@ fn registered_server_application_name(
 #[cfg(test)]
 mod tests {
     use opcua_crypto::{AlternateNames, SecurityPolicy, X509Data, X509};
-    use opcua_types::{MessageSecurityMode, UAString};
+    use opcua_types::{
+        ApplicationType, MessageSecurityMode, RegisteredServer, StatusCode, UAString,
+    };
 
     use crate::{ServerBuilder, ANONYMOUS_USER_TOKEN_ID};
+
+    // Feature 024 (Claude, independent): the LDS registry is bounded and rejects/validates crafted
+    // input without panic (FR-004), and online/offline registration semantics are correct (§5.4.5).
+    fn reg(uri: &str, is_online: bool) -> RegisteredServer {
+        RegisteredServer {
+            server_uri: uri.into(),
+            product_uri: UAString::null(),
+            server_names: None,
+            server_type: ApplicationType::Server,
+            gateway_server_uri: UAString::null(),
+            discovery_urls: None,
+            semaphore_file_path: UAString::null(),
+            is_online,
+        }
+    }
+
+    #[tokio::test]
+    async fn register_server_registry_is_bounded_and_safe() {
+        let (_server, handle) = ServerBuilder::new()
+            .without_node_managers()
+            .application_name("Registry Bound Test")
+            .application_uri("urn:registry-bound-test")
+            .product_uri("urn:registry-bound-test")
+            .discovery_urls(vec!["opc.tcp://127.0.0.1:4840/".to_string()])
+            .host("127.0.0.1")
+            .port(4840)
+            .add_endpoint(
+                "root",
+                (
+                    "/",
+                    SecurityPolicy::None,
+                    MessageSecurityMode::None,
+                    &[ANONYMOUS_USER_TOKEN_ID] as &[&str],
+                ),
+            )
+            .build()
+            .expect("server should build");
+        let info = handle.info();
+
+        // A null (missing) server URI is rejected (no panic, no insert).
+        let mut null_uri = reg("x", true);
+        null_uri.server_uri = UAString::null();
+        assert_eq!(
+            info.apply_register_server(null_uri),
+            StatusCode::BadServerUriInvalid
+        );
+        // Unregistering an unknown server is a clean no-op success.
+        assert_eq!(
+            info.apply_register_server(reg("urn:never-registered", false)),
+            StatusCode::Good
+        );
+
+        // Fill the registry to the cap.
+        for i in 0..super::MAX_REGISTERED_SERVERS {
+            assert_eq!(
+                info.apply_register_server(reg(&format!("urn:s{i}"), true)),
+                StatusCode::Good
+            );
+        }
+        // A NEW distinct registration beyond the cap is rejected (no unbounded growth).
+        assert_eq!(
+            info.apply_register_server(reg("urn:over-cap", true)),
+            StatusCode::BadTooManyOperations
+        );
+        // Updating an EXISTING entry while full still succeeds (not a new key).
+        assert_eq!(
+            info.apply_register_server(reg("urn:s0", true)),
+            StatusCode::Good
+        );
+        // Removing one frees a slot for a new registration.
+        assert_eq!(
+            info.apply_register_server(reg("urn:s0", false)),
+            StatusCode::Good
+        );
+        assert_eq!(
+            info.apply_register_server(reg("urn:over-cap", true)),
+            StatusCode::Good
+        );
+    }
 
     #[tokio::test]
     async fn endpoints_filter_by_requested_endpoint_url() {

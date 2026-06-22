@@ -234,6 +234,147 @@ async fn simple_gate_off_refuses_modification() {
         .await
         .unwrap();
     assert_eq!(dr, vec![StatusCode::BadServiceUnsupported]);
+
+    // References are gated too.
+    let rr = session
+        .add_references(&[AddReferencesItem {
+            source_node_id: parent.clone(),
+            reference_type_id: ReferenceTypeId::Organizes.into(),
+            is_forward: true,
+            target_server_uri: Default::default(),
+            target_node_id: NodeId::new(ns, "RefTarget").into(),
+            target_node_class: NodeClass::Object,
+        }])
+        .await
+        .unwrap();
+    assert_eq!(rr, vec![StatusCode::BadServiceUnsupported]);
+}
+
+/// Seed an Object owned by the SimpleNodeManager, organized under `parent`.
+fn seed_object(nm: &SimpleNodeManager, parent: &NodeId, id: &NodeId, name: &str) {
+    let mut sp = nm.address_space().write();
+    ObjectBuilder::new(id, name, name)
+        .organized_by(parent.clone())
+        .insert(&mut *sp);
+}
+
+#[tokio::test]
+async fn simple_writable_add_delete_reference() {
+    let (_tester, nm, ns, parent, session) = setup_simple(true).await;
+    let a = NodeId::new(ns, "RefA");
+    let b = NodeId::new(ns, "RefB");
+    seed_object(&nm, &parent, &a, "RefA");
+    seed_object(&nm, &parent, &b, "RefB");
+
+    // AddReferences a -Organizes-> b (forward).
+    let r = session
+        .add_references(&[AddReferencesItem {
+            source_node_id: a.clone(),
+            reference_type_id: ReferenceTypeId::Organizes.into(),
+            is_forward: true,
+            target_server_uri: Default::default(),
+            target_node_id: b.clone().into(),
+            target_node_class: NodeClass::Object,
+        }])
+        .await
+        .unwrap();
+    assert_eq!(r, vec![StatusCode::Good]);
+
+    // Browse a forward Organizes -> b present.
+    let browse_a = |session: &Arc<Session>, a: NodeId| {
+        let session = session.clone();
+        async move {
+            session
+                .browse(
+                    &[BrowseDescription {
+                        node_id: a,
+                        browse_direction: BrowseDirection::Forward,
+                        reference_type_id: ReferenceTypeId::Organizes.into(),
+                        include_subtypes: true,
+                        node_class_mask: 0,
+                        result_mask: 0x3f,
+                    }],
+                    1000,
+                    None,
+                )
+                .await
+                .unwrap()
+        }
+    };
+    let br = browse_a(&session, a.clone()).await;
+    assert!(
+        br[0]
+            .references
+            .clone()
+            .unwrap_or_default()
+            .iter()
+            .any(|rf| rf.node_id.node_id == b),
+        "browse must show the added reference"
+    );
+
+    // DeleteReferences -> Good, then it's gone from Browse.
+    let dr = session
+        .delete_references(&[DeleteReferencesItem {
+            source_node_id: a.clone(),
+            reference_type_id: ReferenceTypeId::Organizes.into(),
+            is_forward: true,
+            target_node_id: b.clone().into(),
+            delete_bidirectional: true,
+        }])
+        .await
+        .unwrap();
+    assert_eq!(dr, vec![StatusCode::Good]);
+
+    let br = browse_a(&session, a.clone()).await;
+    assert!(
+        !br[0]
+            .references
+            .clone()
+            .unwrap_or_default()
+            .iter()
+            .any(|rf| rf.node_id.node_id == b),
+        "deleted reference must be gone from Browse"
+    );
+}
+
+#[tokio::test]
+async fn simple_writable_reference_errors() {
+    let (_tester, nm, ns, parent, session) = setup_simple(true).await;
+    let a = NodeId::new(ns, "RefSrc");
+    seed_object(&nm, &parent, &a, "RefSrc");
+
+    let add = |session: &Arc<Session>, src: NodeId, tgt: NodeId, rt: NodeId| {
+        let session = session.clone();
+        async move {
+            session
+                .add_references(&[AddReferencesItem {
+                    source_node_id: src,
+                    reference_type_id: rt,
+                    is_forward: true,
+                    target_server_uri: Default::default(),
+                    target_node_id: tgt.into(),
+                    target_node_class: NodeClass::Object,
+                }])
+                .await
+                .unwrap()
+        }
+    };
+
+    // Both endpoints missing (both in the manager's namespace, both fail) -> BadSourceNodeIdInvalid.
+    // NB: per Part 4, a reference add succeeds if EITHER end is handled, so a single-bad-end case can
+    // still collapse to Good; both-bad makes the operation-level status unambiguous.
+    let r = add(
+        &session,
+        NodeId::new(ns, "NoSuchSource"),
+        NodeId::new(ns, "NoSuchTarget"),
+        ReferenceTypeId::Organizes.into(),
+    )
+    .await;
+    assert_eq!(r, vec![StatusCode::BadSourceNodeIdInvalid]);
+
+    // Null reference type (rejected at item validation) -> BadReferenceTypeIdInvalid.
+    let r = add(&session, a.clone(), a.clone(), NodeId::null()).await;
+    assert_eq!(r, vec![StatusCode::BadReferenceTypeIdInvalid]);
 }
 
 #[tokio::test]

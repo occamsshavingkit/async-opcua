@@ -57,14 +57,14 @@ events, persistence, non-in-memory managers.
 - [X] T005 [US1] Gate; **commit US1** (`feat(022 US1): writable address space — AddNodes/DeleteNodes (gated)`).
 
 ## Phase 4: US2 — AddReferences + DeleteReferences (P2)
-- [ ] T006 [US2] codex: implement `add_references` + `delete_references` in the in-memory impl defaults:
+- [X] T006 [US2] codex: implement `add_references` + `delete_references` in the in-memory impl defaults:
   gate off → unsupported; on: validate source/target/reference-type (`BadSourceNodeIdInvalid`/
   `BadTargetNodeIdInvalid`/`BadReferenceTypeIdInvalid`), `insert_reference`/`delete_reference` honoring
   direction + the source/target ownership rule documented on the trait, set status. (depends T003)
-- [ ] T007 [P] [US2] Claude: e2e tests — AddReferences→Browse shows it (right direction); bad
+- [X] T007 [P] [US2] Claude: e2e tests — AddReferences→Browse shows it (right direction); bad
   source/target/type→respective status; DeleteReferences→Browse no longer shows it; gate OFF→unsupported;
   no panic. (depends T006)
-- [ ] T008 [US2] Gate; **commit US2** (`feat(022 US2): writable address space — AddReferences/DeleteReferences`).
+- [X] T008 [US2] Gate; **commit US2** (`feat(022 US2): writable address space — AddReferences/DeleteReferences`).
 
 ## Phase 5: US3 — demo + gate/edge validation (P3)
 - [ ] T009 [US3] codex: demonstrate the writable address space in the demo-server (a node manager / config

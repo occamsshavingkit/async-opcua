@@ -2,7 +2,10 @@
 //! register_server() / find_servers(). Anchored to OPC UA Part 4 §5.4.5.
 
 use super::utils::Tester;
-use opcua::types::{ApplicationType, LocalizedText, RegisteredServer, StatusCode, UAString};
+use opcua::types::{
+    ApplicationType, ExtensionObject, LocalizedText, MdnsDiscoveryConfiguration, RegisteredServer,
+    StatusCode, UAString,
+};
 
 const REG_URI: &str = "urn:registered-test-server";
 
@@ -132,6 +135,66 @@ async fn register_server_update_is_idempotent() {
         "re-registration must not duplicate the entry"
     );
     assert_eq!(matches[0].application_name.text.as_ref(), "Renamed Server");
+}
+
+#[tokio::test]
+async fn register_server2_mdns_config_unsupported_but_registers() {
+    let tester = Tester::new_default_server(true).await;
+    let url = tester.endpoint();
+    let endpoint = tester
+        .client
+        .get_endpoints(url.clone(), &[], &[])
+        .await
+        .unwrap()
+        .first()
+        .expect("endpoint")
+        .clone();
+
+    // RegisterServer2 with an mDNS discovery configuration: the per-config result is "not supported",
+    // but the server is still registered (Part 4 §5.4.6).
+    let mdns = ExtensionObject::from_message(MdnsDiscoveryConfiguration {
+        mdns_server_name: "registered-test".into(),
+        server_capabilities: Some(vec!["DA".into()]),
+    });
+    let results = tester
+        .client
+        .register_server2(
+            url.clone(),
+            &endpoint,
+            registered_server(true),
+            Some(vec![mdns]),
+        )
+        .await
+        .unwrap();
+    assert_eq!(results, vec![StatusCode::BadNotSupported]);
+
+    // ...yet the server is registered and discoverable.
+    let servers = tester
+        .client
+        .find_servers(url.clone(), None, None)
+        .await
+        .unwrap();
+    assert!(
+        servers
+            .iter()
+            .any(|s| s.application_uri.as_ref() == REG_URI),
+        "RegisterServer2 must still register the server despite the unsupported mdns config"
+    );
+
+    // RegisterServer2 updates the same registry: unregister via is_online=false.
+    tester
+        .client
+        .register_server2(url.clone(), &endpoint, registered_server(false), None)
+        .await
+        .unwrap();
+    let servers = tester
+        .client
+        .find_servers(url.clone(), None, None)
+        .await
+        .unwrap();
+    assert!(!servers
+        .iter()
+        .any(|s| s.application_uri.as_ref() == REG_URI));
 }
 
 #[tokio::test]

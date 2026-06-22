@@ -49,17 +49,17 @@ Client already has register_server/find_servers. Additive; no new dep; warning-f
 - [X] T005 [US1] Gate; **commit US1** (`feat(024 US1): RegisterServer + FindServers integration (LDS registry)`).
 
 ## Phase 3: US2 — RegisterServer2 + discovery configuration results (P2)
-- [ ] T006 [US2] codex: rewrite the `RegisterServer2` handler — update the same registry, build
+- [X] T006 [US2] codex: rewrite the `RegisterServer2` handler — update the same registry, build
   `configuration_results` (one StatusCode per `discovery_configuration` element; `BadNotSupported` for
   MdnsDiscoveryConfiguration / any unsupported config) WITHOUT failing the registration, and send
   `RegisterServer2Response`. (depends T003)
-- [ ] T007 [P] [US2] Claude: tests — RegisterServer2 with an mdns discovery-config element → the per-config
+- [X] T007 [P] [US2] Claude: tests — RegisterServer2 with an mdns discovery-config element → the per-config
   result is BadNotSupported AND the server is still registered (FindServers includes it); RegisterServer2
   updates the same registry as RegisterServer. (depends T006)
-- [ ] T008 [US2] Gate; **commit US2** (`feat(024 US2): RegisterServer2 + discovery-configuration results`).
+- [X] T008 [US2] Gate; **commit US2** (`feat(024 US2): RegisterServer2 + discovery-configuration results`).
 
 ## Phase 4: US3 — bound/no-panic, FindServersOnNetwork deferral, doc (P3)
-- [ ] T009 [US3] Claude: security/edge tests — registering beyond `MAX_REGISTERED_SERVERS` is bounded (no
+- [X] T009 [US3] Claude: security/edge tests — registering beyond `MAX_REGISTERED_SERVERS` is bounded (no
   unbounded growth, no panic); crafted/malformed RegisteredServer (null server_uri, empty names, large
   discovery_urls) handled without panic; FindServersOnNetwork still returns BadServiceUnsupported. (depends T003)
 - [ ] T010 [US3] codex/Claude: a short doc note (where discovery is documented, or a code doc-comment on

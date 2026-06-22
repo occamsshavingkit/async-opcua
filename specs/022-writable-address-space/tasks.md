@@ -67,10 +67,10 @@ events, persistence, non-in-memory managers.
 - [X] T008 [US2] Gate; **commit US2** (`feat(022 US2): writable address space — AddReferences/DeleteReferences`).
 
 ## Phase 5: US3 — demo + gate/edge validation (P3)
-- [ ] T009 [US3] codex: demonstrate the writable address space in the demo-server (a node manager / config
+- [X] T009 [US3] codex: demonstrate the writable address space in the demo-server (a node manager / config
   switch with `clients_can_modify_address_space` on, or documented), WITHOUT changing the default sample
   behavior. (depends T008)
-- [ ] T010 [US3] Claude: edge + gating pass — delete a node with children/references (consistency, no
+- [X] T010 [US3] Claude: edge + gating pass — delete a node with children/references (consistency, no
   dangling refs, no panic), duplicate add, add under missing parent, batch at/over
   `max_nodes_per_node_management`; confirm gate-OFF refusal across all four ops; `cargo build -p
   async-opcua-demo-server` clean. Gate; **commit US3** (`feat(022 US3): demo writable address space + edge/gating tests`).

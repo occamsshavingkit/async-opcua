@@ -377,6 +377,88 @@ async fn simple_writable_reference_errors() {
     assert_eq!(r, vec![StatusCode::BadReferenceTypeIdInvalid]);
 }
 
+/// Edge: deleting a node that has references stays consistent (parent reference removed, no dangling
+/// reference, no panic).
+#[tokio::test]
+async fn simple_writable_delete_node_with_references() {
+    let (_tester, _nm, ns, parent, session) = setup_simple(true).await;
+
+    // Add a child (parent -HasComponent-> child) and an extra reference child -Organizes-> parent.
+    let child = NodeId::new(ns, "ChildWithRefs");
+    let r = session
+        .add_nodes(&[object_item(
+            parent.clone(),
+            ns,
+            "ChildWithRefs",
+            child.clone().into(),
+        )])
+        .await
+        .unwrap();
+    assert_eq!(r[0].status_code, StatusCode::Good);
+    let r = session
+        .add_references(&[AddReferencesItem {
+            source_node_id: child.clone(),
+            reference_type_id: ReferenceTypeId::Organizes.into(),
+            is_forward: true,
+            target_server_uri: Default::default(),
+            target_node_id: parent.clone().into(),
+            target_node_class: NodeClass::Object,
+        }])
+        .await
+        .unwrap();
+    assert_eq!(r, vec![StatusCode::Good]);
+
+    // Delete the child (with its target references) -> Good, no panic.
+    let dr = session
+        .delete_nodes(&[DeleteNodesItem {
+            node_id: child.clone(),
+            delete_target_references: true,
+        }])
+        .await
+        .unwrap();
+    assert_eq!(dr, vec![StatusCode::Good]);
+
+    // The child is gone and the parent no longer references it (no dangling reference).
+    let vals = session
+        .read(
+            &[ReadValueId {
+                node_id: child.clone(),
+                attribute_id: AttributeId::BrowseName as u32,
+                ..Default::default()
+            }],
+            TimestampsToReturn::Neither,
+            0.0,
+        )
+        .await
+        .unwrap();
+    assert_ne!(vals[0].status(), StatusCode::Good);
+
+    let br = session
+        .browse(
+            &[BrowseDescription {
+                node_id: parent.clone(),
+                browse_direction: BrowseDirection::Forward,
+                reference_type_id: ReferenceTypeId::HasComponent.into(),
+                include_subtypes: true,
+                node_class_mask: 0,
+                result_mask: 0x3f,
+            }],
+            1000,
+            None,
+        )
+        .await
+        .unwrap();
+    assert!(
+        !br[0]
+            .references
+            .clone()
+            .unwrap_or_default()
+            .iter()
+            .any(|rf| rf.node_id.node_id == child),
+        "deleted child must not remain referenced by the parent"
+    );
+}
+
 #[tokio::test]
 async fn add_delete_node() {
     let (_tester, nm, session) = setup().await;

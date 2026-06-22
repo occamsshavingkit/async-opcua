@@ -51,14 +51,14 @@ smoke is the Linux proxy. User can run the real UACTT on a Windows VM (US3 = tur
   **commit US2** (`feat(020 US2): demo-server ECC profile (separate EC cert) + config selection`).
 
 ## Phase 4: US3 — UACTT run guide + launch script (P2)
-- [ ] T009 [US3] Claude: `docs/ctt-conformance.md` — obtain/install UACTT (Windows VM); build+run both
+- [X] T009 [US3] Claude: `docs/ctt-conformance.md` — obtain/install UACTT (Windows VM); build+run both
   demo-server profiles; cert provisioning + cross-trust (server cert → UACTT trusted, UACTT client cert →
   server `pki/trusted/`); UACTT project setup (endpoint URLs per profile, policy/mode, sample1 / x509
   credentials, applicable test groups: Security, SecureChannel/Session, Attribute Read/Write, View/Browse,
   Subscription/MonitoredItems, Base/Embedded profile); expected-results / known-gaps table (Tier 3 facets).
-- [ ] T010 [US3] codex/Claude: `samples/demo-server/run-conformance.sh <rsa|ecc>` — clean PKI, launch the
+- [X] T010 [US3] codex/Claude: `samples/demo-server/run-conformance.sh <rsa|ecc>` — clean PKI, launch the
   chosen profile, print endpoint URLs + server cert SHA1/SHA256 thumbprints to trust. Executable, shellcheck-clean.
-- [ ] T011 [US3] Gate; **commit US3** (`docs(020 US3): UACTT run guide + launch/cert script`).
+- [X] T011 [US3] Gate; **commit US3** (`docs(020 US3): UACTT run guide + launch/cert script`).
 
 ## Phase 5: Polish
 - [ ] T012 Update `specs/conformance-gap-backlog.md`: note the CTT harness (smoke + demo profiles + guide)

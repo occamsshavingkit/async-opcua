@@ -61,9 +61,9 @@ BadContinuationPointInvalid. Additive; no new dep; warning-free all feature legs
   server, only if cheap. Gate; **commit US3** (`docs(023 US3): Query continuation-release test + example`).
 
 ## Phase 5: Polish
-- [ ] T009 Update `specs/conformance-gap-backlog.md` Tier 3 #7 → client Query exposed + verified e2e;
+- [X] T009 Update `specs/conformance-gap-backlog.md` Tier 3 #7 → client Query exposed + verified e2e;
   correct the stale "CoreNodeManager doesn't implement Query" claim; record the actual view/empty status.
-- [ ] T010 Final gate: fmt + clippy --all-targets --all-features + json-off/no-default legs +
+- [X] T010 Final gate: fmt + clippy --all-targets --all-features + json-off/no-default legs +
   `cargo test -p async-opcua --test integration_tests query -- --test-threads=1` + existing-suite spot-check.
 
 ---

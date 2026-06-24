@@ -112,13 +112,21 @@ unchanged.
 
 ## Error handling
 
+Result codes per MCP-confirmed Part 9 §5.5.7 (ConditionRefresh) / §5.5.8 (ConditionRefresh2);
+RefreshStart/RefreshEndEvent defined in §5.11.2:
 - Unknown/foreign `subscriptionId` → `BadSubscriptionIdInvalid` (Refresh2 unknown monitoredItemId →
   `BadMonitoredItemIdInvalid`). Validate against the *calling session's* subscriptions only.
+- **Refresh already running for that subscription → `BadRefreshInProgress`** (Part 9 Table 137). Track
+  a per-subscription "refresh in progress" flag: set before issuing RefreshStart, clear after
+  RefreshEnd. Even though our delivery is synchronous within the Call (the window is tiny), the guard
+  is required for conformance and future-proofs throttled delivery.
 - No retained conditions → a valid RefreshStart/RefreshEnd pair with no events between (spec-correct:
   the client learns "nothing currently retained").
 - Refresh delivery never blocks ack/confirm or normal event flow; it only appends to the target
   subscription's event queue (subject to the existing queue-overflow handling).
 - Per Part 9, RefreshStart/End EventIds are fresh per refresh; markers carry SourceNode = Server.
+- Scope note: refresh covers retained **Conditions**; retained condition **Branches** (§5.5.x) are
+  deferred with the broader branching work, so only the conditions in the registry are replayed.
 
 ## Testing (Claude authors, independent of the codex implementation; anchored to Part 9 §5.5.7)
 

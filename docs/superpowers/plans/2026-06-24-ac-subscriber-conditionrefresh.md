@@ -73,6 +73,11 @@ test that register + iter_retained reflects Retain).
   an event item of that subscription, signal `BadMonitoredItemIdInvalid`). Reuse the existing
   per-item event-enqueue path (`MonitoredItem::notify_event`) so EventFilter select/where applies and
   queue-overflow handling is unchanged.
+- **Refresh-in-progress guard (Part 9 §5.5.7, Bad_RefreshInProgress):** track a per-subscription
+  "refresh in progress" flag on the subscription. If a refresh is already running for the target
+  subscription, return a status the caller maps to `BadRefreshInProgress`. Set the flag before
+  enqueuing RefreshStart, clear it after RefreshEnd is enqueued (synchronous, so the flag is set and
+  cleared within the call; the guard still rejects a concurrent racing Call on the same subscription).
 - Must NOT broadcast to other subscriptions/sessions.
 
 **Acceptance:** `cargo build -p async-opcua-server`. Compiles; existing subscription tests still pass.
@@ -91,7 +96,8 @@ methods get callbacks registered (mirror how Acknowledge/Confirm are wired in
   - Build the ordered event list: `RefreshStartEvent`, then for each
     `registry.iter_retained(&address_space)` its current `ServerAlarmEvent`, then `RefreshEndEvent`.
   - Call `context.subscriptions.refresh_subscription_events(sub_id, None, &events, type_tree)`;
-    map a missing subscription to `BadSubscriptionIdInvalid`.
+    map a missing subscription to `BadSubscriptionIdInvalid` and an already-running refresh to
+    `BadRefreshInProgress` (Part 9 §5.5.7, Table 137).
   - Return empty outputs on success.
 - `handle_condition_refresh2(&self, context, args)`: `args[0]`=SubscriptionId, `args[1]`=
   MonitoredItemId (UInt32); same flow with `Some(item_handle)`; unknown item →
@@ -151,7 +157,10 @@ Claude, not codex. Anchored to Part 9 §5.5.7.
    (2788).
 2. **ConditionRefresh2 targeting:** two event monitored items; refresh one; assert only that item got
    the burst.
-3. **Validation:** bogus subscriptionId → `BadSubscriptionIdInvalid`.
+3. **Validation:** bogus subscriptionId → `BadSubscriptionIdInvalid`; Refresh2 bogus monitoredItemId
+   → `BadMonitoredItemIdInvalid`. (`BadRefreshInProgress` is not deterministically triggerable against
+   a synchronous delivery without races, so it is verified by code review of the guard, not a
+   timing-flaky test.)
 4. **No-retained:** refresh with nothing active → Start/End, no condition events between.
 5. **Helpers round-trip:** `acknowledge_condition`/`confirm_condition` drive the transitions the
    existing raw-call test asserts.

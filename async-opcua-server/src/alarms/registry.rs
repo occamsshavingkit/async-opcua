@@ -34,6 +34,11 @@ impl ConditionRegistry {
             .insert(condition.condition_id.clone(), condition);
     }
 
+    /// Returns a registered condition by condition id.
+    pub fn get(&self, condition_id: &NodeId) -> Option<ConditionStateMachine> {
+        self.conditions.read().get(condition_id).cloned()
+    }
+
     /// Returns registered conditions whose Retain property currently reads true.
     pub fn iter_retained(&self, address_space: &AddressSpace) -> Vec<ConditionStateMachine> {
         self.conditions

@@ -11,7 +11,9 @@ use crate::MonitoredItemHandle;
 use opcua_core::events::AlarmEvent;
 use opcua_core::traits::ConditionMethodHandler;
 use opcua_nodes::Event;
-use opcua_types::{DateTime, LocalizedText, MethodId, NodeId, StatusCode, TryFromVariant, Variant};
+#[cfg(feature = "generated-address-space")]
+use opcua_types::MethodId;
+use opcua_types::{DateTime, LocalizedText, NodeId, StatusCode, TryFromVariant, Variant};
 use std::sync::Arc;
 
 /// Handler for Alarm Acknowledge/Confirm method calls.
@@ -192,7 +194,7 @@ impl AlarmMethodHandler {
     }
 }
 
-/// Handler for OPC UA Part 9 ConditionRefresh and ConditionRefresh2 method calls.
+/// Handler for OPC UA Part 9 condition method calls on standard namespace method ids.
 pub struct ConditionRefreshHandler {
     /// Shared registry of condition state machines to replay.
     pub registry: ConditionRegistry,
@@ -237,6 +239,36 @@ impl ConditionRefreshHandler {
         self.refresh_events(context, subscription_id, Some(monitored_item))
     }
 
+    /// Callback executed when the standard Acknowledge method is called by a client.
+    pub fn handle_condition_acknowledge(
+        &self,
+        context: &RequestContext,
+        object_id: &NodeId,
+        args: &[Variant],
+    ) -> Result<Vec<Variant>, StatusCode> {
+        let condition = self
+            .registry
+            .get(object_id)
+            .ok_or(StatusCode::BadNodeIdUnknown)?;
+        AlarmMethodHandler::new(condition, self.address_space.clone())
+            .handle_ack_method(context, args)
+    }
+
+    /// Callback executed when the standard Confirm method is called by a client.
+    pub fn handle_condition_confirm(
+        &self,
+        context: &RequestContext,
+        object_id: &NodeId,
+        args: &[Variant],
+    ) -> Result<Vec<Variant>, StatusCode> {
+        let condition = self
+            .registry
+            .get(object_id)
+            .ok_or(StatusCode::BadNodeIdUnknown)?;
+        AlarmMethodHandler::new(condition, self.address_space.clone())
+            .handle_confirm_method(context, args)
+    }
+
     fn refresh_events(
         &self,
         context: &RequestContext,
@@ -279,23 +311,38 @@ impl ConditionRefreshHandler {
     }
 }
 
-/// Registers the ConditionType ConditionRefresh and ConditionRefresh2 method callbacks.
-pub fn register_condition_refresh_methods(
-    node_manager: &crate::node_manager::memory::SimpleNodeManager,
+/// Registers standard ConditionRefresh, ConditionRefresh2, Acknowledge, and Confirm method callbacks.
+#[cfg(feature = "generated-address-space")]
+pub fn register_condition_methods(
+    core_node_manager: &crate::node_manager::memory::CoreNodeManager,
     registry: ConditionRegistry,
     address_space: Arc<opcua_core::sync::RwLock<AddressSpace>>,
 ) {
     let handler = Arc::new(ConditionRefreshHandler::new(registry, address_space));
 
     let refresh_handler = handler.clone();
-    node_manager.inner().add_method_callback_with_context(
+    core_node_manager.inner().add_method_callback_with_context(
         MethodId::ConditionType_ConditionRefresh.into(),
-        move |ctx, args| refresh_handler.handle_condition_refresh(ctx, args),
+        move |ctx, _object_id, args| refresh_handler.handle_condition_refresh(ctx, args),
     );
 
-    node_manager.inner().add_method_callback_with_context(
+    let refresh2_handler = handler.clone();
+    core_node_manager.inner().add_method_callback_with_context(
         MethodId::ConditionType_ConditionRefresh2.into(),
-        move |ctx, args| handler.handle_condition_refresh2(ctx, args),
+        move |ctx, _object_id, args| refresh2_handler.handle_condition_refresh2(ctx, args),
+    );
+
+    let acknowledge_handler = handler.clone();
+    core_node_manager.inner().add_method_callback_with_context(
+        MethodId::AcknowledgeableConditionType_Acknowledge.into(),
+        move |ctx, object_id, args| {
+            acknowledge_handler.handle_condition_acknowledge(ctx, object_id, args)
+        },
+    );
+
+    core_node_manager.inner().add_method_callback_with_context(
+        MethodId::AcknowledgeableConditionType_Confirm.into(),
+        move |ctx, object_id, args| handler.handle_condition_confirm(ctx, object_id, args),
     );
 }
 

@@ -160,7 +160,7 @@ impl ConditionStateMachine {
         // 8. Create Retain variable
         let retain_var = VariableBuilder::new(&retain_id, "Retain", "Retain")
             .data_type(opcua_types::DataTypeId::Boolean)
-            .value(true)
+            .value(false)
             .writable()
             .build();
         address_space.insert(

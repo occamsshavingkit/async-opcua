@@ -199,6 +199,11 @@ impl ConditionStateMachine {
         !current.is_empty() && current.as_slice() == event_id
     }
 
+    /// Returns the EventId of the condition's current reportable state.
+    pub fn current_event_id(&self) -> Vec<u8> {
+        self.current_event_id.lock().unwrap().clone()
+    }
+
     /// Gets whether the condition is enabled.
     pub fn get_enabled(&self, address_space: &AddressSpace) -> bool {
         self.get_bool_value(address_space, &self.enabled_state_id)

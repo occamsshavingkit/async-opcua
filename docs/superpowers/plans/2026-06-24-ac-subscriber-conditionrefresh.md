@@ -73,11 +73,10 @@ test that register + iter_retained reflects Retain).
   an event item of that subscription, signal `BadMonitoredItemIdInvalid`). Reuse the existing
   per-item event-enqueue path (`MonitoredItem::notify_event`) so EventFilter select/where applies and
   queue-overflow handling is unchanged.
-- **Refresh-in-progress guard (Part 9 §5.5.7, Bad_RefreshInProgress):** track a per-subscription
-  "refresh in progress" flag on the subscription. If a refresh is already running for the target
-  subscription, return a status the caller maps to `BadRefreshInProgress`. Set the flag before
-  enqueuing RefreshStart, clear it after RefreshEnd is enqueued (synchronous, so the flag is set and
-  cleared within the call; the guard still rejects a concurrent racing Call on the same subscription).
+- **Bad_RefreshInProgress (Part 9 §5.5.7):** do NOT implement a flag. Delivery is synchronous/atomic
+  under `&mut self` and OPC UA serializes calls, so no in-progress window exists across calls — the
+  result code is vacuously satisfied (never returned). Add a `// ponytail:` comment noting the upgrade
+  path (add the per-subscription flag + this code only if refresh becomes async/throttled).
 - Must NOT broadcast to other subscriptions/sessions.
 
 **Acceptance:** `cargo build -p async-opcua-server`. Compiles; existing subscription tests still pass.
@@ -96,8 +95,7 @@ methods get callbacks registered (mirror how Acknowledge/Confirm are wired in
   - Build the ordered event list: `RefreshStartEvent`, then for each
     `registry.iter_retained(&address_space)` its current `ServerAlarmEvent`, then `RefreshEndEvent`.
   - Call `context.subscriptions.refresh_subscription_events(sub_id, None, &events, type_tree)`;
-    map a missing subscription to `BadSubscriptionIdInvalid` and an already-running refresh to
-    `BadRefreshInProgress` (Part 9 §5.5.7, Table 137).
+    map a missing subscription to `BadSubscriptionIdInvalid`.
   - Return empty outputs on success.
 - `handle_condition_refresh2(&self, context, args)`: `args[0]`=SubscriptionId, `args[1]`=
   MonitoredItemId (UInt32); same flow with `Some(item_handle)`; unknown item →

@@ -116,10 +116,17 @@ Result codes per MCP-confirmed Part 9 §5.5.7 (ConditionRefresh) / §5.5.8 (Cond
 RefreshStart/RefreshEndEvent defined in §5.11.2:
 - Unknown/foreign `subscriptionId` → `BadSubscriptionIdInvalid` (Refresh2 unknown monitoredItemId →
   `BadMonitoredItemIdInvalid`). Validate against the *calling session's* subscriptions only.
-- **Refresh already running for that subscription → `BadRefreshInProgress`** (Part 9 Table 137). Track
-  a per-subscription "refresh in progress" flag: set before issuing RefreshStart, clear after
-  RefreshEnd. Even though our delivery is synchronous within the Call (the window is tiny), the guard
-  is required for conformance and future-proofs throttled delivery.
+- **`BadRefreshInProgress`** (Part 9 §5.5.7 / Table 137) models a refresh that *spans multiple
+  publish cycles*, leaving a window where a second refresh could arrive mid-stream. async-opcua's
+  wire **transmission** is async (events drain from the monitored-item queues via Publish), BUT the
+  refresh **enqueue** is synchronous and atomic: method callbacks are a synchronous
+  `Fn(&[Variant]) -> Result<…>` (no `async`), and `SubscriptionCache::refresh_subscription_events`
+  runs the whole `&mut self` enqueue under the per-session `cache.lock()`. So RefreshStart → replayed
+  events → RefreshEnd land in the queue as one contiguous, uninterruptible block, and two concurrent
+  ConditionRefresh calls serialize on that lock — neither observes the other "in progress." The
+  condition is therefore vacuously satisfied (never returned); we do **not** add an unreachable flag
+  (dead code). A `// ponytail:` comment notes the upgrade path: if refresh ever becomes
+  async/throttled (spanning publishes), add the per-subscription in-progress flag + this result code.
 - No retained conditions → a valid RefreshStart/RefreshEnd pair with no events between (spec-correct:
   the client learns "nothing currently retained").
 - Refresh delivery never blocks ack/confirm or normal event flow; it only appends to the target

@@ -9,6 +9,10 @@ pub(crate) enum NotificationWorkItem {
         handle: MonitoredItemHandle,
         value: DataValue,
     },
+    Event {
+        handle: MonitoredItemHandle,
+        event: Box<dyn Event + Send>,
+    },
     Refresh {
         subscription_id: u32,
         monitored_item: Option<MonitoredItemHandle>,

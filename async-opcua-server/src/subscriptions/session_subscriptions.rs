@@ -1037,28 +1037,6 @@ impl SessionSubscriptions {
             .available_sequence_numbers(subscription_id)
     }
 
-    pub(super) fn notify_data_changes(&mut self, values: Vec<(MonitoredItemHandle, DataValue)>) {
-        let now = DateTime::now();
-        for (handle, value) in values {
-            let Some(sub) = self.subscriptions.get_mut(&handle.subscription_id) else {
-                continue;
-            };
-            sub.notify_data_value(&handle.monitored_item_id, value, &now);
-        }
-    }
-
-    pub(super) fn notify_events(&mut self, events: Vec<(MonitoredItemHandle, &dyn Event)>) {
-        // Only get the inner type tree if we need to, for performance.
-        let mut lck = None;
-        for (handle, event) in events {
-            let Some(sub) = self.subscriptions.get_mut(&handle.subscription_id) else {
-                continue;
-            };
-            let type_tree = lck.get_or_insert_with(|| self.type_tree_for_user.get_type_tree());
-            sub.notify_event(&handle.monitored_item_id, event, type_tree.get());
-        }
-    }
-
     pub(super) fn drain_ring_chunk(
         &mut self,
         ring: &ArrayQueue<NotificationWorkItem>,
@@ -1086,6 +1064,13 @@ impl SessionSubscriptions {
                         continue;
                     };
                     sub.notify_data_value(&handle.monitored_item_id, value, &now);
+                }
+                NotificationWorkItem::Event { handle, event } => {
+                    let Some(sub) = self.subscriptions.get_mut(&handle.subscription_id) else {
+                        processed += 1;
+                        continue;
+                    };
+                    sub.notify_event(&handle.monitored_item_id, &*event, type_tree);
                 }
                 NotificationWorkItem::Refresh {
                     subscription_id,

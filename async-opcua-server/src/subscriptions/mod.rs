@@ -1208,7 +1208,7 @@ mod tests {
     use opcua_core::sync::RwLock;
     use opcua_crypto::{random, SecurityPolicy};
     use opcua_types::{
-        ApplicationDescription, AttributeId, ByteString, CreateSubscriptionRequest,
+        ApplicationDescription, AttributeId, BuildInfo, ByteString, CreateSubscriptionRequest,
         ExtensionObject, MessageSecurityMode, MonitoredItemCreateRequest, MonitoringMode,
         MonitoringParameters, NodeId, ReadValueId, StatusCode, TimestampsToReturn, UAString,
     };
@@ -1216,9 +1216,9 @@ mod tests {
     use crate::{
         authenticator::UserToken,
         identity_token::{IdentityToken, POLICY_ID_ANONYMOUS},
-        node_manager::{RequestContext, RequestContextInner},
+        node_manager::{RequestContext, RequestContextInner, ServerContext},
         session::instance::Session,
-        ServerBuilder, SubscriptionCache,
+        ServerBuilder, ServerStatusWrapper, SubscriptionCache,
     };
 
     use super::CreateMonitoredItem;
@@ -1315,7 +1315,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "P3.3: rewritten for self-tick + reaper in P3.T (Claude)"]
     async fn expired_subscriptions_return_reverse_indexes_to_baseline() {
         const ITEMS_PER_SUBSCRIPTION: usize = 3;
 
@@ -1379,7 +1378,35 @@ mod tests {
             .expect("monitored items should be created");
         assert!(results.iter().all(|r| r.status_code.is_good()));
 
-        // rewritten in P3.T
+        // No publish requests are ever sent, so the subscription's lifetime expires.
+        // The per-session actor self-ticks on its own deadline timer (no central scan)
+        // and reports the removed subscription on the cleanup channel; the reaper
+        // (run as the server runs it) performs the index cleanup. Wait for the indexes
+        // to return to baseline rather than driving ticks manually.
+        let cleanup_rx = fixture
+            .cache
+            .take_cleanup_receiver()
+            .expect("cleanup receiver should be available");
+        {
+            let cache = Arc::clone(&fixture.cache);
+            let ctx = fixture.server_context.clone();
+            tokio::spawn(async move { cache.run_cleanup(&ctx, cleanup_rx).await });
+        }
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            let at_baseline = fixture.cache.subscription_to_session_size_for_test()
+                == baseline_subscription_to_session
+                && fixture.cache.reverse_index_size_for_test() == baseline_monitored_items;
+            if at_baseline {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "subscription did not self-tick to expiry and clean up within 10s"
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
 
         assert_eq!(
             fixture.cache.subscription_to_session_size_for_test(),
@@ -1397,6 +1424,7 @@ mod tests {
         info: Arc<crate::ServerInfo>,
         cache: Arc<SubscriptionCache>,
         context: RequestContext,
+        server_context: ServerContext,
     }
 
     impl SubscriptionFixture {
@@ -1442,10 +1470,24 @@ mod tests {
                 subscriptions: Arc::clone(&cache),
                 info: Arc::clone(&info),
             }));
+            let server_context = ServerContext {
+                node_managers: handle.node_managers().as_weak(),
+                subscriptions: Arc::clone(&cache),
+                info: Arc::clone(&info),
+                authenticator: info.authenticator.clone(),
+                type_tree: info.type_tree.clone(),
+                type_tree_getter: info.type_tree_getter.clone(),
+                status: Arc::new(ServerStatusWrapper::new(
+                    BuildInfo::default(),
+                    Arc::clone(&cache),
+                )),
+            };
+
             Self {
                 info,
                 cache,
                 context,
+                server_context,
             }
         }
     }

@@ -1,3 +1,4 @@
+mod actor;
 mod monitored_item;
 mod notify;
 pub(crate) mod pool;

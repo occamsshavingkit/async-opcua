@@ -1,5 +1,5 @@
 use std::{
-    collections::VecDeque,
+    collections::{HashSet, VecDeque},
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -85,6 +85,9 @@ pub struct SessionSubscriptions {
     /// transferred away (Part 4 §5.14.7.1: the old session receives Good_SubscriptionTransferred).
     /// Delivered on the next available publish request, even with no remaining subscriptions.
     pending_status_changes: VecDeque<(u32, Arc<NotificationMessage>)>,
+    /// Subscriptions staged for transfer out. They remain routable/drainable
+    /// until the cache index flips, but this session no longer advances them.
+    transferring: HashSet<u32>,
     /// Notifications that have been sent but have yet to be acknowledged (retransmission queue).
     retransmission_queue: RetransmissionQueue,
     /// Reusable storage for data-change notifications reclaimed from acknowledged publishes.
@@ -110,6 +113,7 @@ impl SessionSubscriptions {
             subscriptions: HashMap::new(),
             publish_request_queue: VecDeque::new(),
             pending_status_changes: VecDeque::new(),
+            transferring: HashSet::new(),
             retransmission_queue: RetransmissionQueue::new(),
             data_change_notification_pool: DataChangeNotificationVecPool::default(),
             limits,
@@ -140,6 +144,7 @@ impl SessionSubscriptions {
         if self.subscriptions.len() >= self.limits.max_subscriptions_per_session {
             return Err((StatusCode::BadTooManySubscriptions, subscription, notifs));
         }
+        self.transferring.remove(&subscription.id());
         self.subscriptions.insert(subscription.id(), subscription);
         for notif in notifs {
             self.retransmission_queue.push_existing(notif);
@@ -191,10 +196,30 @@ impl SessionSubscriptions {
         &mut self,
         subscription_id: u32,
     ) -> (Option<Subscription>, Vec<NonAckedPublish>) {
+        self.transferring.remove(&subscription_id);
         let notifs = self
             .retransmission_queue
             .remove_subscription(subscription_id);
         (self.subscriptions.remove(&subscription_id), notifs)
+    }
+
+    pub(super) fn clone_for_transfer(
+        &self,
+        subscription_id: u32,
+    ) -> Option<(Subscription, Vec<NonAckedPublish>)> {
+        let subscription = self.subscriptions.get(&subscription_id)?.clone();
+        let notifs = self
+            .retransmission_queue
+            .clone_subscription(subscription_id);
+        Some((subscription, notifs))
+    }
+
+    pub(super) fn mark_transferring(&mut self, subscription_id: u32) -> Result<(), StatusCode> {
+        if !self.subscriptions.contains_key(&subscription_id) {
+            return Err(StatusCode::BadSubscriptionIdInvalid);
+        }
+        self.transferring.insert(subscription_id);
+        Ok(())
     }
 
     /// Get a mutable reference to a subscription by ID.
@@ -696,6 +721,16 @@ impl SessionSubscriptions {
         );
     }
 
+    pub(super) fn has_more_notifications(&self) -> bool {
+        self.subscriptions
+            .values()
+            .any(|subscription| subscription.more_notifications())
+    }
+
+    pub(super) fn has_queued_publish_request(&self) -> bool {
+        !self.publish_request_queue.is_empty()
+    }
+
     /// Queue a StatusChangeNotification to be delivered to this session on the next
     /// available publish request. Used when a subscription is transferred away
     /// (Part 4 §5.14.7.1).
@@ -753,7 +788,7 @@ impl SessionSubscriptions {
     ) -> Vec<RemovedSubscription> {
         self.deliver_pending_status_changes(now);
 
-        if self.subscriptions.is_empty() {
+        if self.subscriptions.is_empty() || self.subscriptions.len() == self.transferring.len() {
             self.reject_publish_requests_without_subscriptions();
             return Vec::new();
         }
@@ -795,6 +830,9 @@ impl SessionSubscriptions {
         let mut to_remove = Vec::new();
 
         for (sub_id, subscription) in &mut self.subscriptions {
+            if self.transferring.contains(sub_id) {
+                continue;
+            }
             buffer.reset();
             let monitored_items = subscription.monitored_item_refs();
             let res = subscription.tick(
@@ -833,6 +871,9 @@ impl SessionSubscriptions {
         let mut more_notifications = false;
 
         for sub_id in self.subscription_ids_by_priority() {
+            if self.transferring.contains(&sub_id) {
+                continue;
+            }
             let (removed_subscription, subscription_has_more_notifications) = self
                 .tick_subscription_with_publish_requests(
                     sub_id,
@@ -915,6 +956,7 @@ impl SessionSubscriptions {
 
     fn remove_ready_subscriptions(&mut self, to_remove: Vec<u32>) {
         for sub_id in to_remove {
+            self.transferring.remove(&sub_id);
             self.subscriptions.remove(&sub_id);
             let removed = self.retransmission_queue.remove_subscription(sub_id);
             for notification in removed {

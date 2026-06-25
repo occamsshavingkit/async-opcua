@@ -1,5 +1,3 @@
-use std::sync::atomic::Ordering;
-
 use hashbrown::HashMap;
 use opcua_nodes::Event;
 use opcua_types::{node_id::IntoNodeIdRef, AttributeId, DataValue, DateTime, ObjectId, Variant};
@@ -139,9 +137,7 @@ impl Drop for SubscriptionDataNotifier<'_> {
             };
             for (handle, value) in items {
                 let item = NotificationWorkItem::Data { handle, value };
-                if entry.ring.push(item).is_err() {
-                    entry.dropped.fetch_add(1, Ordering::Relaxed);
-                }
+                entry.handle.push_notification(item);
             }
         }
     }
@@ -262,9 +258,7 @@ impl Drop for SubscriptionEventNotifier<'_, '_> {
                     handle,
                     event: event.clone_box(),
                 };
-                if entry.ring.push(item).is_err() {
-                    entry.dropped.fetch_add(1, Ordering::Relaxed);
-                }
+                entry.handle.push_notification(item);
             }
         }
     }

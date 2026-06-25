@@ -7,34 +7,27 @@ mod ring;
 mod session_subscriptions;
 mod subscription;
 
-use std::{
-    hash::Hash,
-    sync::{
-        atomic::{AtomicU64, Ordering},
-        Arc,
-    },
-    time::Instant,
-};
+use std::{hash::Hash, sync::Arc, time::Instant};
 
 use chrono::Utc;
-use crossbeam_queue::ArrayQueue;
 use hashbrown::{Equivalent, HashMap};
 pub use monitored_item::{CreateMonitoredItem, MonitoredItem};
 use opcua_core::{trace_read_lock, trace_write_lock, RepublishResponseShared, ResponseMessage};
-use opcua_nodes::{Event, TypeTree};
+use opcua_nodes::Event;
 use ring::NotificationWorkItem;
+use session_subscriptions::RemovedSubscription;
 pub use session_subscriptions::SessionSubscriptions;
-use session_subscriptions::{PendingRefreshDrain, RemovedSubscription};
 use subscription::TickReason;
 pub use subscription::{MonitoredItemHandle, Subscription, SubscriptionState};
 use tracing::error;
 
+use actor::SubscriptionActorHandle;
 pub use notify::{
     SubscriptionDataNotifier, SubscriptionDataNotifierBatch, SubscriptionEventNotifier,
     SubscriptionEventNotifierBatch,
 };
 
-use opcua_core::sync::{Mutex, RwLock};
+use opcua_core::sync::RwLock;
 
 use opcua_types::{
     node_id::{IdentifierRef, NodeIdRef},
@@ -95,10 +88,7 @@ const RING_DRAIN_BUDGET: usize = 4096;
 #[derive(Clone)]
 #[allow(dead_code)]
 struct SessionEntry {
-    subs: Arc<Mutex<SessionSubscriptions>>,
-    ring: Arc<ArrayQueue<NotificationWorkItem>>,
-    pending_refresh: Arc<Mutex<Option<PendingRefreshDrain>>>,
-    dropped: Arc<AtomicU64>,
+    handle: SubscriptionActorHandle,
 }
 
 impl SessionEntry {
@@ -108,18 +98,14 @@ impl SessionEntry {
         session: Arc<RwLock<Session>>,
         type_tree: Arc<dyn TypeTreeForUserStatic>,
     ) -> Self {
+        let subs = SessionSubscriptions::new(limits, key, session, Arc::clone(&type_tree));
         Self {
-            subs: Arc::new(Mutex::new(SessionSubscriptions::new(
-                limits, key, session, type_tree,
-            ))),
-            ring: Arc::new(ArrayQueue::new(NOTIFICATION_RING_CAPACITY)),
-            pending_refresh: Arc::new(Mutex::new(None)),
-            dropped: Arc::new(AtomicU64::new(0)),
+            handle: actor::spawn(subs, type_tree),
         }
     }
 
-    fn subs(&self) -> Arc<Mutex<SessionSubscriptions>> {
-        Arc::clone(&self.subs)
+    fn handle(&self) -> SubscriptionActorHandle {
+        self.handle.clone()
     }
 }
 
@@ -168,15 +154,33 @@ impl SubscriptionCache {
     }
 
     /// Get the `SessionSubscriptions` object for a single session by its numeric ID.
-    pub fn get_session_subscriptions(
+    pub(crate) fn get_session_subscriptions(
         &self,
         session_id: u32,
-    ) -> Option<Arc<Mutex<SessionSubscriptions>>> {
+    ) -> Option<SubscriptionActorHandle> {
         let inner = trace_read_lock!(self.inner);
         inner
             .session_subscriptions
             .get(&session_id)
-            .map(SessionEntry::subs)
+            .map(SessionEntry::handle)
+    }
+
+    /// Run `f` against the owned `SessionSubscriptions` for `session_id` inside its actor and return
+    /// the result. Returns `None` if there is no such session. Primarily for tests/introspection.
+    pub async fn with_session_subscriptions<R: Send + 'static>(
+        &self,
+        session_id: u32,
+        f: impl FnOnce(&SessionSubscriptions) -> R + Send + 'static,
+    ) -> Option<R> {
+        let cache = {
+            let inner = trace_read_lock!(self.inner);
+            inner
+                .session_subscriptions
+                .get(&session_id)
+                .map(SessionEntry::handle)
+        }?;
+
+        cache.legacy(move |subs| f(subs)).await.ok()
     }
 
     #[allow(dead_code)]
@@ -186,77 +190,46 @@ impl SubscriptionCache {
             return;
         };
 
-        if entry.ring.push(item).is_err() {
-            entry.dropped.fetch_add(1, Ordering::Relaxed);
-        }
+        entry.handle.push_notification(item);
     }
 
-    pub(crate) fn update_session_user(&self, session_id: u32, context: &RequestContext) {
+    pub(crate) async fn update_session_user(&self, session_id: u32, context: &RequestContext) {
         let Some(cache) = ({
             let lck = trace_read_lock!(self.inner);
             lck.session_subscriptions
                 .get(&session_id)
-                .map(SessionEntry::subs)
+                .map(SessionEntry::handle)
         }) else {
             return;
         };
 
         let key = Self::get_key(&context.session);
         let type_tree_for_user = context.info.type_tree_getter.get_type_tree_static(context);
-        cache.lock().update_owner(key, type_tree_for_user);
+        let _ = cache
+            .legacy(move |subs| subs.update_owner(key, type_tree_for_user))
+            .await;
     }
 
-    fn drain_session_ring(
-        sub: &Arc<Mutex<SessionSubscriptions>>,
-        ring: &Arc<ArrayQueue<NotificationWorkItem>>,
-        pending_refresh: &Arc<Mutex<Option<PendingRefreshDrain>>>,
-        type_tree: &dyn TypeTree,
-    ) -> usize {
-        let mut processed = 0;
-        while processed < RING_DRAIN_BUDGET {
-            let chunk_limit = RING_DRAIN_EVENT_CHUNK.min(RING_DRAIN_BUDGET - processed);
-            let mut pending_refresh_lck = pending_refresh.lock();
-            let drained = sub.lock().drain_ring_chunk(
-                ring.as_ref(),
-                type_tree,
-                chunk_limit,
-                &mut pending_refresh_lck,
-            );
-            let completed_refresh = if pending_refresh_lck
-                .as_ref()
-                .is_some_and(PendingRefreshDrain::is_complete)
-            {
-                pending_refresh_lck.take()
-            } else {
-                None
-            };
-            let has_pending_refresh = pending_refresh_lck.is_some();
-            drop(pending_refresh_lck);
-            let completed_refresh_dropped = completed_refresh.is_some();
-            drop(completed_refresh);
-            processed += drained;
-            if drained < chunk_limit && !has_pending_refresh && !completed_refresh_dropped {
-                break;
-            }
-        }
-        processed
-    }
-
-    pub(crate) fn get_session_monitored_items(&self, session_id: u32) -> Vec<MonitoredItemRef> {
+    pub(crate) async fn get_session_monitored_items(
+        &self,
+        session_id: u32,
+    ) -> Vec<MonitoredItemRef> {
         let Some(cache) = ({
             let lck = trace_read_lock!(self.inner);
             lck.session_subscriptions
                 .get(&session_id)
-                .map(SessionEntry::subs)
+                .map(SessionEntry::handle)
         }) else {
             return Vec::new();
         };
 
-        let cache_lck = cache.lock();
-        cache_lck.monitored_item_refs()
+        cache
+            .legacy(|subs| subs.monitored_item_refs())
+            .await
+            .unwrap_or_default()
     }
 
-    pub(crate) fn apply_revalidated_values(
+    pub(crate) async fn apply_revalidated_values(
         &self,
         session_id: u32,
         values: Vec<(MonitoredItemRef, DataValue)>,
@@ -269,15 +242,17 @@ impl SubscriptionCache {
             let lck = trace_read_lock!(self.inner);
             lck.session_subscriptions
                 .get(&session_id)
-                .map(SessionEntry::subs)
+                .map(SessionEntry::handle)
         }) else {
             return;
         };
 
-        cache.lock().apply_revalidated_values(values);
+        let _ = cache
+            .legacy(move |subs| subs.apply_revalidated_values(values))
+            .await;
     }
 
-    pub(crate) fn delete_monitored_item_refs(
+    pub(crate) async fn delete_monitored_item_refs(
         &self,
         session_id: u32,
         items: &[MonitoredItemRef],
@@ -291,25 +266,27 @@ impl SubscriptionCache {
                 .push(handle.monitored_item_id);
         }
 
-        let mut lck = trace_write_lock!(self.inner);
-        let Some(cache) = lck
-            .session_subscriptions
-            .get(&session_id)
-            .map(SessionEntry::subs)
-        else {
-            return Err(StatusCode::BadNoSubscription);
-        };
+        let cache = {
+            let lck = trace_read_lock!(self.inner);
+            lck.session_subscriptions
+                .get(&session_id)
+                .map(SessionEntry::handle)
+        }
+        .ok_or(StatusCode::BadNoSubscription)?;
 
-        let mut cache_lck = cache.lock();
         let mut results = Vec::with_capacity(items.len());
         for (subscription_id, item_ids) in ids_by_subscription {
-            let deleted = cache_lck.delete_monitored_items(subscription_id, &item_ids)?;
+            let deleted = cache
+                .legacy(move |subs| subs.delete_monitored_items(subscription_id, &item_ids))
+                .await
+                .map_err(|_| StatusCode::BadNoSubscription)??;
             for (status, rf) in &deleted {
                 if status.is_good() {
                     let key = MonitoredItemKeyRef {
                         id: rf.node_id().into(),
                         attribute_id: rf.attribute(),
                     };
+                    let mut lck = trace_write_lock!(self.inner);
                     if let Some(it) = lck.monitored_items.get_mut(&key) {
                         it.remove(&rf.handle());
                     }
@@ -333,31 +310,39 @@ impl SubscriptionCache {
         {
             let now = Utc::now();
             let now_instant = Instant::now();
-            let mut buffer = pool::NotificationBuffer::new();
             let session_subscriptions = {
                 let lck = trace_read_lock!(self.inner);
                 lck.session_subscriptions
                     .iter()
-                    .map(|(session_id, entry)| {
-                        (
-                            *session_id,
-                            entry.subs(),
-                            Arc::clone(&entry.ring),
-                            Arc::clone(&entry.pending_refresh),
-                        )
-                    })
+                    .map(|(session_id, entry)| (*session_id, entry.handle()))
                     .collect::<Vec<_>>()
             };
-            let type_tree_lck = trace_read_lock!(context.type_tree);
-            for (session_id, sub, ring, pending_refresh) in session_subscriptions {
-                Self::drain_session_ring(&sub, &ring, &pending_refresh, &*type_tree_lck);
-                let mut sub_lck = sub.lock();
-                let removed_subscriptions =
-                    sub_lck.tick(&now, now_instant, TickReason::TickTimerFired, &mut buffer);
+            for (session_id, sub) in session_subscriptions {
+                let tick_result = sub
+                    .legacy(move |subs| {
+                        let mut buffer = pool::NotificationBuffer::new();
+                        let removed_subscriptions =
+                            subs.tick(&now, now_instant, TickReason::TickTimerFired, &mut buffer);
+                        let expired_session =
+                            (!removed_subscriptions.is_empty()).then(|| subs.session().clone());
+                        (
+                            expired_session,
+                            removed_subscriptions,
+                            subs.is_ready_to_delete(),
+                        )
+                    })
+                    .await;
+                let Ok((expired_session, removed_subscriptions, ready_to_delete)) = tick_result
+                else {
+                    to_delete.push(session_id);
+                    continue;
+                };
                 if !removed_subscriptions.is_empty() {
-                    expired_subscriptions.push((sub_lck.session().clone(), removed_subscriptions));
+                    if let Some(session) = expired_session {
+                        expired_subscriptions.push((session, removed_subscriptions));
+                    }
                 }
-                if sub_lck.is_ready_to_delete() {
+                if ready_to_delete {
                     to_delete.push(session_id);
                 }
             }
@@ -368,7 +353,9 @@ impl SubscriptionCache {
                 Self::cleanup_removed_subscriptions(&mut lck, removed_subscriptions);
             }
             for id in to_delete {
-                lck.session_subscriptions.remove(&id);
+                if let Some(entry) = lck.session_subscriptions.remove(&id) {
+                    entry.handle.stop();
+                }
             }
             context
                 .info
@@ -454,7 +441,7 @@ impl SubscriptionCache {
         }
     }
 
-    pub(crate) fn get_monitored_item_count(
+    pub(crate) async fn get_monitored_item_count(
         &self,
         session_id: u32,
         subscription_id: u32,
@@ -463,33 +450,42 @@ impl SubscriptionCache {
             let lck = trace_read_lock!(self.inner);
             lck.session_subscriptions
                 .get(&session_id)
-                .map(SessionEntry::subs)
+                .map(SessionEntry::handle)
         })?;
-        let cache_lck = cache.lock();
-        cache_lck.get_monitored_item_count(subscription_id)
+        cache
+            .legacy(move |subs| subs.get_monitored_item_count(subscription_id))
+            .await
+            .ok()
+            .flatten()
     }
 
-    pub(crate) fn create_subscription(
+    pub(crate) async fn create_subscription(
         &self,
         session_id: u32,
         request: &CreateSubscriptionRequest,
         context: &RequestContext,
     ) -> Result<CreateSubscriptionResponse, StatusCode> {
+        let cache = {
+            let mut lck = trace_write_lock!(self.inner);
+            lck.session_subscriptions
+                .entry(session_id)
+                .or_insert_with(|| {
+                    SessionEntry::new(
+                        self.limits,
+                        Self::get_key(&context.session),
+                        context.session.clone(),
+                        context.info.type_tree_getter.get_type_tree_static(context),
+                    )
+                })
+                .handle()
+        };
+        let request = request.clone();
+        let info = context.info.clone();
+        let res = cache
+            .legacy(move |subs| subs.create_subscription(&request, &info))
+            .await
+            .map_err(|_| StatusCode::BadNoSubscription)??;
         let mut lck = trace_write_lock!(self.inner);
-        let cache = lck
-            .session_subscriptions
-            .entry(session_id)
-            .or_insert_with(|| {
-                SessionEntry::new(
-                    self.limits,
-                    Self::get_key(&context.session),
-                    context.session.clone(),
-                    context.info.type_tree_getter.get_type_tree_static(context),
-                )
-            })
-            .subs();
-        let mut cache_lck = cache.lock();
-        let res = cache_lck.create_subscription(request, &context.info)?;
         lck.subscription_to_session
             .insert(res.subscription_id, session_id);
         context
@@ -500,25 +496,48 @@ impl SubscriptionCache {
         Ok(res)
     }
 
-    pub(crate) fn modify_subscription(
+    fn ensure_session_entry(
+        &self,
+        session_id: u32,
+        key: PersistentSessionKey,
+        context: &RequestContext,
+    ) -> SubscriptionActorHandle {
+        let mut lck = trace_write_lock!(self.inner);
+        lck.session_subscriptions
+            .entry(session_id)
+            .or_insert_with(|| {
+                SessionEntry::new(
+                    self.limits,
+                    key,
+                    context.session.clone(),
+                    context.info.type_tree_getter.get_type_tree_static(context),
+                )
+            })
+            .handle()
+    }
+
+    pub(crate) async fn modify_subscription(
         &self,
         session_id: u32,
         request: &ModifySubscriptionRequest,
-        info: &ServerInfo,
+        info: Arc<ServerInfo>,
     ) -> Result<ModifySubscriptionResponse, StatusCode> {
         let Some(cache) = ({
             let lck = trace_read_lock!(self.inner);
             lck.session_subscriptions
                 .get(&session_id)
-                .map(SessionEntry::subs)
+                .map(SessionEntry::handle)
         }) else {
             return Err(StatusCode::BadNoSubscription);
         };
-        let mut cache_lck = cache.lock();
-        cache_lck.modify_subscription(request, info)
+        let request = request.clone();
+        cache
+            .legacy(move |subs| subs.modify_subscription(&request, &info))
+            .await
+            .map_err(|_| StatusCode::BadNoSubscription)?
     }
 
-    pub(crate) fn set_publishing_mode(
+    pub(crate) async fn set_publishing_mode(
         &self,
         session_id: u32,
         request: &SetPublishingModeRequest,
@@ -527,15 +546,18 @@ impl SubscriptionCache {
             let lck = trace_read_lock!(self.inner);
             lck.session_subscriptions
                 .get(&session_id)
-                .map(SessionEntry::subs)
+                .map(SessionEntry::handle)
         }) else {
             return Err(StatusCode::BadNoSubscription);
         };
-        let mut cache_lck = cache.lock();
-        cache_lck.set_publishing_mode(request)
+        let request = request.clone();
+        cache
+            .legacy(move |subs| subs.set_publishing_mode(&request))
+            .await
+            .map_err(|_| StatusCode::BadNoSubscription)?
     }
 
-    pub(crate) fn republish(
+    pub(crate) async fn republish(
         &self,
         session_id: u32,
         request: &RepublishRequest,
@@ -544,43 +566,37 @@ impl SubscriptionCache {
             let lck = trace_read_lock!(self.inner);
             lck.session_subscriptions
                 .get(&session_id)
-                .map(SessionEntry::subs)
+                .map(SessionEntry::handle)
         }) else {
             return Err(StatusCode::BadNoSubscription);
         };
-        let mut cache_lck = cache.lock();
-        cache_lck.republish(request)
+        let request = request.clone();
+        cache
+            .legacy(move |subs| subs.republish(&request))
+            .await
+            .map_err(|_| StatusCode::BadNoSubscription)?
     }
 
-    pub(crate) fn enqueue_publish_request(
+    pub(crate) async fn enqueue_publish_request(
         &self,
         session_id: u32,
-        now: &DateTimeUtc,
+        now: DateTimeUtc,
         now_instant: Instant,
         request: PendingPublish,
     ) -> Result<(), StatusCode> {
-        let Some((cache, ring, pending_refresh)) = ({
+        let Some(cache) = ({
             let lck = trace_read_lock!(self.inner);
-            lck.session_subscriptions.get(&session_id).map(|entry| {
-                (
-                    entry.subs(),
-                    Arc::clone(&entry.ring),
-                    Arc::clone(&entry.pending_refresh),
-                )
-            })
+            lck.session_subscriptions
+                .get(&session_id)
+                .map(SessionEntry::handle)
         }) else {
             return Err(StatusCode::BadNoSubscription);
         };
 
-        {
-            let type_tree_for_user = cache.lock().type_tree_for_user();
-            let type_tree_lck = type_tree_for_user.get_type_tree();
-            Self::drain_session_ring(&cache, &ring, &pending_refresh, type_tree_lck.get());
-        }
-
-        let mut cache_lck = cache.lock();
-        cache_lck.enqueue_publish_request(now, now_instant, request);
-        Ok(())
+        cache
+            .enqueue_publish_request(now, now_instant, request)
+            .await
+            .map_err(|_| StatusCode::BadNoSubscription)
     }
 
     /// Return a notifier for notifying the server of a batch of changes.
@@ -698,32 +714,33 @@ impl SubscriptionCache {
             monitored_item,
             events,
         };
-        if entry.ring.push(item).is_err() {
-            entry.dropped.fetch_add(1, Ordering::Relaxed);
-        }
+        entry.handle.push_notification(item);
 
         Ok(())
     }
 
-    pub(crate) fn create_monitored_items(
+    pub(crate) async fn create_monitored_items(
         &self,
         session_id: u32,
         subscription_id: u32,
-        requests: &[CreateMonitoredItem],
+        requests: Vec<CreateMonitoredItem>,
     ) -> Result<Vec<MonitoredItemCreateResult>, StatusCode> {
-        let mut lck = trace_write_lock!(self.inner);
-        let Some(cache) = lck
-            .session_subscriptions
-            .get(&session_id)
-            .map(SessionEntry::subs)
-        else {
-            return Err(StatusCode::BadNoSubscription);
-        };
+        let cache = {
+            let lck = trace_read_lock!(self.inner);
+            lck.session_subscriptions
+                .get(&session_id)
+                .map(SessionEntry::handle)
+        }
+        .ok_or(StatusCode::BadNoSubscription)?;
 
-        let mut cache_lck = cache.lock();
-        let result = cache_lck.create_monitored_items(subscription_id, requests);
+        let requests_for_index = requests.clone();
+        let result = cache
+            .legacy(move |subs| subs.create_monitored_items(subscription_id, &requests))
+            .await
+            .map_err(|_| StatusCode::BadNoSubscription)?;
         if let Ok(res) = &result {
-            for (create, res) in requests.iter().zip(res.iter()) {
+            let mut lck = trace_write_lock!(self.inner);
+            for (create, res) in requests_for_index.iter().zip(res.iter()) {
                 if res.status_code.is_good() {
                     let key = MonitoredItemKey {
                         id: create.item_to_monitor().node_id.clone(),
@@ -747,32 +764,37 @@ impl SubscriptionCache {
         result
     }
 
-    pub(crate) fn modify_monitored_items(
+    pub(crate) async fn modify_monitored_items(
         &self,
         session_id: u32,
         subscription_id: u32,
-        info: &ServerInfo,
+        info: Arc<ServerInfo>,
         timestamps_to_return: TimestampsToReturn,
         requests: Vec<MonitoredItemModifyRequest>,
-        type_tree: &dyn TypeTree,
     ) -> Result<Vec<MonitoredItemUpdateRef>, StatusCode> {
         let Some(cache) = ({
             let lck = trace_read_lock!(self.inner);
             lck.session_subscriptions
                 .get(&session_id)
-                .map(SessionEntry::subs)
+                .map(SessionEntry::handle)
         }) else {
             return Err(StatusCode::BadNoSubscription);
         };
 
-        let mut cache_lck = cache.lock();
-        cache_lck.modify_monitored_items(
-            subscription_id,
-            info,
-            timestamps_to_return,
-            requests,
-            type_tree,
-        )
+        cache
+            .legacy(move |subs| {
+                let type_tree_for_user = subs.type_tree_for_user();
+                let type_tree = type_tree_for_user.get_type_tree();
+                subs.modify_monitored_items(
+                    subscription_id,
+                    &info,
+                    timestamps_to_return,
+                    requests,
+                    type_tree.get(),
+                )
+            })
+            .await
+            .map_err(|_| StatusCode::BadNoSubscription)?
     }
 
     fn get_key(session: &RwLock<Session>) -> PersistentSessionKey {
@@ -784,26 +806,28 @@ impl SubscriptionCache {
         )
     }
 
-    pub(crate) fn set_monitoring_mode(
+    pub(crate) async fn set_monitoring_mode(
         &self,
         session_id: u32,
         subscription_id: u32,
         monitoring_mode: MonitoringMode,
         items: Vec<u32>,
     ) -> Result<Vec<(StatusCode, MonitoredItemRef)>, StatusCode> {
-        let mut lck = trace_write_lock!(self.inner);
-        let Some(cache) = lck
-            .session_subscriptions
-            .get(&session_id)
-            .map(SessionEntry::subs)
-        else {
-            return Err(StatusCode::BadNoSubscription);
-        };
+        let cache = {
+            let lck = trace_read_lock!(self.inner);
+            lck.session_subscriptions
+                .get(&session_id)
+                .map(SessionEntry::handle)
+        }
+        .ok_or(StatusCode::BadNoSubscription)?;
 
-        let mut cache_lck = cache.lock();
-        let result = cache_lck.set_monitoring_mode(subscription_id, monitoring_mode, items);
+        let result = cache
+            .legacy(move |subs| subs.set_monitoring_mode(subscription_id, monitoring_mode, items))
+            .await
+            .map_err(|_| StatusCode::BadNoSubscription)?;
 
         if let Ok(res) = &result {
+            let mut lck = trace_write_lock!(self.inner);
             for (status, rf) in res {
                 if status.is_good() {
                     let key = MonitoredItemKeyRef {
@@ -823,7 +847,7 @@ impl SubscriptionCache {
         result
     }
 
-    pub(crate) fn set_triggering(
+    pub(crate) async fn set_triggering(
         &self,
         session_id: u32,
         subscription_id: u32,
@@ -835,38 +859,45 @@ impl SubscriptionCache {
             let lck = trace_read_lock!(self.inner);
             lck.session_subscriptions
                 .get(&session_id)
-                .map(SessionEntry::subs)
+                .map(SessionEntry::handle)
         }) else {
             return Err(StatusCode::BadNoSubscription);
         };
 
-        let mut cache_lck = cache.lock();
-        cache_lck.set_triggering(
-            subscription_id,
-            triggering_item_id,
-            links_to_add,
-            links_to_remove,
-        )
+        cache
+            .legacy(move |subs| {
+                subs.set_triggering(
+                    subscription_id,
+                    triggering_item_id,
+                    links_to_add,
+                    links_to_remove,
+                )
+            })
+            .await
+            .map_err(|_| StatusCode::BadNoSubscription)?
     }
 
-    pub(crate) fn delete_monitored_items(
+    pub(crate) async fn delete_monitored_items(
         &self,
         session_id: u32,
         subscription_id: u32,
         items: &[u32],
     ) -> Result<Vec<(StatusCode, MonitoredItemRef)>, StatusCode> {
-        let mut lck = trace_write_lock!(self.inner);
-        let Some(cache) = lck
-            .session_subscriptions
-            .get(&session_id)
-            .map(SessionEntry::subs)
-        else {
-            return Err(StatusCode::BadNoSubscription);
-        };
+        let cache = {
+            let lck = trace_read_lock!(self.inner);
+            lck.session_subscriptions
+                .get(&session_id)
+                .map(SessionEntry::handle)
+        }
+        .ok_or(StatusCode::BadNoSubscription)?;
 
-        let mut cache_lck = cache.lock();
-        let result = cache_lck.delete_monitored_items(subscription_id, items);
+        let items = items.to_vec();
+        let result = cache
+            .legacy(move |subs| subs.delete_monitored_items(subscription_id, &items))
+            .await
+            .map_err(|_| StatusCode::BadNoSubscription)?;
         if let Ok(res) = &result {
+            let mut lck = trace_write_lock!(self.inner);
             for (status, rf) in res {
                 if status.is_good() {
                     let key = MonitoredItemKeyRef {
@@ -882,31 +913,35 @@ impl SubscriptionCache {
         result
     }
 
-    pub(crate) fn delete_subscriptions(
+    pub(crate) async fn delete_subscriptions(
         &self,
         session_id: u32,
         ids: &[u32],
-        info: &ServerInfo,
+        info: Arc<ServerInfo>,
     ) -> Result<Vec<(StatusCode, Vec<MonitoredItemRef>)>, StatusCode> {
-        let mut lck = trace_write_lock!(self.inner);
-        let Some(cache) = lck
-            .session_subscriptions
-            .get(&session_id)
-            .map(SessionEntry::subs)
-        else {
-            return Err(StatusCode::BadNoSubscription);
-        };
-        let mut cache_lck = cache.lock();
-        let result = cache_lck.delete_subscriptions(ids);
+        let cache = {
+            let lck = trace_read_lock!(self.inner);
+            lck.session_subscriptions
+                .get(&session_id)
+                .map(SessionEntry::handle)
+        }
+        .ok_or(StatusCode::BadNoSubscription)?;
+        let ids = ids.to_vec();
+        let ids_for_cleanup = ids.clone();
+        let result = cache
+            .legacy(move |subs| subs.delete_subscriptions(&ids))
+            .await
+            .map_err(|_| StatusCode::BadNoSubscription)?;
         let removed_subscriptions = result
             .iter()
-            .zip(ids.iter())
+            .zip(ids_for_cleanup.iter())
             .filter(|((status, _), _)| status.is_good())
             .map(|((_, monitored_items), id)| RemovedSubscription {
                 id: *id,
                 monitored_items: monitored_items.clone(),
             })
             .collect::<Vec<_>>();
+        let mut lck = trace_write_lock!(self.inner);
         Self::cleanup_removed_subscriptions(&mut lck, &removed_subscriptions);
         info.diagnostics
             .set_current_subscription_count(lck.subscription_to_session.len() as u32);
@@ -914,18 +949,48 @@ impl SubscriptionCache {
         Ok(result)
     }
 
-    pub(crate) fn get_session_subscription_ids(&self, session_id: u32) -> Vec<u32> {
+    pub(crate) async fn get_session_subscription_ids(&self, session_id: u32) -> Vec<u32> {
         let Some(cache) = ({
             let lck = trace_read_lock!(self.inner);
             lck.session_subscriptions
                 .get(&session_id)
-                .map(SessionEntry::subs)
+                .map(SessionEntry::handle)
         }) else {
             return Vec::new();
         };
 
-        let cache_lck = cache.lock();
-        cache_lck.subscription_ids()
+        cache
+            .legacy(|subs| subs.subscription_ids())
+            .await
+            .unwrap_or_default()
+    }
+
+    pub(crate) async fn teardown_session(&self, session_id: u32, info: &ServerInfo) {
+        let entry = {
+            let mut lck = trace_write_lock!(self.inner);
+            lck.session_subscriptions.remove(&session_id)
+        };
+        let Some(entry) = entry else {
+            return;
+        };
+
+        let (subscription_ids, monitored_items) = entry
+            .handle
+            .legacy(|subs| (subs.subscription_ids(), subs.monitored_item_refs()))
+            .await
+            .unwrap_or_default();
+
+        {
+            let mut lck = trace_write_lock!(self.inner);
+            for id in subscription_ids {
+                lck.subscription_to_session.remove(&id);
+            }
+            Self::cleanup_monitored_item_refs(&mut lck, &monitored_items);
+            info.diagnostics
+                .set_current_subscription_count(lck.subscription_to_session.len() as u32);
+        }
+
+        entry.handle.stop();
     }
 
     #[cfg(test)]
@@ -940,7 +1005,7 @@ impl SubscriptionCache {
         lck.subscription_to_session.len()
     }
 
-    pub(crate) fn transfer(
+    pub(crate) async fn transfer(
         &self,
         req: &TransferSubscriptionsRequest,
         context: &RequestContext,
@@ -961,85 +1026,136 @@ impl SubscriptionCache {
             .collect();
 
         let key = Self::get_key(&context.session);
-        {
-            let mut lck = trace_write_lock!(self.inner);
-            let session_subs = lck
-                .session_subscriptions
-                .entry(context.session_id)
-                .or_insert_with(|| {
-                    SessionEntry::new(
-                        self.limits,
-                        key.clone(),
-                        context.session.clone(),
-                        context.info.type_tree_getter.get_type_tree_static(context),
-                    )
+        let dest_handle = self.ensure_session_entry(context.session_id, key.clone(), context);
+
+        for (sub_id, res) in &mut results {
+            let Some((current_owner_session_id, source_handle)) = ({
+                let lck = trace_read_lock!(self.inner);
+                let owner = lck.subscription_to_session.get(sub_id).copied();
+                owner.and_then(|owner_session_id| {
+                    lck.session_subscriptions
+                        .get(&owner_session_id)
+                        .map(|entry| (owner_session_id, entry.handle()))
                 })
-                .subs();
-            let mut session_subs_lck = session_subs.lock();
+            }) else {
+                continue;
+            };
 
-            for (sub_id, res) in &mut results {
-                let Some(current_owner_session_id) = lck.subscription_to_session.get(sub_id) else {
-                    continue;
-                };
-                if context.session_id == *current_owner_session_id {
-                    res.status_code = StatusCode::Good;
-                    res.available_sequence_numbers =
-                        session_subs_lck.available_sequence_numbers(*sub_id);
-                    continue;
-                }
+            if context.session_id == current_owner_session_id {
+                res.status_code = StatusCode::Good;
+                res.available_sequence_numbers = dest_handle
+                    .legacy({
+                        let sub_id = *sub_id;
+                        move |subs| subs.available_sequence_numbers(sub_id)
+                    })
+                    .await
+                    .ok()
+                    .flatten();
+                continue;
+            }
 
-                let Some(session_cache) = lck
-                    .session_subscriptions
-                    .get(current_owner_session_id)
-                    .map(SessionEntry::subs)
-                else {
-                    // Should be impossible.
-                    continue;
-                };
+            let user_matches = source_handle
+                .legacy({
+                    let key = key.clone();
+                    move |subs| subs.user_token().is_equivalent_for_transfer(&key)
+                })
+                .await
+                .unwrap_or(false);
+            if !user_matches {
+                res.status_code = StatusCode::BadUserAccessDenied;
+                continue;
+            }
 
-                let mut session_lck = session_cache.lock();
+            let staged = source_handle
+                .legacy({
+                    let sub_id = *sub_id;
+                    move |subs| subs.clone_for_transfer(sub_id)
+                })
+                .await;
+            let Ok(Some((sub, notifs))) = staged else {
+                continue;
+            };
 
-                if !session_lck.user_token().is_equivalent_for_transfer(&key) {
-                    res.status_code = StatusCode::BadUserAccessDenied;
-                    continue;
-                }
+            tracing::debug!(
+                "Transfer subscription {} to session {}",
+                sub.id(),
+                context.session_id
+            );
+            let next_seq = sub.peek_next_sequence_number();
+            let available_sequence_numbers = Some(
+                notifs
+                    .iter()
+                    .map(|n| n.message.sequence_number)
+                    .collect::<Vec<_>>(),
+            );
 
-                if let (Some(sub), notifs) = session_lck.remove(*sub_id) {
-                    tracing::debug!(
-                        "Transfer subscription {} to session {}",
-                        sub.id(),
-                        context.session_id
-                    );
-                    res.status_code = StatusCode::Good;
-                    res.available_sequence_numbers =
-                        Some(notifs.iter().map(|n| n.message.sequence_number).collect());
-
-                    // Capture the next sequence number before the subscription moves out, to
-                    // label the final status-change delivered to the old session.
-                    let next_seq = sub.peek_next_sequence_number();
-
-                    if let Err((e, sub, notifs)) = session_subs_lck.insert(sub, notifs) {
-                        res.status_code = e;
-                        let _ = session_lck.insert(sub, notifs);
-                    } else {
-                        if req.send_initial_values {
-                            if let Some(sub) = session_subs_lck.get_mut(*sub_id) {
+            let inserted = dest_handle
+                .legacy({
+                    let send_initial_values = req.send_initial_values;
+                    let sub_id = *sub_id;
+                    move |subs| {
+                        if let Err((e, _, _)) = subs.insert(sub, notifs) {
+                            return Err(e);
+                        }
+                        if send_initial_values {
+                            if let Some(sub) = subs.get_mut(sub_id) {
                                 sub.set_resend_data();
                             }
                         }
-                        lck.subscription_to_session
-                            .insert(*sub_id, context.session_id);
-                        // Part 4 §5.14.7.1: the old session shall receive a
-                        // Good_SubscriptionTransferred StatusChangeNotification.
-                        session_lck.queue_status_change(
-                            *sub_id,
+                        Ok::<(), StatusCode>(())
+                    }
+                })
+                .await;
+
+            match inserted {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => {
+                    res.status_code = e;
+                    continue;
+                }
+                Err(()) => {
+                    res.status_code = StatusCode::BadNoSubscription;
+                    continue;
+                }
+            }
+
+            if source_handle
+                .legacy({
+                    let sub_id = *sub_id;
+                    move |subs| subs.mark_transferring(sub_id)
+                })
+                .await
+                .map_err(|_| StatusCode::BadNoSubscription)
+                .and_then(|r| r)
+                .is_err()
+            {
+                res.status_code = StatusCode::BadSubscriptionIdInvalid;
+                continue;
+            }
+
+            {
+                let mut lck = trace_write_lock!(self.inner);
+                lck.subscription_to_session
+                    .insert(*sub_id, context.session_id);
+            }
+
+            let _ = source_handle
+                .legacy({
+                    let sub_id = *sub_id;
+                    move |subs| {
+                        let _ = subs.remove(sub_id);
+                        subs.queue_status_change(
+                            sub_id,
                             next_seq,
                             DateTime::now(),
                             StatusCode::GoodSubscriptionTransferred,
                         );
                     }
-                }
-            }
+                })
+                .await;
+
+            res.status_code = StatusCode::Good;
+            res.available_sequence_numbers = available_sequence_numbers;
         }
 
         TransferSubscriptionsResponse {
@@ -1057,6 +1173,7 @@ pub(crate) struct PendingPublish {
     pub deadline: Instant,
 }
 
+#[derive(Clone)]
 struct NonAckedPublish {
     message: Arc<NotificationMessage>,
     subscription_id: u32,
@@ -1138,6 +1255,7 @@ mod tests {
                     },
                     &fixture.context,
                 )
+                .await
                 .expect("subscription should be created")
                 .subscription_id;
 
@@ -1174,7 +1292,8 @@ mod tests {
 
             let results = fixture
                 .cache
-                .create_monitored_items(fixture.context.session_id, subscription_id, &requests)
+                .create_monitored_items(fixture.context.session_id, subscription_id, requests)
+                .await
                 .expect("monitored items should be created");
             assert!(results.iter().all(|r| r.status_code.is_good()));
 
@@ -1183,8 +1302,9 @@ mod tests {
                 .delete_subscriptions(
                     fixture.context.session_id,
                     &[subscription_id],
-                    &fixture.info,
+                    fixture.info.clone(),
                 )
+                .await
                 .expect("subscription delete should complete");
             assert_eq!(delete_results.len(), 1);
             assert!(delete_results[0].0.is_good());
@@ -1224,6 +1344,7 @@ mod tests {
                 },
                 &fixture.context,
             )
+            .await
             .expect("subscription should be created")
             .subscription_id;
 
@@ -1260,7 +1381,8 @@ mod tests {
 
         let results = fixture
             .cache
-            .create_monitored_items(fixture.context.session_id, subscription_id, &requests)
+            .create_monitored_items(fixture.context.session_id, subscription_id, requests)
+            .await
             .expect("monitored items should be created");
         assert!(results.iter().all(|r| r.status_code.is_good()));
 

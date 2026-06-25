@@ -11,9 +11,13 @@ use tokio::sync::{mpsc, oneshot, Notify};
 use crate::node_manager::TypeTreeForUserStatic;
 
 use super::{
-    ring::NotificationWorkItem, session_subscriptions::PendingRefreshDrain, SessionSubscriptions,
-    NOTIFICATION_RING_CAPACITY, RING_DRAIN_EVENT_CHUNK,
+    pool::NotificationBuffer, ring::NotificationWorkItem,
+    session_subscriptions::PendingRefreshDrain, PendingPublish, SessionSubscriptions,
+    NOTIFICATION_RING_CAPACITY, RING_DRAIN_BUDGET, RING_DRAIN_EVENT_CHUNK,
 };
+use crate::subscriptions::subscription::TickReason;
+use opcua_types::DateTimeUtc;
+use std::time::Instant;
 
 /// Commands accepted by the per-session subscription actor.
 pub(crate) enum SubscriptionCommand {
@@ -23,10 +27,17 @@ pub(crate) enum SubscriptionCommand {
     /// [`oneshot::Sender<R>`] and send the result before returning. The command
     /// itself intentionally remains non-generic so it can live in one channel.
     LegacyCall(Box<dyn FnOnce(&mut SessionSubscriptions) + Send>),
+    EnqueuePublish {
+        now: DateTimeUtc,
+        now_instant: Instant,
+        request: PendingPublish,
+        response: oneshot::Sender<()>,
+    },
     /// Stop the actor after all earlier commands have been handled.
     Stop,
 }
 
+#[derive(Clone)]
 pub(crate) struct SubscriptionActorHandle {
     ring: Arc<ArrayQueue<NotificationWorkItem>>,
     notify: Arc<Notify>,
@@ -55,6 +66,29 @@ impl SubscriptionActorHandle {
 
         reply_rx.await.map_err(|_| ())
     }
+
+    pub(super) async fn enqueue_publish_request(
+        &self,
+        now: DateTimeUtc,
+        now_instant: Instant,
+        request: PendingPublish,
+    ) -> Result<(), ()> {
+        let (response, recv) = oneshot::channel();
+        self.commands
+            .send(SubscriptionCommand::EnqueuePublish {
+                now,
+                now_instant,
+                request,
+                response,
+            })
+            .map_err(|_| ())?;
+
+        recv.await.map_err(|_| ())
+    }
+
+    pub(crate) fn stop(&self) {
+        let _ = self.commands.send(SubscriptionCommand::Stop);
+    }
 }
 
 pub(crate) struct SubscriptionActor {
@@ -72,7 +106,29 @@ impl SubscriptionActor {
             tokio::select! {
                 command = self.commands_rx.recv() => {
                     match command {
-                        Some(SubscriptionCommand::LegacyCall(f)) => f(&mut self.subs),
+                        Some(SubscriptionCommand::LegacyCall(f)) => {
+                            self.drain_ring().await;
+                            f(&mut self.subs);
+                        }
+                        Some(SubscriptionCommand::EnqueuePublish { now, now_instant, request, response }) => {
+                            self.drain_ring().await;
+                            let mut buffer = NotificationBuffer::new();
+                            self.subs.enqueue_publish_request(&now, now_instant, request);
+                            loop {
+                                let more_notifications = self.subs.has_more_notifications()
+                                    && self.subs.has_queued_publish_request();
+                                if !more_notifications {
+                                    break;
+                                }
+                                let _ = self.subs.tick(
+                                    &now,
+                                    now_instant,
+                                    TickReason::ReceivePublishRequest,
+                                    &mut buffer,
+                                );
+                            }
+                            let _ = response.send(());
+                        }
                         Some(SubscriptionCommand::Stop) | None => break,
                     }
                 }
@@ -84,7 +140,13 @@ impl SubscriptionActor {
     }
 
     async fn drain_ring(&mut self) {
+        let mut processed = 0;
         loop {
+            if processed >= RING_DRAIN_BUDGET {
+                tokio::task::yield_now().await;
+                processed = 0;
+            }
+
             let drained = {
                 let type_tree = self.type_tree.get_type_tree();
                 self.subs.drain_ring_chunk(
@@ -107,6 +169,7 @@ impl SubscriptionActor {
                 break;
             }
 
+            processed += drained;
             tokio::task::yield_now().await;
         }
     }

@@ -2,16 +2,26 @@ mod monitored_item;
 mod notify;
 pub(crate) mod pool;
 mod retransmission_queue;
+mod ring;
 mod session_subscriptions;
 mod subscription;
 
-use std::{hash::Hash, sync::Arc, time::Instant};
+use std::{
+    hash::Hash,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
+    time::Instant,
+};
 
 use chrono::Utc;
+use crossbeam_queue::ArrayQueue;
 use hashbrown::{Equivalent, HashMap};
 pub use monitored_item::{CreateMonitoredItem, MonitoredItem};
 use opcua_core::{trace_read_lock, trace_write_lock, RepublishResponseShared, ResponseMessage};
 use opcua_nodes::{Event, TypeTree};
+use ring::NotificationWorkItem;
 use session_subscriptions::RemovedSubscription;
 pub use session_subscriptions::SessionSubscriptions;
 use subscription::TickReason;
@@ -41,7 +51,10 @@ use crate::node_manager::RequestContextInner;
 use super::{
     authenticator::UserToken,
     info::ServerInfo,
-    node_manager::{MonitoredItemRef, MonitoredItemUpdateRef, RequestContext, ServerContext},
+    node_manager::{
+        MonitoredItemRef, MonitoredItemUpdateRef, RequestContext, ServerContext,
+        TypeTreeForUserStatic,
+    },
     session::instance::Session,
     SubscriptionLimits,
 };
@@ -74,6 +87,39 @@ impl<T: IdentifierRef> Equivalent<MonitoredItemKey> for MonitoredItemKeyRef<T> {
     }
 }
 
+const NOTIFICATION_RING_CAPACITY: usize = 8192;
+const RING_DRAIN_CHUNK: usize = 256;
+const RING_DRAIN_BUDGET: usize = 4096;
+
+#[derive(Clone)]
+#[allow(dead_code)]
+struct SessionEntry {
+    subs: Arc<Mutex<SessionSubscriptions>>,
+    ring: Arc<ArrayQueue<NotificationWorkItem>>,
+    dropped: Arc<AtomicU64>,
+}
+
+impl SessionEntry {
+    fn new(
+        limits: SubscriptionLimits,
+        key: PersistentSessionKey,
+        session: Arc<RwLock<Session>>,
+        type_tree: Arc<dyn TypeTreeForUserStatic>,
+    ) -> Self {
+        Self {
+            subs: Arc::new(Mutex::new(SessionSubscriptions::new(
+                limits, key, session, type_tree,
+            ))),
+            ring: Arc::new(ArrayQueue::new(NOTIFICATION_RING_CAPACITY)),
+            dropped: Arc::new(AtomicU64::new(0)),
+        }
+    }
+
+    fn subs(&self) -> Arc<Mutex<SessionSubscriptions>> {
+        Arc::clone(&self.subs)
+    }
+}
+
 /// A basic description of the monitoring parameters for a monitored item, used
 /// for conditional sampling.
 pub struct MonitoredItemEntry {
@@ -87,7 +133,7 @@ pub struct MonitoredItemEntry {
 
 struct SubscriptionCacheInner {
     /// Map from session ID to subscription cache
-    session_subscriptions: HashMap<u32, Arc<Mutex<SessionSubscriptions>>>,
+    session_subscriptions: HashMap<u32, SessionEntry>,
     /// Map from subscription ID to session ID.
     subscription_to_session: HashMap<u32, u32>,
     /// Map from notifier node ID to monitored item handles.
@@ -124,13 +170,30 @@ impl SubscriptionCache {
         session_id: u32,
     ) -> Option<Arc<Mutex<SessionSubscriptions>>> {
         let inner = trace_read_lock!(self.inner);
-        inner.session_subscriptions.get(&session_id).cloned()
+        inner
+            .session_subscriptions
+            .get(&session_id)
+            .map(SessionEntry::subs)
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn push_work(&self, session_id: u32, item: NotificationWorkItem) {
+        let inner = trace_read_lock!(self.inner);
+        let Some(entry) = inner.session_subscriptions.get(&session_id) else {
+            return;
+        };
+
+        if entry.ring.push(item).is_err() {
+            entry.dropped.fetch_add(1, Ordering::Relaxed);
+        }
     }
 
     pub(crate) fn update_session_user(&self, session_id: u32, context: &RequestContext) {
         let Some(cache) = ({
             let lck = trace_read_lock!(self.inner);
-            lck.session_subscriptions.get(&session_id).cloned()
+            lck.session_subscriptions
+                .get(&session_id)
+                .map(SessionEntry::subs)
         }) else {
             return;
         };
@@ -140,10 +203,31 @@ impl SubscriptionCache {
         cache.lock().update_owner(key, type_tree_for_user);
     }
 
+    fn drain_session_ring(
+        sub: &Arc<Mutex<SessionSubscriptions>>,
+        ring: &Arc<ArrayQueue<NotificationWorkItem>>,
+        type_tree: &dyn TypeTree,
+    ) -> usize {
+        let mut processed = 0;
+        while processed < RING_DRAIN_BUDGET {
+            let chunk_limit = RING_DRAIN_CHUNK.min(RING_DRAIN_BUDGET - processed);
+            let drained = sub
+                .lock()
+                .drain_ring_chunk(ring.as_ref(), type_tree, chunk_limit);
+            processed += drained;
+            if drained < chunk_limit {
+                break;
+            }
+        }
+        processed
+    }
+
     pub(crate) fn get_session_monitored_items(&self, session_id: u32) -> Vec<MonitoredItemRef> {
         let Some(cache) = ({
             let lck = trace_read_lock!(self.inner);
-            lck.session_subscriptions.get(&session_id).cloned()
+            lck.session_subscriptions
+                .get(&session_id)
+                .map(SessionEntry::subs)
         }) else {
             return Vec::new();
         };
@@ -163,7 +247,9 @@ impl SubscriptionCache {
 
         let Some(cache) = ({
             let lck = trace_read_lock!(self.inner);
-            lck.session_subscriptions.get(&session_id).cloned()
+            lck.session_subscriptions
+                .get(&session_id)
+                .map(SessionEntry::subs)
         }) else {
             return;
         };
@@ -186,7 +272,11 @@ impl SubscriptionCache {
         }
 
         let mut lck = trace_write_lock!(self.inner);
-        let Some(cache) = lck.session_subscriptions.get(&session_id).cloned() else {
+        let Some(cache) = lck
+            .session_subscriptions
+            .get(&session_id)
+            .map(SessionEntry::subs)
+        else {
             return Err(StatusCode::BadNoSubscription);
         };
 
@@ -228,10 +318,12 @@ impl SubscriptionCache {
                 let lck = trace_read_lock!(self.inner);
                 lck.session_subscriptions
                     .iter()
-                    .map(|(session_id, sub)| (*session_id, Arc::clone(sub)))
+                    .map(|(session_id, entry)| (*session_id, entry.subs(), Arc::clone(&entry.ring)))
                     .collect::<Vec<_>>()
             };
-            for (session_id, sub) in session_subscriptions {
+            let type_tree_lck = trace_read_lock!(context.type_tree);
+            for (session_id, sub, ring) in session_subscriptions {
+                Self::drain_session_ring(&sub, &ring, &*type_tree_lck);
                 let mut sub_lck = sub.lock();
                 let removed_subscriptions =
                     sub_lck.tick(&now, now_instant, TickReason::TickTimerFired, &mut buffer);
@@ -342,7 +434,9 @@ impl SubscriptionCache {
     ) -> Option<usize> {
         let cache = ({
             let lck = trace_read_lock!(self.inner);
-            lck.session_subscriptions.get(&session_id).cloned()
+            lck.session_subscriptions
+                .get(&session_id)
+                .map(SessionEntry::subs)
         })?;
         let cache_lck = cache.lock();
         cache_lck.get_monitored_item_count(subscription_id)
@@ -359,14 +453,14 @@ impl SubscriptionCache {
             .session_subscriptions
             .entry(session_id)
             .or_insert_with(|| {
-                Arc::new(Mutex::new(SessionSubscriptions::new(
+                SessionEntry::new(
                     self.limits,
                     Self::get_key(&context.session),
                     context.session.clone(),
                     context.info.type_tree_getter.get_type_tree_static(context),
-                )))
+                )
             })
-            .clone();
+            .subs();
         let mut cache_lck = cache.lock();
         let res = cache_lck.create_subscription(request, &context.info)?;
         lck.subscription_to_session
@@ -387,7 +481,9 @@ impl SubscriptionCache {
     ) -> Result<ModifySubscriptionResponse, StatusCode> {
         let Some(cache) = ({
             let lck = trace_read_lock!(self.inner);
-            lck.session_subscriptions.get(&session_id).cloned()
+            lck.session_subscriptions
+                .get(&session_id)
+                .map(SessionEntry::subs)
         }) else {
             return Err(StatusCode::BadNoSubscription);
         };
@@ -402,7 +498,9 @@ impl SubscriptionCache {
     ) -> Result<SetPublishingModeResponse, StatusCode> {
         let Some(cache) = ({
             let lck = trace_read_lock!(self.inner);
-            lck.session_subscriptions.get(&session_id).cloned()
+            lck.session_subscriptions
+                .get(&session_id)
+                .map(SessionEntry::subs)
         }) else {
             return Err(StatusCode::BadNoSubscription);
         };
@@ -417,7 +515,9 @@ impl SubscriptionCache {
     ) -> Result<RepublishResponseShared, StatusCode> {
         let Some(cache) = ({
             let lck = trace_read_lock!(self.inner);
-            lck.session_subscriptions.get(&session_id).cloned()
+            lck.session_subscriptions
+                .get(&session_id)
+                .map(SessionEntry::subs)
         }) else {
             return Err(StatusCode::BadNoSubscription);
         };
@@ -432,12 +532,20 @@ impl SubscriptionCache {
         now_instant: Instant,
         request: PendingPublish,
     ) -> Result<(), StatusCode> {
-        let Some(cache) = ({
+        let Some((cache, ring)) = ({
             let lck = trace_read_lock!(self.inner);
-            lck.session_subscriptions.get(&session_id).cloned()
+            lck.session_subscriptions
+                .get(&session_id)
+                .map(|entry| (entry.subs(), Arc::clone(&entry.ring)))
         }) else {
             return Err(StatusCode::BadNoSubscription);
         };
+
+        {
+            let type_tree_for_user = cache.lock().type_tree_for_user();
+            let type_tree_lck = type_tree_for_user.get_type_tree();
+            Self::drain_session_ring(&cache, &ring, type_tree_lck.get());
+        }
 
         let mut cache_lck = cache.lock();
         cache_lck.enqueue_publish_request(now, now_instant, request);
@@ -539,7 +647,9 @@ impl SubscriptionCache {
     ) -> Result<(), StatusCode> {
         let Some(cache) = ({
             let lck = trace_read_lock!(self.inner);
-            lck.session_subscriptions.get(&session_id).cloned()
+            lck.session_subscriptions
+                .get(&session_id)
+                .map(SessionEntry::subs)
         }) else {
             return Err(StatusCode::BadSubscriptionIdInvalid);
         };
@@ -555,7 +665,11 @@ impl SubscriptionCache {
         requests: &[CreateMonitoredItem],
     ) -> Result<Vec<MonitoredItemCreateResult>, StatusCode> {
         let mut lck = trace_write_lock!(self.inner);
-        let Some(cache) = lck.session_subscriptions.get(&session_id).cloned() else {
+        let Some(cache) = lck
+            .session_subscriptions
+            .get(&session_id)
+            .map(SessionEntry::subs)
+        else {
             return Err(StatusCode::BadNoSubscription);
         };
 
@@ -597,7 +711,9 @@ impl SubscriptionCache {
     ) -> Result<Vec<MonitoredItemUpdateRef>, StatusCode> {
         let Some(cache) = ({
             let lck = trace_read_lock!(self.inner);
-            lck.session_subscriptions.get(&session_id).cloned()
+            lck.session_subscriptions
+                .get(&session_id)
+                .map(SessionEntry::subs)
         }) else {
             return Err(StatusCode::BadNoSubscription);
         };
@@ -629,7 +745,11 @@ impl SubscriptionCache {
         items: Vec<u32>,
     ) -> Result<Vec<(StatusCode, MonitoredItemRef)>, StatusCode> {
         let mut lck = trace_write_lock!(self.inner);
-        let Some(cache) = lck.session_subscriptions.get(&session_id).cloned() else {
+        let Some(cache) = lck
+            .session_subscriptions
+            .get(&session_id)
+            .map(SessionEntry::subs)
+        else {
             return Err(StatusCode::BadNoSubscription);
         };
 
@@ -666,7 +786,9 @@ impl SubscriptionCache {
     ) -> Result<(Vec<StatusCode>, Vec<StatusCode>), StatusCode> {
         let Some(cache) = ({
             let lck = trace_read_lock!(self.inner);
-            lck.session_subscriptions.get(&session_id).cloned()
+            lck.session_subscriptions
+                .get(&session_id)
+                .map(SessionEntry::subs)
         }) else {
             return Err(StatusCode::BadNoSubscription);
         };
@@ -687,7 +809,11 @@ impl SubscriptionCache {
         items: &[u32],
     ) -> Result<Vec<(StatusCode, MonitoredItemRef)>, StatusCode> {
         let mut lck = trace_write_lock!(self.inner);
-        let Some(cache) = lck.session_subscriptions.get(&session_id).cloned() else {
+        let Some(cache) = lck
+            .session_subscriptions
+            .get(&session_id)
+            .map(SessionEntry::subs)
+        else {
             return Err(StatusCode::BadNoSubscription);
         };
 
@@ -716,7 +842,11 @@ impl SubscriptionCache {
         info: &ServerInfo,
     ) -> Result<Vec<(StatusCode, Vec<MonitoredItemRef>)>, StatusCode> {
         let mut lck = trace_write_lock!(self.inner);
-        let Some(cache) = lck.session_subscriptions.get(&session_id).cloned() else {
+        let Some(cache) = lck
+            .session_subscriptions
+            .get(&session_id)
+            .map(SessionEntry::subs)
+        else {
             return Err(StatusCode::BadNoSubscription);
         };
         let mut cache_lck = cache.lock();
@@ -740,7 +870,9 @@ impl SubscriptionCache {
     pub(crate) fn get_session_subscription_ids(&self, session_id: u32) -> Vec<u32> {
         let Some(cache) = ({
             let lck = trace_read_lock!(self.inner);
-            lck.session_subscriptions.get(&session_id).cloned()
+            lck.session_subscriptions
+                .get(&session_id)
+                .map(SessionEntry::subs)
         }) else {
             return Vec::new();
         };
@@ -788,14 +920,14 @@ impl SubscriptionCache {
                 .session_subscriptions
                 .entry(context.session_id)
                 .or_insert_with(|| {
-                    Arc::new(Mutex::new(SessionSubscriptions::new(
+                    SessionEntry::new(
                         self.limits,
                         key.clone(),
                         context.session.clone(),
                         context.info.type_tree_getter.get_type_tree_static(context),
-                    )))
+                    )
                 })
-                .clone();
+                .subs();
             let mut session_subs_lck = session_subs.lock();
 
             for (sub_id, res) in &mut results {
@@ -812,7 +944,7 @@ impl SubscriptionCache {
                 let Some(session_cache) = lck
                     .session_subscriptions
                     .get(current_owner_session_id)
-                    .cloned()
+                    .map(SessionEntry::subs)
                 else {
                     // Should be impossible.
                     continue;

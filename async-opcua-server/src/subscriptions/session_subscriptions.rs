@@ -8,12 +8,14 @@ use super::{
     monitored_item::MonitoredItem,
     pool::NotificationBuffer,
     retransmission_queue::RetransmissionQueue,
+    ring::NotificationWorkItem,
     subscription::{
         reclaim_data_change_notification_vecs, DataChangeNotificationVecPool, MonitoredItemHandle,
         Subscription, TickReason, TickResult,
     },
     CreateMonitoredItem, NonAckedPublish, PendingPublish, PersistentSessionKey,
 };
+use crossbeam_queue::ArrayQueue;
 use hashbrown::HashMap;
 use opcua_nodes::{Event, TypeTree};
 
@@ -1027,6 +1029,50 @@ impl SessionSubscriptions {
         }
     }
 
+    pub(crate) fn drain_ring_chunk(
+        &mut self,
+        ring: &ArrayQueue<NotificationWorkItem>,
+        type_tree: &dyn TypeTree,
+        chunk: usize,
+    ) -> usize {
+        let mut processed = 0;
+        let now = DateTime::now();
+        for _ in 0..chunk {
+            let Some(item) = ring.pop() else {
+                break;
+            };
+
+            match item {
+                NotificationWorkItem::Data { handle, value } => {
+                    let Some(sub) = self.subscriptions.get_mut(&handle.subscription_id) else {
+                        processed += 1;
+                        continue;
+                    };
+                    sub.notify_data_value(&handle.monitored_item_id, value, &now);
+                }
+                NotificationWorkItem::Refresh {
+                    subscription_id,
+                    monitored_item,
+                    events,
+                } => {
+                    let Some(sub) = self.subscriptions.get_mut(&subscription_id) else {
+                        processed += 1;
+                        continue;
+                    };
+                    let events = events
+                        .iter()
+                        .map(|event| event.as_ref() as &dyn Event)
+                        .collect::<Vec<_>>();
+                    let _ = sub.refresh_events(monitored_item, &events, type_tree);
+                }
+            }
+
+            processed += 1;
+        }
+
+        processed
+    }
+
     #[allow(dead_code)]
     pub(crate) fn refresh_subscription_events(
         &mut self,
@@ -1045,6 +1091,10 @@ impl SessionSubscriptions {
 
     pub(super) fn user_token(&self) -> &PersistentSessionKey {
         &self.user_token
+    }
+
+    pub(super) fn type_tree_for_user(&self) -> Arc<dyn TypeTreeForUserStatic> {
+        Arc::clone(&self.type_tree_for_user)
     }
 
     pub(super) fn get_monitored_item_count(&self, subscription_id: u32) -> Option<usize> {

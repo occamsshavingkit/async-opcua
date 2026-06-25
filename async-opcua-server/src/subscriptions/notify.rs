@@ -133,7 +133,7 @@ impl Drop for SubscriptionDataNotifier<'_> {
             let Some(cache) = self.lock.session_subscriptions.get(session_id) else {
                 continue;
             };
-            let mut cache_lck = cache.lock();
+            let mut cache_lck = cache.subs.lock();
             cache_lck.notify_data_changes(items);
         }
     }
@@ -249,7 +249,7 @@ impl Drop for SubscriptionEventNotifier<'_, '_> {
             let Some(cache) = self.lock.session_subscriptions.get(session_id) else {
                 continue;
             };
-            let mut cache_lck = cache.lock();
+            let mut cache_lck = cache.subs.lock();
             cache_lck.notify_events(items);
         }
     }

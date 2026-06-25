@@ -797,45 +797,16 @@ impl Server {
         self.run_with(listener).await
     }
 
-    async fn run_subscription_ticks(interval: u64, context: &ServerContext) -> Never {
+    async fn run_subscription_ticks(_interval: u64, context: &ServerContext) -> Never {
         let context = context.clone();
         let cleanup_rx = context.subscriptions.take_cleanup_receiver();
 
-        let tick_fut = {
-            let context = context.clone();
-            async move {
-                if interval == 0 {
-                    futures::future::pending().await
-                } else {
-                    let mut tick = tokio::time::interval(Duration::from_millis(interval));
-                    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-                    loop {
-                        tick.tick().await;
-
-                        context.subscriptions.periodic_tick(&context).await;
-                    }
-                }
-            }
-        };
-
-        let cleanup_fut = async move {
-            if let Some(rx) = cleanup_rx {
-                let subscriptions = context.subscriptions.clone();
-                subscriptions.run_cleanup(&context, rx).await;
-            } else {
-                futures::future::pending::<()>().await;
-            }
-        };
-
-        pin!(tick_fut);
-        pin!(cleanup_fut);
-
-        loop {
-            tokio::select! {
-                _ = &mut tick_fut => {}
-                _ = &mut cleanup_fut => {}
-            }
+        if let Some(rx) = cleanup_rx {
+            let subscriptions = context.subscriptions.clone();
+            subscriptions.run_cleanup(&context, rx).await;
         }
+
+        futures::future::pending().await
     }
 
     async fn run_session_expiry(sessions: &RwLock<SessionManager>, notify: &Notify) -> Never {

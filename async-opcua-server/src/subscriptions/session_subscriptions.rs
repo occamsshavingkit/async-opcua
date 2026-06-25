@@ -42,6 +42,36 @@ pub(super) struct RemovedSubscription {
 
 type PendingPublishResponse = (PendingPublish, Arc<NotificationMessage>, u32);
 
+pub(super) struct PendingRefreshDrain {
+    subscription_id: u32,
+    monitored_item: Option<MonitoredItemHandle>,
+    events: Vec<Box<dyn Event + Send>>,
+    next_event: usize,
+}
+
+impl PendingRefreshDrain {
+    fn new(
+        subscription_id: u32,
+        monitored_item: Option<MonitoredItemHandle>,
+        events: Vec<Box<dyn Event + Send>>,
+    ) -> Self {
+        Self {
+            subscription_id,
+            monitored_item,
+            events,
+            next_event: 0,
+        }
+    }
+
+    fn remaining(&self) -> usize {
+        self.events.len().saturating_sub(self.next_event)
+    }
+
+    pub(super) fn is_complete(&self) -> bool {
+        self.next_event >= self.events.len()
+    }
+}
+
 /// Subscriptions belonging to a single session. Note that they are technically _owned_ by
 /// a user token, which means that they can be transfered to a different session.
 pub struct SessionSubscriptions {
@@ -1029,15 +1059,22 @@ impl SessionSubscriptions {
         }
     }
 
-    pub(crate) fn drain_ring_chunk(
+    pub(super) fn drain_ring_chunk(
         &mut self,
         ring: &ArrayQueue<NotificationWorkItem>,
         type_tree: &dyn TypeTree,
-        chunk: usize,
+        event_chunk: usize,
+        pending_refresh: &mut Option<PendingRefreshDrain>,
     ) -> usize {
         let mut processed = 0;
         let now = DateTime::now();
-        for _ in 0..chunk {
+        while processed < event_chunk {
+            if pending_refresh.is_some() {
+                processed +=
+                    self.drain_pending_refresh(type_tree, event_chunk - processed, pending_refresh);
+                break;
+            }
+
             let Some(item) = ring.pop() else {
                 break;
             };
@@ -1055,15 +1092,17 @@ impl SessionSubscriptions {
                     monitored_item,
                     events,
                 } => {
-                    let Some(sub) = self.subscriptions.get_mut(&subscription_id) else {
-                        processed += 1;
-                        continue;
-                    };
-                    let events = events
-                        .iter()
-                        .map(|event| event.as_ref() as &dyn Event)
-                        .collect::<Vec<_>>();
-                    let _ = sub.refresh_events(monitored_item, &events, type_tree);
+                    *pending_refresh = Some(PendingRefreshDrain::new(
+                        subscription_id,
+                        monitored_item,
+                        events,
+                    ));
+                    processed += self.drain_pending_refresh(
+                        type_tree,
+                        event_chunk - processed,
+                        pending_refresh,
+                    );
+                    continue;
                 }
             }
 
@@ -1073,20 +1112,33 @@ impl SessionSubscriptions {
         processed
     }
 
-    #[allow(dead_code)]
-    pub(crate) fn refresh_subscription_events(
+    fn drain_pending_refresh(
         &mut self,
-        subscription_id: u32,
-        monitored_item: Option<MonitoredItemHandle>,
-        events: &[&dyn Event],
         type_tree: &dyn TypeTree,
-    ) -> Result<(), StatusCode> {
-        // ponytail: If refresh ever becomes async/throttled, add a per-subscription in-progress flag + StatusCode::BadRefreshInProgress here.
-        let Some(sub) = self.subscriptions.get_mut(&subscription_id) else {
-            return Err(StatusCode::BadSubscriptionIdInvalid);
+        event_limit: usize,
+        pending_refresh: &mut Option<PendingRefreshDrain>,
+    ) -> usize {
+        let Some(refresh) = pending_refresh.as_mut() else {
+            return 0;
         };
 
-        sub.refresh_events(monitored_item, events, type_tree)
+        let deliver_count = refresh.remaining().min(event_limit);
+        if deliver_count == 0 {
+            return 0;
+        }
+
+        let start = refresh.next_event;
+        let end = start + deliver_count;
+        if let Some(sub) = self.subscriptions.get_mut(&refresh.subscription_id) {
+            let events = refresh.events[start..end]
+                .iter()
+                .map(|event| event.as_ref() as &dyn Event)
+                .collect::<Vec<_>>();
+            let _ = sub.refresh_events(refresh.monitored_item, &events, type_tree);
+        }
+        refresh.next_event = end;
+
+        deliver_count
     }
 
     pub(super) fn user_token(&self) -> &PersistentSessionKey {

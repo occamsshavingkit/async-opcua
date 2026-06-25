@@ -1,149 +1,140 @@
-# Bounded-Ring Notification Delivery (the async-delivery invariant) — Design
+# Session-Actor Subscription Delivery (the async-delivery invariant) — Design
 
-Date: 2026-06-25
-Status: approved (brainstorm); full bounded-ring + majordomo approach confirmed
+Date: 2026-06-25 (rev 2 — pivoted from bounded-lock to lock-free session actor)
+Status: approved (brainstorm + multi-AI cross-check); lock-free session-actor approach confirmed
 
 ## Purpose
 
-Hold the async invariant on the notification hot path: **never hold a session/subscription lock
-across an unbounded amount of work.** Today producers flush notifications into the monitored-item
-queues while holding the per-session `Mutex<SessionSubscriptions>`, and ConditionRefresh replays N
-retained conditions under that same lock. Measured (this branch,
-`bench_condition_refresh_lock_hold_scaling`): **O(N) at ~43 µs/condition — 87 ms at 2 000 conditions,
-extrapolating to ~430 ms at 10 000** — and that window blocks every other operation on the session
-(other subscriptions' Publish, GetMonitoredItems, …).
+Make a session's subscription handling **actually asynchronous**: never hold a lock across the
+notification hot path. Today, per-session state (`SessionSubscriptions`) lives behind an
+`Arc<Mutex<>>` taken by notification delivery, the periodic tick, Publish handling, and
+subscription/monitored-item management alike. Measured (`bench_condition_refresh_lock_hold_scaling`):
+ConditionRefresh holds that `Mutex` **O(N)** in retained conditions — ~43 µs/condition, **87 ms at
+2 000**, extrapolating to ~430 ms at 10 000 — stalling every other operation on the session.
 
-Fix: producers stop flushing under the lock and instead **push work items into a bounded lock-free
-ring**; a **majordomo** drains the ring into the existing monitored-item queues **in bounded chunks**,
-holding the session lock only over each chunk. Cribbed from QuackPLC's `rtrb` discipline (bounded
-lock-free ring + backpressure + fan-in majordomo), minus the cross-process memfd/seal layer it does
-not need in-process.
+The lock-free first step (lock-free producer ring) is done. This design finishes the job: the lock
+goes away entirely by giving each session's subscription state a **single owner** — a per-session
+actor task — fed by the lock-free ring (hot path) and an unbounded command channel (ops needing a
+result). No `Mutex` on the session hot path; the session is never blocked.
 
-## Scope
+## Approach: per-session subscription actor
 
-**In scope**
-- A per-session bounded lock-free ring (`crossbeam-queue::ArrayQueue`; crossbeam is already a
-  dependency — no new crate) carrying `NotificationWorkItem`s.
-- A `NotificationWorkItem` that is either a single (monitored-item, notification) or a contiguous
-  **refresh batch** (subscription, optional target item, ordered events) so ConditionRefresh stays
-  atomic in one ring slot.
-- A **majordomo drain** integrated into the existing `periodic_tick` (and the Publish-driven tick)
-  that pops work items and enqueues them into the monitored-item queues **in bounded chunks**,
-  re-acquiring the session lock per chunk so it is never held over unbounded work.
-- Rewiring the producers — `notify_events`, ConditionRefresh delivery, then `notify_data_change` — to
-  push to the ring instead of flushing under the session `Mutex`.
-- Backpressure/overflow accounting when the ring is full (bounded memory; surfaced via the existing
-  `EventQueueOverflow` / status semantics — producers are not blocked).
-- Before/after benchmark + correctness tests.
+A **dedicated** per-session actor task (separate from the existing generic Read/Write `SessionActor`
+in `session/actor.rs`, so subscription timing never queues behind node-manager work) **owns**
+`SessionSubscriptions` outright. Inbox:
 
-**Out of scope**
-- Replacing the monitored-item queues themselves (their EventFilter / deadband / `EventQueueOverflow`
-  / discard-oldest / retransmission semantics are unchanged — the ring sits *in front* of them).
-- The full actor-per-session rewrite (`specs/005` US3). This reuses the existing central tick driver;
-  dedicated per-session tasks remain a later option if latency demands.
-- `thingbuf` slot-recycling (no-alloc) — a documented upgrade if allocation churn is later measured.
+- **Notification ring** (already built: per-session `crossbeam_queue::ArrayQueue<NotificationWorkItem>`)
+  for the hot, fire-and-forget path (`notify`/ConditionRefresh push and return). Paired with a
+  `tokio::sync::Notify` so a push **wakes** the actor (an `ArrayQueue` cannot wake a sleeping task on
+  its own).
+- **Unbounded command channel** (`tokio::sync::mpsc::unbounded`) for operations that need a result —
+  CreateSubscription, Create/Modify/Delete MonitoredItems, Set{PublishingMode,Triggering,MonitoringMode},
+  Publish, Republish, GetMonitoredItems, ResendData, TransferSubscriptions. Each is `(request,
+  oneshot reply)`. **Unbounded** is deliberate: a bounded channel deadlocks (the connection reader
+  task blocks on `send().await` and can then no longer read the client's Delete/Close to clear the
+  jam); the outstanding count is already protocol-bounded (`max_pending_publish_requests`, connection
+  limits).
 
-## Architecture
+The actor loop `select!`s over `{ command received, Notify woken → drain ring, tick deadline }`,
+applying everything to its owned state single-threaded — no lock — and yielding between messages.
 
+### Incremental migration without a shared Mutex — the `LegacyCall` bridge
+
+The actor becomes the **sole owner from phase 1** (a half-migrated shared `Mutex` is *worse* — a
+blocked pool thread holding it would stall the actor). Services not yet ported reach the owned state
+through one bridge command:
+```rust
+LegacyCall(Box<dyn FnOnce(&mut SessionSubscriptions) -> () + Send>, oneshot::Sender<R>)
 ```
-producer (notify_events / ConditionRefresh / notify_data_change)
-   │  resolve target items under the SubscriptionCache READ lock (unchanged, concurrent-safe)
-   │  push NotificationWorkItem  ──► [ per-session bounded ArrayQueue ]   (lock-free, O(1); Err on full)
-   │  return immediately (no session Mutex held)
-                                          │
-   periodic_tick / publish-tick ──────────┘  MAJORDOMO DRAIN:
-      take session Mutex → enqueue up to CHUNK items into monitored-item queues → release
-      → repeat until ring drained or a drain budget is reached → then run the normal tick/Publish
-```
+This lets us migrate the service call-sites cluster-by-cluster while ownership is already correct.
+The existing service call-sites are tractable for this: they are synchronous cache calls before/after
+the async node-manager work, not locks held across awaits (verified: `session/services/*` resolve the
+node manager first, then touch the cache).
 
-The session `Mutex` is held only over a bounded `CHUNK` of enqueues, never over all N. Producers never
-take the session `Mutex` at all. All existing queue semantics apply at enqueue time, unchanged.
+### The one structure that stays shared
 
-## Components (one responsibility each)
+The global **node → monitored-item index** producers use to resolve "which items match this event"
+stays in the cache behind a **read-mostly `RwLock`** (written only on item add/remove, read
+concurrently by producers). That is not the invariant offender (the offender was the *per-session*
+`Mutex` held across tick/deliver/Publish). The actor returns enough data from its create/delete
+commands for the cache to update this reverse index; the actor **deregisters its items on teardown**.
 
-1. **`NotificationWorkItem`** (enum) — `Data { handle, value }` | `Event { handle, event }` |
-   `RefreshBatch { subscription_id, monitored_item: Option<MonitoredItemHandle>, events: Vec<…> }`.
-   The refresh batch is ONE ring slot so RefreshStart→events→RefreshEnd stay contiguous and ordered
-   even under concurrent producers (FIFO across producers preserves relative order; a single-slot
-   batch keeps the refresh internally contiguous).
-2. **Per-session ring** — `ArrayQueue<NotificationWorkItem>` of fixed capacity, created with the
-   `SessionSubscriptions` (`mod.rs:362/791`) and dropped with it (`:252`). Lock-free MPMC used as
-   many-producers→one-drainer. `push` returns `Err(item)` when full → overflow path.
-3. **Producer push** — the existing `Notifier` (`notify.rs`) resolves target items under the
-   `SubscriptionCacheInner` **read** lock (unchanged), but on flush PUSHES work items to the target
-   session's ring instead of taking the session `Mutex`. ConditionRefresh pushes one `RefreshBatch`.
-4. **Majordomo drain** — `drain_ring(session, budget)` called at the start of `periodic_tick`'s
-   per-session step and when a Publish request is serviced: pop up to `CHUNK` items, take the session
-   `Mutex`, enqueue them (applying EventFilter/deadband/overflow exactly as today), release; loop to a
-   `budget` (so one session can't starve others). A `RefreshBatch` is expanded and enqueued in
-   `CHUNK`-sized sub-batches across lock acquisitions.
-5. **Overflow accounting** — when `push` returns `Err` (ring full), increment a per-subscription
-   dropped-notification counter and set the overflow indicator the next delivered notification carries
-   (reuse the `EventQueueOverflow`/`StatusCode` overflow path rather than blocking the producer).
+## Correctness invariants (from the OPC UA spec + the multi-AI cross-check)
 
-## Data flow & correctness
+1. **Publish drains the ring first.** On a Publish command the actor must drain pending ring work
+   BEFORE evaluating the request, so a keep-alive/Publish never overtakes already-pushed notifications
+   (sequence-number + `more_notifications` correctness).
+2. **`more_notifications` fast-path.** After a Publish with `more_notifications == true`, if another
+   Publish request is queued, send the next batch immediately — do not wait for the next tick.
+3. **Sequence / keep-alive / lifetime.** Keep-alive uses `peek_next_sequence_number` (no increment);
+   notifications/status-changes increment. Compute lifetime/keep-alive from **elapsed wall-time**
+   (`Instant` deltas → intervals passed), not raw tick counts, to survive async scheduling jitter.
+4. **ConditionRefresh must not be silently dropped.** Losing RefreshStart/RefreshEnd or retained
+   events is client-visible. Refresh goes via a path that applies real backpressure / returns a
+   server-busy status on saturation — never the current "ring full → drop → return Ok". (Fixes an
+   existing bug.)
+5. **TransferSubscriptions — two-phase, routing-aware.** Prepare on the source actor (drain its ring,
+   validate the transfer key, remove the `Subscription` + its retransmission entries **in insertion
+   order** + unsent publishes, return them); commit on the destination actor (insert, append, tick);
+   only THEN flip the global `subscription_to_session` mapping; then have the source queue
+   `Good_SubscriptionTransferred`. Guard producer routing during the move with a per-subscription
+   "transferring" state (buffer at destination) so notifications are neither dropped nor misrouted.
+   Roll back into the source if the destination rejects on limits.
+6. **Connection-drop grace.** A disconnect must NOT tear the actor down — it keeps ticking (queueing
+   to the configured limits) until the session lifetime expires, so the client can reconnect and
+   TransferSubscriptions.
 
-- **Ordering**: `ArrayQueue` is a FIFO queue linearized at push-completion, and the drain pops in that
-  order, so a *single producer's* items keep their relative order — which is what matters, since a given
-  monitored item's notifications come from one producer (the sampler for data, the event dispatch for
-  events). RefreshStart→…→RefreshEnd stay ordered because the whole refresh is one batch slot (it cannot
-  be torn or reordered by other producers). Cross-producer interleaving of *different* items is
-  immaterial and spec-permitted.
-- **Refresh atomicity / `Bad_RefreshInProgress`**: a refresh is one `RefreshBatch` slot, so it cannot
-  be torn by concurrent producers. Concurrent refreshes become two ordered batches; interleaving of
-  *other* events between two refreshes is spec-permitted (Part 9 §5.5.7). `Bad_RefreshInProgress`
-  remains structurally unreachable (push is instant; nothing spans publishes).
-- **Latency**: enqueue now happens at the next tick/Publish drain rather than synchronously. Because
-  notifications are delivered to the client on Publish anyway (bounded by the publishing interval), the
-  drain runs at the start of each tick/Publish, so client-visible latency is unchanged in the normal
-  case; under burst it is bounded by the drain budget.
-- **The benchmark** must show ConditionRefresh's *Call* time drops from O(N) to ~O(1) (it just pushes a
-  batch), and that a concurrent op on the same session no longer stalls for the full N.
+## Components
 
-## Backpressure / overflow
+1. `SubscriptionActor` (new, `subscriptions/actor.rs`) — owns `SessionSubscriptions`; holds the ring
+   `Arc` + `Notify`, the command receiver, and a single earliest-deadline tick timer; runs the loop.
+2. `SubscriptionCommand` enum — the request/reply messages above + `LegacyCall`.
+3. Cache handle per session — `{ ring: Arc<ArrayQueue>, notify: Arc<Notify>, commands: UnboundedSender<SubscriptionCommand>, dropped: AtomicU64 }`, replacing today's `Arc<Mutex<SessionSubscriptions>>` entry. Producers push to the ring + `notify_one()`; services `commands.send(cmd)` + await the oneshot.
+4. **Tick scheduler** — one `tokio::time::Sleep` per actor, reset to the soonest subscription deadline;
+   on fire, tick all due subscriptions (lifetime by elapsed time), recompute, reset.
+5. Producer rewiring — `notify.rs` notifier `Drop` pushes to the ring + `notify_one()` instead of
+   taking the `Mutex` (replaces the bounded-lock drain entirely).
 
-Bounded ring (capacity sized from the subscription limits, e.g. a multiple of
-`max_notifications_per_publish × max_subscriptions_per_session`). On full, the producer does NOT block
-or spin (QuackPLC's refuse-and-retry is wrong for a shared async producer): it drops the work item and
-records overflow, which surfaces to the client through the existing queue-overflow indication. Memory
-is bounded by ring capacity + the (already bounded) item queues.
+## Phased migration (subscription + alarms suites green at every step)
 
-## Error handling
+- **Phase 1:** introduce `SubscriptionActor` as sole owner; ring (`Notify`-woken) + unbounded command
+  channel; route **delivery + Publish** through it; all other services reach state via `LegacyCall`.
+  Replace the bounded-lock drain. (Delete the per-session `Mutex` type usage from the hot path;
+  `LegacyCall` runs the closure on the owned state inside the actor.)
+- **Phase 2:** migrate management services off `LegacyCall` into typed commands, cluster by cluster
+  (monitored-items create/modify/delete/set-modes; subscription create/modify/delete; get-monitored-items;
+  resend) — returning reverse-index updates to the cache.
+- **Phase 3:** per-actor earliest-deadline tick (retire the central `periodic_tick` scan);
+  TransferSubscriptions two-phase between actors; connection-drop grace.
+- **Phase 4:** delete `LegacyCall` and confirm there is no `Mutex` anywhere on the session path.
 
-- Ring full → overflow accounting, never panic, never block. The connection/subscription is not torn.
-- Session torn down mid-drain → the ring is dropped with its `SessionSubscriptions`; in-flight items
-  are discarded (the session is gone).
-- A `RefreshBatch` whose subscription/item vanished before drain → dropped (status logged), not a panic.
+## Testing (Claude authors; before each phase merges)
 
-## Testing (Claude authors, independent)
-
-1. **Before/after benchmark** (extend `bench_condition_refresh_lock_hold_scaling`): assert the
-   ConditionRefresh *Call* time is now ~flat in N (push-only), and add a **concurrent-stall** measurement
-   — a small op on the same session during a 2 000-condition refresh — showing its latency no longer
-   scales with N.
-2. **Correctness, unchanged behavior**: the full existing alarms + subscription integration suites stay
-   green (ConditionRefresh late-subscriber sync, Refresh2 targeting, ack/confirm, limit alarms,
-   data-change subscriptions, EventQueueOverflow).
-3. **Ordering**: a refresh burst + interleaved normal events arrive with RefreshStart before
-   RefreshEnd and per-subscription order preserved.
-4. **Overflow**: drive more notifications than the ring holds; assert overflow is indicated (not a
-   panic / not unbounded memory) and the subscription recovers.
+- **Invariant:** the benchmark shows ConditionRefresh Call time flat-in-N AND a concurrent op on the
+  same session no longer stalls with N (re-uses + extends `bench_condition_refresh_lock_hold_scaling`).
+- **Ordering:** Publish after ring push preserves order; refresh + interleaved events keep
+  RefreshStart-before-RefreshEnd; keep-alive doesn't overtake notifications.
+- **State machine unchanged:** full Part 4 §5.13 subscription suite + alarms/limit-alarm suites green
+  at every phase.
+- **Transfer:** Republish after transfer returns the moved retransmission messages; old session gets
+  `Good_SubscriptionTransferred`; rollback on destination limit; no notification loss during transfer.
+- **Backpressure/health:** ConditionRefresh on a saturated path fails loudly (not silent Ok); command
+  channel never deadlocks; lifetime expiry deregisters reverse-index entries + runs node-manager
+  cleanup as today.
 
 ## Implementation split
 
-Per project workflow: **codex implements** the ring, work-item, producer push rewiring, and majordomo
-drain (feature/hot-path code); **Claude authors/validates** the benchmark + correctness tests and runs
-the before/after numbers. One concern per codex dispatch; every brief carries the scope-escape rule and
-"run `cargo fmt` on files you touch". No-git guardrail; branch verified after each.
+**codex implements** the actor, channels, `Notify` wake, `LegacyCall` bridge, producer rewiring, tick
+scheduler, and the phased service migration; **Claude authors/validates** the benchmark + the
+correctness/ordering/transfer/state-machine tests and runs the before/after numbers. One concern per
+codex dispatch; scope-escape rule + "run `cargo fmt`" in every brief; no-git guardrail; branch verified
+after each. This is a multi-PR effort — one PR per phase, each green on the full CI gate.
 
-## Decomposition (→ implementation plan)
+## Provenance
 
-- T1 (codex): `NotificationWorkItem` + the per-session `ArrayQueue` ring on `SessionSubscriptions`
-  (created/dropped with it), with overflow accounting. No behavior change yet (ring unused).
-- T2 (codex): majordomo `drain_ring` (bounded-chunk enqueue into the existing queues) wired into
-  `periodic_tick` + the Publish-tick path.
-- T3 (codex): rewire the **event** producers (`notify_events`) + **ConditionRefresh** to push to the
-  ring (`RefreshBatch`) instead of flushing under the session `Mutex`. (The measured pathology.)
-- T4 (codex): rewire `notify_data_change` (and `maybe_notify`) onto the ring.
-- T5 (Claude): before/after benchmark (flat-in-N + concurrent-stall) + ordering/overflow correctness
-  tests; confirm the full existing suites stay green.
+Cross-checked with Gemini (Antigravity) and codex (read-only, code-grounded) on 2026-06-25; their
+critiques drove: the `Notify` wake, the unbounded command channel (deadlock avoidance), the
+`LegacyCall` sole-owner-from-day-1 bridge, the dedicated (not shared) subscription actor, the
+earliest-deadline single tick, elapsed-time lifetime, Publish-drains-first, the two-phase routing-aware
+Transfer, ConditionRefresh non-silent-drop, connection-drop grace, and index deregistration on teardown.
+See [[multi-ai-audit-crosscheck]] and [[async-delivery-invariant]].

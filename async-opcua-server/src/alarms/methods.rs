@@ -292,7 +292,7 @@ impl ConditionRefreshHandler {
         events.extend(
             alarm_events
                 .into_iter()
-                .map(|event| Box::new(OwnedAlarmEvent { event }) as Box<dyn Event + Send>),
+                .map(|event| Box::new(OwnedAlarmEvent::new(event)) as Box<dyn Event + Send>),
         );
         events.push(Box::new(RefreshEndEvent::new()));
 
@@ -307,11 +307,22 @@ impl ConditionRefreshHandler {
     }
 }
 
-struct OwnedAlarmEvent {
+#[derive(Clone)]
+pub(crate) struct OwnedAlarmEvent {
     event: AlarmEvent,
 }
 
+impl OwnedAlarmEvent {
+    pub(crate) fn new(event: AlarmEvent) -> Self {
+        Self { event }
+    }
+}
+
 impl Event for OwnedAlarmEvent {
+    fn clone_box(&self) -> Box<dyn Event + Send> {
+        Box::new(self.clone())
+    }
+
     fn time(&self) -> &DateTime {
         &self.event.time
     }

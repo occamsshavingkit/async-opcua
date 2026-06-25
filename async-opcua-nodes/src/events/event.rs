@@ -9,6 +9,9 @@ use opcua_types::{
 /// This is used repeatedly when publishing event notifications to
 /// clients.
 pub trait Event: EventField {
+    /// Clone this event into an owned boxed event.
+    fn clone_box(&self) -> Box<dyn Event + Send>;
+
     /// Get a field from the event. Should return [`Variant::Empty`]
     /// if the field is not valid for the event.
     fn get_field(
@@ -26,7 +29,7 @@ pub trait Event: EventField {
     fn event_type_id(&self) -> &NodeId;
 }
 
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 /// This corresponds to BaseEventType definition in OPC UA Part 5
 pub struct BaseEventType {
     /// A unique identifier for an event, e.g. a GUID in a byte string
@@ -73,6 +76,10 @@ pub struct BaseEventType {
 }
 
 impl Event for BaseEventType {
+    fn clone_box(&self) -> Box<dyn Event + Send> {
+        Box::new(self.clone())
+    }
+
     fn time(&self) -> &DateTime {
         &self.time
     }
@@ -215,7 +222,7 @@ mod method_event_field {
         pub(super) use crate as nodes;
         pub(super) use opcua_types as types;
     }
-    #[derive(Default, EventField, Debug)]
+    #[derive(Clone, Default, EventField, Debug)]
     /// A field of an event that references a method.
     pub struct MethodEventField {
         /// Method node ID.

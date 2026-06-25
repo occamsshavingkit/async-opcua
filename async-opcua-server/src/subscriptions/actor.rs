@@ -13,7 +13,7 @@ use crate::node_manager::TypeTreeForUserStatic;
 use super::{
     pool::NotificationBuffer, ring::NotificationWorkItem,
     session_subscriptions::PendingRefreshDrain, PendingPublish, SessionSubscriptions,
-    NOTIFICATION_RING_CAPACITY, RING_DRAIN_BUDGET, RING_DRAIN_EVENT_CHUNK,
+    SubscriptionCleanup, NOTIFICATION_RING_CAPACITY, RING_DRAIN_BUDGET, RING_DRAIN_EVENT_CHUNK,
 };
 use crate::subscriptions::subscription::TickReason;
 use opcua_types::DateTimeUtc;
@@ -92,10 +92,12 @@ impl SubscriptionActorHandle {
 }
 
 pub(crate) struct SubscriptionActor {
+    session_id: u32,
     subs: SessionSubscriptions,
     ring: Arc<ArrayQueue<NotificationWorkItem>>,
     notify: Arc<Notify>,
     commands_rx: mpsc::UnboundedReceiver<SubscriptionCommand>,
+    cleanup_tx: mpsc::UnboundedSender<SubscriptionCleanup>,
     type_tree: Arc<dyn TypeTreeForUserStatic>,
     pending_refresh: Option<PendingRefreshDrain>,
 }
@@ -176,8 +178,10 @@ impl SubscriptionActor {
 }
 
 pub(crate) fn spawn(
+    session_id: u32,
     subs: SessionSubscriptions,
     type_tree: Arc<dyn TypeTreeForUserStatic>,
+    cleanup_tx: mpsc::UnboundedSender<SubscriptionCleanup>,
 ) -> SubscriptionActorHandle {
     assert_actor_send_bounds();
 
@@ -188,10 +192,12 @@ pub(crate) fn spawn(
 
     tokio::spawn(
         SubscriptionActor {
+            session_id,
             subs,
             ring: Arc::clone(&ring),
             notify: Arc::clone(&notify),
             commands_rx,
+            cleanup_tx,
             type_tree,
             pending_refresh: None,
         }

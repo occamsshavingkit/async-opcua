@@ -19,6 +19,7 @@ use session_subscriptions::RemovedSubscription;
 pub use session_subscriptions::SessionSubscriptions;
 use subscription::TickReason;
 pub use subscription::{MonitoredItemHandle, Subscription, SubscriptionState};
+use tokio::sync::mpsc;
 use tracing::error;
 
 use actor::SubscriptionActorHandle;
@@ -27,7 +28,7 @@ pub use notify::{
     SubscriptionEventNotifierBatch,
 };
 
-use opcua_core::sync::RwLock;
+use opcua_core::sync::{Mutex, RwLock};
 
 use opcua_types::{
     node_id::{IdentifierRef, NodeIdRef},
@@ -93,14 +94,16 @@ struct SessionEntry {
 
 impl SessionEntry {
     fn new(
+        session_id: u32,
         limits: SubscriptionLimits,
         key: PersistentSessionKey,
         session: Arc<RwLock<Session>>,
         type_tree: Arc<dyn TypeTreeForUserStatic>,
+        cleanup_tx: mpsc::UnboundedSender<SubscriptionCleanup>,
     ) -> Self {
         let subs = SessionSubscriptions::new(limits, key, session, Arc::clone(&type_tree));
         Self {
-            handle: actor::spawn(subs, type_tree),
+            handle: actor::spawn(session_id, subs, type_tree, cleanup_tx),
         }
     }
 
@@ -118,6 +121,13 @@ pub struct MonitoredItemEntry {
     pub data_encoding: DataEncoding,
     /// The index range of the monitored item.
     pub index_range: NumericRange,
+}
+
+pub(crate) struct SubscriptionCleanup {
+    session_id: u32,
+    session: Option<Arc<RwLock<Session>>>,
+    removed_subscriptions: Vec<RemovedSubscription>,
+    ready_to_delete: bool,
 }
 
 struct SubscriptionCacheInner {
@@ -139,10 +149,13 @@ pub struct SubscriptionCache {
     inner: RwLock<SubscriptionCacheInner>,
     /// Configured limits on subscriptions.
     limits: SubscriptionLimits,
+    cleanup_tx: mpsc::UnboundedSender<SubscriptionCleanup>,
+    cleanup_rx: Mutex<Option<mpsc::UnboundedReceiver<SubscriptionCleanup>>>,
 }
 
 impl SubscriptionCache {
     pub(crate) fn new(limits: SubscriptionLimits) -> Self {
+        let (cleanup_tx, cleanup_rx) = mpsc::unbounded_channel();
         Self {
             inner: RwLock::new(SubscriptionCacheInner {
                 session_subscriptions: HashMap::new(),
@@ -150,7 +163,15 @@ impl SubscriptionCache {
                 monitored_items: HashMap::new(),
             }),
             limits,
+            cleanup_tx,
+            cleanup_rx: Mutex::new(Some(cleanup_rx)),
         }
+    }
+
+    pub(crate) fn take_cleanup_receiver(
+        &self,
+    ) -> Option<mpsc::UnboundedReceiver<SubscriptionCleanup>> {
+        self.cleanup_rx.lock().take()
     }
 
     /// Get the `SessionSubscriptions` object for a single session by its numeric ID.
@@ -414,6 +435,41 @@ impl SubscriptionCache {
         }
     }
 
+    pub(crate) async fn run_cleanup(
+        &self,
+        context: &ServerContext,
+        mut rx: mpsc::UnboundedReceiver<SubscriptionCleanup>,
+    ) {
+        while let Some(c) = rx.recv().await {
+            let should_delete_expired_monitored_items =
+                c.session.is_some() && !c.removed_subscriptions.is_empty();
+            {
+                let mut lck = trace_write_lock!(self.inner);
+                if !c.removed_subscriptions.is_empty() {
+                    Self::cleanup_removed_subscriptions(&mut lck, &c.removed_subscriptions);
+                }
+                if c.ready_to_delete {
+                    if let Some(entry) = lck.session_subscriptions.remove(&c.session_id) {
+                        entry.handle.stop();
+                    }
+                }
+                context
+                    .info
+                    .diagnostics
+                    .set_current_subscription_count(lck.subscription_to_session.len() as u32);
+            }
+            if should_delete_expired_monitored_items {
+                if let Some(session) = c.session {
+                    Self::delete_expired_monitored_items(
+                        context,
+                        vec![(session, c.removed_subscriptions)],
+                    )
+                    .await;
+                }
+            }
+        }
+    }
+
     fn cleanup_removed_subscriptions(
         inner: &mut SubscriptionCacheInner,
         removed_subscriptions: &[RemovedSubscription],
@@ -471,11 +527,14 @@ impl SubscriptionCache {
             lck.session_subscriptions
                 .entry(session_id)
                 .or_insert_with(|| {
+                    let cleanup_tx = self.cleanup_tx.clone();
                     SessionEntry::new(
+                        session_id,
                         self.limits,
                         Self::get_key(&context.session),
                         context.session.clone(),
                         context.info.type_tree_getter.get_type_tree_static(context),
+                        cleanup_tx,
                     )
                 })
                 .handle()
@@ -504,14 +563,17 @@ impl SubscriptionCache {
         context: &RequestContext,
     ) -> SubscriptionActorHandle {
         let mut lck = trace_write_lock!(self.inner);
+        let cleanup_tx = self.cleanup_tx.clone();
         lck.session_subscriptions
             .entry(session_id)
             .or_insert_with(|| {
                 SessionEntry::new(
+                    session_id,
                     self.limits,
                     key,
                     context.session.clone(),
                     context.info.type_tree_getter.get_type_tree_static(context),
+                    cleanup_tx,
                 )
             })
             .handle()

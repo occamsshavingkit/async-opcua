@@ -245,7 +245,7 @@ mod tests {
         AttributeId, ByteString, EUInformation, KeyValuePair, LocalizedText, NodeId, NumericRange,
         ObjectTypeId, QualifiedName, StatusCode, UAString, Variant,
     };
-    #[derive(Event)]
+    #[derive(Clone, Event)]
     #[opcua(identifier = "s=myevent", namespace = "uri:my:namespace")]
     struct BasicValueEvent {
         base: BaseEventType,
@@ -384,12 +384,12 @@ mod tests {
         assert_eq!(euinfo.description, "Some unit desc".into());
     }
 
-    #[derive(EventField, Default, Debug)]
+    #[derive(Clone, EventField, Default, Debug)]
     struct ComplexEventField {
         float: f32,
     }
 
-    #[derive(EventField, Default, Debug)]
+    #[derive(Clone, EventField, Default, Debug)]
     struct SubComplexEventField {
         base: ComplexEventField,
         node_id: NodeId,
@@ -399,7 +399,7 @@ mod tests {
         data: i32,
     }
 
-    #[derive(EventField, Default, Debug)]
+    #[derive(Clone, EventField, Default, Debug)]
     struct ComplexVariable {
         node_id: NodeId,
         value: i32,
@@ -408,7 +408,7 @@ mod tests {
         extra: PlaceholderEventField<i32>,
     }
 
-    #[derive(Event)]
+    #[derive(Clone, Event)]
     #[opcua(identifier = "s=mynestedevent", namespace = "uri:my:namespace")]
     struct NestedEvent {
         base: BasicValueEvent,

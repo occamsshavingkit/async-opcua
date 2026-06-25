@@ -154,6 +154,7 @@ impl SubscriptionCache {
     }
 
     /// Get the `SessionSubscriptions` object for a single session by its numeric ID.
+    #[cfg_attr(not(feature = "generated-address-space"), allow(dead_code))]
     pub(crate) fn get_session_subscriptions(
         &self,
         session_id: u32,

@@ -35,10 +35,10 @@ An operator configures permissions on nodes, and a client can read the `RolePerm
 that apply to the roles granted to the calling Session.
 
 **Why this priority**: It is the data foundation every other story builds on — the `PermissionType`
-bitmask, `RolePermissionType`, and the three node attributes (16/17/18) — and is independently valuable
+bitmask, `RolePermissionType`, and the three node attributes (24/25/26) — and is independently valuable
 (clients can introspect permissions) and independently testable.
 
-**Independent Test**: Configure a node with RolePermissions for two roles; read attributes 16/17/18 over a
+**Independent Test**: Configure a node with RolePermissions for two roles; read attributes 24/25/26 over a
 session; verify RolePermissions returns the full set, AccessRestrictions returns the configured value, and
 UserRolePermissions returns only the entries for the session's granted roles.
 
@@ -257,8 +257,8 @@ active.
   ReadRolePermissions, WriteAttribute, WriteRolePermissions, WriteHistorizing, Read, Write, ReadHistory,
   InsertHistory, ModifyHistory, DeleteHistory, ReceiveEvents, Call, AddReference, RemoveReference,
   DeleteNode, AddNode) and the `RolePermissionType` (roleId + permissions).
-- **FR-002**: The system MUST expose the `RolePermissions` (16), `UserRolePermissions` (17), and
-  `AccessRestrictions` (18) node attributes for read, returning configured values and computing
+- **FR-002**: The system MUST expose the `RolePermissions` (24), `UserRolePermissions` (25), and
+  `AccessRestrictions` (26) node attributes for read, returning configured values and computing
   UserRolePermissions as the per-session-role subset.
 - **FR-003**: The system MUST grant each activated Session a set of Roles by evaluating configured
   identity-mapping rules against the session identity (anonymous / username / certificate thumbprint /
@@ -344,7 +344,7 @@ them up via the OPC UA reference MCP. Sections are from the OPC 10000 series (Pa
 | Well-known Roles (8) + suggested permissions | Part 3 §4.9.2 (Well-Known Roles) |
 | `PermissionType` bitmask (17 bits) + `RolePermissionType` | Part 3 §8.55 (PermissionType); Part 5 (RolePermissionType DataType) |
 | `AccessRestrictionType` (Signing/Encryption/Session/ApplyToBrowse) | Part 3 §8.56 (AccessRestrictionType) |
-| RolePermissions (16) / UserRolePermissions (17) / AccessRestrictions (18) attributes | Part 3 §5.2 (Base NodeClass attributes); Part 4 §6 (Attribute ids); Part 3 §5.9.x |
+| RolePermissions (24) / UserRolePermissions (25) / AccessRestrictions (26) attributes | Part 3 §5.2 (Base NodeClass attributes); Part 4 §6 (Attribute ids); Part 3 §5.9.x |
 | Per-namespace defaults (Default*Permissions / NamespaceMetadata) | Part 5 §6 (NamespaceMetadataType / NamespacesType) |
 | `RoleSetType`, `RoleType` (i=15620), components | Part 18 §4.4.1 (RoleType), §4.5 (RoleSetType); Part 5 (ServerCapabilities.RoleSet) |
 | `IdentityMappingRuleType` (i=15634) + criteria types | Part 18 §4.4.3 (IdentityMappingRuleType); Part 18 §4.4.2 (IdentityCriteriaType) |
@@ -357,7 +357,7 @@ them up via the OPC UA reference MCP. Sections are from the OPC 10000 series (Pa
 ## Assumptions
 
 - The standard well-known Role NodeIds, RoleSetType/RoleType/IdentityMappingRuleType definitions, the three
-  node attributes (16/17/18), the PermissionType/AccessRestrictionType bit definitions, and the management
+  node attributes (24/25/26), the PermissionType/AccessRestrictionType bit definitions, and the management
   Method NodeIds are available in the generated namespace-0 type set (Part 3/5/18); where a generated type
   or attribute id is missing it will be added as part of the build.
 - "Permissive when unconfigured" means: a node with no RolePermissions (and no applicable namespace default)

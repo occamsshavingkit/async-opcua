@@ -24,10 +24,10 @@
 
 ## Phase 2: Foundational (blocking prerequisites — BLOCKS all user stories)
 
-- [ ] T005 Add optional `role_permissions: Option<Vec<RolePermissionType>>` and `access_restrictions: Option<AccessRestrictionType>` fields to `nodes/base.rs::Base` with constructors/setters preserving existing construction (Spec: Part 3 §8.55, §8.56)
-- [ ] T006 Add `RolePermissions`(24)/`AccessRestrictions`(26) cases to `Base::get_attribute` in `nodes/base.rs` returning the stored values (null when unset); confirm `UserRolePermissions`(25) is handled in the read path, not here (Spec: Part 3 §5.2; Part 6 attribute table)
-- [ ] T007 [P] Add `VariableBuilder`/`ObjectBuilder`/generic node builder `.role_permissions(...)` and `.access_restrictions(...)` methods in `nodes/` builders (Spec: Part 3 §8.55, §8.56)
-- [ ] T008 Add a resolved-role-set carrier to `srv/node_manager/context.rs` — `RequestContextInner.user_roles: Arc<Vec<NodeId>>` + `RequestContext::user_roles(&self) -> &[NodeId]`, defaulting to empty (Spec: Part 18 §4.4.1; Part 3 §4.9)
+- [X] T005 Add optional `role_permissions: Option<Vec<RolePermissionType>>` and `access_restrictions: Option<AccessRestrictionType>` fields to `nodes/base.rs::Base` with constructors/setters preserving existing construction (Spec: Part 3 §8.55, §8.56)
+- [X] T006 Add `RolePermissions`(24)/`AccessRestrictions`(26) cases to `Base::get_attribute` in `nodes/base.rs` returning the stored values (null when unset); confirm `UserRolePermissions`(25) is handled in the read path, not here (Spec: Part 3 §5.2; Part 6 attribute table)
+- [X] T007 [P] Add `VariableBuilder`/`ObjectBuilder`/generic node builder `.role_permissions(...)` and `.access_restrictions(...)` methods in `nodes/` builders (Spec: Part 3 §8.55, §8.56)
+- [X] T008 Add a resolved-role-set carrier to `srv/node_manager/context.rs` — `RequestContextInner.user_roles: Arc<Vec<NodeId>>` + `RequestContext::user_roles(&self) -> &[NodeId]`, defaulting to empty (Spec: Part 18 §4.4.1; Part 3 §4.9)
 - [ ] T009 Extend `srv/authenticator.rs::CoreServerPermissions` (or a new return) so the authenticator can surface the resolved role set for a `UserToken`; keep `read_diagnostics` behaviour (Spec: Part 18 §4; Part 3 §4.9)
 - [ ] T010 Implement the central `authorize(context, node_id, effective_role_permissions, required) -> bool` in `srv/authorization/decision.rs` with the permissive-when-unconfigured + fail-closed semantics from research.md D4/D5 (Spec: Part 3 §4.8.2; Part 4 §7.39 Bad_UserAccessDenied)
 - [ ] T011 [P] Unit-test `authorize`: union across roles, unconfigured⇒permit, list-excludes-my-roles⇒deny, required-bit present/absent — in `srv/authorization/decision.rs` tests (Spec: Part 3 §4.8.2)
@@ -42,18 +42,18 @@ is the per-session-role subset. **Independent test**: configure a node with two 
 
 ### Tests for US1
 
-- [ ] T013 [P] [US1] Integration test `it/rbac.rs::reads_role_permissions_attribute` — configured node returns full RolePermissions list (Spec: Part 3 §8.55; Part 4 §5.10 Read)
-- [ ] T014 [P] [US1] Integration test `it/rbac.rs::reads_access_restrictions_attribute` — configured AccessRestrictionType bitmask returned (Spec: Part 3 §8.56)
-- [ ] T015 [P] [US1] Integration test `it/rbac.rs::user_role_permissions_is_session_subset` — only the session's granted roles' entries returned (Spec: Part 3 §5.2; Part 18 §4)
-- [ ] T016 [P] [US1] Integration test `it/rbac.rs::unconfigured_permission_attrs_return_null` — node with no RolePermissions returns null/empty, no error (Spec: Part 3 §5.2)
+- [X] T013 [P] [US1] Integration test `it/rbac.rs::reads_role_permissions_attribute` — configured node returns full RolePermissions list (Spec: Part 3 §8.55; Part 4 §5.10 Read)
+- [X] T014 [P] [US1] Integration test `it/rbac.rs::reads_access_restrictions_attribute` — configured AccessRestrictionType bitmask returned (Spec: Part 3 §8.56)
+- [X] T015 [P] [US1] Integration test `it/rbac.rs::user_role_permissions_is_session_subset` — only the session's granted roles' entries returned (Spec: Part 3 §5.2; Part 18 §4)
+- [X] T016 [P] [US1] Integration test `it/rbac.rs::unconfigured_permission_attrs_return_null` — node with no RolePermissions returns null/empty, no error (Spec: Part 3 §5.2)
 
 ### Implementation for US1
 
-- [ ] T017 [US1] Serve `RolePermissions`(24) and `AccessRestrictions`(26) through the address-space read path `srv/address_space/utils.rs::read_node_value` (Spec: Part 3 §5.2; Part 4 §5.10)
-- [ ] T018 [US1] Compute and serve `UserRolePermissions`(25) in `srv/address_space/utils.rs::read_node_value` from `context.user_roles()` ∩ node RolePermissions, merged across roles (Spec: Part 3 §5.2; Part 18 §4)
+- [X] T017 [US1] Serve `RolePermissions`(24) and `AccessRestrictions`(26) through the address-space read path `srv/address_space/utils.rs::read_node_value` (Spec: Part 3 §5.2; Part 4 §5.10)
+- [X] T018 [US1] Compute and serve `UserRolePermissions`(25) in `srv/address_space/utils.rs::read_node_value` from `context.user_roles()` ∩ node RolePermissions, merged across roles (Spec: Part 3 §5.2; Part 18 §4)
 - [ ] T019 [US1] Gate reading the RolePermissions attribute itself by the `ReadRolePermissions` permission in the read path (permissive when unconfigured) (Spec: Part 3 §8.55 ReadRolePermissions)
 - [ ] T020 [US1] Ensure `node.into()`/codegen-loaded nodes can carry RolePermissions/AccessRestrictions from the nodeset loader (preserve when present) `srv/node_manager/memory` (Spec: Part 3 §5.2)
-- [ ] T021 [US1] Verify the four US1 tests pass under default features; fix any read-path regressions (Spec: Part 4 §5.10)
+- [X] T021 [US1] Verify the four US1 tests pass under default features; fix any read-path regressions (Spec: Part 4 §5.10)
 
 **Checkpoint**: permission attributes are introspectable; UserRolePermissions is role-aware.
 

@@ -13,13 +13,13 @@ parallelizable. Engine work is in `async-opcua-server/src/aggregates/engine.rs`;
 
 ## Phase 1: Setup
 
-- [ ] T001 [P] Confirm the aggregate + history suites are green at baseline: `cargo test -p async-opcua-server` and `cargo test -p async-opcua-history-sqlite` (Spec: SC-004)
-- [ ] T002 Inventory the touch points: `AggregateInput` (engine.rs:271), `compute_processed_intervals` (engine.rs:1450), the dispatch arm + "unsupported" comment (engine.rs:~1417), `SUPPORTED_AGGREGATE_IDS` (engine.rs:45); the TWO `read_processed` impls (`history/backend.rs:84/117` trait default AND `async-opcua-history-sqlite/src/backend.rs:647/680` override); `read_annotations` (backend.rs:144); the other `AggregateInput` sites (`subscriptions/monitored_item.rs:605`, `tests/aggregates_tests.rs` `calculate_aggregate`); and the "AnnotationCount unsupported" tests (aggregates_tests.rs ~L45-68/L700-705/L1135-1140) (Spec: Part 13 §5.4.3.20)
+- [X] T001 [P] Confirm the aggregate + history suites are green at baseline: `cargo test -p async-opcua-server` and `cargo test -p async-opcua-history-sqlite` (Spec: SC-004)
+- [X] T002 Inventory the touch points: `AggregateInput` (engine.rs:271), `compute_processed_intervals` (engine.rs:1450), the dispatch arm + "unsupported" comment (engine.rs:~1417), `SUPPORTED_AGGREGATE_IDS` (engine.rs:45); the TWO `read_processed` impls (`history/backend.rs:84/117` trait default AND `async-opcua-history-sqlite/src/backend.rs:647/680` override); `read_annotations` (backend.rs:144); the other `AggregateInput` sites (`subscriptions/monitored_item.rs:605`, `tests/aggregates_tests.rs` `calculate_aggregate`); and the "AnnotationCount unsupported" tests (aggregates_tests.rs ~L45-68/L700-705/L1135-1140) (Spec: Part 13 §5.4.3.20)
 
 ## Phase 2: Foundational (BLOCKING — additive plumbing; no behavior change yet)
 
-- [ ] T003 Add `pub annotations: &'a [DateTime]` to `AggregateInput` (engine.rs:271); set it to `&[]` at the `monitored_item.rs:605` construction site and in the `aggregates_tests.rs` `calculate_aggregate` helper (no behavior change — every existing aggregate ignores the empty slice) (Spec: Part 13 §5.4.3.20)
-- [ ] T004 Add an `annotation_times: &[DateTime]` parameter to `compute_processed_intervals` (engine.rs:1450); per interval, slice the timestamps in `[min_t, max_t)` into `AggregateInput.annotations`; update BOTH callers (`history/backend.rs:117` and `async-opcua-history-sqlite/src/backend.rs:680`) to pass `&[]` for now (Spec: Part 13 §5.4.3.20; FR-003)
+- [X] T003 Add `pub annotations: &'a [DateTime]` to `AggregateInput` (engine.rs:271); set it to `&[]` at the `monitored_item.rs:605` construction site and in the `aggregates_tests.rs` `calculate_aggregate` helper (no behavior change — every existing aggregate ignores the empty slice) (Spec: Part 13 §5.4.3.20)
+- [X] T004 Add an `annotation_times: &[DateTime]` parameter to `compute_processed_intervals` (engine.rs:1450); per interval, slice the timestamps in `[min_t, max_t)` into `AggregateInput.annotations`; update BOTH callers (`history/backend.rs:117` and `async-opcua-history-sqlite/src/backend.rs:680`) to pass `&[]` for now (Spec: Part 13 §5.4.3.20; FR-003)
 
 **Checkpoint**: the annotation slice is plumbed through the engine; all aggregates still identical (annotations always empty).
 
@@ -30,15 +30,15 @@ parallelizable. Engine work is in `async-opcua-server/src/aggregates/engine.rs`;
 **Goal**: AnnotationCount returns the per-interval count of annotations.
 **Independent test**: store 3 annotations in an interval, read AnnotationCount → 3 (was Bad_AggregateNotSupported).
 
-- [ ] T005 [US1] Implement `agg_annotation_count(input)` in engine.rs returning `Int32(input.annotations.len())`, status Good, source_timestamp = interval_start; add `const AGG_ANNOTATION_COUNT: u32 = 2351`, a dispatch arm for it, add `2351` to `SUPPORTED_AGGREGATE_IDS`, and remove the "intentionally unsupported" comment (Spec: Part 13 §5.4.3.20)
-- [ ] T006 [US1] In the trait-default `read_processed` (`history/backend.rs`), when `aggregate_type` is AnnotationCount (i=2351) call `self.read_annotations(node_id, &[], None)`, map each `DataValue` to `get_value_timestamp`, filter to `[start_time, end_time]`, sort, and pass as `annotation_times`; for other aggregates pass `&[]`; on `Err`/unsupported use an empty set (Spec: Part 13 §5.4.3.20; FR-007)
-- [ ] T007 [US1] Apply the SAME annotation-load logic in the sqlite `read_processed` OVERRIDE (`async-opcua-history-sqlite/src/backend.rs:647`) — the second impl that must not be missed (Spec: Part 13 §5.4.3.20; FR-005)
-- [ ] T008 [P] [US1] [Claude] Unit test (engine): an `AggregateInput` with N annotation timestamps in the interval → AnnotationCount = N for N ∈ {0, 1, 3} (Spec: SC-001; §5.4.3.20)
-- [ ] T009 [P] [US1] [Claude] Unit test: a multi-interval range with annotations spread across intervals → each interval counts its own `[start, end)` window; a boundary timestamp falls in the start-inclusive interval; empty interval → 0 (Spec: SC-002; FR-003)
-- [ ] T010 [US1] [Claude] Flip the "AnnotationCount unsupported" tests (aggregates_tests.rs): assert 2351 IS advertised (advertised count 34 → 35) and a request is computed (Good), not `Bad_AggregateNotSupported` (Spec: SC-003; SC-004)
-- [ ] T011 [P] [US1] [Claude] Integration test (in-memory backend, e2e): HistoryUpdate `UpdateStructureData` to add annotations, then HistoryRead the AnnotationCount aggregate → the per-interval counts (the full write→count loop) (Spec: SC-001; §5.4.3.20)
-- [ ] T011a [P] [US1] [Claude] sqlite parity test (`async-opcua-history-sqlite/tests/`, under the `sqlite` feature): same annotations + AnnotationCount read returns the same counts as the in-memory backend (Spec: SC-006; FR-005)
-- [ ] T012 [P] [US1] [Claude] Test: a backend whose `read_annotations` is unsupported → AnnotationCount returns 0 (Good), no error/panic (Spec: FR-007; SC-006)
+- [X] T005 [US1] Implement `agg_annotation_count(input)` in engine.rs returning `Int32(input.annotations.len())`, status Good, source_timestamp = interval_start; add `const AGG_ANNOTATION_COUNT: u32 = 2351`, a dispatch arm for it, add `2351` to `SUPPORTED_AGGREGATE_IDS`, and remove the "intentionally unsupported" comment (Spec: Part 13 §5.4.3.20)
+- [X] T006 [US1] In the trait-default `read_processed` (`history/backend.rs`), when `aggregate_type` is AnnotationCount (i=2351) call `self.read_annotations(node_id, &[], None)`, map each `DataValue` to `get_value_timestamp`, filter to `[start_time, end_time]`, sort, and pass as `annotation_times`; for other aggregates pass `&[]`; on `Err`/unsupported use an empty set (Spec: Part 13 §5.4.3.20; FR-007)
+- [X] T007 [US1] Apply the SAME annotation-load logic in the sqlite `read_processed` OVERRIDE (`async-opcua-history-sqlite/src/backend.rs:647`) — the second impl that must not be missed (Spec: Part 13 §5.4.3.20; FR-005)
+- [X] T008 [P] [US1] [Claude] Unit test (engine): an `AggregateInput` with N annotation timestamps in the interval → AnnotationCount = N for N ∈ {0, 1, 3} (Spec: SC-001; §5.4.3.20)
+- [X] T009 [P] [US1] [Claude] Unit test: a multi-interval range with annotations spread across intervals → each interval counts its own `[start, end)` window; a boundary timestamp falls in the start-inclusive interval; empty interval → 0 (Spec: SC-002; FR-003)
+- [X] T010 [US1] [Claude] Flip the "AnnotationCount unsupported" tests (aggregates_tests.rs): assert 2351 IS advertised (advertised count 34 → 35) and a request is computed (Good), not `Bad_AggregateNotSupported` (Spec: SC-003; SC-004)
+- [X] T011 [P] [US1] [Claude] Integration test (in-memory backend, e2e): HistoryUpdate `UpdateStructureData` to add annotations, then HistoryRead the AnnotationCount aggregate → the per-interval counts (the full write→count loop) (Spec: SC-001; §5.4.3.20)
+- [X] T011a [P] [US1] [Claude] sqlite parity test (`async-opcua-history-sqlite/tests/`, under the `sqlite` feature): same annotations + AnnotationCount read returns the same counts as the in-memory backend (Spec: SC-006; FR-005)
+- [X] T012 [P] [US1] [Claude] Test: a backend whose `read_annotations` is unsupported → AnnotationCount returns 0 (Good), no error/panic (Spec: FR-007; SC-006)
 
 **Checkpoint**: AnnotationCount works end-to-end on both backends; the standard aggregate set is complete.
 

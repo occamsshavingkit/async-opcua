@@ -13,12 +13,12 @@ parallelizable (different concern, no incomplete deps). All engine work is in
 
 ## Phase 1: Setup
 
-- [ ] T001 [P] Confirm the aggregate suite is green at baseline: `cargo test -p async-opcua-server` (engine unit tests + `tests/aggregates_tests.rs`) (Spec: SC-004)
-- [ ] T002 Inventory the touch points in `aggregates/engine.rs`: `variant_to_f64` (L111), `good_numeric_points` (L325), `state_regions`/`StateRegion` (L271/L358), `agg_count` (L1022), `agg_number_of_transitions` (L1153), `agg_duration_in_state_zero/non_zero` (L1143), `agg_duration_good/bad`, `agg_percent_good/bad`, `agg_worst_quality/2`; and the existing numeric Count/NumberOfTransitions vectors in `tests/aggregates_tests.rs` (Spec: Part 13 §5.4.3.21 / §5.4.3.24)
+- [X] T001 [P] Confirm the aggregate suite is green at baseline: `cargo test -p async-opcua-server` (engine unit tests + `tests/aggregates_tests.rs`) (Spec: SC-004)
+- [X] T002 Inventory the touch points in `aggregates/engine.rs`: `variant_to_f64` (L111), `good_numeric_points` (L325), `state_regions`/`StateRegion` (L271/L358), `agg_count` (L1022), `agg_number_of_transitions` (L1153), `agg_duration_in_state_zero/non_zero` (L1143), `agg_duration_good/bad`, `agg_percent_good/bad`, `agg_worst_quality/2`; and the existing numeric Count/NumberOfTransitions vectors in `tests/aggregates_tests.rs` (Spec: Part 13 §5.4.3.21 / §5.4.3.24)
 
 ## Phase 2: Foundational (BLOCKING — shared test fixtures)
 
-- [ ] T003 [Claude] Add non-numeric `DataValue` test fixtures in `tests/aggregates_tests.rs` — e.g. `bool_dv(value, sec, status)`, `string_dv(value, sec)` mirroring the existing `good(value, sec)` numeric helper — reused by US1–US4 tests (Spec: Part 13 §5.4.3)
+- [X] T003 [Claude] Add non-numeric `DataValue` test fixtures in `tests/aggregates_tests.rs` — e.g. `bool_dv(value, sec, status)`, `string_dv(value, sec)` mirroring the existing `good(value, sec)` numeric helper — reused by US1–US4 tests (Spec: Part 13 §5.4.3)
 
 **Checkpoint**: baseline known-green; typed fixtures available. No engine behavior changed yet.
 
@@ -29,11 +29,11 @@ parallelizable (different concern, no incomplete deps). All engine work is in
 **Goal**: Count returns the number of Good-status raw points regardless of value type.
 **Independent test**: a Boolean series with 5 good points reads Count = 5 (was 0); numeric unchanged.
 
-- [ ] T004 [US1] Add a `good_status_point_count(input)` helper in `engine.rs` that counts points whose StatusCode is Good (`status.is_none_or(is_good)`, i.e. Good-only — Uncertain is NOT counted, per §5.4.3.21), independent of value type — do NOT touch `good_numeric_points` (Spec: Part 13 §5.4.3.21 Count)
-- [ ] T005 [US1] Rewrite `agg_count` to use `good_status_point_count` instead of `good_numeric_points(input).len()`; leave the result StatusCode (`percent_values_status`) and timestamps unchanged (Spec: Part 13 §5.4.3.21)
-- [ ] T006 [P] [US1] [Claude] Test: a Boolean source with N good raw points in an interval reads Count = N for N ∈ {0, 1, 5} (Spec: SC-001; §5.4.3.21)
-- [ ] T007 [P] [US1] [Claude] Test: a String source with good points + one Bad-status point reads Count = (good count only), independent of value type (Spec: §5.4.3.21)
-- [ ] T008 [P] [US1] [Claude] Test: a numeric (Double) source returns the SAME Count as before this change (regression) (Spec: FR-007; SC-004)
+- [X] T004 [US1] Add a `good_status_point_count(input)` helper in `engine.rs` that counts points whose StatusCode is Good (`status.is_none_or(is_good)`, i.e. Good-only — Uncertain is NOT counted, per §5.4.3.21), independent of value type — do NOT touch `good_numeric_points` (Spec: Part 13 §5.4.3.21 Count)
+- [X] T005 [US1] Rewrite `agg_count` to use `good_status_point_count` instead of `good_numeric_points(input).len()`; leave the result StatusCode (`percent_values_status`) and timestamps unchanged (Spec: Part 13 §5.4.3.21)
+- [X] T006 [P] [US1] [Claude] Test: a Boolean source with N good raw points in an interval reads Count = N for N ∈ {0, 1, 5} (Spec: SC-001; §5.4.3.21)
+- [X] T007 [P] [US1] [Claude] Test: a String source with good points + one Bad-status point reads Count = (good count only), independent of value type (Spec: §5.4.3.21)
+- [X] T008 [P] [US1] [Claude] Test: a numeric (Double) source returns the SAME Count as before this change (regression) (Spec: FR-007; SC-004)
 
 **Checkpoint**: Count is value-type-independent; numeric Count unchanged.
 

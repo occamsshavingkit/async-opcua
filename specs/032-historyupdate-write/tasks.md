@@ -17,14 +17,14 @@ tests and runs the full suite (codex sandbox cannot bind sockets).
 
 ## Phase 2: Foundational (BLOCKING — all stories depend on this)
 
-- [ ] T003 Extend the `HistoryStorageBackend` trait (`async-opcua-server/src/history/backend.rs`) with `update_structure_data`, `update_event`, `delete_raw_modified`, `delete_at_time`, `delete_event` as `async` methods, each defaulting to `Err(StatusCode::BadHistoryOperationUnsupported)` (Spec: Part 11 §6.8–6.9; contracts/history-update.md)
-- [ ] T004 Add a `Remove` arm to the `HistoryStorageBackend::update_data` contract/signature note + the trait doc so backends implement all four `PerformUpdateType` modes (Spec: Part 11 §6.8.2; Part 4 §11.7.2)
-- [ ] T005 Implement `history_update` on `SimpleNodeManager` (`node_manager/memory/simple.rs:574`, and the `InMemoryNodeManager` equivalent) to fetch `self.history_backend` (the existing `RwLock<Option<Arc<dyn HistoryStorageBackend>>>` used by the read path) and route each `HistoryUpdateDetails` variant to the matching backend method, setting node `statusCode` from the result; return `Bad_HistoryOperationUnsupported` when no backend is set (Spec: Part 4 §11.7; mirrors the existing read path)
-- [ ] T006 In the dispatch, size and set `HistoryUpdateNode::set_operation_results` to the per-entry result vector for per-entry ops; set the operation `statusCode` directly for `DeleteRawModified` (Spec: Part 4 §11.7 result tables)
-- [ ] T007 [P] Reuse the existing `ModificationInfo { modification_time, update_type: HistoryUpdateType, user_name }` (async-opcua-types) as the modified-history record carried by both backends; define any small internal wrapper in `async-opcua-server/src/history/` (Spec: Part 11 §6.5 / §A.2 ModificationInfo; §3.1 HistoryUpdateType)
-- [ ] T007a Extend `HistoryStorageBackend::read_raw_modified` to ALSO return `Vec<ModificationInfo>` (e.g. `-> (Vec<DataValue>, Vec<ModificationInfo>, Option<Vec<u8>>)`). Update: (a) the trait def + both existing implementors `async-opcua-history-sqlite/src/backend.rs:270` and `history/event_history.rs:102` (return an empty `ModificationInfo` vec for now); (b) the internal aggregate-path callers `history/backend.rs:92` and sqlite `backend.rs:348` to destructure/ignore the new vec; (c) the two `HistoryModifiedData` construction sites `history/read.rs:19` and `node_manager/memory/simple.rs:371` to populate `modification_infos` from it instead of the hardcoded `None` (Spec: Part 11 §6.5; Part 4 §11.6 ReadRawModifiedDetails) — BLOCKS US4
-- [ ] T008 [P] Keep the node-manager trait default `history_update` returning `Bad_HistoryOperationUnsupported` and add a regression test asserting an unhistorized manager is unchanged (Spec: FR-011; SC-005)
-- [ ] T009 [P] [Claude] Unit test: the extended trait's default methods return `Bad_HistoryOperationUnsupported` (no override) (Spec: FR-011)
+- [X] T003 Extend the `HistoryStorageBackend` trait (`async-opcua-server/src/history/backend.rs`) with `update_structure_data`, `update_event`, `delete_raw_modified`, `delete_at_time`, `delete_event` as `async` methods, each defaulting to `Err(StatusCode::BadHistoryOperationUnsupported)` (Spec: Part 11 §6.8–6.9; contracts/history-update.md)
+- [X] T004 Add a `Remove` arm to the `HistoryStorageBackend::update_data` contract/signature note + the trait doc so backends implement all four `PerformUpdateType` modes (Spec: Part 11 §6.8.2; Part 4 §11.7.2)
+- [X] T005 Implement `history_update` on `SimpleNodeManager` (`node_manager/memory/simple.rs:574`, and the `InMemoryNodeManager` equivalent) to fetch `self.history_backend` (the existing `RwLock<Option<Arc<dyn HistoryStorageBackend>>>` used by the read path) and route each `HistoryUpdateDetails` variant to the matching backend method, setting node `statusCode` from the result; return `Bad_HistoryOperationUnsupported` when no backend is set (Spec: Part 4 §11.7; mirrors the existing read path)
+- [X] T006 In the dispatch, size and set `HistoryUpdateNode::set_operation_results` to the per-entry result vector for per-entry ops; set the operation `statusCode` directly for `DeleteRawModified` (Spec: Part 4 §11.7 result tables)
+- [X] T007 [P] Reuse the existing `ModificationInfo { modification_time, update_type: HistoryUpdateType, user_name }` (async-opcua-types) as the modified-history record carried by both backends; define any small internal wrapper in `async-opcua-server/src/history/` (Spec: Part 11 §6.5 / §A.2 ModificationInfo; §3.1 HistoryUpdateType)
+- [X] T007a Extend `HistoryStorageBackend::read_raw_modified` to ALSO return `Vec<ModificationInfo>` (e.g. `-> (Vec<DataValue>, Vec<ModificationInfo>, Option<Vec<u8>>)`). Update: (a) the trait def + both existing implementors `async-opcua-history-sqlite/src/backend.rs:270` and `history/event_history.rs:102` (return an empty `ModificationInfo` vec for now); (b) the internal aggregate-path callers `history/backend.rs:92` and sqlite `backend.rs:348` to destructure/ignore the new vec; (c) the two `HistoryModifiedData` construction sites `history/read.rs:19` and `node_manager/memory/simple.rs:371` to populate `modification_infos` from it instead of the hardcoded `None` (Spec: Part 11 §6.5; Part 4 §11.6 ReadRawModifiedDetails) — BLOCKS US4
+- [X] T008 [P] Keep the node-manager trait default `history_update` returning `Bad_HistoryOperationUnsupported` and add a regression test asserting an unhistorized manager is unchanged (Spec: FR-011; SC-005)
+- [X] T009 [P] [Claude] Unit test: the extended trait's default methods return `Bad_HistoryOperationUnsupported` (no override) (Spec: FR-011)
 
 **Checkpoint**: trait extended + dispatch routes every variant; backends still report unsupported.
 
@@ -36,18 +36,18 @@ tests and runs the full suite (codex sandbox cannot bind sockets).
 result codes, recording a modified-history entry on Replace/Update-overwrite.
 **Independent test**: drive the Insert/Replace/Update/Remove matrix against the sqlite backend.
 
-- [ ] T010 [US1] Add the `Remove` arm to sqlite `update_data` (`async-opcua-history-sqlite/src/backend.rs`): delete the raw row at the timestamp; `Good` if present, `Bad_NoEntryExists` if absent (Spec: Part 11 §6.8.2 Remove; Part 4 §11.7.2)
-- [ ] T011 [US1] Verify/fix sqlite `update_data` Insert: `Good_EntryInserted` when absent, `Bad_EntryExists` when present (Spec: Part 11 §6.8.2; Part 4 §11.7.2)
-- [ ] T012 [US1] Verify/fix sqlite `update_data` Replace: `Good_EntryReplaced` when present, `Bad_NoEntryExists` when absent (Spec: Part 11 §6.8.2; Part 4 §11.7.2)
-- [ ] T013 [US1] Verify/fix sqlite `update_data` Update: insert-or-replace → `Good_EntryInserted` (new) or `Good_EntryReplaced` (overwrite) (Spec: Part 11 §6.8.2; Part 4 §11.7.2)
-- [ ] T014 [US1] Create the `modified_historical_data` table (migration/DDL) in the sqlite backend keyed by `(node_id, source_timestamp, modification_time)` with an `update_type` column (Spec: Part 11 §6.5)
-- [ ] T015 [US1] On sqlite Replace and Update-overwrite, append the superseded value to `modified_historical_data` with `update_type` and modification time/user (Spec: Part 11 §6.5)
-- [ ] T016 [US1] Ensure sqlite `update_data` bounds work to the input vector and never panics on empty values / duplicate timestamps within a batch (Spec: FR-013; Constitution IV)
-- [ ] T017 [P] [US1] [Claude] sqlite test: Insert into empty → `Good_EntryInserted`; Insert over existing → `Bad_EntryExists`; read-back confirms unchanged (Spec: Part 11 §6.8.2)
-- [ ] T018 [P] [US1] [Claude] sqlite test: Replace present → `Good_EntryReplaced`; Replace absent → `Bad_NoEntryExists` (Spec: Part 11 §6.8.2)
-- [ ] T019 [P] [US1] [Claude] sqlite test: Update new vs overwrite → `Good_EntryInserted` / `Good_EntryReplaced` (Spec: Part 11 §6.8.2)
-- [ ] T020 [P] [US1] [Claude] sqlite test: Remove present → `Good`; Remove absent → `Bad_NoEntryExists`; read-back confirms deletion (Spec: Part 11 §6.8.2)
-- [ ] T021 [P] [US1] [Claude] sqlite test: empty value array and duplicate-timestamp batch handled without panic (Spec: FR-013)
+- [X] T010 [US1] Add the `Remove` arm to sqlite `update_data` (`async-opcua-history-sqlite/src/backend.rs`): delete the raw row at the timestamp; `Good` if present, `Bad_NoEntryExists` if absent (Spec: Part 11 §6.8.2 Remove; Part 4 §11.7.2)
+- [X] T011 [US1] Verify/fix sqlite `update_data` Insert: `Good_EntryInserted` when absent, `Bad_EntryExists` when present (Spec: Part 11 §6.8.2; Part 4 §11.7.2)
+- [X] T012 [US1] Verify/fix sqlite `update_data` Replace: `Good_EntryReplaced` when present, `Bad_NoEntryExists` when absent (Spec: Part 11 §6.8.2; Part 4 §11.7.2)
+- [X] T013 [US1] Verify/fix sqlite `update_data` Update: insert-or-replace → `Good_EntryInserted` (new) or `Good_EntryReplaced` (overwrite) (Spec: Part 11 §6.8.2; Part 4 §11.7.2)
+- [X] T014 [US1] Create the `modified_historical_data` table (migration/DDL) in the sqlite backend keyed by `(node_id, source_timestamp, modification_time)` with an `update_type` column (Spec: Part 11 §6.5)
+- [X] T015 [US1] On sqlite Replace and Update-overwrite, append the superseded value to `modified_historical_data` with `update_type` and modification time/user (Spec: Part 11 §6.5)
+- [X] T016 [US1] Ensure sqlite `update_data` bounds work to the input vector and never panics on empty values / duplicate timestamps within a batch (Spec: FR-013; Constitution IV)
+- [X] T017 [P] [US1] [Claude] sqlite test: Insert into empty → `Good_EntryInserted`; Insert over existing → `Bad_EntryExists`; read-back confirms unchanged (Spec: Part 11 §6.8.2)
+- [X] T018 [P] [US1] [Claude] sqlite test: Replace present → `Good_EntryReplaced`; Replace absent → `Bad_NoEntryExists` (Spec: Part 11 §6.8.2)
+- [X] T019 [P] [US1] [Claude] sqlite test: Update new vs overwrite → `Good_EntryInserted` / `Good_EntryReplaced` (Spec: Part 11 §6.8.2)
+- [X] T020 [P] [US1] [Claude] sqlite test: Remove present → `Good`; Remove absent → `Bad_NoEntryExists`; read-back confirms deletion (Spec: Part 11 §6.8.2)
+- [X] T021 [P] [US1] [Claude] sqlite test: empty value array and duplicate-timestamp batch handled without panic (Spec: FR-013)
 
 **Checkpoint**: sqlite UpdateData complete and tested for all four modes.
 

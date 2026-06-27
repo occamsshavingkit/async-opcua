@@ -12,15 +12,15 @@ Claude authors the `[Claude]` test tasks and runs the full suite (codex sandbox 
 
 ## Phase 1: Setup
 
-- [ ] T001 Inventory the reuse surface: `update_value` in `async-opcua-server/src/alarms/limit.rs`, `ConditionRegistry` in `alarms/registry.rs`, `dispatch_alarm_event`/`ServerAlarmEvent` in `alarms/dispatch.rs`, `RequestContext::subscriptions()` in `node_manager/context.rs`, and the Value-write path in `node_manager/memory/simple.rs` (Spec: Part 9 §5.8.2; Part 4 §11.x Write)
-- [ ] T002 [P] Confirm `cargo test -p async-opcua-server` and the `async-opcua` alarms integration suite are green at baseline (Spec: SC-004)
+- [X] T001 Inventory the reuse surface: `update_value` in `async-opcua-server/src/alarms/limit.rs`, `ConditionRegistry` in `alarms/registry.rs`, `dispatch_alarm_event`/`ServerAlarmEvent` in `alarms/dispatch.rs`, `RequestContext::subscriptions()` in `node_manager/context.rs`, and the Value-write path in `node_manager/memory/simple.rs` (Spec: Part 9 §5.8.2; Part 4 §11.x Write)
+- [X] T002 [P] Confirm `cargo test -p async-opcua-server` and the `async-opcua` alarms integration suite are green at baseline (Spec: SC-004)
 
 ## Phase 2: Foundational (BLOCKING — all stories depend on this)
 
-- [ ] T003 Define the `SourceMonitoredAlarm` trait (`source_node()`, `re_evaluate(&AddressSpace mut, &DataValue) -> Option<AlarmEvent>`) in a NEW `async-opcua-server/src/alarms/source_monitor.rs`; register the module in `alarms/mod.rs` (Spec: Part 9 §5.8.2 AlarmConditionType.InputNode)
-- [ ] T004 Implement `AlarmSourceRegistry` (`RwLock<HashMap<NodeId source, Vec<Arc<dyn SourceMonitoredAlarm>>>>` with `register`/`unregister`/`alarms_for`) in `alarms/source_monitor.rs`; multiple alarms per source (Spec: Part 9 §4.4 ConditionSource / HasCondition)
-- [ ] T005 Hold an `AlarmSourceRegistry` on the `InMemoryNodeManager` (`node_manager/memory/mod.rs`) + an accessor reachable from the write path; default-empty (Spec: Part 9 §4.4)
-- [ ] T006 [P] [Claude] Unit test the registry index: register, `alarms_for` returns all bound alarms, multiple-per-source, unknown source → empty (Spec: Part 9 §4.4)
+- [X] T003 Define the `SourceMonitoredAlarm` trait (`source_node()`, `re_evaluate(&AddressSpace mut, &DataValue) -> Option<AlarmEvent>`) in a NEW `async-opcua-server/src/alarms/source_monitor.rs`; register the module in `alarms/mod.rs` (Spec: Part 9 §5.8.2 AlarmConditionType.InputNode)
+- [X] T004 Implement `AlarmSourceRegistry` (`RwLock<HashMap<NodeId source, Vec<Arc<dyn SourceMonitoredAlarm>>>>` with `register`/`unregister`/`alarms_for`) in `alarms/source_monitor.rs`; multiple alarms per source (Spec: Part 9 §4.4 ConditionSource / HasCondition)
+- [X] T005 Hold an `AlarmSourceRegistry` on the `InMemoryNodeManager` (`node_manager/memory/mod.rs`) + an accessor reachable from the write path; default-empty (Spec: Part 9 §4.4)
+- [X] T006 [P] [Claude] Unit test the registry index: register, `alarms_for` returns all bound alarms, multiple-per-source, unknown source → empty (Spec: Part 9 §4.4)
 
 **Checkpoint**: trait + registry exist; nothing is wired into the write path yet.
 
@@ -32,20 +32,20 @@ Claude authors the `[Claude]` test tasks and runs the full suite (codex sandbox 
 no manual `update_value`. **Independent test**: bind an ExclusiveLimitAlarm, write above High, assert
 Active(High) + event with no manual call.
 
-- [ ] T007 [US1] Implement `SourceMonitoredAlarm` for `ExclusiveLimitAlarmType` in `alarms/limit.rs`: `source_node()` returns the bound InputNode (the InputNode property is on AlarmConditionType); `re_evaluate` extracts the value and delegates to the existing `update_value` (no new evaluation logic) (Spec: Part 9 §5.8.18 ExclusiveLimitAlarmType; §5.8.2 AlarmConditionType.InputNode)
-- [ ] T008 [US1] Add a value-extraction helper (`DataValue` → `f64`) used by `re_evaluate`: null / non-numeric / Bad-status → `None` (skip), never panic (Spec: Part 9 §5.8.2; Constitution IV)
-- [ ] T009 [US1] In `InMemoryNodeManager::write` (`node_manager/memory/simple.rs`), DURING the read-locked per-node loop, collect `(source NodeId, written DataValue)` for each node that wrote `Good` AND has a non-empty `alarms_for(node)` — zero cost when no written node is an alarm source (Spec: Part 4 §11.x Write; Part 9 §4.4)
-- [ ] T010 [US1] AFTER the write loop, drop the read lock and (if any sources were collected) acquire a WRITE lock; for each `(source, value)` and each bound alarm call `re_evaluate(&mut space, &value)` and dispatch each `Some(AlarmEvent)` via `context.subscriptions().notify_events` using `ServerAlarmEvent` (reuse `dispatch.rs`) (Spec: Part 9 §5.8 event reporting; Part 4 §5.12 Notification)
-- [ ] T011 [US1] Isolate alarm re-evaluation from the Write result: the Write status is fully set before the post-loop re-eval; log+swallow any eval/dispatch error; the Write service result MUST be unchanged (Spec: Part 4 §11.x Write; Constitution IV)
-- [ ] T011a [US1] Add `InMemoryNodeManager::set_source_value(source: &NodeId, value: DataValue)` — write the Value AND run the same re-evaluate-and-dispatch path (the only programmatic entry point that drives alarms; FR-011) (Spec: Part 9 §5.8 / §4.4; FR-011)
-- [ ] T012 [US1] Confirm the Enabled gate: a disabled alarm's `re_evaluate` returns `None` (via `update_value`'s existing enabled check), so no auto-fire (Spec: Part 9 §5.5.2 EnabledState)
-- [ ] T013 [P] [US1] [Claude] Integration test (`async-opcua/tests/integration/alarms.rs`): bind alarm, write above High → Active(High) + AlarmEvent auto-dispatched, no `update_value` call (Spec: Part 9 §5.8.2)
-- [ ] T014 [P] [US1] [Claude] Integration test: from Active, write back within limits (honoring deadband) → Inactive + clearing event (Spec: Part 9 §5.8.2 / §5.5.3)
-- [ ] T015 [P] [US1] [Claude] Integration test: two alarms bound to one source both re-evaluate on a single write (Spec: Part 9 §4.4)
-- [ ] T016 [P] [US1] [Claude] Integration test: writing a source with no bound alarm is a no-op (no error, no event) (Spec: Part 9 §4.4)
-- [ ] T017 [P] [US1] [Claude] Integration test: a disabled alarm does not fire when its source changes (Spec: Part 9 §5.5.2)
-- [ ] T018 [P] [US1] [Claude] Test: non-numeric / null / Bad-status write to a source → no panic, the write still succeeds, no event emitted (Spec: Part 4 §11.x; Constitution IV)
-- [ ] T018a [P] [US1] [Claude] Integration test: a programmatic `set_source_value` above a limit auto-activates the alarm + emits the event (FR-011 path) (Spec: Part 9 §5.8 / §4.4)
+- [X] T007 [US1] Implement `SourceMonitoredAlarm` for `ExclusiveLimitAlarmType` in `alarms/limit.rs`: `source_node()` returns the bound InputNode (the InputNode property is on AlarmConditionType); `re_evaluate` extracts the value and delegates to the existing `update_value` (no new evaluation logic) (Spec: Part 9 §5.8.18 ExclusiveLimitAlarmType; §5.8.2 AlarmConditionType.InputNode)
+- [X] T008 [US1] Add a value-extraction helper (`DataValue` → `f64`) used by `re_evaluate`: null / non-numeric / Bad-status → `None` (skip), never panic (Spec: Part 9 §5.8.2; Constitution IV)
+- [X] T009 [US1] In `InMemoryNodeManager::write` (`node_manager/memory/simple.rs`), DURING the read-locked per-node loop, collect `(source NodeId, written DataValue)` for each node that wrote `Good` AND has a non-empty `alarms_for(node)` — zero cost when no written node is an alarm source (Spec: Part 4 §11.x Write; Part 9 §4.4)
+- [X] T010 [US1] AFTER the write loop, drop the read lock and (if any sources were collected) acquire a WRITE lock; for each `(source, value)` and each bound alarm call `re_evaluate(&mut space, &value)` and dispatch each `Some(AlarmEvent)` via `context.subscriptions().notify_events` using `ServerAlarmEvent` (reuse `dispatch.rs`) (Spec: Part 9 §5.8 event reporting; Part 4 §5.12 Notification)
+- [X] T011 [US1] Isolate alarm re-evaluation from the Write result: the Write status is fully set before the post-loop re-eval; log+swallow any eval/dispatch error; the Write service result MUST be unchanged (Spec: Part 4 §11.x Write; Constitution IV)
+- [X] T011a [US1] Add `InMemoryNodeManager::set_source_value(source: &NodeId, value: DataValue)` — write the Value AND run the same re-evaluate-and-dispatch path (the only programmatic entry point that drives alarms; FR-011) (Spec: Part 9 §5.8 / §4.4; FR-011)
+- [X] T012 [US1] Confirm the Enabled gate: a disabled alarm's `re_evaluate` returns `None` (via `update_value`'s existing enabled check), so no auto-fire (Spec: Part 9 §5.5.2 EnabledState)
+- [X] T013 [P] [US1] [Claude] Integration test (`async-opcua/tests/integration/alarms.rs`): bind alarm, write above High → Active(High) + AlarmEvent auto-dispatched, no `update_value` call (Spec: Part 9 §5.8.2)
+- [X] T014 [P] [US1] [Claude] Integration test: from Active, write back within limits (honoring deadband) → Inactive + clearing event (Spec: Part 9 §5.8.2 / §5.5.3)
+- [X] T015 [P] [US1] [Claude] Integration test: two alarms bound to one source both re-evaluate on a single write (Spec: Part 9 §4.4)
+- [X] T016 [P] [US1] [Claude] Integration test: writing a source with no bound alarm is a no-op (no error, no event) (Spec: Part 9 §4.4)
+- [X] T017 [P] [US1] [Claude] Integration test: a disabled alarm does not fire when its source changes (Spec: Part 9 §5.5.2)
+- [X] T018 [P] [US1] [Claude] Test: non-numeric / null / Bad-status write to a source → no panic, the write still succeeds, no event emitted (Spec: Part 4 §11.x; Constitution IV)
+- [X] T018a [P] [US1] [Claude] Integration test: a programmatic `set_source_value` above a limit auto-activates the alarm + emits the event (FR-011 path) (Spec: Part 9 §5.8 / §4.4)
 
 **Checkpoint**: the closed loop works for ExclusiveLimitAlarmType end-to-end.
 

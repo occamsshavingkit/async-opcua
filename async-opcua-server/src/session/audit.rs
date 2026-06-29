@@ -501,13 +501,55 @@ pub(crate) fn dispatch_certificate_audit(
     session_id: Option<NodeId>,
     status: StatusCode,
 ) {
+    dispatch_certificate_audit_with_action(
+        subscriptions,
+        info,
+        request_header,
+        certificate,
+        session_id,
+        status,
+        "Validate ClientCertificate",
+    );
+}
+
+/// Emits the matching AuditCertificateEventType subtype for an X.509 user identity certificate.
+///
+/// A no-op for status codes that are not certificate-validation failures.
+pub(crate) fn dispatch_user_certificate_audit(
+    subscriptions: &Arc<SubscriptionCache>,
+    info: &ServerInfo,
+    request_header: &RequestHeader,
+    certificate: ByteString,
+    session_id: Option<NodeId>,
+    status: StatusCode,
+) {
+    dispatch_certificate_audit_with_action(
+        subscriptions,
+        info,
+        request_header,
+        certificate,
+        session_id,
+        status,
+        "Validate UserIdentityCertificate",
+    );
+}
+
+fn dispatch_certificate_audit_with_action(
+    subscriptions: &Arc<SubscriptionCache>,
+    info: &ServerInfo,
+    request_header: &RequestHeader,
+    certificate: ByteString,
+    session_id: Option<NodeId>,
+    status: StatusCode,
+    action: &'static str,
+) {
     let Some(event_type) = certificate_event_type(status) else {
         return;
     };
     let event = ServerAuditEvent::outcome(
         event_type,
         info.application_uri.clone(),
-        "Validate ClientCertificate",
+        action,
         request_header.audit_entry_id.clone(),
         UAString::null(),
         status,
@@ -809,6 +851,18 @@ mod tests {
                 StatusCode::BadCertificateInvalid,
                 ObjectTypeId::AuditCertificateInvalidEventType,
             ),
+            (
+                StatusCode::BadCertificateUseNotAllowed,
+                ObjectTypeId::AuditCertificateInvalidEventType,
+            ),
+            (
+                StatusCode::BadCertificateChainIncomplete,
+                ObjectTypeId::AuditCertificateUntrustedEventType,
+            ),
+            (
+                StatusCode::BadCertificatePolicyCheckFailed,
+                ObjectTypeId::AuditCertificateInvalidEventType,
+            ),
         ];
         for (status, expected) in cases {
             assert_eq!(certificate_event_type(status), Some(expected), "{status}");
@@ -942,6 +996,14 @@ mod tests {
         assert_eq!(
             event.get_value(AttributeId::Value, &NumericRange::None, &field("Status")),
             Variant::Boolean(false)
+        );
+        assert_eq!(
+            event.get_value(
+                AttributeId::Value,
+                &NumericRange::None,
+                &field("StatusCodeId")
+            ),
+            Variant::from(StatusCode::BadCertificateUntrusted)
         );
     }
 }

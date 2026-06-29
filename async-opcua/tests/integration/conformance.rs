@@ -108,6 +108,25 @@ fn tokens(include_x509: bool) -> Vec<(&'static str, IdentityToken)> {
     v
 }
 
+#[tokio::test]
+async fn trusted_x509_user_token_activates() {
+    let mut tester = Tester::new(crate::utils::test_server(), false).await;
+    let (session, handle) = tester
+        .connect(
+            SecurityPolicy::None,
+            MessageSecurityMode::None,
+            client_x509_token().expect("x509 token"),
+        )
+        .await
+        .expect("trusted configured X.509 user token should connect");
+    let _h = handle.spawn();
+    timeout(Duration::from_secs(20), session.wait_for_connection())
+        .await
+        .expect("trusted X.509 user token should activate before timeout");
+    exercise_core_services(&session).await;
+    let _ = session.disconnect().await;
+}
+
 /// Run + exercise every valid (policy, mode) × token cell against `tester`, then disconnect.
 async fn run_matrix(
     tester: &mut Tester,

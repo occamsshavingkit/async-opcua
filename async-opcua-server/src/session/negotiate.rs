@@ -26,10 +26,35 @@ pub(crate) struct EccSecretContext {
 
 /// Delays failed identity-token validation without blocking Tokio workers.
 pub(crate) async fn tarpit_identity_token_validation_failure(error: Error) -> Error {
+    let status = error.status();
     tokio::time::sleep(IDENTITY_TOKEN_VALIDATION_TARPIT).await;
+    if preserves_identity_token_failure_status(status) {
+        return error;
+    }
     Error::new(
         StatusCode::BadUserAccessDenied,
         format!("Identity token validation failed: {error}"),
+    )
+}
+
+fn preserves_identity_token_failure_status(status: StatusCode) -> bool {
+    matches!(
+        status,
+        StatusCode::BadUserSignatureInvalid
+            | StatusCode::BadCertificateInvalid
+            | StatusCode::BadCertificateTimeInvalid
+            | StatusCode::BadCertificateIssuerTimeInvalid
+            | StatusCode::BadCertificateHostNameInvalid
+            | StatusCode::BadCertificateUriInvalid
+            | StatusCode::BadCertificateUseNotAllowed
+            | StatusCode::BadCertificateIssuerUseNotAllowed
+            | StatusCode::BadCertificateUntrusted
+            | StatusCode::BadCertificateRevocationUnknown
+            | StatusCode::BadCertificateIssuerRevocationUnknown
+            | StatusCode::BadCertificateRevoked
+            | StatusCode::BadCertificateIssuerRevoked
+            | StatusCode::BadCertificateChainIncomplete
+            | StatusCode::BadCertificatePolicyCheckFailed
     )
 }
 

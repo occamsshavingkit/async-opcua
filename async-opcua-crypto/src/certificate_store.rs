@@ -22,7 +22,7 @@ use x509_cert::{
 
 use crate::{
     validate_certificate_chain, CertificatePurpose, ChainValidationContext, PrivateKey,
-    SuppressibleStep, ValidationOptions,
+    SuppressedFinding, SuppressibleStep, ValidationOptions,
 };
 
 use super::{
@@ -248,6 +248,25 @@ impl CertificateStore {
         self.validate_application_instance_cert(cert, security_policy, hostname, application_uri)
     }
 
+    /// Validates an X.509 user identity certificate before thumbprint-based user mapping.
+    ///
+    /// User identity certificates use the same trust-chain, validity, revocation, security-policy,
+    /// and usage pipeline as incoming application certificates, but a configured user thumbprint is
+    /// not a trust anchor. Suppressed non-critical findings are returned to the caller so they can
+    /// be audited as required by OPC UA Part 4.
+    pub fn validate_user_identity_cert(
+        &self,
+        cert: &X509,
+        security_policy: SecurityPolicy,
+    ) -> Result<Vec<SuppressedFinding>, Error> {
+        self.validate_incoming_cert(
+            cert,
+            security_policy,
+            CertificatePurpose::ClientApplication,
+            false,
+        )
+    }
+
     /// Ensures that the cert provided is the same as the one specified by a path. This is a
     /// security check to stop someone from renaming a cert on disk to match another cert and
     /// somehow bypassing or subverting a check. The disk cert must exactly match the memory cert
@@ -308,6 +327,49 @@ impl CertificateStore {
         hostname: Option<&str>,
         application_uri: Option<&str>,
     ) -> Result<(), Error> {
+        // Server application certificates carry host names; client validation does not.
+        let purpose = if hostname.is_some() {
+            CertificatePurpose::ServerApplication
+        } else {
+            CertificatePurpose::ClientApplication
+        };
+        let cert_file_name = CertificateStore::cert_file_name(cert);
+        let findings = self.validate_incoming_cert(cert, security_policy, purpose, true)?;
+        for finding in findings {
+            warn!(
+                "Certificate {cert_file_name}: suppressed certificate-validation finding [{:?}] {} - {}",
+                finding.step, finding.status, finding.message
+            );
+        }
+
+        if self.skip_verify_certs {
+            debug!(
+                "Skipping additional verifications for certificate {}",
+                cert_file_name
+            );
+            return Ok(());
+        }
+
+        // Compare the hostname of the cert against the cert supplied
+        if let Some(hostname) = hostname {
+            cert.is_hostname_valid(hostname)?;
+        }
+
+        // Compare the application / product uri to the supplied application description
+        if let Some(application_uri) = application_uri {
+            cert.is_application_uri_valid(application_uri)?;
+        }
+
+        Ok(())
+    }
+
+    fn validate_incoming_cert(
+        &self,
+        cert: &X509,
+        security_policy: SecurityPolicy,
+        purpose: CertificatePurpose,
+        allow_trust_unknown_certs: bool,
+    ) -> Result<Vec<SuppressedFinding>, Error> {
         let cert_file_name = CertificateStore::cert_file_name(cert);
         debug!("Validating cert with name on disk {}", cert_file_name);
 
@@ -381,18 +443,11 @@ impl CertificateStore {
             options.suppressed_steps.insert(SuppressibleStep::Validity);
         }
 
-        // Server application certificates carry host names; client validation does not.
-        let purpose = if hostname.is_some() {
-            CertificatePurpose::ServerApplication
-        } else {
-            CertificatePurpose::ClientApplication
-        };
-
         let mut trusted = self.read_trusted_certs();
         // Honor trust_unknown_certs: auto-trust an unknown presented certificate by persisting it and
         // making it its own trust anchor. The chain engine still verifies its signature (a self-signed
         // cert self-verifies; a non-self-signed anchor is trusted as presented) and its validity period.
-        if self.trust_unknown_certs {
+        if allow_trust_unknown_certs && self.trust_unknown_certs {
             let already_trusted = trusted.iter().any(|t| t.thumbprint() == cert.thumbprint());
             if !already_trusted {
                 warn!(
@@ -424,34 +479,9 @@ impl CertificateStore {
                 return Err(e);
             }
             Ok(findings) => {
-                for finding in findings {
-                    warn!(
-                        "Certificate {cert_file_name}: suppressed certificate-validation finding [{:?}] {} - {}",
-                        finding.step, finding.status, finding.message
-                    );
-                }
+                return Ok(findings);
             }
         }
-
-        if self.skip_verify_certs {
-            debug!(
-                "Skipping additional verifications for certificate {}",
-                cert_file_name
-            );
-            return Ok(());
-        }
-
-        // Compare the hostname of the cert against the cert supplied
-        if let Some(hostname) = hostname {
-            cert.is_hostname_valid(hostname)?;
-        }
-
-        // Compare the application / product uri to the supplied application description
-        if let Some(application_uri) = application_uri {
-            cert.is_application_uri_valid(application_uri)?;
-        }
-
-        Ok(())
     }
 
     /// Returns a certificate file name from the cert's issuer and thumbprint fields.

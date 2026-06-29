@@ -1376,6 +1376,28 @@ fn store_lenient_default_accepts_ca_signed_leaf_without_crl() {
         .expect("the default lenient policy accepts a CA-signed leaf with no CRL present");
 }
 
+#[test]
+fn store_user_identity_validation_returns_suppressed_findings() {
+    // User identity validation must surface suppressed findings to the caller so ActivateSession
+    // can audit them; application-instance validation only logs these findings.
+    let root = root_ca();
+    let expired_leaf = leaf_signed_by_root(502, t(2021, 1, 1));
+    let (_tmp, mut store) = store_with(&[&root], &[]);
+    store.set_check_time(false);
+
+    let findings = store
+        .validate_user_identity_cert(&expired_leaf, SecurityPolicy::Basic256Sha256)
+        .expect("suppressing validity lets the user identity certificate pass");
+
+    assert!(
+        findings
+            .iter()
+            .any(|finding| finding.step == SuppressibleStep::Validity
+                && finding.status == StatusCode::BadCertificateTimeInvalid),
+        "suppressed user identity certificate validation findings must be returned: {findings:?}"
+    );
+}
+
 // --- OCSP revocation (supplied/stapled responses) -----------------------------------------------
 
 /// Build a DER OCSPResponse signed by `issuer_key`, asserting `revoked`/good for `serial`. Mirrors

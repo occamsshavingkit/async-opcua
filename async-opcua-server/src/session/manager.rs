@@ -718,7 +718,7 @@ pub(crate) async fn activate_session(
     #[cfg(not(feature = "ecc"))]
     let ecc_ctx = crate::session::negotiate::EccSecretContext::default();
 
-    let (user_token, claims) = info
+    let authentication = match info
         .authenticate_endpoint_with_ecc_ctx(
             request,
             &endpoint_url,
@@ -728,7 +728,47 @@ pub(crate) async fn activate_session(
             &session_nonce,
             ecc_ctx,
         )
-        .await?;
+        .await
+    {
+        Ok(authentication) => authentication,
+        Err(error) => {
+            if let Some(certificate) = x509_user_certificate_from_request(request) {
+                let session_id = {
+                    let session = trace_read_lock!(session_lck);
+                    Some(session.session_id().clone())
+                };
+                audit::dispatch_user_certificate_audit(
+                    handler.subscriptions(),
+                    &info,
+                    &request.request_header,
+                    certificate,
+                    session_id,
+                    error.status(),
+                );
+            }
+            return Err(error.status());
+        }
+    };
+    if let Some(validation) = authentication.x509_user_certificate_validation.as_ref() {
+        if !validation.suppressed_findings.is_empty() {
+            let session_id = {
+                let session = trace_read_lock!(session_lck);
+                Some(session.session_id().clone())
+            };
+            for finding in &validation.suppressed_findings {
+                audit::dispatch_user_certificate_audit(
+                    handler.subscriptions(),
+                    &info,
+                    &request.request_header,
+                    validation.certificate.clone(),
+                    session_id.clone(),
+                    finding.status,
+                );
+            }
+        }
+    }
+    let user_token = authentication.user_token;
+    let claims = authentication.claims;
 
     #[cfg(feature = "ecc")]
     let ecc_secret_consumed = matches!(
@@ -879,6 +919,13 @@ pub(crate) async fn activate_session(
         response.response_header.additional_header = header;
     }
     Ok(response)
+}
+
+fn x509_user_certificate_from_request(request: &ActivateSessionRequest) -> Option<ByteString> {
+    match IdentityToken::new(request.user_identity_token.clone()) {
+        IdentityToken::X509(token) => Some(token.certificate_data),
+        _ => None,
+    }
 }
 
 #[cfg(test)]

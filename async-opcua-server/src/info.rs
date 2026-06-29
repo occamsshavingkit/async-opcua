@@ -26,7 +26,8 @@ use opcua_core::handle::AtomicHandle;
 use opcua_core::sync::RwLock;
 use opcua_crypto::identity::{LocalOAuth2Validator, OAuth2IdentityValidator};
 use opcua_crypto::{
-    verify_x509_identity_token, CertificateStore, PrivateKey, SecurityPolicy, X509,
+    verify_x509_identity_token, CertificateStore, PrivateKey, SecurityPolicy, SuppressedFinding,
+    X509,
 };
 #[cfg(feature = "discovery-mdns")]
 use opcua_types::MdnsDiscoveryConfiguration;
@@ -124,6 +125,8 @@ pub struct ServerInfo {
     pub server_certificate: RwLock<Option<X509>>,
     /// Server private key
     pub server_pkey: RwLock<Option<PrivateKey>>,
+    /// Certificate store used to validate incoming application and user identity certificates.
+    pub(crate) certificate_store: Arc<RwLock<CertificateStore>>,
     /// Operational limits
     pub(crate) operational_limits: OperationalLimits,
     /// Current state
@@ -173,6 +176,35 @@ pub struct ServerInfo {
     pub diagnostics: ServerDiagnostics,
     /// Performance metrics for this server instance.
     pub metrics: Arc<crate::metrics::ServerMetrics>,
+}
+
+pub(crate) struct X509UserCertificateValidation {
+    pub certificate: ByteString,
+    pub suppressed_findings: Vec<SuppressedFinding>,
+}
+
+pub(crate) struct EndpointAuthentication {
+    pub user_token: UserToken,
+    pub claims: Option<opcua_crypto::identity::ClaimProfile>,
+    pub x509_user_certificate_validation: Option<X509UserCertificateValidation>,
+}
+
+impl EndpointAuthentication {
+    fn new(user_token: UserToken, claims: Option<opcua_crypto::identity::ClaimProfile>) -> Self {
+        Self {
+            user_token,
+            claims,
+            x509_user_certificate_validation: None,
+        }
+    }
+
+    fn x509(user_token: UserToken, validation: X509UserCertificateValidation) -> Self {
+        Self {
+            user_token,
+            claims: None,
+            x509_user_certificate_validation: Some(validation),
+        }
+    }
 }
 
 impl ServerInfo {
@@ -784,16 +816,18 @@ impl ServerInfo {
         user_identity_token: ExtensionObject,
         server_nonce: &ByteString,
     ) -> Result<(UserToken, Option<opcua_crypto::identity::ClaimProfile>), Error> {
-        self.authenticate_endpoint_with_ecc_ctx(
-            request,
-            endpoint_url,
-            security_policy,
-            security_mode,
-            user_identity_token,
-            server_nonce,
-            EccSecretContext::default(),
-        )
-        .await
+        let authentication = self
+            .authenticate_endpoint_with_ecc_ctx(
+                request,
+                endpoint_url,
+                security_policy,
+                security_mode,
+                user_identity_token,
+                server_nonce,
+                EccSecretContext::default(),
+            )
+            .await?;
+        Ok((authentication.user_token, authentication.claims))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -806,7 +840,7 @@ impl ServerInfo {
         user_identity_token: ExtensionObject,
         server_nonce: &ByteString,
         ecc_ctx: EccSecretContext,
-    ) -> Result<(UserToken, Option<opcua_crypto::identity::ClaimProfile>), Error> {
+    ) -> Result<EndpointAuthentication, Error> {
         // Get security from endpoint url
         let result = if let Some(endpoint) = self.config.find_endpoint(
             endpoint_url,
@@ -826,7 +860,7 @@ impl ServerInfo {
                 IdentityToken::Anonymous(token) => self
                     .authenticate_anonymous_token(endpoint, &token)
                     .await
-                    .map(|token| (token, None)),
+                    .map(|token| EndpointAuthentication::new(token, None)),
                 IdentityToken::UserName(token) => {
                     let server_key = self.server_pkey.read().clone();
                     self.authenticate_username_identity_token(
@@ -838,7 +872,7 @@ impl ServerInfo {
                         &ecc_ctx,
                     )
                     .await
-                    .map(|token| (token, None))
+                    .map(|token| EndpointAuthentication::new(token, None))
                 }
                 IdentityToken::X509(token) => {
                     // Clone out of the lock; the guard must not be held
@@ -852,7 +886,7 @@ impl ServerInfo {
                         server_nonce,
                     )
                     .await
-                    .map(|token| (token, None))
+                    .map(|(token, validation)| EndpointAuthentication::x509(token, validation))
                 }
                 IdentityToken::IssuedToken(token) => {
                     let server_key = self.server_pkey.read().clone();
@@ -865,6 +899,7 @@ impl ServerInfo {
                         &ecc_ctx,
                     )
                     .await
+                    .map(|(token, claims)| EndpointAuthentication::new(token, claims))
                 }
                 IdentityToken::Invalid(o) => Err(Error::new(
                     StatusCode::BadIdentityTokenInvalid,
@@ -988,7 +1023,7 @@ impl ServerInfo {
         user_token_signature: &SignatureData,
         server_certificate: &Option<X509>,
         server_nonce: &ByteString,
-    ) -> Result<UserToken, Error> {
+    ) -> Result<(UserToken, X509UserCertificateValidation), Error> {
         if !self.authenticator.supports_x509(endpoint) {
             error!("Endpoint doesn't support x509 tokens");
             Err(Error::new(
@@ -1002,7 +1037,8 @@ impl ServerInfo {
                 "Token doesn't possess the correct policy id",
             ))
         } else {
-            match server_certificate {
+            let signing_cert = X509::from_byte_string(&token.certificate_data)?;
+            let suppressed_findings = match server_certificate {
                 Some(ref server_certificate) => {
                     // Find the security policy used for verifying tokens
                     let user_identity_tokens = self.authenticator.user_token_policies(endpoint);
@@ -1019,14 +1055,22 @@ impl ServerInfo {
                             "Bad security policy",
                         )),
                         security_policy => {
-                            // Verify token
+                            let suppressed_findings = {
+                                let certificate_store = self.certificate_store.read();
+                                certificate_store
+                                    .validate_user_identity_cert(&signing_cert, security_policy)?
+                            };
+
+                            // Verify token proof-of-possession after the certificate itself is
+                            // trusted and valid for user authentication.
                             verify_x509_identity_token(
                                 token,
                                 user_token_signature,
                                 security_policy,
                                 server_certificate,
                                 server_nonce.as_ref(),
-                            )
+                            )?;
+                            Ok(suppressed_findings)
                         }
                     }
                 }
@@ -1037,12 +1081,20 @@ impl ServerInfo {
             }?;
 
             // Check the endpoint to see if this token is supported
-            let signing_cert = X509::from_byte_string(&token.certificate_data)?;
             let signing_thumbprint = signing_cert.thumbprint();
 
-            self.authenticator
+            let user_token = self
+                .authenticator
                 .authenticate_x509_identity_token(endpoint, &signing_thumbprint)
-                .await
+                .await?;
+
+            Ok((
+                user_token,
+                X509UserCertificateValidation {
+                    certificate: token.certificate_data.clone(),
+                    suppressed_findings,
+                },
+            ))
         }
     }
 

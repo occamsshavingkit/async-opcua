@@ -476,11 +476,9 @@ impl CertificateStore {
         match validate_certificate_chain(cert, &context) {
             Err(e) => {
                 let _ = self.store_rejected_cert(cert);
-                return Err(e);
+                Err(e)
             }
-            Ok(findings) => {
-                return Ok(findings);
-            }
+            Ok(findings) => Ok(findings),
         }
     }
 

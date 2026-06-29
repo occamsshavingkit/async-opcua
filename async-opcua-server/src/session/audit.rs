@@ -17,6 +17,7 @@ use crate::{
 const AUDIT_FAILURE_SEVERITY: u16 = 900;
 const AUDIT_SUCCESS_SEVERITY: u16 = 100;
 const AUDIT_SOURCE_NAME: &str = "Server";
+const AUDIT_CERTIFICATE_SOURCE_NAME: &str = "Security/Certificate";
 
 #[derive(Clone)]
 pub(crate) struct AuditEventContext {
@@ -278,6 +279,14 @@ impl ServerAuditEvent {
     /// Records the subject certificate for an AuditCertificateEventType (exposed as `Certificate`).
     fn with_certificate(mut self, certificate: ByteString) -> Self {
         self.client_certificate = Some(certificate);
+        self
+    }
+
+    /// AuditCertificateEventType requires this source name (OPC UA Part 5 §6.4.12).
+    fn with_certificate_source_name(mut self) -> Self {
+        self.base = self
+            .base
+            .set_source_name(UAString::from(AUDIT_CERTIFICATE_SOURCE_NAME));
         self
     }
 
@@ -555,7 +564,8 @@ fn dispatch_certificate_audit_with_action(
         status,
         session_id,
     )
-    .with_certificate(certificate);
+    .with_certificate(certificate)
+    .with_certificate_source_name();
     dispatch_audit_event(subscriptions, &event);
 }
 
@@ -976,7 +986,8 @@ mod tests {
             StatusCode::BadCertificateUntrusted,
             None,
         )
-        .with_certificate(cert.clone());
+        .with_certificate(cert.clone())
+        .with_certificate_source_name();
 
         assert_eq!(
             event.get_value(AttributeId::Value, &NumericRange::None, &field("EventType")),
@@ -992,6 +1003,14 @@ mod tests {
                 &field("Certificate")
             ),
             Variant::from(cert)
+        );
+        assert_eq!(
+            event.get_value(
+                AttributeId::Value,
+                &NumericRange::None,
+                &field("SourceName")
+            ),
+            Variant::from(UAString::from(AUDIT_CERTIFICATE_SOURCE_NAME))
         );
         assert_eq!(
             event.get_value(AttributeId::Value, &NumericRange::None, &field("Status")),

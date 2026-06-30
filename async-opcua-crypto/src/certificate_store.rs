@@ -45,6 +45,36 @@ const ISSUER_CRLS_DIR: &str = "issuer_crls";
 /// The directory holding rejected certificates
 const REJECTED_CERTS_DIR: &str = "rejected";
 
+#[derive(Clone, Copy)]
+enum IncomingCertificateKind {
+    ApplicationInstance,
+    UserIdentity,
+}
+
+impl IncomingCertificateKind {
+    fn trust_list_status(self) -> StatusCode {
+        StatusCode::BadCertificateUntrusted
+    }
+
+    fn rejected_store_status(self) -> StatusCode {
+        self.trust_list_status()
+    }
+
+    fn invalid_structure_status(self) -> StatusCode {
+        match self {
+            IncomingCertificateKind::ApplicationInstance => StatusCode::BadSecurityChecksFailed,
+            IncomingCertificateKind::UserIdentity => StatusCode::BadCertificateInvalid,
+        }
+    }
+
+    fn policy_check_status(self) -> StatusCode {
+        match self {
+            IncomingCertificateKind::ApplicationInstance => StatusCode::BadSecurityChecksFailed,
+            IncomingCertificateKind::UserIdentity => StatusCode::BadCertificatePolicyCheckFailed,
+        }
+    }
+}
+
 /// The certificate store manages the storage of a server/client's own certificate & private key
 /// and the trust / rejection of certificates from the other end.
 pub struct CertificateStore {
@@ -264,6 +294,7 @@ impl CertificateStore {
             security_policy,
             CertificatePurpose::ClientApplication,
             false,
+            IncomingCertificateKind::UserIdentity,
         )
     }
 
@@ -334,7 +365,13 @@ impl CertificateStore {
             CertificatePurpose::ClientApplication
         };
         let cert_file_name = CertificateStore::cert_file_name(cert);
-        let findings = self.validate_incoming_cert(cert, security_policy, purpose, true)?;
+        let findings = self.validate_incoming_cert(
+            cert,
+            security_policy,
+            purpose,
+            true,
+            IncomingCertificateKind::ApplicationInstance,
+        )?;
         for finding in findings {
             warn!(
                 "Certificate {cert_file_name}: suppressed certificate-validation finding [{:?}] {} - {}",
@@ -369,6 +406,7 @@ impl CertificateStore {
         security_policy: SecurityPolicy,
         purpose: CertificatePurpose,
         allow_trust_unknown_certs: bool,
+        kind: IncomingCertificateKind,
     ) -> Result<Vec<SuppressedFinding>, Error> {
         let cert_file_name = CertificateStore::cert_file_name(cert);
         debug!("Validating cert with name on disk {}", cert_file_name);
@@ -400,7 +438,7 @@ impl CertificateStore {
                     cert_file_name
                 );
                 return Err(Error::new(
-                    StatusCode::BadSecurityChecksFailed,
+                    kind.rejected_store_status(),
                     format!(
                         "Certificate {} is untrusted because it resides in the rejected directory",
                         cert_file_name
@@ -417,7 +455,7 @@ impl CertificateStore {
             Err(_) => {
                 error!("Cannot read key length from certificate {}", cert_file_name);
                 return Err(Error::new(
-                    StatusCode::BadSecurityChecksFailed,
+                    kind.invalid_structure_status(),
                     format!("Cannot read key length from certificate {}", cert_file_name),
                 ));
             }
@@ -428,7 +466,7 @@ impl CertificateStore {
                         cert_file_name, key_length, security_policy
                     );
                     return Err(Error::new(
-                        StatusCode::BadSecurityChecksFailed,
+                        kind.policy_check_status(),
                         format!(
                             "Certificate {} has an invalid key length {} for the policy {}",
                             cert_file_name, key_length, security_policy
@@ -443,7 +481,9 @@ impl CertificateStore {
             options.suppressed_steps.insert(SuppressibleStep::Validity);
         }
 
-        let mut trusted = self.read_trusted_certs();
+        self.ensure_trusted_certs_dir_available(cert, &cert_file_name, kind)?;
+
+        let mut trusted = self.read_trusted_certs_for_validation(cert, &cert_file_name, kind)?;
         // Honor trust_unknown_certs: auto-trust an unknown presented certificate by persisting it and
         // making it its own trust anchor. The chain engine still verifies its signature (a self-signed
         // cert self-verifies; a non-self-signed anchor is trusted as presented) and its validity period.
@@ -480,6 +520,64 @@ impl CertificateStore {
             }
             Ok(findings) => Ok(findings),
         }
+    }
+
+    fn ensure_trusted_certs_dir_available(
+        &self,
+        cert: &X509,
+        cert_file_name: &str,
+        kind: IncomingCertificateKind,
+    ) -> Result<(), Error> {
+        let trusted_dir = self.trusted_certs_dir();
+        if let Err(err) = read_dir(&trusted_dir) {
+            let thumbprint = cert.thumbprint().as_hex_string();
+            error!(
+                "Certificate {} cannot be trusted because trusted certificate directory {} is unavailable: {}",
+                cert_file_name,
+                trusted_dir.display(),
+                err
+            );
+            return Err(Error::new(
+                kind.trust_list_status(),
+                format!(
+                    "Certificate {} ({}) cannot be trusted because trusted certificate directory {} is unavailable: {}",
+                    cert_file_name,
+                    thumbprint,
+                    trusted_dir.display(),
+                    err
+                ),
+            ));
+        }
+
+        Ok(())
+    }
+
+    fn read_trusted_certs_for_validation(
+        &self,
+        cert: &X509,
+        cert_file_name: &str,
+        kind: IncomingCertificateKind,
+    ) -> Result<Vec<X509>, Error> {
+        let trusted_dir = self.trusted_certs_dir();
+        CertificateStore::read_cert_dir_strict(&trusted_dir).map_err(|err| {
+            let thumbprint = cert.thumbprint().as_hex_string();
+            error!(
+                "Certificate {} cannot be trusted because trusted certificate storage {} is invalid: {}",
+                cert_file_name,
+                trusted_dir.display(),
+                err
+            );
+            Error::new(
+                kind.trust_list_status(),
+                format!(
+                    "Certificate {} ({}) cannot be trusted because trusted certificate storage {} is invalid: {}",
+                    cert_file_name,
+                    thumbprint,
+                    trusted_dir.display(),
+                    err
+                ),
+            )
+        })
     }
 
     /// Returns a certificate file name from the cert's issuer and thumbprint fields.
@@ -735,6 +833,38 @@ impl CertificateStore {
             }
         }
         certs
+    }
+
+    fn read_cert_dir_strict(path: &Path) -> Result<Vec<X509>, String> {
+        let entries = read_dir(path).map_err(|err| {
+            format!(
+                "Cannot read certificate directory {}: {}",
+                path.display(),
+                err
+            )
+        })?;
+
+        let mut certs = Vec::new();
+        for entry in entries {
+            let entry = entry.map_err(|err| {
+                format!(
+                    "Cannot read certificate directory entry from {}: {}",
+                    path.display(),
+                    err
+                )
+            })?;
+            let cert_path = entry.path();
+            if !CertificateStore::is_der_or_pem_file(&cert_path) {
+                continue;
+            }
+
+            let cert = CertificateStore::read_cert(&cert_path).map_err(|err| {
+                format!("Cannot read certificate {}: {}", cert_path.display(), err)
+            })?;
+            certs.push(cert);
+        }
+
+        Ok(certs)
     }
 
     fn read_crl_dir(path: &Path) -> Vec<CertificateList> {

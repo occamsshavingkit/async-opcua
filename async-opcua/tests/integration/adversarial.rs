@@ -8,7 +8,7 @@
 
 use std::{fs, net::SocketAddr, path::PathBuf, time::Duration};
 
-use opcua::client::{IdentityToken, Session};
+use opcua::client::{ClientBuilder, IdentityToken, Session};
 use opcua::crypto::{AlternateNames, CertificateStore, SecurityPolicy, X509Data, X509};
 use opcua::server::ServerUserToken;
 use opcua::types::{
@@ -293,7 +293,7 @@ async fn subscribe_to_certificate_audits(
         .create_subscription(Duration::from_millis(100), 100, 20, 1000, 0, true, notifs)
         .await
         .expect("audit subscription should be created");
-    let select = ["EventType", "Certificate", "Status"]
+    let select = ["EventType", "SourceName", "Certificate", "Status"]
         .into_iter()
         .map(|field| SimpleAttributeOperand {
             type_definition_id: NodeId::new(0, 2041),
@@ -344,12 +344,59 @@ async fn expect_certificate_audit(
         else {
             break;
         };
-        if fields.len() >= 3 && fields[0] == expected_type && fields[1] == expected_cert {
-            assert_eq!(fields[2], Variant::Boolean(false));
+        if fields.len() >= 4 && fields[0] == expected_type && fields[2] == expected_cert {
+            assert_eq!(fields[3], Variant::Boolean(false));
             return;
         }
     }
     panic!("expected certificate audit event {event_type:?} was not delivered");
+}
+
+async fn expect_certificate_audit_source_name(
+    events: &mut UnboundedReceiver<(ReadValueId, Option<Vec<Variant>>)>,
+    event_type: ObjectTypeId,
+    certificate: ByteString,
+    source_name: &str,
+) {
+    let expected_type = Variant::from(NodeId::from(event_type));
+    let expected_source_name = Variant::from(source_name);
+    let expected_cert = Variant::from(certificate);
+    for _ in 0..16 {
+        let Ok(Some((_item, Some(fields)))) =
+            tokio::time::timeout(Duration::from_secs(3), events.recv()).await
+        else {
+            break;
+        };
+        if fields.len() >= 4 && fields[0] == expected_type && fields[2] == expected_cert {
+            assert_eq!(fields[1], expected_source_name);
+            assert_eq!(fields[3], Variant::Boolean(false));
+            return;
+        }
+    }
+    panic!("expected certificate audit event {event_type:?} was not delivered");
+}
+
+async fn expect_successful_certificate_audit(
+    events: &mut UnboundedReceiver<(ReadValueId, Option<Vec<Variant>>)>,
+    event_type: ObjectTypeId,
+    certificate: ByteString,
+) {
+    let expected_type = Variant::from(NodeId::from(event_type));
+    let expected_source_name = Variant::from("Security/Certificate");
+    let expected_cert = Variant::from(certificate);
+    for _ in 0..16 {
+        let Ok(Some((_item, Some(fields)))) =
+            tokio::time::timeout(Duration::from_secs(3), events.recv()).await
+        else {
+            break;
+        };
+        if fields.len() >= 4 && fields[0] == expected_type && fields[2] == expected_cert {
+            assert_eq!(fields[1], expected_source_name);
+            assert_eq!(fields[3], Variant::Boolean(true));
+            return;
+        }
+    }
+    panic!("expected successful certificate audit event {event_type:?} was not delivered");
 }
 
 async fn x509_connect_status(
@@ -404,6 +451,30 @@ fn zero_day_x509_user(tmp: &tempfile::TempDir) -> (IdentityToken, PathBuf, ByteS
         cert_path,
         certificate,
     )
+}
+
+fn zero_day_application_client_certificate(
+    tmp: &tempfile::TempDir,
+    application_uri: &str,
+) -> ByteString {
+    let mut alt_host_names = AlternateNames::new();
+    alt_host_names.add_uri(application_uri);
+    let data = X509Data {
+        key_size: 2048,
+        common_name: "zero-day-application-client".to_string(),
+        organization: "async-opcua tests".to_string(),
+        organizational_unit: "security".to_string(),
+        country: "US".to_string(),
+        state: "test".to_string(),
+        alt_host_names,
+        certificate_duration_days: 0,
+    };
+    let cert_path = tmp.path().join("own/cert.der");
+    let private_key_path = tmp.path().join("private/private.pem");
+    let (cert, _private_key) =
+        CertificateStore::create_certificate_and_key(&data, true, &cert_path, &private_key_path)
+            .expect("zero-day application client certificate should be written");
+    cert.as_byte_string()
 }
 
 /// A4 (multi-AI cross-check): an invalid X509 user-token signature in ActivateSession must be
@@ -467,6 +538,86 @@ async fn tampered_x509_user_token_signature_is_rejected() {
 }
 
 #[tokio::test]
+async fn open_secure_channel_invalid_certificate_audit_uses_certificate_source_name() {
+    let mut tester = Tester::new(test_server().trust_client_certs(false), true).await;
+    let (audit_session, audit_event_loop) = tester.connect_default().await.unwrap();
+    audit_event_loop.spawn();
+    tokio::time::timeout(Duration::from_secs(10), audit_session.wait_for_connection())
+        .await
+        .expect("audit observer session should activate");
+    let mut events = subscribe_to_certificate_audits(&audit_session).await;
+
+    let invalid_client_pki =
+        tempfile::tempdir().expect("invalid OpenSecureChannel client PKI tempdir");
+    let _seed_client = ClientBuilder::new()
+        .application_name("invalid OpenSecureChannel certificate audit client")
+        .application_uri("urn:invalid-open-secure-channel-certificate-audit-client")
+        .product_uri("urn:invalid-open-secure-channel-certificate-audit-client")
+        .pki_dir(invalid_client_pki.path())
+        .create_sample_keypair(true)
+        .trust_server_certs(true)
+        .session_retry_limit(0)
+        .session_retry_initial(Duration::from_millis(20))
+        .client()
+        .expect("seed invalid OpenSecureChannel client should build");
+    drop(_seed_client);
+
+    let cert_path = invalid_client_pki.path().join("own/cert.der");
+    let mut invalid_cert_der =
+        fs::read(&cert_path).expect("generated application certificate should be readable");
+    let last_signature_byte = invalid_cert_der
+        .last_mut()
+        .expect("generated application certificate DER should not be empty");
+    *last_signature_byte ^= 0x01;
+    fs::write(&cert_path, &invalid_cert_der)
+        .expect("invalid application certificate should be written");
+    let presented_certificate = ByteString::from(invalid_cert_der);
+
+    let endpoints = tester
+        .client
+        .get_server_endpoints_from_url(tester.endpoint().as_str())
+        .await
+        .unwrap();
+    let endpoint = endpoints
+        .into_iter()
+        .find(|endpoint| {
+            endpoint.security_policy_uri.as_ref() == SecurityPolicy::Basic256Sha256.to_uri()
+                && endpoint.security_mode == MessageSecurityMode::SignAndEncrypt
+        })
+        .expect("secured endpoint should be advertised");
+    let mut invalid_client = ClientBuilder::new()
+        .application_name("invalid OpenSecureChannel certificate audit client")
+        .application_uri("urn:invalid-open-secure-channel-certificate-audit-client")
+        .product_uri("urn:invalid-open-secure-channel-certificate-audit-client")
+        .pki_dir(invalid_client_pki.path())
+        .certificate_path("own/cert.der")
+        .private_key_path("private/private.pem")
+        .create_sample_keypair(false)
+        .trust_server_certs(true)
+        .session_retry_limit(0)
+        .session_retry_initial(Duration::from_millis(20))
+        .client()
+        .expect("invalid OpenSecureChannel client should build");
+
+    let (_failed_session, event_loop) = invalid_client
+        .connect_to_endpoint_directly(endpoint, IdentityToken::Anonymous)
+        .expect("invalid OpenSecureChannel session event loop should be created");
+    let status = tokio::time::timeout(Duration::from_secs(10), event_loop.run())
+        .await
+        .expect("OpenSecureChannel invalid-certificate rejection should complete");
+    assert_eq!(status, opcua::types::StatusCode::BadSecurityChecksFailed);
+    audit_session.trigger_publish_now();
+
+    expect_certificate_audit_source_name(
+        &mut events,
+        ObjectTypeId::AuditCertificateInvalidEventType,
+        presented_certificate,
+        "Security/Certificate",
+    )
+    .await;
+}
+
+#[tokio::test]
 async fn hard_x509_user_certificate_validation_failure_emits_audit_certificate_event() {
     let (mut tester, _nm, session) = setup().await;
     let mut events = subscribe_to_certificate_audits(&session).await;
@@ -524,6 +675,69 @@ async fn suppressed_x509_user_certificate_validation_finding_emits_audit_certifi
         certificate,
     )
     .await;
+}
+
+#[tokio::test]
+async fn create_session_with_suppressed_client_certificate_finding_emits_success_audit_event() {
+    let client_pki =
+        tempfile::tempdir().expect("suppressed application certificate client PKI tempdir");
+    let application_uri = "urn:suppressed-client-certificate-audit-client";
+    let presented_certificate =
+        zero_day_application_client_certificate(&client_pki, application_uri);
+
+    let mut tester = Tester::new(test_server().check_cert_time(false), true).await;
+    let (audit_session, audit_event_loop) = tester.connect_default().await.unwrap();
+    audit_event_loop.spawn();
+    tokio::time::timeout(Duration::from_secs(10), audit_session.wait_for_connection())
+        .await
+        .expect("audit observer session should activate");
+    let mut events = subscribe_to_certificate_audits(&audit_session).await;
+
+    tokio::time::sleep(Duration::from_millis(1100)).await;
+    let endpoints = tester
+        .client
+        .get_server_endpoints_from_url(tester.endpoint().as_str())
+        .await
+        .unwrap();
+    let endpoint = endpoints
+        .into_iter()
+        .find(|endpoint| {
+            endpoint.security_policy_uri.as_ref() == SecurityPolicy::Basic256Sha256.to_uri()
+                && endpoint.security_mode == MessageSecurityMode::SignAndEncrypt
+        })
+        .expect("secured endpoint should be advertised");
+
+    let mut expired_client = ClientBuilder::new()
+        .application_name("suppressed client certificate audit client")
+        .application_uri(application_uri)
+        .product_uri("urn:suppressed-client-certificate-audit-client")
+        .pki_dir(client_pki.path())
+        .certificate_path("own/cert.der")
+        .private_key_path("private/private.pem")
+        .create_sample_keypair(false)
+        .trust_server_certs(true)
+        .session_retry_limit(0)
+        .session_retry_initial(Duration::from_millis(20))
+        .client()
+        .expect("expired application certificate client should build");
+
+    let (session, event_loop) = expired_client
+        .connect_to_endpoint_directly(endpoint, IdentityToken::Anonymous)
+        .expect("expired application certificate session event loop should be created");
+    let handle = event_loop.spawn();
+    tokio::time::timeout(Duration::from_secs(10), session.wait_for_connection())
+        .await
+        .expect("suppressed application certificate client should activate");
+    read_service_level(&session).await.unwrap();
+    audit_session.trigger_publish_now();
+
+    expect_successful_certificate_audit(
+        &mut events,
+        ObjectTypeId::AuditCertificateExpiredEventType,
+        presented_certificate,
+    )
+    .await;
+    handle.abort();
 }
 
 /// B3 proxy: forward everything, but the first time we see an *intermediate* chunk (chunk-type byte

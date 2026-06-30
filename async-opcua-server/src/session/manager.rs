@@ -1135,9 +1135,9 @@ fn x509_user_certificate_from_request(request: &ActivateSessionRequest) -> Optio
 mod tests {
     use std::{
         fs,
-        path::{Path, PathBuf},
+        path::Path,
         sync::{
-            atomic::{AtomicBool, AtomicUsize, Ordering},
+            atomic::{AtomicBool, Ordering},
             Arc,
         },
     };
@@ -1169,33 +1169,23 @@ mod tests {
         is_cross_channel_transfer_forbidden,
     };
 
-    static NEXT_TEST_ID: AtomicUsize = AtomicUsize::new(0);
     const X509_STATE_CLEANUP_USER_TOKEN: &str = "x509-state-cleanup-user";
 
     struct TempPath {
-        path: PathBuf,
+        dir: tempfile::TempDir,
     }
 
     impl TempPath {
         fn new(name: &str) -> Self {
-            let id = NEXT_TEST_ID.fetch_add(1, Ordering::Relaxed);
-            let path = std::env::temp_dir().join(format!(
-                "async-opcua-manager-{name}-{}-{id}",
-                std::process::id()
-            ));
-            let _ = fs::remove_dir_all(&path);
-            fs::create_dir_all(&path).expect("test temp directory should be created");
-            Self { path }
+            let dir = tempfile::Builder::new()
+                .prefix(&format!("async-opcua-manager-{name}-"))
+                .tempdir()
+                .expect("test temp directory should be created");
+            Self { dir }
         }
 
         fn path(&self) -> &Path {
-            &self.path
-        }
-    }
-
-    impl Drop for TempPath {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.path);
+            self.dir.path()
         }
     }
 

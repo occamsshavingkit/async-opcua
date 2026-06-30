@@ -702,7 +702,6 @@ impl MonitoringMode {
     const DISABLED_REPR: i32 = 0i32;
     const SAMPLING_REPR: i32 = 1i32;
     const REPORTING_REPR: i32 = 2i32;
-
     fn from_raw(value: i32) -> Self {
         match value {
             Self::DISABLED_REPR => Self::Disabled,
@@ -711,7 +710,6 @@ impl MonitoringMode {
             invalid => Self::Invalid(invalid),
         }
     }
-
     pub fn into_repr(self) -> i32 {
         match self {
             Self::Disabled => Self::DISABLED_REPR,
@@ -733,22 +731,18 @@ impl opcua::types::IntoVariant for MonitoringMode {
 }
 impl TryFrom<i32> for MonitoringMode {
     type Error = opcua::types::Error;
-
     fn try_from(value: i32) -> Result<Self, opcua::types::Error> {
         Ok(Self::from_raw(value))
     }
 }
 impl opcua::types::UaEnum for MonitoringMode {
     type Repr = i32;
-
     fn from_repr(repr: Self::Repr) -> Result<Self, opcua::types::Error> {
         Ok(Self::from_raw(repr))
     }
-
     fn into_repr(self) -> Self::Repr {
         self.into_repr()
     }
-
     fn as_str(&self) -> &'static str {
         match self {
             Self::Disabled => "Disabled_0",
@@ -757,7 +751,6 @@ impl opcua::types::UaEnum for MonitoringMode {
             Self::Invalid(_) => "Invalid",
         }
     }
-
     fn from_str(val: &str) -> Result<Self, opcua::types::Error> {
         Ok(match val {
             "Disabled_0" => Self::Disabled,
@@ -787,7 +780,6 @@ impl opcua::types::BinaryEncodable for MonitoringMode {
     fn byte_len(&self, ctx: &opcua::types::Context<'_>) -> usize {
         opcua::types::BinaryEncodable::byte_len(&self.into_repr(), ctx)
     }
-
     fn encode<S: std::io::Write + ?Sized>(
         &self,
         stream: &mut S,
@@ -857,19 +849,16 @@ impl opcua::types::xml::XmlDecodable for MonitoringMode {
 mod monitoring_mode_tests {
     use super::MonitoringMode;
     use crate::{BinaryDecodable, ContextOwned};
-
     #[test]
     fn monitoring_mode_raw_decode_preserves_invalid_value_for_service_status() {
         let invalid_monitoring_mode = 3i32;
         let bytes = invalid_monitoring_mode.to_le_bytes();
         let mut stream = bytes.as_slice();
         let ctx = ContextOwned::default();
-
         let decoded = MonitoringMode::decode(&mut stream, &ctx.context()).expect(
             "OPC-10000-4 5.13.4.3 Table 70 requires service code to see invalid \
-             MonitoringMode values so it can return Bad_MonitoringModeInvalid",
+                             MonitoringMode values so it can return Bad_MonitoringModeInvalid",
         );
-
         assert_eq!(decoded.into_repr(), invalid_monitoring_mode);
     }
 }

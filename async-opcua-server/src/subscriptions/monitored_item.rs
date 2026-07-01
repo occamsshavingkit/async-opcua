@@ -14,10 +14,10 @@ use crate::{
 };
 use opcua_types::{
     match_extension_object_owned, AggregateConfiguration, AggregateFilter, AggregateFilterResult,
-    DataChangeFilter, DataValue, DateTime, EventFieldList, EventFilter, ExtensionObject,
-    MonitoredItemCreateRequest, MonitoredItemModifyRequest, MonitoredItemNotification,
-    MonitoringMode, NodeId, NumericRange, ObjectTypeId, ParsedDataChangeFilter, StatusCode,
-    TimestampsToReturn, Variant,
+    DataChangeFilter, DataValue, DateTime, DiagnosticBits, DiagnosticInfo, EventFieldList,
+    EventFilter, ExtensionObject, MonitoredItemCreateRequest, MonitoredItemModifyRequest,
+    MonitoredItemNotification, MonitoringMode, NodeId, NumericRange, ObjectTypeId,
+    ParsedDataChangeFilter, StatusCode, TimestampsToReturn, Variant,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -162,6 +162,8 @@ pub struct CreateMonitoredItem {
     sampling_interval: f64,
     initial_value: Option<DataValue>,
     status_code: StatusCode,
+    diagnostic_bits: DiagnosticBits,
+    diagnostic_info: Option<DiagnosticInfo>,
     filter: FilterType,
     filter_res: Option<ExtensionObject>,
     timestamps_to_return: TimestampsToReturn,
@@ -210,12 +212,14 @@ fn sanitize_queue_size(info: &ServerInfo, requested_queue_size: usize) -> usize 
 }
 
 impl CreateMonitoredItem {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         req: MonitoredItemCreateRequest,
         id: u32,
         sub_id: u32,
         info: &ServerInfo,
         timestamps_to_return: TimestampsToReturn,
+        diagnostic_bits: DiagnosticBits,
         type_tree: &dyn TypeTree,
         eu_range: Option<(f64, f64)>,
     ) -> Self {
@@ -249,6 +253,8 @@ impl CreateMonitoredItem {
             sampling_interval,
             initial_value: None,
             status_code: status,
+            diagnostic_bits,
+            diagnostic_info: None,
             filter,
             timestamps_to_return,
             filter_res,
@@ -277,6 +283,22 @@ impl CreateMonitoredItem {
     /// `Good` status code.
     pub fn set_status(&mut self, status: StatusCode) {
         self.status_code = status;
+    }
+
+    /// Header diagnostic bits for requesting operation-level diagnostics.
+    pub fn diagnostic_bits(&self) -> DiagnosticBits {
+        self.diagnostic_bits
+    }
+
+    /// Set diagnostic infos, you don't need to do this if
+    /// `diagnostic_bits` are not set.
+    pub fn set_diagnostic_info(&mut self, diagnostic_info: DiagnosticInfo) {
+        self.diagnostic_info = Some(diagnostic_info);
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn take_diagnostic_info(&mut self) -> Option<DiagnosticInfo> {
+        self.diagnostic_info.take()
     }
 
     /// Attribute to monitor.

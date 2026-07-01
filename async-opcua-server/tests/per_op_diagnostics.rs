@@ -20,8 +20,13 @@ use opcua_core::ResponseMessage;
 use opcua_crypto::SecurityPolicy;
 use opcua_server::{ServerBuilder, ServerEndpoint, ServerHandle, ANONYMOUS_USER_TOKEN_ID};
 use opcua_types::{
-    BrowseDescription, BrowseDirection, BrowseNextRequest, BrowseRequest, BrowseResultMask,
-    DiagnosticBits, MessageSecurityMode, NodeId, ObjectId, RequestHeader, ViewDescription,
+    AttributeId, BrowseDescription, BrowseDirection, BrowseNextRequest, BrowseRequest,
+    BrowseResultMask, CreateMonitoredItemsRequest, CreateSubscriptionRequest,
+    DeleteMonitoredItemsRequest, DiagnosticBits, ExtensionObject, MessageSecurityMode,
+    ModifyMonitoredItemsRequest, MonitoredItemCreateRequest, MonitoredItemModifyRequest,
+    MonitoringMode, MonitoringParameters, NodeId, ObjectId, ReadValueId, RequestHeader,
+    SetMonitoringModeRequest, SetTriggeringRequest, TimestampsToReturn, VariableId,
+    ViewDescription,
 };
 use tokio::net::TcpListener;
 
@@ -296,4 +301,293 @@ async fn browse_next_returns_aligned_diagnostic_infos_only_when_requested() {
         response.diagnostic_infos.is_none(),
         "per-op diagnosticInfos must be absent when not requested"
     );
+}
+
+// ---------------------------------------------------------------------------
+// US2: MonitoredItems service group
+// ---------------------------------------------------------------------------
+
+async fn create_subscription(server: &TestServer) -> u32 {
+    let request = CreateSubscriptionRequest {
+        request_header: server.request_header(DiagnosticBits::empty()),
+        requested_publishing_interval: 100.0,
+        requested_lifetime_count: 100,
+        requested_max_keep_alive_count: 30,
+        max_notifications_per_publish: 0,
+        publishing_enabled: true,
+        priority: 0,
+    };
+    let ResponseMessage::CreateSubscription(response) = server.send(request).await else {
+        panic!("CreateSubscription should return CreateSubscriptionResponse");
+    };
+    response.subscription_id
+}
+
+fn item_to_create(node_id: NodeId, client_handle: u32) -> MonitoredItemCreateRequest {
+    MonitoredItemCreateRequest {
+        item_to_monitor: ReadValueId::new(node_id, AttributeId::Value),
+        monitoring_mode: MonitoringMode::Reporting,
+        requested_parameters: MonitoringParameters {
+            client_handle,
+            sampling_interval: 100.0,
+            filter: ExtensionObject::null(),
+            queue_size: 1,
+            discard_oldest: true,
+        },
+    }
+}
+
+/// Create two valid monitored items on the subscription and return their server ids.
+async fn create_two_items(server: &TestServer, subscription_id: u32) -> Vec<u32> {
+    let request = CreateMonitoredItemsRequest {
+        request_header: server.request_header(DiagnosticBits::empty()),
+        subscription_id,
+        timestamps_to_return: TimestampsToReturn::Both,
+        items_to_create: Some(vec![
+            item_to_create(VariableId::Server_ServerStatus_CurrentTime.into(), 1),
+            item_to_create(VariableId::Server_ServerStatus_State.into(), 2),
+        ]),
+    };
+    let ResponseMessage::CreateMonitoredItems(response) = server.send(request).await else {
+        panic!("CreateMonitoredItems should return CreateMonitoredItemsResponse");
+    };
+    let results = response.results.expect("create results");
+    results
+        .iter()
+        .map(|r| {
+            assert!(r.status_code.is_good(), "setup item should be created");
+            r.monitored_item_id
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn create_monitored_items_returns_aligned_diagnostic_infos_only_when_requested() {
+    let server = TestServer::start("create-monitored-items-per-op-diagnostics").await;
+    let subscription_id = create_subscription(&server).await;
+
+    // Mixed outcomes: one valid node, one unknown node.
+    let items = || {
+        Some(vec![
+            item_to_create(VariableId::Server_ServerStatus_CurrentTime.into(), 1),
+            item_to_create(NodeId::new(1, "per-op-diagnostics-unknown-node"), 2),
+        ])
+    };
+
+    // 1) REQUESTED -> aligned array present.
+    let request = CreateMonitoredItemsRequest {
+        request_header: server.request_header(OP_BITS),
+        subscription_id,
+        timestamps_to_return: TimestampsToReturn::Both,
+        items_to_create: items(),
+    };
+    let ResponseMessage::CreateMonitoredItems(response) = server.send(request).await else {
+        panic!("CreateMonitoredItems should return CreateMonitoredItemsResponse");
+    };
+    let results = response.results.as_ref().expect("results");
+    assert_eq!(results.len(), 2);
+    let diags = response
+        .diagnostic_infos
+        .as_ref()
+        .expect("per-op diagnosticInfos must be present when requested");
+    assert_eq!(diags.len(), results.len());
+
+    // 2) NOT REQUESTED -> no array.
+    let request = CreateMonitoredItemsRequest {
+        request_header: server.request_header(DiagnosticBits::empty()),
+        subscription_id,
+        timestamps_to_return: TimestampsToReturn::Both,
+        items_to_create: items(),
+    };
+    let ResponseMessage::CreateMonitoredItems(response) = server.send(request).await else {
+        panic!("CreateMonitoredItems should return CreateMonitoredItemsResponse");
+    };
+    assert_eq!(response.results.as_ref().map(Vec::len), Some(2));
+    assert!(response.diagnostic_infos.is_none());
+}
+
+#[tokio::test]
+async fn modify_monitored_items_returns_aligned_diagnostic_infos_only_when_requested() {
+    let server = TestServer::start("modify-monitored-items-per-op-diagnostics").await;
+    let subscription_id = create_subscription(&server).await;
+    let item_ids = create_two_items(&server, subscription_id).await;
+
+    // Mixed outcomes: one valid item, one unknown item id.
+    let items = |ids: &[u32]| {
+        Some(vec![
+            MonitoredItemModifyRequest {
+                monitored_item_id: ids[0],
+                requested_parameters: MonitoringParameters {
+                    client_handle: 1,
+                    sampling_interval: 200.0,
+                    filter: ExtensionObject::null(),
+                    queue_size: 1,
+                    discard_oldest: true,
+                },
+            },
+            MonitoredItemModifyRequest {
+                monitored_item_id: u32::MAX,
+                requested_parameters: MonitoringParameters {
+                    client_handle: 2,
+                    sampling_interval: 200.0,
+                    filter: ExtensionObject::null(),
+                    queue_size: 1,
+                    discard_oldest: true,
+                },
+            },
+        ])
+    };
+
+    // 1) REQUESTED -> aligned array present.
+    let request = ModifyMonitoredItemsRequest {
+        request_header: server.request_header(OP_BITS),
+        subscription_id,
+        timestamps_to_return: TimestampsToReturn::Both,
+        items_to_modify: items(&item_ids),
+    };
+    let ResponseMessage::ModifyMonitoredItems(response) = server.send(request).await else {
+        panic!("ModifyMonitoredItems should return ModifyMonitoredItemsResponse");
+    };
+    let results = response.results.as_ref().expect("results");
+    assert_eq!(results.len(), 2);
+    let diags = response
+        .diagnostic_infos
+        .as_ref()
+        .expect("per-op diagnosticInfos must be present when requested");
+    assert_eq!(diags.len(), results.len());
+
+    // 2) NOT REQUESTED -> no array.
+    let request = ModifyMonitoredItemsRequest {
+        request_header: server.request_header(DiagnosticBits::empty()),
+        subscription_id,
+        timestamps_to_return: TimestampsToReturn::Both,
+        items_to_modify: items(&item_ids),
+    };
+    let ResponseMessage::ModifyMonitoredItems(response) = server.send(request).await else {
+        panic!("ModifyMonitoredItems should return ModifyMonitoredItemsResponse");
+    };
+    assert_eq!(response.results.as_ref().map(Vec::len), Some(2));
+    assert!(response.diagnostic_infos.is_none());
+}
+
+#[tokio::test]
+async fn set_monitoring_mode_returns_aligned_diagnostic_infos_only_when_requested() {
+    let server = TestServer::start("set-monitoring-mode-per-op-diagnostics").await;
+    let subscription_id = create_subscription(&server).await;
+    let item_ids = create_two_items(&server, subscription_id).await;
+
+    // 1) REQUESTED -> aligned array present. Mixed outcomes: valid + unknown id.
+    let request = SetMonitoringModeRequest {
+        request_header: server.request_header(OP_BITS),
+        subscription_id,
+        monitoring_mode: MonitoringMode::Sampling,
+        monitored_item_ids: Some(vec![item_ids[0], u32::MAX]),
+    };
+    let ResponseMessage::SetMonitoringMode(response) = server.send(request).await else {
+        panic!("SetMonitoringMode should return SetMonitoringModeResponse");
+    };
+    let results = response.results.as_ref().expect("results");
+    assert_eq!(results.len(), 2);
+    let diags = response
+        .diagnostic_infos
+        .as_ref()
+        .expect("per-op diagnosticInfos must be present when requested");
+    assert_eq!(diags.len(), results.len());
+
+    // 2) NOT REQUESTED -> no array.
+    let request = SetMonitoringModeRequest {
+        request_header: server.request_header(DiagnosticBits::empty()),
+        subscription_id,
+        monitoring_mode: MonitoringMode::Reporting,
+        monitored_item_ids: Some(vec![item_ids[0], u32::MAX]),
+    };
+    let ResponseMessage::SetMonitoringMode(response) = server.send(request).await else {
+        panic!("SetMonitoringMode should return SetMonitoringModeResponse");
+    };
+    assert_eq!(response.results.as_ref().map(Vec::len), Some(2));
+    assert!(response.diagnostic_infos.is_none());
+}
+
+#[tokio::test]
+async fn set_triggering_returns_aligned_diagnostic_infos_only_when_requested() {
+    let server = TestServer::start("set-triggering-per-op-diagnostics").await;
+    let subscription_id = create_subscription(&server).await;
+    let item_ids = create_two_items(&server, subscription_id).await;
+
+    // 1) REQUESTED -> BOTH arrays aligned to their respective request arrays.
+    // links_to_add has mixed outcomes (valid + unknown), links_to_remove one unknown.
+    let request = SetTriggeringRequest {
+        request_header: server.request_header(OP_BITS),
+        subscription_id,
+        triggering_item_id: item_ids[0],
+        links_to_add: Some(vec![item_ids[1], u32::MAX]),
+        links_to_remove: Some(vec![u32::MAX - 1]),
+    };
+    let ResponseMessage::SetTriggering(response) = server.send(request).await else {
+        panic!("SetTriggering should return SetTriggeringResponse");
+    };
+    let add_results = response.add_results.as_ref().expect("add results");
+    assert_eq!(add_results.len(), 2);
+    let add_diags = response
+        .add_diagnostic_infos
+        .as_ref()
+        .expect("add diagnosticInfos must be present when requested");
+    assert_eq!(add_diags.len(), add_results.len());
+    let remove_results = response.remove_results.as_ref().expect("remove results");
+    assert_eq!(remove_results.len(), 1);
+    let remove_diags = response
+        .remove_diagnostic_infos
+        .as_ref()
+        .expect("remove diagnosticInfos must be present when requested");
+    assert_eq!(remove_diags.len(), remove_results.len());
+
+    // 2) NOT REQUESTED -> neither array.
+    let request = SetTriggeringRequest {
+        request_header: server.request_header(DiagnosticBits::empty()),
+        subscription_id,
+        triggering_item_id: item_ids[0],
+        links_to_add: Some(vec![item_ids[1], u32::MAX]),
+        links_to_remove: Some(vec![u32::MAX - 1]),
+    };
+    let ResponseMessage::SetTriggering(response) = server.send(request).await else {
+        panic!("SetTriggering should return SetTriggeringResponse");
+    };
+    assert!(response.add_diagnostic_infos.is_none());
+    assert!(response.remove_diagnostic_infos.is_none());
+}
+
+#[tokio::test]
+async fn delete_monitored_items_returns_aligned_diagnostic_infos_only_when_requested() {
+    let server = TestServer::start("delete-monitored-items-per-op-diagnostics").await;
+    let subscription_id = create_subscription(&server).await;
+    let item_ids = create_two_items(&server, subscription_id).await;
+
+    // 1) REQUESTED -> aligned array present. Mixed outcomes: valid + unknown id.
+    let request = DeleteMonitoredItemsRequest {
+        request_header: server.request_header(OP_BITS),
+        subscription_id,
+        monitored_item_ids: Some(vec![item_ids[0], u32::MAX]),
+    };
+    let ResponseMessage::DeleteMonitoredItems(response) = server.send(request).await else {
+        panic!("DeleteMonitoredItems should return DeleteMonitoredItemsResponse");
+    };
+    let results = response.results.as_ref().expect("results");
+    assert_eq!(results.len(), 2);
+    let diags = response
+        .diagnostic_infos
+        .as_ref()
+        .expect("per-op diagnosticInfos must be present when requested");
+    assert_eq!(diags.len(), results.len());
+
+    // 2) NOT REQUESTED -> no array.
+    let request = DeleteMonitoredItemsRequest {
+        request_header: server.request_header(DiagnosticBits::empty()),
+        subscription_id,
+        monitored_item_ids: Some(vec![item_ids[1], u32::MAX]),
+    };
+    let ResponseMessage::DeleteMonitoredItems(response) = server.send(request).await else {
+        panic!("DeleteMonitoredItems should return DeleteMonitoredItemsResponse");
+    };
+    assert_eq!(response.results.as_ref().map(Vec::len), Some(2));
+    assert!(response.diagnostic_infos.is_none());
 }

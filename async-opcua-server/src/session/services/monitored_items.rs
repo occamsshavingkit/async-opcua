@@ -2,7 +2,8 @@ use std::{collections::HashMap, sync::Arc};
 
 use crate::{
     node_manager::{
-        DynNodeManager, MonitoredItemRef, MonitoredItemUpdateRef, NodeManagers, RequestContext,
+        consume_results, DynNodeManager, MonitoredItemRef, MonitoredItemUpdateRef, NodeManagers,
+        RequestContext,
     },
     session::{
         controller::Response,
@@ -17,9 +18,10 @@ use opcua_core::ResponseMessage;
 use opcua_types::{
     AttributeId, BrowsePath, CreateMonitoredItemsRequest, CreateMonitoredItemsResponse,
     DataChangeFilter, DeadbandType, DeleteMonitoredItemsRequest, DeleteMonitoredItemsResponse,
-    ModifyMonitoredItemsRequest, ModifyMonitoredItemsResponse, MonitoringMode, NodeId, Range,
-    ReadRequest, ReferenceTypeId, RelativePath, RelativePathElement, RequestHeader, ResponseHeader,
-    SetMonitoringModeRequest, SetMonitoringModeResponse, StatusCode, TimestampsToReturn,
+    DiagnosticInfo, ModifyMonitoredItemsRequest, ModifyMonitoredItemsResponse,
+    MonitoredItemModifyResult, MonitoringMode, NodeId, Range, ReadRequest, ReferenceTypeId,
+    RelativePath, RelativePathElement, RequestHeader, ResponseHeader, SetMonitoringModeRequest,
+    SetMonitoringModeResponse, StatusCode, TimestampsToReturn,
     TranslateBrowsePathsToNodeIdsRequest, Variant,
 };
 use tracing::debug_span;
@@ -199,6 +201,7 @@ pub(crate) async fn create_monitored_items(
     // custom per-user TypeTrees keep their existing behavior, and the default getter reads the
     // published snapshot instead of the global TypeTree lock. Keep this context scoped away from
     // node-manager and subscription awaits below.
+    let return_diagnostics = request.request.request_header.return_diagnostics;
     let mut items: Vec<_> = {
         let type_tree = context.get_type_tree_for_user();
         items_to_create
@@ -211,6 +214,7 @@ pub(crate) async fn create_monitored_items(
                     request.request.subscription_id,
                     &request.info,
                     request.request.timestamps_to_return,
+                    return_diagnostics,
                     type_tree.get(),
                     range,
                 )
@@ -303,12 +307,15 @@ pub(crate) async fn create_monitored_items(
             return service_fault!(request, e);
         }
     };
+    let diagnostic_infos = items.iter_mut().map(|i| i.take_diagnostic_info());
+    let pairs: Vec<_> = res.into_iter().zip(diagnostic_infos).collect();
+    let (results, diagnostic_infos) = consume_results(pairs, return_diagnostics);
 
     Response {
         message: CreateMonitoredItemsResponse {
             response_header: ResponseHeader::new_good(request.request_handle),
-            results: Some(res),
-            diagnostic_infos: None,
+            results,
+            diagnostic_infos,
         }
         .into(),
         request_id: request.request_id,
@@ -418,12 +425,18 @@ pub(crate) async fn modify_monitored_items(
         |node, node_manager| node.status_code().is_good() && node_manager.owns_node(node.node_id()),
     )
     .await;
+    let return_diagnostics = request.request.request_header.return_diagnostics;
+    let pairs: Vec<(MonitoredItemModifyResult, Option<DiagnosticInfo>)> = results
+        .into_iter()
+        .map(|r| (r.into_result(), None))
+        .collect();
+    let (results, diagnostic_infos) = consume_results(pairs, return_diagnostics);
 
     Response {
         message: ModifyMonitoredItemsResponse {
             response_header: ResponseHeader::new_good(request.request_handle),
-            results: Some(results.into_iter().map(|r| r.into_result()).collect()),
-            diagnostic_infos: None,
+            results,
+            diagnostic_infos,
         }
         .into(),
         request_id: request.request_id,
@@ -491,12 +504,16 @@ pub(crate) async fn set_monitoring_mode(
         |node, node_manager| node.0.is_good() && node_manager.owns_node(node.1.node_id()),
     )
     .await;
+    let return_diagnostics = request.request.request_header.return_diagnostics;
+    let pairs: Vec<(StatusCode, Option<DiagnosticInfo>)> =
+        results.into_iter().map(|r| (r.0, None)).collect();
+    let (results, diagnostic_infos) = consume_results(pairs, return_diagnostics);
 
     Response {
         message: SetMonitoringModeResponse {
             response_header: ResponseHeader::new_good(request.request_handle),
-            results: Some(results.into_iter().map(|r| r.0).collect()),
-            diagnostic_infos: None,
+            results,
+            diagnostic_infos,
         }
         .into(),
         request_id: request.request_id,
@@ -549,12 +566,16 @@ pub(crate) async fn delete_monitored_items(
         |node, node_manager| node.0.is_good() && node_manager.owns_node(node.1.node_id()),
     )
     .await;
+    let return_diagnostics = request.request.request_header.return_diagnostics;
+    let pairs: Vec<(StatusCode, Option<DiagnosticInfo>)> =
+        results.into_iter().map(|r| (r.0, None)).collect();
+    let (results, diagnostic_infos) = consume_results(pairs, return_diagnostics);
 
     Response {
         message: DeleteMonitoredItemsResponse {
             response_header: ResponseHeader::new_good(request.request_handle),
-            results: Some(results.into_iter().map(|r| r.0).collect()),
-            diagnostic_infos: None,
+            results,
+            diagnostic_infos,
         }
         .into(),
         request_id: request.request_id,

@@ -635,6 +635,13 @@ impl ServerBuilder {
         self
     }
 
+    /// Maximum number of servers held in the local discovery (`RegisterServer`) registry
+    /// before new distinct registrations are rejected.
+    pub fn max_registered_servers(mut self, max_registered_servers: usize) -> Self {
+        self.config.limits.max_registered_servers = max_registered_servers;
+        self
+    }
+
     /// Maximum time in milliseconds a session can be inactive before it is timed out and removed.
     /// The client can request a lower value than this.
     pub fn max_session_timeout_ms(mut self, max_session_timeout_ms: u64) -> Self {

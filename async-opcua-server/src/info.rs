@@ -53,8 +53,6 @@ use super::authenticator::{AuthManager, UserToken};
 use super::identity_token::{IdentityToken, POLICY_ID_ANONYMOUS, POLICY_ID_X509};
 use super::{OperationalLimits, ServerCapabilities, ANONYMOUS_USER_TOKEN_ID};
 
-const MAX_REGISTERED_SERVERS: usize = 1000;
-
 #[cfg(feature = "discovery-mdns")]
 fn registered_mdns_name(server: &RegisteredServer, config: &MdnsDiscoveryConfiguration) -> String {
     if !config.mdns_server_name.is_null() && !config.mdns_server_name.is_empty() {
@@ -426,7 +424,7 @@ impl ServerInfo {
         }
 
         if !registered_servers.contains_key(&server_uri)
-            && registered_servers.len() >= MAX_REGISTERED_SERVERS
+            && registered_servers.len() >= self.config.limits.max_registered_servers
         {
             return StatusCode::BadTooManyOperations;
         }
@@ -1404,6 +1402,7 @@ mod tests {
             .discovery_urls(vec!["opc.tcp://127.0.0.1:4840/".to_string()])
             .host("127.0.0.1")
             .port(4840)
+            .max_registered_servers(8)
             .add_endpoint(
                 "root",
                 (
@@ -1430,8 +1429,8 @@ mod tests {
             StatusCode::Good
         );
 
-        // Fill the registry to the cap.
-        for i in 0..super::MAX_REGISTERED_SERVERS {
+        // Fill the registry to the (builder-overridden) cap.
+        for i in 0..info.config.limits.max_registered_servers {
             assert_eq!(
                 info.apply_register_server(reg(&format!("urn:s{i}"), true)),
                 StatusCode::Good

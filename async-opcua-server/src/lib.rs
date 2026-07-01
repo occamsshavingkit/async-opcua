@@ -174,6 +174,9 @@ pub mod constants {
     pub const MAX_SESSIONS: usize = 20;
     /// Maximum number of active TCP connections accepted by the server.
     pub const MAX_CONNECTIONS: usize = 100;
+    /// Maximum number of servers held in the local discovery (`RegisterServer`) registry
+    /// before new distinct registrations are rejected.
+    pub const MAX_REGISTERED_SERVERS: usize = 1000;
     /// Maximum number of references per node during Browse or BrowseNext.
     pub const MAX_REFERENCES_PER_BROWSE_NODE: usize = 1000;
 

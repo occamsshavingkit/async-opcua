@@ -6,14 +6,14 @@ use tracing_futures::Instrument;
 
 use crate::{
     node_manager::{
-        resolve_external_references, BrowseNode, BrowsePathItem, ExternalReferencesContPoint,
-        NodeManagers, RegisterNodeItem, RequestContext,
+        consume_results, resolve_external_references, BrowseNode, BrowsePathItem,
+        ExternalReferencesContPoint, NodeManagers, RegisterNodeItem, RequestContext,
     },
     session::{controller::Response, message_handler::Request},
 };
 use opcua_types::{
     BrowseNextRequest, BrowseNextResponse, BrowsePathResult, BrowsePathTarget, BrowseRequest,
-    BrowseResponse, BrowseResult, ByteString, NodeClass, RegisterNodesRequest,
+    BrowseResponse, BrowseResult, ByteString, DiagnosticInfo, NodeClass, RegisterNodesRequest,
     RegisterNodesResponse, ResponseHeader, StatusCode, TranslateBrowsePathsToNodeIdsRequest,
     TranslateBrowsePathsToNodeIdsResponse, UnregisterNodesRequest, UnregisterNodesResponse,
 };
@@ -51,8 +51,10 @@ pub(crate) async fn browse(
 
     // Part 4 §5.9.2 Table 36: a non-null referenceTypeId that is not a ReferenceType is rejected
     // with operation-level Bad_ReferenceTypeIdInvalid, rather than silently returning no references.
+    let return_diagnostics = request.request.request_header.return_diagnostics;
     let mut nodes = Vec::with_capacity(nodes_to_browse.len());
-    let mut results: Vec<Option<BrowseResult>> = Vec::with_capacity(nodes_to_browse.len());
+    let mut results: Vec<Option<(BrowseResult, Option<DiagnosticInfo>)>> =
+        Vec::with_capacity(nodes_to_browse.len());
     {
         let type_tree = context.get_type_tree_for_user();
         for (idx, r) in nodes_to_browse.into_iter().enumerate() {
@@ -62,14 +64,22 @@ pub(crate) async fn browse(
                     Some(NodeClass::ReferenceType)
                 )
             {
-                results.push(Some(BrowseResult {
-                    status_code: StatusCode::BadReferenceTypeIdInvalid,
-                    continuation_point: ByteString::null(),
-                    references: None,
-                }));
+                results.push(Some((
+                    BrowseResult {
+                        status_code: StatusCode::BadReferenceTypeIdInvalid,
+                        continuation_point: ByteString::null(),
+                        references: None,
+                    },
+                    None,
+                )));
             } else {
                 results.push(None);
-                nodes.push(BrowseNode::new(r, max_references_per_node, idx));
+                nodes.push(BrowseNode::new(
+                    r,
+                    return_diagnostics,
+                    max_references_per_node,
+                    idx,
+                ));
             }
         }
     }
@@ -98,12 +108,11 @@ pub(crate) async fn browse(
         let mut session = request.session.write();
         while let Some(n) = nodes.get(i) {
             if n.is_completed() {
-                let (result, input_index) = nodes.swap_remove(i).into_result(
-                    node_manager_index,
-                    node_manager_count,
-                    &mut session,
-                );
-                results[input_index] = Some(result);
+                let mut node = nodes.swap_remove(i);
+                let diagnostic_info = node.take_diagnostic_info();
+                let (result, input_index) =
+                    node.into_result(node_manager_index, node_manager_count, &mut session);
+                results[input_index] = Some((result, diagnostic_info));
             } else {
                 i += 1;
             }
@@ -166,20 +175,22 @@ pub(crate) async fn browse(
         for mut node in nodes {
             node.resolve_external_references(type_tree.get(), &node_map);
 
+            let diagnostic_info = node.take_diagnostic_info();
             let (result, input_index) =
                 node.into_result(node_manager_count - 1, node_manager_count, &mut session);
-            results[input_index] = Some(result);
+            results[input_index] = Some((result, diagnostic_info));
         }
     }
 
     // Cannot be None here, since we are guaranteed to always empty out nodes.
-    let results = results.into_iter().map(Option::unwrap).collect();
+    let pairs = results.into_iter().map(Option::unwrap).collect();
+    let (results, diagnostic_infos) = consume_results(pairs, return_diagnostics);
 
     Response {
         message: BrowseResponse {
             response_header: ResponseHeader::new_good(request.request_handle),
-            results: Some(results),
-            diagnostic_infos: None,
+            results,
+            diagnostic_infos,
         }
         .into(),
         request_id: request.request_id,
@@ -196,7 +207,9 @@ pub(crate) async fn browse_next(
         request.request.continuation_points,
         request.info.operational_limits.max_nodes_per_browse
     );
-    let mut results: Vec<_> = (0..nodes_to_browse.len()).map(|_| None).collect();
+    let return_diagnostics = request.request.request_header.return_diagnostics;
+    let mut results: Vec<Option<(BrowseResult, Option<DiagnosticInfo>)>> =
+        (0..nodes_to_browse.len()).map(|_| None).collect();
 
     let mut nodes = {
         let mut session = trace_write_lock!(request.session);
@@ -204,19 +217,26 @@ pub(crate) async fn browse_next(
         for (idx, point) in nodes_to_browse.into_iter().enumerate() {
             let point = session.remove_browse_continuation_point(&point);
             if let Some(point) = point {
-                nodes.push(BrowseNode::from_continuation_point(point, idx));
+                nodes.push(BrowseNode::from_continuation_point(
+                    point,
+                    return_diagnostics,
+                    idx,
+                ));
             } else {
-                results[idx] = Some(BrowseResult {
-                    status_code: StatusCode::BadContinuationPointInvalid,
-                    continuation_point: ByteString::null(),
-                    references: None,
-                });
+                results[idx] = Some((
+                    BrowseResult {
+                        status_code: StatusCode::BadContinuationPointInvalid,
+                        continuation_point: ByteString::null(),
+                        references: None,
+                    },
+                    None,
+                ));
             }
         }
         nodes
     };
 
-    let results = if request.request.release_continuation_points {
+    let pairs = if request.request.release_continuation_points {
         // Part 4 §5.9.3.2 Table 37: when releaseContinuationPoints == TRUE the continuation points
         // are released (done above via remove_browse_continuation_point) and the results and
         // diagnosticInfos arrays are empty.
@@ -260,12 +280,11 @@ pub(crate) async fn browse_next(
             let mut session = request.session.write();
             while let Some(n) = batch_nodes.get(i) {
                 if n.is_completed() {
-                    let (result, input_index) = batch_nodes.swap_remove(i).into_result(
-                        node_manager_index,
-                        node_manager_count,
-                        &mut session,
-                    );
-                    results[input_index] = Some(result);
+                    let mut node = batch_nodes.swap_remove(i);
+                    let diagnostic_info = node.take_diagnostic_info();
+                    let (result, input_index) =
+                        node.into_result(node_manager_index, node_manager_count, &mut session);
+                    results[input_index] = Some((result, diagnostic_info));
                 } else {
                     i += 1;
                 }
@@ -330,21 +349,23 @@ pub(crate) async fn browse_next(
             for mut node in nodes.into_iter().chain(batch_nodes) {
                 node.resolve_external_references(type_tree.get(), &node_map);
 
+                let diagnostic_info = node.take_diagnostic_info();
                 let (result, input_index) =
                     node.into_result(node_manager_count - 1, node_manager_count, &mut session);
-                results[input_index] = Some(result);
+                results[input_index] = Some((result, diagnostic_info));
             }
         }
 
         // Cannot be None here, since we are guaranteed to always empty out nodes.
         results.into_iter().map(Option::unwrap).collect()
     };
+    let (results, diagnostic_infos) = consume_results(pairs, return_diagnostics);
 
     Response {
         message: BrowseNextResponse {
             response_header: ResponseHeader::new_good(request.request_handle),
-            results: Some(results),
-            diagnostic_infos: None,
+            results,
+            diagnostic_infos,
         }
         .into(),
         request_id: request.request_id,

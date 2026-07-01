@@ -11,8 +11,9 @@ use opcua_crypto::random;
 use opcua_nodes::TypeTree;
 use opcua_types::{
     BrowseDescription, BrowseDescriptionResultMask, BrowseDirection, BrowsePath, BrowseResult,
-    BrowseResultMask, ByteString, ExpandedNodeId, LocalizedText, NodeClass, NodeClassMask, NodeId,
-    QualifiedName, ReferenceDescription, RelativePathElement, StatusCode,
+    BrowseResultMask, ByteString, DiagnosticBits, DiagnosticInfo, ExpandedNodeId, LocalizedText,
+    NodeClass, NodeClassMask, NodeId, QualifiedName, ReferenceDescription, RelativePathElement,
+    StatusCode,
 };
 use tracing::warn;
 
@@ -152,6 +153,8 @@ pub struct BrowseNode {
     result_mask: BrowseDescriptionResultMask,
     references: Vec<ReferenceDescription>,
     status_code: StatusCode,
+    diagnostic_bits: DiagnosticBits,
+    diagnostic_info: Option<DiagnosticInfo>,
     // It is feasible to only keep one continuation point, by using the
     // fact that node managers are sequential. If the first node manager is done reading,
     // we move on to the next.
@@ -188,6 +191,7 @@ impl BrowseNode {
     /// Create a new empty browse node
     pub(crate) fn new(
         description: BrowseDescription,
+        diagnostic_bits: DiagnosticBits,
         max_references_per_node: usize,
         input_index: usize,
     ) -> Self {
@@ -203,6 +207,8 @@ impl BrowseNode {
             max_references_per_node,
             references: Vec::new(),
             status_code: StatusCode::BadNodeIdUnknown,
+            diagnostic_bits,
+            diagnostic_info: None,
             input_index,
             start_node_manager: 0,
             external_references: Vec::new(),
@@ -211,6 +217,7 @@ impl BrowseNode {
 
     pub(crate) fn from_continuation_point(
         point: BrowseContinuationPoint,
+        diagnostic_bits: DiagnosticBits,
         input_index: usize,
     ) -> Self {
         Self {
@@ -222,6 +229,8 @@ impl BrowseNode {
             result_mask: point.result_mask,
             references: Vec::new(),
             status_code: StatusCode::BadNodeIdUnknown,
+            diagnostic_bits,
+            diagnostic_info: None,
             input_continuation_point: Some(point.continuation_point),
             next_continuation_point: None,
             max_references_per_node: point.max_references_per_node,
@@ -235,6 +244,22 @@ impl BrowseNode {
     /// if you own the node being browsed. It defaults to BadNodeIdUnknown.
     pub fn set_status(&mut self, status: StatusCode) {
         self.status_code = status;
+    }
+
+    /// Header diagnostic bits for requesting operation-level diagnostics.
+    pub fn diagnostic_bits(&self) -> DiagnosticBits {
+        self.diagnostic_bits
+    }
+
+    /// Set diagnostic infos, you don't need to do this if
+    /// `diagnostic_bits` are not set.
+    pub fn set_diagnostic_info(&mut self, diagnostic_info: DiagnosticInfo) {
+        self.diagnostic_info = Some(diagnostic_info);
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn take_diagnostic_info(&mut self) -> Option<DiagnosticInfo> {
+        self.diagnostic_info.take()
     }
 
     /// Get the continuation point created during the last request.
@@ -825,6 +850,7 @@ pub async fn impl_translate_browse_paths_using_browse(
                     node_class_mask: NodeClassMask::all().bits(),
                     result_mask: BrowseResultMask::BrowseName as u32,
                 },
+                DiagnosticBits::empty(),
                 context
                     .info
                     .config

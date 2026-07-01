@@ -1779,6 +1779,7 @@ mod tests {
                 node_class_mask: NodeClassMask::OBJECT.bits(),
                 result_mask: BrowseDescriptionResultMask::RESULT_MASK_BROWSE_NAME.bits(),
             },
+            DiagnosticBits::empty(),
             100,
             0,
         );

@@ -25,12 +25,42 @@ Per-entry `DiagnosticInfo` content is NOT populated by this feature (node-manage
 | ModifyMonitoredItems (§5.12.3) | `.return_diagnostics` | `MonitoredItemUpdateRef` | `MonitoredItemModifyResult` | `ModifyMonitoredItemsResponse.diagnostic_infos` |
 | DeleteMonitoredItems (§5.12.6) | `.return_diagnostics` | `MonitoredItemRef` | `StatusCode` | `DeleteMonitoredItemsResponse.diagnostic_infos` |
 | SetMonitoringMode (§5.12.4) | `.return_diagnostics` | `MonitoredItemRef` | `StatusCode` | `SetMonitoringModeResponse.diagnostic_infos` |
-| SetTriggering (§5.12.5) | `.return_diagnostics` | (triggering result item) | `StatusCode` (add/remove) | `SetTriggeringResponse.{add,remove}_diagnostic_infos` |
-| QueryFirst (Annex B) | `QueryFirstRequest.return_diagnostics` | `QueryRequest` (`query.rs`) | per-op result | `QueryFirstResponse.diagnostic_infos` + nested `data_diagnostic_infos` |
-| QueryNext (Annex B) | `QueryNextRequest.return_diagnostics` | `QueryRequest` | per-op result | `QueryNextResponse.diagnostic_infos` |
+| SetTriggering (§5.12.5) | `.return_diagnostics` | none — plain status pairs (`session/message_handler.rs`) | `StatusCode` (add/remove) | `SetTriggeringResponse.{add,remove}_diagnostic_infos` |
+| QueryFirst (Annex B.2.3) | `QueryFirstRequest.return_diagnostics` | `QueryRequest` (`query.rs`) | per-nodeType `ParsingResult` | `QueryFirstResponse.diagnostic_infos` (aligned to `node_types`, NOT to data sets) + nested `ParsingResult.data_diagnostic_infos` |
+| ~~QueryNext~~ | — | — | — | **OUT OF SCOPE**: `QueryNextResponse` has no `diagnostic_infos` field (Part 4 Annex B.2.4: response is only `responseHeader` + `queryDataSets` + `revisedContinuationPoint`). Verified against the generated type and the spec 2026-07-01. |
 
-> Exact result-type names to be confirmed against `opcua_types` during implementation; the shape (each work
-> item yields `(Result, Option<DiagnosticInfo>)`) is fixed by `IntoResult`.
+## T001 verification results (confirmed against the code, 2026-07-01)
+
+Result-type names confirmed. Three corrections to the original assumptions, found by reading the actual
+handlers:
+
+1. **`impl IntoResult` does not fit every work item directly.** `BrowseNode::into_result(self, nm_index,
+   nm_count, &mut Session)` and `HistoryNode::into_result(self, &mut Session)` are session-dependent
+   (continuation points), and Browse writes `results[input_index]` out of request order; `browse_next`
+   pre-fills invalid-continuation-point slots that never become `BrowseNode`s. **Sanctioned mechanism**: add
+   ONE additive blanket impl in `utils/result.rs` — `impl<T> IntoResult for (T, Option<DiagnosticInfo>)` —
+   and have handlers assemble `Vec<(Result, Option<DiagnosticInfo>)>` in final positional order, then emit
+   via the unchanged `consume_results(pairs, return_diagnostics)`. Work items whose inherent `into_result`
+   is already zero-arg (`HistoryUpdateNode` → `HistoryUpdateResult`, `MonitoredItemUpdateRef` →
+   `MonitoredItemModifyResult`) get the diagnostic slot + a direct `impl IntoResult` per the original plan.
+   Everything still ends on the single `consume_results` emit path (Constitution II).
+2. **`MonitoredItemRef` gets no diagnostic slot.** Node managers only ever receive it behind `&`
+   (`&[&MonitoredItemRef]`), so a `set_diagnostic_info(&mut self)` extension point would be unreachable dead
+   API. SetMonitoringMode/Delete results are `Vec<(StatusCode, MonitoredItemRef)>`; CreateMonitoredItems
+   results come from the subscription cache (`Vec<MonitoredItemCreateResult>`, confirmed built in request
+   order). The mutable extension point for Create is `CreateMonitoredItem`
+   (`subscriptions/monitored_item.rs`, node managers get `&mut`), which gets the slot; the handler zips its
+   diagnostics with the cache results. SetMonitoringMode/Delete emit `(StatusCode, None)` pairs.
+3. **SetTriggering lives in `session/message_handler.rs`** (`fn set_triggering`, ~line 619), not
+   `session/services/monitored_items.rs`; it has no work items (plain `Vec<StatusCode>` pairs from
+   `subscriptions.set_triggering`). Emit both arrays via `consume_results` on `(StatusCode, None)` pairs.
+
+Confirmed `IntoResult::Result` types: Browse/BrowseNext→`BrowseResult`; HistoryRead→`HistoryReadResult`;
+HistoryUpdate→`HistoryUpdateResult`; CreateMonitoredItems→`MonitoredItemCreateResult`;
+ModifyMonitoredItems→`MonitoredItemModifyResult`; Delete/SetMonitoringMode/SetTriggering→`StatusCode`;
+QueryFirst→`ParsingResult` (op level, aligned to `node_types`; spec B.2.3: "diagnostic information for the
+requested NodeTypeDescription") + nested `data_diagnostic_infos` aligned to each `ParsingResult`'s
+`data_status_codes`.
 
 ## Verification
 

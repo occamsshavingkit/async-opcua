@@ -65,9 +65,9 @@ no blocking prerequisite. Each user story is independent and can be implemented/
 
 **Goal**: HistoryRead and HistoryUpdate return aligned per-op arrays when requested.
 
-- [ ] T009 [US3] Add the diagnostic slot + `IntoResult` to `HistoryNode` (result: `HistoryReadResult`) and `HistoryUpdateNode` (result: `HistoryUpdateResult`) in `async-opcua-server/src/node_manager/history.rs`, threading `diagnostic_bits` through each `new(...)`.
-- [ ] T010 [US3] Route the HistoryRead and HistoryUpdate handlers in `async-opcua-server/src/session/services/attribute.rs` through `consume_results(items, return_diagnostics)`, replacing the `diagnostic_infos: None` in `HistoryReadResponse`/`HistoryUpdateResponse`.
-- [ ] T011 [P] [US3] Independent test in `async-opcua-server/tests/per_op_diagnostics.rs`: for HistoryRead and HistoryUpdate, assert aligned `diagnostic_infos` present when requested and `None` when not. Raw `UARequest` builders. Red-first.
+- [X] T009 [US3] Add the diagnostic slot + `IntoResult` to `HistoryNode` (result: `HistoryReadResult`) and `HistoryUpdateNode` (result: `HistoryUpdateResult`) in `async-opcua-server/src/node_manager/history.rs`, threading `diagnostic_bits` through each `new(...)`.
+- [X] T010 [US3] Route the HistoryRead and HistoryUpdate handlers in `async-opcua-server/src/session/services/attribute.rs` through `consume_results(items, return_diagnostics)`, replacing the `diagnostic_infos: None` in `HistoryReadResponse`/`HistoryUpdateResponse`.
+- [X] T011 [P] [US3] Independent test in `async-opcua-server/tests/per_op_diagnostics.rs`: for HistoryRead and HistoryUpdate, assert aligned `diagnostic_infos` present when requested and `None` when not. Raw `UARequest` builders. Red-first.
 
 **Checkpoint**: US3 independently deliverable.
 

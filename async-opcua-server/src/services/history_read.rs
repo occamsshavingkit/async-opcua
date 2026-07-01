@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use opcua_core::{sync::RwLock, trace_write_lock};
-use opcua_types::{HistoryReadValueId, NodeId, ObjectId, StatusCode};
+use opcua_types::{DiagnosticBits, HistoryReadValueId, NodeId, ObjectId, StatusCode};
 
 use crate::{
     node_manager::{DynNodeManager, HistoryNode, NodeManagers, RequestContext},
@@ -16,6 +16,7 @@ pub async fn prepare_history_nodes(
     node_managers: &NodeManagers,
     context: &RequestContext,
     items: Vec<HistoryReadValueId>,
+    diagnostic_bits: DiagnosticBits,
     is_events: bool,
     release: bool,
 ) -> Vec<HistoryNode> {
@@ -23,7 +24,9 @@ pub async fn prepare_history_nodes(
         let mut session = trace_write_lock!(session_lock);
         items
             .into_iter()
-            .map(|node| prepare_history_node(&mut session, node, is_events, release))
+            .map(|node| {
+                prepare_history_node(&mut session, node, diagnostic_bits, is_events, release)
+            })
             .collect()
     };
 
@@ -37,11 +40,12 @@ pub async fn prepare_history_nodes(
 fn prepare_history_node(
     session: &mut Session,
     node: HistoryReadValueId,
+    diagnostic_bits: DiagnosticBits,
     is_events: bool,
     release: bool,
 ) -> HistoryNode {
     if node.continuation_point.is_null_or_empty() {
-        let mut node = HistoryNode::new(node, is_events, None);
+        let mut node = HistoryNode::new(node, diagnostic_bits, is_events, None);
         if release {
             node.set_status(StatusCode::Good);
         }
@@ -50,7 +54,7 @@ fn prepare_history_node(
 
     let cp = session.remove_history_continuation_point(&node.continuation_point);
     let cp_missing = cp.is_none();
-    let mut node = HistoryNode::new(node, is_events, cp);
+    let mut node = HistoryNode::new(node, diagnostic_bits, is_events, cp);
     if cp_missing {
         node.set_status(StatusCode::BadContinuationPointInvalid);
     } else if release {

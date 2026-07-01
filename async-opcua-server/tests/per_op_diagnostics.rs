@@ -21,12 +21,13 @@ use opcua_crypto::SecurityPolicy;
 use opcua_server::{ServerBuilder, ServerEndpoint, ServerHandle, ANONYMOUS_USER_TOKEN_ID};
 use opcua_types::{
     AttributeId, BrowseDescription, BrowseDirection, BrowseNextRequest, BrowseRequest,
-    BrowseResultMask, CreateMonitoredItemsRequest, CreateSubscriptionRequest,
-    DeleteMonitoredItemsRequest, DiagnosticBits, ExtensionObject, MessageSecurityMode,
+    BrowseResultMask, CreateMonitoredItemsRequest, CreateSubscriptionRequest, DateTime,
+    DeleteMonitoredItemsRequest, DeleteRawModifiedDetails, DiagnosticBits, ExtensionObject,
+    HistoryReadRequest, HistoryReadValueId, HistoryUpdateRequest, MessageSecurityMode,
     ModifyMonitoredItemsRequest, MonitoredItemCreateRequest, MonitoredItemModifyRequest,
-    MonitoringMode, MonitoringParameters, NodeId, ObjectId, ReadValueId, RequestHeader,
-    SetMonitoringModeRequest, SetTriggeringRequest, TimestampsToReturn, VariableId,
-    ViewDescription,
+    MonitoringMode, MonitoringParameters, NodeId, NumericRange, ObjectId, QualifiedName,
+    ReadRawModifiedDetails, ReadValueId, RequestHeader, SetMonitoringModeRequest,
+    SetTriggeringRequest, TimestampsToReturn, VariableId, ViewDescription,
 };
 use tokio::net::TcpListener;
 
@@ -587,6 +588,127 @@ async fn delete_monitored_items_returns_aligned_diagnostic_infos_only_when_reque
     };
     let ResponseMessage::DeleteMonitoredItems(response) = server.send(request).await else {
         panic!("DeleteMonitoredItems should return DeleteMonitoredItemsResponse");
+    };
+    assert_eq!(response.results.as_ref().map(Vec::len), Some(2));
+    assert!(response.diagnostic_infos.is_none());
+}
+
+// ---------------------------------------------------------------------------
+// US3: HistoryRead & HistoryUpdate
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn history_read_returns_aligned_diagnostic_infos_only_when_requested() {
+    let server = TestServer::start("history-read-per-op-diagnostics").await;
+
+    // The default server exposes no history, so per-op results carry bad
+    // statuses — the structural contract (alignment/gating) is unaffected.
+    let details = || {
+        ExtensionObject::from_message(ReadRawModifiedDetails {
+            is_read_modified: false,
+            start_time: DateTime::epoch(),
+            end_time: DateTime::now(),
+            num_values_per_node: 10,
+            return_bounds: false,
+        })
+    };
+    let nodes_to_read = || {
+        Some(vec![
+            HistoryReadValueId {
+                node_id: VariableId::Server_ServerStatus_CurrentTime.into(),
+                index_range: NumericRange::None,
+                data_encoding: QualifiedName::null(),
+                continuation_point: Default::default(),
+            },
+            HistoryReadValueId {
+                node_id: NodeId::new(1, "per-op-diagnostics-unknown-node"),
+                index_range: NumericRange::None,
+                data_encoding: QualifiedName::null(),
+                continuation_point: Default::default(),
+            },
+        ])
+    };
+
+    // 1) REQUESTED -> aligned array present.
+    let request = HistoryReadRequest {
+        request_header: server.request_header(OP_BITS),
+        history_read_details: details(),
+        timestamps_to_return: TimestampsToReturn::Both,
+        release_continuation_points: false,
+        nodes_to_read: nodes_to_read(),
+    };
+    let ResponseMessage::HistoryRead(response) = server.send(request).await else {
+        panic!("HistoryRead should return HistoryReadResponse");
+    };
+    let results = response.results.as_ref().expect("results");
+    assert_eq!(results.len(), 2);
+    let diags = response
+        .diagnostic_infos
+        .as_ref()
+        .expect("per-op diagnosticInfos must be present when requested");
+    assert_eq!(diags.len(), results.len());
+
+    // 2) NOT REQUESTED -> no array.
+    let request = HistoryReadRequest {
+        request_header: server.request_header(DiagnosticBits::empty()),
+        history_read_details: details(),
+        timestamps_to_return: TimestampsToReturn::Both,
+        release_continuation_points: false,
+        nodes_to_read: nodes_to_read(),
+    };
+    let ResponseMessage::HistoryRead(response) = server.send(request).await else {
+        panic!("HistoryRead should return HistoryReadResponse");
+    };
+    assert_eq!(response.results.as_ref().map(Vec::len), Some(2));
+    assert!(response.diagnostic_infos.is_none());
+}
+
+#[tokio::test]
+async fn history_update_returns_aligned_diagnostic_infos_only_when_requested() {
+    let server = TestServer::start("history-update-per-op-diagnostics").await;
+
+    // Two update operations (delete-raw on a known and an unknown node); the
+    // default server has no history backend, so statuses are bad but aligned.
+    let details = || {
+        Some(vec![
+            ExtensionObject::from_message(DeleteRawModifiedDetails {
+                node_id: VariableId::Server_ServerStatus_CurrentTime.into(),
+                is_delete_modified: false,
+                start_time: DateTime::epoch(),
+                end_time: DateTime::now(),
+            }),
+            ExtensionObject::from_message(DeleteRawModifiedDetails {
+                node_id: NodeId::new(1, "per-op-diagnostics-unknown-node"),
+                is_delete_modified: false,
+                start_time: DateTime::epoch(),
+                end_time: DateTime::now(),
+            }),
+        ])
+    };
+
+    // 1) REQUESTED -> aligned array present.
+    let request = HistoryUpdateRequest {
+        request_header: server.request_header(OP_BITS),
+        history_update_details: details(),
+    };
+    let ResponseMessage::HistoryUpdate(response) = server.send(request).await else {
+        panic!("HistoryUpdate should return HistoryUpdateResponse");
+    };
+    let results = response.results.as_ref().expect("results");
+    assert_eq!(results.len(), 2);
+    let diags = response
+        .diagnostic_infos
+        .as_ref()
+        .expect("per-op diagnosticInfos must be present when requested");
+    assert_eq!(diags.len(), results.len());
+
+    // 2) NOT REQUESTED -> no array.
+    let request = HistoryUpdateRequest {
+        request_header: server.request_header(DiagnosticBits::empty()),
+        history_update_details: details(),
+    };
+    let ResponseMessage::HistoryUpdate(response) = server.send(request).await else {
+        panic!("HistoryUpdate should return HistoryUpdateResponse");
     };
     assert_eq!(response.results.as_ref().map(Vec::len), Some(2));
     assert!(response.diagnostic_infos.is_none());

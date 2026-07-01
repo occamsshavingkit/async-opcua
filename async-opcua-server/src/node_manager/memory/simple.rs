@@ -1265,8 +1265,9 @@ mod tests {
     use async_trait::async_trait;
     use opcua_types::{
         ApplicationDescription, ByteString, DateTime, DeleteAtTimeDetails, DeleteEventDetails,
-        DeleteRawModifiedDetails, EventFilter, HistoryEventFieldList, PerformUpdateType, UAString,
-        UpdateDataDetails, UpdateEventDetails, UpdateStructureDataDetails,
+        DeleteRawModifiedDetails, DiagnosticBits, EventFilter, HistoryEventFieldList,
+        PerformUpdateType, UAString, UpdateDataDetails, UpdateEventDetails,
+        UpdateStructureDataDetails,
     };
 
     use crate::{
@@ -1580,30 +1581,37 @@ mod tests {
     }
 
     fn update_data_node(node_id: &NodeId, entry_count: usize) -> HistoryUpdateNode {
-        HistoryUpdateNode::new(HistoryUpdateDetails::UpdateData(UpdateDataDetails {
-            node_id: node_id.clone(),
-            perform_insert_replace: PerformUpdateType::Insert,
-            update_values: Some(vec![DataValue::default(); entry_count]),
-        }))
+        HistoryUpdateNode::new(
+            HistoryUpdateDetails::UpdateData(UpdateDataDetails {
+                node_id: node_id.clone(),
+                perform_insert_replace: PerformUpdateType::Insert,
+                update_values: Some(vec![DataValue::default(); entry_count]),
+            }),
+            DiagnosticBits::empty(),
+        )
     }
 
     fn update_structure_node(node_id: &NodeId, entry_count: usize) -> HistoryUpdateNode {
-        HistoryUpdateNode::new(HistoryUpdateDetails::UpdateStructureData(
-            UpdateStructureDataDetails {
+        HistoryUpdateNode::new(
+            HistoryUpdateDetails::UpdateStructureData(UpdateStructureDataDetails {
                 node_id: node_id.clone(),
                 perform_insert_replace: PerformUpdateType::Replace,
                 update_values: Some(vec![DataValue::default(); entry_count]),
-            },
-        ))
+            }),
+            DiagnosticBits::empty(),
+        )
     }
 
     fn update_event_node(node_id: &NodeId, entry_count: usize) -> HistoryUpdateNode {
-        HistoryUpdateNode::new(HistoryUpdateDetails::UpdateEvent(UpdateEventDetails {
-            node_id: node_id.clone(),
-            perform_insert_replace: PerformUpdateType::Update,
-            filter: EventFilter::default(),
-            event_data: Some(vec![HistoryEventFieldList::default(); entry_count]),
-        }))
+        HistoryUpdateNode::new(
+            HistoryUpdateDetails::UpdateEvent(UpdateEventDetails {
+                node_id: node_id.clone(),
+                perform_insert_replace: PerformUpdateType::Update,
+                filter: EventFilter::default(),
+                event_data: Some(vec![HistoryEventFieldList::default(); entry_count]),
+            }),
+            DiagnosticBits::empty(),
+        )
     }
 
     fn delete_raw_modified_node(
@@ -1611,32 +1619,39 @@ mod tests {
         start_time: DateTime,
         end_time: DateTime,
     ) -> HistoryUpdateNode {
-        HistoryUpdateNode::new(HistoryUpdateDetails::DeleteRawModified(
-            DeleteRawModifiedDetails {
+        HistoryUpdateNode::new(
+            HistoryUpdateDetails::DeleteRawModified(DeleteRawModifiedDetails {
                 node_id: node_id.clone(),
                 is_delete_modified: true,
                 start_time,
                 end_time,
-            },
-        ))
+            }),
+            DiagnosticBits::empty(),
+        )
     }
 
     fn delete_at_time_node(node_id: &NodeId, req_times: Vec<DateTime>) -> HistoryUpdateNode {
-        HistoryUpdateNode::new(HistoryUpdateDetails::DeleteAtTime(DeleteAtTimeDetails {
-            node_id: node_id.clone(),
-            req_times: Some(req_times),
-        }))
+        HistoryUpdateNode::new(
+            HistoryUpdateDetails::DeleteAtTime(DeleteAtTimeDetails {
+                node_id: node_id.clone(),
+                req_times: Some(req_times),
+            }),
+            DiagnosticBits::empty(),
+        )
     }
 
     fn delete_event_node(node_id: &NodeId, entry_count: usize) -> HistoryUpdateNode {
-        HistoryUpdateNode::new(HistoryUpdateDetails::DeleteEvent(DeleteEventDetails {
-            node_id: node_id.clone(),
-            event_ids: Some(
-                (0..entry_count)
-                    .map(|i| ByteString::from(vec![i as u8]))
-                    .collect(),
-            ),
-        }))
+        HistoryUpdateNode::new(
+            HistoryUpdateDetails::DeleteEvent(DeleteEventDetails {
+                node_id: node_id.clone(),
+                event_ids: Some(
+                    (0..entry_count)
+                        .map(|i| ByteString::from(vec![i as u8]))
+                        .collect(),
+                ),
+            }),
+            DiagnosticBits::empty(),
+        )
     }
 
     #[tokio::test]

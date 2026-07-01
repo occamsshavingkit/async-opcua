@@ -6,6 +6,14 @@ pub(crate) trait IntoResult {
     fn into_result(self) -> (Self::Result, Option<DiagnosticInfo>);
 }
 
+impl<T> IntoResult for (T, Option<DiagnosticInfo>) {
+    type Result = T;
+
+    fn into_result(self) -> (T, Option<DiagnosticInfo>) {
+        self
+    }
+}
+
 pub(crate) fn consume_results<T: IntoResult>(
     items: Vec<T>,
     bits: DiagnosticBits,

@@ -21,8 +21,8 @@ use crate::{
     authenticator::UserToken,
     info::ServerInfo,
     node_manager::{
-        get_namespaces_for_user, MonitoredItemRef, NodeManagers, ReadNode, RequestContext,
-        RequestContextInner,
+        consume_results, get_namespaces_for_user, MonitoredItemRef, NodeManagers, ReadNode,
+        RequestContext, RequestContextInner,
     },
     session::{
         audit::{self, AuditEventContext},
@@ -622,6 +622,7 @@ impl MessageHandler {
         data: RequestData,
     ) -> HandleMessageResult {
         let subscriptions = self.subscriptions.clone();
+        let return_diagnostics = request.request_header.return_diagnostics;
         HandleMessageResult::AsyncMessage(tokio::task::spawn(async move {
             let result = subscriptions
                 .set_triggering(
@@ -632,12 +633,26 @@ impl MessageHandler {
                     request.links_to_remove.unwrap_or_default(),
                 )
                 .await
-                .map(|(add_res, remove_res)| SetTriggeringResponse {
-                    response_header: ResponseHeader::new_good(&request.request_header),
-                    add_results: Some(add_res),
-                    add_diagnostic_infos: None,
-                    remove_results: Some(remove_res),
-                    remove_diagnostic_infos: None,
+                .map(|(add_res, remove_res)| {
+                    let add_pairs: Vec<(StatusCode, Option<DiagnosticInfo>)> =
+                        add_res.into_iter().map(|status| (status, None)).collect();
+                    let (add_results, add_diagnostic_infos) =
+                        consume_results(add_pairs, return_diagnostics);
+
+                    let remove_pairs: Vec<(StatusCode, Option<DiagnosticInfo>)> = remove_res
+                        .into_iter()
+                        .map(|status| (status, None))
+                        .collect();
+                    let (remove_results, remove_diagnostic_infos) =
+                        consume_results(remove_pairs, return_diagnostics);
+
+                    SetTriggeringResponse {
+                        response_header: ResponseHeader::new_good(&request.request_header),
+                        add_results,
+                        add_diagnostic_infos,
+                        remove_results,
+                        remove_diagnostic_infos,
+                    }
                 });
 
             Response::from_result(result, data.request_handle, data.request_id)

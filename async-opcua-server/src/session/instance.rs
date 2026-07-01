@@ -491,7 +491,7 @@ mod tests {
     use opcua_nodes::ParsedContentFilter;
     use opcua_types::{
         ApplicationDescription, BrowseDescription, BrowseDescriptionResultMask, BrowseDirection,
-        MessageSecurityMode, NodeClassMask, NodeId, ReferenceTypeId, UAString,
+        DiagnosticBits, MessageSecurityMode, NodeClassMask, NodeId, ReferenceTypeId, UAString,
     };
 
     use crate::{identity_token::IdentityToken, node_manager::QueryRequest, ServerBuilder};
@@ -514,6 +514,7 @@ mod tests {
                 node_class_mask: NodeClassMask::empty().bits(),
                 result_mask: BrowseDescriptionResultMask::all().bits(),
             },
+            DiagnosticBits::empty(),
             1,
             0,
         );

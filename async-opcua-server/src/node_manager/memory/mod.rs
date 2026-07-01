@@ -1602,50 +1602,64 @@ mod tests {
                 data_encoding: QualifiedName::null(),
                 continuation_point: ByteString::null(),
             },
+            DiagnosticBits::empty(),
             is_events,
             None,
         )
     }
 
     fn update_data_node(node_id: &NodeId, mode: PerformUpdateType) -> HistoryUpdateNode {
-        HistoryUpdateNode::new(HistoryUpdateDetails::UpdateData(UpdateDataDetails {
-            node_id: node_id.clone(),
-            perform_insert_replace: mode,
-            update_values: None,
-        }))
-    }
-
-    fn update_event_node(node_id: &NodeId, mode: PerformUpdateType) -> HistoryUpdateNode {
-        HistoryUpdateNode::new(HistoryUpdateDetails::UpdateEvent(UpdateEventDetails {
-            node_id: node_id.clone(),
-            perform_insert_replace: mode,
-            filter: EventFilter::default(),
-            event_data: None,
-        }))
-    }
-
-    fn update_structure_node(node_id: &NodeId, mode: PerformUpdateType) -> HistoryUpdateNode {
-        HistoryUpdateNode::new(HistoryUpdateDetails::UpdateStructureData(
-            UpdateStructureDataDetails {
+        HistoryUpdateNode::new(
+            HistoryUpdateDetails::UpdateData(UpdateDataDetails {
                 node_id: node_id.clone(),
                 perform_insert_replace: mode,
                 update_values: None,
-            },
-        ))
+            }),
+            DiagnosticBits::empty(),
+        )
+    }
+
+    fn update_event_node(node_id: &NodeId, mode: PerformUpdateType) -> HistoryUpdateNode {
+        HistoryUpdateNode::new(
+            HistoryUpdateDetails::UpdateEvent(UpdateEventDetails {
+                node_id: node_id.clone(),
+                perform_insert_replace: mode,
+                filter: EventFilter::default(),
+                event_data: None,
+            }),
+            DiagnosticBits::empty(),
+        )
+    }
+
+    fn update_structure_node(node_id: &NodeId, mode: PerformUpdateType) -> HistoryUpdateNode {
+        HistoryUpdateNode::new(
+            HistoryUpdateDetails::UpdateStructureData(UpdateStructureDataDetails {
+                node_id: node_id.clone(),
+                perform_insert_replace: mode,
+                update_values: None,
+            }),
+            DiagnosticBits::empty(),
+        )
     }
 
     fn delete_at_time_node(node_id: &NodeId) -> HistoryUpdateNode {
-        HistoryUpdateNode::new(HistoryUpdateDetails::DeleteAtTime(DeleteAtTimeDetails {
-            node_id: node_id.clone(),
-            req_times: Some(vec![DateTime::null()]),
-        }))
+        HistoryUpdateNode::new(
+            HistoryUpdateDetails::DeleteAtTime(DeleteAtTimeDetails {
+                node_id: node_id.clone(),
+                req_times: Some(vec![DateTime::null()]),
+            }),
+            DiagnosticBits::empty(),
+        )
     }
 
     fn delete_event_node(node_id: &NodeId) -> HistoryUpdateNode {
-        HistoryUpdateNode::new(HistoryUpdateDetails::DeleteEvent(DeleteEventDetails {
-            node_id: node_id.clone(),
-            event_ids: None,
-        }))
+        HistoryUpdateNode::new(
+            HistoryUpdateDetails::DeleteEvent(DeleteEventDetails {
+                node_id: node_id.clone(),
+                event_ids: None,
+            }),
+            DiagnosticBits::empty(),
+        )
     }
 
     fn validated_history_read_len(
@@ -1779,6 +1793,7 @@ mod tests {
                 node_class_mask: NodeClassMask::OBJECT.bits(),
                 result_mask: BrowseDescriptionResultMask::RESULT_MASK_BROWSE_NAME.bits(),
             },
+            DiagnosticBits::empty(),
             100,
             0,
         );

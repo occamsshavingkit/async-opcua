@@ -4,12 +4,12 @@ use tracing::{debug_span, info};
 use tracing_futures::Instrument;
 
 use crate::{
-    node_manager::{NodeManagers, ParsedNodeTypeDescription, QueryRequest},
+    node_manager::{consume_results, NodeManagers, ParsedNodeTypeDescription, QueryRequest},
     session::{controller::Response, message_handler::Request},
 };
 use opcua_types::{
-    ByteString, FilterOperator, QueryFirstRequest, QueryFirstResponse, QueryNextRequest,
-    QueryNextResponse, ResponseHeader, StatusCode,
+    ByteString, DiagnosticInfo, FilterOperator, ParsingResult, QueryFirstRequest,
+    QueryFirstResponse, QueryNextRequest, QueryNextResponse, ResponseHeader, StatusCode,
 };
 
 pub(crate) async fn query_first(
@@ -42,6 +42,7 @@ pub(crate) async fn query_first(
     }
 
     let mut status_code = StatusCode::Good;
+    let return_diagnostics = request.request.request_header.return_diagnostics;
 
     let mut parsing_results = Vec::with_capacity(node_types.len());
     let mut final_node_types = Vec::with_capacity(node_types.len());
@@ -51,7 +52,7 @@ pub(crate) async fn query_first(
         let type_tree_ctx = context.get_type_tree_for_user();
         let type_tree = type_tree_ctx.get();
         for node_type in node_types {
-            let (mut res, parsed) = ParsedNodeTypeDescription::parse(node_type);
+            let (mut res, parsed) = ParsedNodeTypeDescription::parse(node_type, return_diagnostics);
             match parsed {
                 // Part 4 Annex B Table B.6: typeDefinitionNode shall be a valid TypeDefinitionNode.
                 // A non-null id that is not a known type definition is Bad_NotTypeDefinition, rather
@@ -95,6 +96,12 @@ pub(crate) async fn query_first(
     };
 
     if status_code.is_bad() {
+        let pairs: Vec<(ParsingResult, Option<DiagnosticInfo>)> = parsing_results
+            .into_iter()
+            .map(|parsing_result| (parsing_result, None))
+            .collect();
+        let (parsing_results, diagnostic_infos) = consume_results(pairs, return_diagnostics);
+
         return Response {
             message: QueryFirstResponse {
                 response_header: ResponseHeader::new_service_result(
@@ -103,9 +110,9 @@ pub(crate) async fn query_first(
                 ),
                 query_data_sets: None,
                 continuation_point: ByteString::null(),
-                parsing_results: Some(parsing_results),
+                parsing_results,
                 filter_result,
-                diagnostic_infos: None,
+                diagnostic_infos,
             }
             .into(),
             request_id: request.request_id,
@@ -130,14 +137,20 @@ pub(crate) async fn query_first(
             .instrument(debug_span!("Query", node_manager = %node_manager.name()))
             .await
         {
+            let pairs: Vec<(ParsingResult, Option<DiagnosticInfo>)> = parsing_results
+                .into_iter()
+                .map(|parsing_result| (parsing_result, None))
+                .collect();
+            let (parsing_results, diagnostic_infos) = consume_results(pairs, return_diagnostics);
+
             return Response {
                 message: QueryFirstResponse {
                     response_header: ResponseHeader::new_service_result(request.request_handle, e),
                     query_data_sets: None,
                     continuation_point: ByteString::null(),
-                    parsing_results: Some(parsing_results),
+                    parsing_results,
                     filter_result,
-                    diagnostic_infos: None,
+                    diagnostic_infos,
                 }
                 .into(),
                 request_id: request.request_id,
@@ -156,6 +169,11 @@ pub(crate) async fn query_first(
             &mut session,
         )
     };
+    let pairs: Vec<(ParsingResult, Option<DiagnosticInfo>)> = parsing_results
+        .into_iter()
+        .map(|parsing_result| (parsing_result, None))
+        .collect();
+    let (_, diagnostic_infos) = consume_results(pairs, return_diagnostics);
 
     Response {
         message: QueryFirstResponse {
@@ -163,7 +181,7 @@ pub(crate) async fn query_first(
             query_data_sets: Some(result),
             continuation_point,
             parsing_results: None,
-            diagnostic_infos: None,
+            diagnostic_infos,
             filter_result,
         }
         .into(),

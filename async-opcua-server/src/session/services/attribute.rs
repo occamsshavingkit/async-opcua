@@ -15,9 +15,10 @@ use crate::{
     },
 };
 use opcua_types::{
-    ByteString, DeleteAtTimeDetails, ExtensionObject, HistoryReadRequest, HistoryReadResponse,
-    HistoryReadResult, HistoryUpdateRequest, HistoryUpdateResponse, NodeId, ObjectId, ReadRequest,
-    ReadResponse, ResponseHeader, StatusCode, TimestampsToReturn,
+    ByteString, DeleteAtTimeDetails, DiagnosticInfo, ExtensionObject, HistoryReadRequest,
+    HistoryReadResponse, HistoryReadResult, HistoryUpdateRequest, HistoryUpdateResponse,
+    HistoryUpdateResult, NodeId, ObjectId, ReadRequest, ReadResponse, ResponseHeader, StatusCode,
+    TimestampsToReturn,
 };
 pub(crate) async fn read(node_managers: NodeManagers, request: Request<ReadRequest>) -> Response {
     let context = request.context();
@@ -134,11 +135,13 @@ pub(crate) async fn history_read(
     {
         return service_fault!(request, StatusCode::BadTooManyOperations);
     }
+    let return_diagnostics = request.request.request_header.return_diagnostics;
     let mut nodes = crate::services::history_read::prepare_history_nodes(
         &request.session,
         &node_managers,
         &context,
         items,
+        return_diagnostics,
         is_events,
         request.request.release_continuation_points,
     )
@@ -146,20 +149,25 @@ pub(crate) async fn history_read(
 
     // If we are releasing continuation points we should not return any data.
     if request.request.release_continuation_points {
+        let pairs: Vec<(HistoryReadResult, Option<DiagnosticInfo>)> = nodes
+            .into_iter()
+            .map(|mut node| {
+                let diagnostic_info = node.take_diagnostic_info();
+                let result = HistoryReadResult {
+                    status_code: node.status(),
+                    continuation_point: ByteString::null(),
+                    history_data: ExtensionObject::null(),
+                };
+                (result, diagnostic_info)
+            })
+            .collect();
+        let (results, diagnostic_infos) = consume_results(pairs, return_diagnostics);
+
         return Response {
             message: HistoryReadResponse {
                 response_header: ResponseHeader::new_good(request.request_handle),
-                results: Some(
-                    nodes
-                        .into_iter()
-                        .map(|n| HistoryReadResult {
-                            status_code: n.status(),
-                            continuation_point: ByteString::null(),
-                            history_data: ExtensionObject::null(),
-                        })
-                        .collect(),
-                ),
-                diagnostic_infos: None,
+                results,
+                diagnostic_infos,
             }
             .into(),
             request_id: request.request_id,
@@ -245,19 +253,24 @@ pub(crate) async fn history_read(
     )
     .await;
 
-    let results: Vec<_> = {
+    let pairs: Vec<(HistoryReadResult, Option<DiagnosticInfo>)> = {
         let mut session = trace_write_lock!(request.session);
         nodes
             .into_iter()
-            .map(|n| n.into_result(&mut session))
+            .map(|mut node| {
+                let diagnostic_info = node.take_diagnostic_info();
+                let result = node.into_result(&mut session);
+                (result, diagnostic_info)
+            })
             .collect()
     };
+    let (results, diagnostic_infos) = consume_results(pairs, return_diagnostics);
 
     Response {
         message: HistoryReadResponse {
             response_header: ResponseHeader::new_good(&request.request.request_header),
-            results: Some(results),
-            diagnostic_infos: None,
+            results,
+            diagnostic_infos,
         }
         .into(),
         request_id: request.request_id,
@@ -274,6 +287,7 @@ pub(crate) async fn history_update(
         request.request.history_update_details,
         request.info.operational_limits.max_nodes_per_history_update
     );
+    let return_diagnostics = request.request.request_header.return_diagnostics;
 
     let mut nodes: Vec<_> = items
         .into_iter()
@@ -282,17 +296,18 @@ pub(crate) async fn history_update(
                 Ok(h) => h,
                 Err(e) => {
                     // need some empty history update node here, it won't be passed to node managers.
-                    let mut node = HistoryUpdateNode::new(HistoryUpdateDetails::DeleteAtTime(
-                        DeleteAtTimeDetails {
+                    let mut node = HistoryUpdateNode::new(
+                        HistoryUpdateDetails::DeleteAtTime(DeleteAtTimeDetails {
                             node_id: NodeId::null(),
                             req_times: None,
-                        },
-                    ));
+                        }),
+                        return_diagnostics,
+                    );
                     node.set_status(e);
                     return node;
                 }
             };
-            HistoryUpdateNode::new(details)
+            HistoryUpdateNode::new(details, return_diagnostics)
         })
         .collect();
 
@@ -339,13 +354,21 @@ pub(crate) async fn history_update(
     )
     .await;
 
-    let results: Vec<_> = nodes.into_iter().map(|n| n.into_result()).collect();
+    let pairs: Vec<(HistoryUpdateResult, Option<DiagnosticInfo>)> = nodes
+        .into_iter()
+        .map(|mut node| {
+            let diagnostic_info = node.take_diagnostic_info();
+            let result = node.into_result();
+            (result, diagnostic_info)
+        })
+        .collect();
+    let (results, diagnostic_infos) = consume_results(pairs, return_diagnostics);
 
     Response {
         message: HistoryUpdateResponse {
             response_header: ResponseHeader::new_good(&request.request.request_header),
-            results: Some(results),
-            diagnostic_infos: None,
+            results,
+            diagnostic_infos,
         }
         .into(),
         request_id: request.request_id,

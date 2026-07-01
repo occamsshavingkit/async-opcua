@@ -5,8 +5,8 @@ use crate::session::{
 use opcua_crypto::random;
 use opcua_nodes::ParsedContentFilter;
 use opcua_types::{
-    AttributeId, ByteString, ExpandedNodeId, NodeTypeDescription, NumericRange, ParsingResult,
-    QueryDataDescription, QueryDataSet, RelativePath, StatusCode,
+    AttributeId, ByteString, DiagnosticBits, DiagnosticInfo, ExpandedNodeId, NodeTypeDescription,
+    NumericRange, ParsingResult, QueryDataDescription, QueryDataSet, RelativePath, StatusCode,
 };
 
 pub(crate) struct QueryContinuationPoint {
@@ -56,7 +56,10 @@ pub struct ParsedNodeTypeDescription {
 }
 
 impl ParsedNodeTypeDescription {
-    pub(crate) fn parse(desc: NodeTypeDescription) -> (ParsingResult, Result<Self, StatusCode>) {
+    pub(crate) fn parse(
+        desc: NodeTypeDescription,
+        diagnostic_bits: DiagnosticBits,
+    ) -> (ParsingResult, Result<Self, StatusCode>) {
         let num_descs = desc
             .data_to_return
             .as_ref()
@@ -75,11 +78,17 @@ impl ParsedNodeTypeDescription {
         }
 
         if final_descs.len() < num_descs {
+            let data_diagnostic_infos = if diagnostic_bits.is_empty() {
+                None
+            } else {
+                Some(vec![DiagnosticInfo::default(); desc_results.len()])
+            };
+
             return (
                 ParsingResult {
                     status_code: StatusCode::BadInvalidArgument,
                     data_status_codes: Some(desc_results),
-                    data_diagnostic_infos: None,
+                    data_diagnostic_infos,
                 },
                 Err(StatusCode::BadInvalidArgument),
             );

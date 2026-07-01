@@ -2,12 +2,12 @@ use crate::session::{continuation_points::ContinuationPoint, instance::Session};
 use opcua_crypto::random;
 use opcua_types::{
     match_extension_object_owned, ByteString, DeleteAtTimeDetails, DeleteEventDetails,
-    DeleteRawModifiedDetails, DynEncodable, ExtensionObject, HistoryData, HistoryEvent,
-    HistoryModifiedData, HistoryReadResult, HistoryReadValueId, HistoryUpdateResult, NodeId,
-    NumericRange, ObjectId, PerformUpdateType, PermissionType, QualifiedName,
-    ReadAnnotationDataDetails, ReadAtTimeDetails, ReadEventDetails, ReadProcessedDetails,
-    ReadRawModifiedDetails, StatusCode, UpdateDataDetails, UpdateEventDetails,
-    UpdateStructureDataDetails,
+    DeleteRawModifiedDetails, DiagnosticBits, DiagnosticInfo, DynEncodable, ExtensionObject,
+    HistoryData, HistoryEvent, HistoryModifiedData, HistoryReadResult, HistoryReadValueId,
+    HistoryUpdateResult, NodeId, NumericRange, ObjectId, PerformUpdateType, PermissionType,
+    QualifiedName, ReadAnnotationDataDetails, ReadAtTimeDetails, ReadEventDetails,
+    ReadProcessedDetails, ReadRawModifiedDetails, StatusCode, UpdateDataDetails,
+    UpdateEventDetails, UpdateStructureDataDetails,
 };
 
 /// Container for a single node in a history read request.
@@ -19,6 +19,8 @@ pub struct HistoryNode {
     next_continuation_point: Option<ContinuationPoint>,
     result: Option<ExtensionObject>,
     status: StatusCode,
+    diagnostic_bits: DiagnosticBits,
+    diagnostic_info: Option<DiagnosticInfo>,
 }
 
 pub(crate) enum HistoryReadDetails {
@@ -126,6 +128,7 @@ impl HistoryResult for HistoryEvent {}
 impl HistoryNode {
     pub(crate) fn new(
         node: HistoryReadValueId,
+        diagnostic_bits: DiagnosticBits,
         is_events: bool,
         cp: Option<ContinuationPoint>,
     ) -> Self {
@@ -143,6 +146,8 @@ impl HistoryNode {
             next_continuation_point: None,
             result: None,
             status,
+            diagnostic_bits,
+            diagnostic_info: None,
         }
     }
 
@@ -191,6 +196,22 @@ impl HistoryNode {
         self.status
     }
 
+    /// Header diagnostic bits for requesting operation-level diagnostics.
+    pub fn diagnostic_bits(&self) -> DiagnosticBits {
+        self.diagnostic_bits
+    }
+
+    /// Set diagnostic infos, you don't need to do this if
+    /// `diagnostic_bits` are not set.
+    pub fn set_diagnostic_info(&mut self, diagnostic_info: DiagnosticInfo) {
+        self.diagnostic_info = Some(diagnostic_info);
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn take_diagnostic_info(&mut self) -> Option<DiagnosticInfo> {
+        self.diagnostic_info.take()
+    }
+
     pub(crate) fn into_result(mut self, session: &mut Session) -> HistoryReadResult {
         let cp = match self.next_continuation_point {
             Some(p) => {
@@ -218,14 +239,18 @@ pub struct HistoryUpdateNode {
     details: HistoryUpdateDetails,
     status: StatusCode,
     operation_results: Option<Vec<StatusCode>>,
+    diagnostic_bits: DiagnosticBits,
+    diagnostic_info: Option<DiagnosticInfo>,
 }
 
 impl HistoryUpdateNode {
-    pub(crate) fn new(details: HistoryUpdateDetails) -> Self {
+    pub(crate) fn new(details: HistoryUpdateDetails, diagnostic_bits: DiagnosticBits) -> Self {
         Self {
             details,
             status: StatusCode::BadNodeIdUnknown,
             operation_results: None,
+            diagnostic_bits,
+            diagnostic_info: None,
         }
     }
 
@@ -243,6 +268,22 @@ impl HistoryUpdateNode {
     /// the length of the entries in the history update details.
     pub fn set_operation_results(&mut self, operation_results: Option<Vec<StatusCode>>) {
         self.operation_results = operation_results;
+    }
+
+    /// Header diagnostic bits for requesting operation-level diagnostics.
+    pub fn diagnostic_bits(&self) -> DiagnosticBits {
+        self.diagnostic_bits
+    }
+
+    /// Set diagnostic infos, you don't need to do this if
+    /// `diagnostic_bits` are not set.
+    pub fn set_diagnostic_info(&mut self, diagnostic_info: DiagnosticInfo) {
+        self.diagnostic_info = Some(diagnostic_info);
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn take_diagnostic_info(&mut self) -> Option<DiagnosticInfo> {
+        self.diagnostic_info.take()
     }
 
     pub(crate) fn into_result(mut self) -> HistoryUpdateResult {

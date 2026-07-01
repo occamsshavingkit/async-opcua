@@ -1507,8 +1507,9 @@ mod tests {
     use opcua_crypto::{random, SecurityPolicy};
     use opcua_types::{
         ApplicationDescription, AttributeId, BuildInfo, ByteString, CreateSubscriptionRequest,
-        ExtensionObject, MessageSecurityMode, MonitoredItemCreateRequest, MonitoringMode,
-        MonitoringParameters, NodeId, ReadValueId, StatusCode, TimestampsToReturn, UAString,
+        DiagnosticBits, ExtensionObject, MessageSecurityMode, MonitoredItemCreateRequest,
+        MonitoringMode, MonitoringParameters, NodeId, ReadValueId, StatusCode, TimestampsToReturn,
+        UAString,
     };
 
     use crate::{
@@ -1572,6 +1573,7 @@ mod tests {
                         subscription_id,
                         &fixture.info,
                         TimestampsToReturn::Both,
+                        DiagnosticBits::empty(),
                         &*type_tree,
                         None,
                     );
@@ -1661,6 +1663,7 @@ mod tests {
                     subscription_id,
                     &fixture.info,
                     TimestampsToReturn::Both,
+                    DiagnosticBits::empty(),
                     &*type_tree,
                     None,
                 );

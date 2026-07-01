@@ -51,6 +51,10 @@ pub struct Limits {
     /// Maximum number of registered sessions before new ones are rejected.
     #[serde(default = "defaults::max_sessions")]
     pub max_sessions: usize,
+    /// Maximum number of servers held in the local discovery (`RegisterServer`) registry
+    /// before new distinct registrations are rejected.
+    #[serde(default = "defaults::max_registered_servers")]
+    pub max_registered_servers: usize,
     /// Whether clients are allowed to modify the address space via the NodeManagement service (AddNodes/DeleteNodes/AddReferences/DeleteReferences) on node managers that support it. Default false (read-only).
     #[serde(default = "defaults::clients_can_modify_address_space")]
     pub clients_can_modify_address_space: bool,
@@ -78,6 +82,7 @@ impl Default for Limits {
             unactivated_session_timeout_ms: defaults::unactivated_session_timeout_ms(),
             operational: OperationalLimits::default(),
             max_sessions: defaults::max_sessions(),
+            max_registered_servers: defaults::max_registered_servers(),
             clients_can_modify_address_space: defaults::clients_can_modify_address_space(),
             enforce_role_based_access: defaults::enforce_role_based_access(),
         }
@@ -272,6 +277,9 @@ mod defaults {
     pub(super) fn max_sessions() -> usize {
         constants::MAX_SESSIONS
     }
+    pub(super) fn max_registered_servers() -> usize {
+        constants::MAX_REGISTERED_SERVERS
+    }
     pub(super) fn clients_can_modify_address_space() -> bool {
         false
     }
@@ -401,6 +409,7 @@ mod tests {
                 max_history_continuation_points: 500,
                 max_query_continuation_points: 500,
                 max_sessions: 20,
+                max_registered_servers: 1000,
                 max_inflight_requests_per_connection: 512,
                 max_unactivated_sessions_per_channel: 5,
                 unactivated_session_timeout_ms: 10_000,

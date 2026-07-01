@@ -21,12 +21,13 @@ use opcua_crypto::SecurityPolicy;
 use opcua_server::{ServerBuilder, ServerEndpoint, ServerHandle, ANONYMOUS_USER_TOKEN_ID};
 use opcua_types::{
     AttributeId, BrowseDescription, BrowseDirection, BrowseNextRequest, BrowseRequest,
-    BrowseResultMask, CreateMonitoredItemsRequest, CreateSubscriptionRequest, DateTime,
-    DeleteMonitoredItemsRequest, DeleteRawModifiedDetails, DiagnosticBits, ExtensionObject,
-    HistoryReadRequest, HistoryReadValueId, HistoryUpdateRequest, MessageSecurityMode,
-    ModifyMonitoredItemsRequest, MonitoredItemCreateRequest, MonitoredItemModifyRequest,
-    MonitoringMode, MonitoringParameters, NodeId, NumericRange, ObjectId, QualifiedName,
-    ReadRawModifiedDetails, ReadValueId, RequestHeader, SetMonitoringModeRequest,
+    BrowseResultMask, ContentFilter, CreateMonitoredItemsRequest, CreateSubscriptionRequest,
+    DateTime, DeleteMonitoredItemsRequest, DeleteRawModifiedDetails, DiagnosticBits,
+    ExtensionObject, HistoryReadRequest, HistoryReadValueId, HistoryUpdateRequest,
+    MessageSecurityMode, ModifyMonitoredItemsRequest, MonitoredItemCreateRequest,
+    MonitoredItemModifyRequest, MonitoringMode, MonitoringParameters, NodeId, NodeTypeDescription,
+    NumericRange, ObjectId, ObjectTypeId, QualifiedName, QueryDataDescription, QueryFirstRequest,
+    ReadRawModifiedDetails, ReadValueId, RelativePath, RequestHeader, SetMonitoringModeRequest,
     SetTriggeringRequest, TimestampsToReturn, VariableId, ViewDescription,
 };
 use tokio::net::TcpListener;
@@ -712,4 +713,110 @@ async fn history_update_returns_aligned_diagnostic_infos_only_when_requested() {
     };
     assert_eq!(response.results.as_ref().map(Vec::len), Some(2));
     assert!(response.diagnostic_infos.is_none());
+}
+
+// ---------------------------------------------------------------------------
+// US4: QueryFirst (QueryNext has no diagnosticInfos on the wire, Part 4 B.2.4)
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn query_first_returns_aligned_diagnostic_infos_only_when_requested() {
+    let server = TestServer::start("query-first-per-op-diagnostics").await;
+
+    // Two node types: one parseable, one whose data description has an invalid
+    // attribute id, so parsing fails -> the response carries parsingResults
+    // (one per requested NodeTypeDescription, Part 4 B.2.3) and the op-level
+    // diagnosticInfos must align with them. The failing entry also carries
+    // nested data_status_codes, whose data_diagnostic_infos follow the same
+    // bits-gated rule.
+    let node_types = || {
+        Some(vec![
+            NodeTypeDescription {
+                type_definition_node: NodeId::from(ObjectTypeId::BaseObjectType).into(),
+                include_sub_types: true,
+                data_to_return: Some(vec![QueryDataDescription {
+                    relative_path: RelativePath { elements: None },
+                    attribute_id: AttributeId::Value as u32,
+                    index_range: NumericRange::None,
+                }]),
+            },
+            NodeTypeDescription {
+                type_definition_node: NodeId::from(ObjectTypeId::BaseObjectType).into(),
+                include_sub_types: true,
+                data_to_return: Some(vec![QueryDataDescription {
+                    relative_path: RelativePath { elements: None },
+                    attribute_id: 0, // invalid -> BadAttributeIdInvalid
+                    index_range: NumericRange::None,
+                }]),
+            },
+        ])
+    };
+
+    // 1) REQUESTED -> op-level array aligned with parsingResults, nested
+    //    data_diagnostic_infos aligned with data_status_codes.
+    let request = QueryFirstRequest {
+        request_header: server.request_header(OP_BITS),
+        view: ViewDescription::default(),
+        node_types: node_types(),
+        filter: ContentFilter { elements: None },
+        max_data_sets_to_return: 100,
+        max_references_to_return: 100,
+    };
+    let ResponseMessage::QueryFirst(response) = server.send(request).await else {
+        panic!("QueryFirst should return QueryFirstResponse");
+    };
+    let parsing_results = response
+        .parsing_results
+        .as_ref()
+        .expect("parsing results on the parse-failure path");
+    assert_eq!(parsing_results.len(), 2);
+    let diags = response
+        .diagnostic_infos
+        .as_ref()
+        .expect("op-level diagnosticInfos must be present when requested");
+    assert_eq!(
+        diags.len(),
+        parsing_results.len(),
+        "op-level diagnosticInfos must align with parsingResults (one per NodeTypeDescription)"
+    );
+    let failed = &parsing_results[1];
+    let data_status_codes = failed
+        .data_status_codes
+        .as_ref()
+        .expect("failing parsing result carries data status codes");
+    let data_diags = failed
+        .data_diagnostic_infos
+        .as_ref()
+        .expect("nested data_diagnostic_infos must be present when requested");
+    assert_eq!(
+        data_diags.len(),
+        data_status_codes.len(),
+        "nested data_diagnostic_infos must align with data_status_codes"
+    );
+
+    // 2) NOT REQUESTED -> neither level carries an array.
+    let request = QueryFirstRequest {
+        request_header: server.request_header(DiagnosticBits::empty()),
+        view: ViewDescription::default(),
+        node_types: node_types(),
+        filter: ContentFilter { elements: None },
+        max_data_sets_to_return: 100,
+        max_references_to_return: 100,
+    };
+    let ResponseMessage::QueryFirst(response) = server.send(request).await else {
+        panic!("QueryFirst should return QueryFirstResponse");
+    };
+    let parsing_results = response
+        .parsing_results
+        .as_ref()
+        .expect("parsing results on the parse-failure path");
+    assert_eq!(parsing_results.len(), 2);
+    assert!(
+        response.diagnostic_infos.is_none(),
+        "op-level diagnosticInfos must be absent when not requested"
+    );
+    assert!(
+        parsing_results[1].data_diagnostic_infos.is_none(),
+        "nested data_diagnostic_infos must be absent when not requested"
+    );
 }

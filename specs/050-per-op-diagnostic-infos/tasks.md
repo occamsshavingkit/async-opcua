@@ -88,8 +88,8 @@ no blocking prerequisite. Each user story is independent and can be implemented/
 
 ## Phase 7: Polish & Cross-Cutting
 
-- [ ] T015 Grep gate: confirm no per-op response construction among the affected services still hardcodes `diagnostic_infos: None` / `n: None` — `rg "diagnostic_infos: None|n: None" async-opcua-server/src/session/services async-opcua-server/src/node_manager` shows none for Browse/BrowseNext/History*/MonitoredItems*/Query (SetTriggering both arrays; Query both levels). Update `specs/conformance-audit/FINDINGS.md` P4-GEN-01 row from PARTIAL to FIXED with the per-service list.
-- [ ] T016 Full gate: `cargo test -p async-opcua-server` (lib + all integration binaries), `cargo clippy -p async-opcua-server --all-features` and default features, `cargo fmt --all` — all clean; confirm no result/status/ordering/size change in existing tests.
+- [X] T015 Grep gate: confirm no per-op response construction among the affected services still hardcodes `diagnostic_infos: None` / `n: None` — `rg "diagnostic_infos: None|n: None" async-opcua-server/src/session/services async-opcua-server/src/node_manager` shows none for Browse/BrowseNext/History*/MonitoredItems*/Query (SetTriggering both arrays; Query both levels). Update `specs/conformance-audit/FINDINGS.md` P4-GEN-01 row from PARTIAL to FIXED with the per-service list.
+- [X] T016 Full gate: `cargo test -p async-opcua-server` (lib + all integration binaries), `cargo clippy -p async-opcua-server --all-features` and default features, `cargo fmt --all` — all clean; confirm no result/status/ordering/size change in existing tests.
 
 ---
 

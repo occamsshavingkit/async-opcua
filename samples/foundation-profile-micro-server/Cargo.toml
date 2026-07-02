@@ -12,3 +12,24 @@ tokio = { version = "^1", default-features = false, features = ["macros", "rt", 
 path = "../../async-opcua"
 features = ["base-server"]
 default-features = false
+
+[features]
+# Profile behavior tests — NOT default; valid only under an isolated
+# `cargo test -p async-opcua-foundation-profile-micro-server --features profile-tests`
+# (see specs/054-profile-polish/tasks.md, test-graph unification caveat).
+profile-tests = []
+
+# Dev-only: in-tree client drives the profile tests; dev-deps do not affect the
+# built benchmark binary (absence verified via tools/check-profile-absence.sh).
+[dev-dependencies]
+tokio = { version = "^1", default-features = false, features = [
+  "macros",
+  "rt",
+  "net",
+  "time",
+] }
+
+[dev-dependencies.async-opcua]
+path = "../../async-opcua"
+features = ["client"]
+default-features = false

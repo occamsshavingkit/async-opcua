@@ -162,14 +162,14 @@ basic data-change monitoring works; deadband/triggering/events/methods compiled 
 
 ### Tests (red first)
 
-- [ ] T022 [P] [US2] Micro smoke test in
+- [X] T022 [P] [US2] Micro smoke test in
       `samples/foundation-profile-micro-server/tests/profile_smoke.rs`: CreateSubscription
       → CreateMonitoredItems (value change, queue size 1) → Publish notification flow,
       including publish-queue overflow handling; two parallel sessions. [Cite: Embedded
       DataChange Subscription facet CUs — Monitor Basic/Items 2/QueueSize_1/Value Change,
       Subscription Basic/Publish Min 02, PublishRequest Queue Overflow; Session Minimum 2
       Parallel; OPC 10000-4 §5.13/§5.14]
-- [ ] T023 [P] [US2] Micro rejection test in
+- [X] T023 [P] [US2] Micro rejection test in
       `samples/foundation-profile-micro-server/tests/service_rejection.rs`: deadband
       DataChangeFilter → `BadMonitoredItemFilterUnsupported`; EventFilter item →
       `BadMonitoredItemFilterUnsupported`; SetTriggering → `BadServiceUnsupported`;

@@ -17,7 +17,59 @@ functional servers.
 | minimal-server (contrast) | 7,631,864 B | unchanged surface (base-server, all gates) | | |
 | simple-server (contrast) | 15,862,224 B | | | |
 
+## Size ordering notes
+
+- nano < micro < embedded: monotonic as expected (each rung adds compiled surface).
+- standard (16,751,080 B) > simple-server (15,862,224 B): the `standard` alias
+  includes `discovery-server-registration` which compiles client-side periodic
+  registration code into the binary. simple-server uses the full `server` feature
+  (all gates) but does NOT use `discovery-server-registration`. This is expected
+  and documented — the profiles are a ladder of *profile surface*, not strictly
+  of binary size.
+- embedded (9,906,256 B) == pre-054 baseline (9,906,256 B): gated-out code
+  (events, alarms, history, etc.) was already LTO-dead-stripped in the base-server
+  build. The gates buy compile surface and capability honesty, not bytes.
+
 ## Guard notes (for T036 CI wiring)
+
+## Section accounting (T038)
+
+`size` output (text, data, bss — stripped binaries):
+
+| Build | text | data | bss | total |
+|-------|------|------|-----|-------|
+| nano | 6,454,185 | 308,320 | 11,928 | 6,774,433 |
+| micro | 6,894,401 | 315,360 | 11,272 | 7,221,033 |
+| embedded | 9,539,033 | 363,460 | 20,396 | 9,922,889 |
+| standard | 16,132,052 | 612,988 | 24,036 | 16,769,076 |
+
+Top text-section hotspots (unstripped, `nm -C --size-sort`):
+
+| Symbol | Size (B) | Present in |
+|--------|----------|------------|
+| `RequestMessage::decode_by_object_id` | ~66K | all |
+| `CertificateStore::read_crl_dir` | ~41K | all |
+| `SessionController::process_request` | ~30–35K | all |
+| `main::{closure}` | ~33–53K | all |
+| `regex_automata::meta::strategy::new` | ~22K | all |
+| `moka::sync::base_cache::Inner::do_run_pending_tasks` | ~21K | all |
+| `validate_certificate_chain` | ~20K | all |
+| `X509::from_pkey` | ~19K | all |
+| `MessageHandler::handle_message` | ~38K | micro+ (not nano) |
+| `create_monitored_items::{closure}` | ~21K | micro+ (not nano) |
+| `<ObjectId as Debug>::fmt` | ~24K | all |
+| `<T as der::decode::Decode>::decode` | ~25K | all |
+
+Key observations:
+- nano → micro delta (~440K text): dominated by subscription machinery
+  (`MessageHandler::handle_message`, `create_monitored_items`, sampler).
+- micro → embedded delta (~2.6M text): generated core namespace
+  (type system, standard nodes, method dispatch).
+- embedded → standard delta (~6.6M text): `discovery-server-registration`
+  pulls in the full client crate (periodic registration, secure channel,
+  session management).
+- Cross-cutting hotspots present in ALL profiles: crypto cert chain
+  validation, regex (der parsing), moka cache, backtrace machinery.
 
 - rbac sentinel: the rbac-off build mounts a zero-size stub at the SAME
   `crate::rbac` path (R6 one-code-shape design), so `opcua_server::rbac::` matches

@@ -10,6 +10,8 @@ use chrono::Duration as ChronoDuration;
 use chrono::Offset;
 use hashbrown::HashMap;
 
+#[cfg(not(feature = "history"))]
+use crate::config::HistoryServerCapabilities;
 #[cfg(all(feature = "method-call", feature = "subscriptions-standard"))]
 use crate::load_method_args;
 #[cfg(feature = "method-call")]
@@ -26,8 +28,6 @@ use crate::{
     },
     ServerCapabilities, ServerStatusWrapper,
 };
-#[cfg(not(feature = "history"))]
-use crate::config::HistoryServerCapabilities;
 #[cfg(feature = "diagnostics")]
 use crate::{
     config::ANONYMOUS_USER_TOKEN_ID,

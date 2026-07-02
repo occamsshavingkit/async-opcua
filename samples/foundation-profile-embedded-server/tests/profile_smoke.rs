@@ -38,9 +38,10 @@ async fn secure_channel_basic256sha256_sign_encrypt() {
     let tester = spawn_embedded().await;
 
     // Debug: check if server cert is loaded
-    let cert = tester.handle.info().server_certificate.read();
-    eprintln!("[embedded-debug] server cert loaded: {}", cert.is_some());
-    drop(cert);
+    {
+        let cert = tester.handle.info().server_certificate.read();
+        eprintln!("[embedded-debug] server cert loaded: {}", cert.is_some());
+    }
 
     let session = connect_secure(&tester).await;
 

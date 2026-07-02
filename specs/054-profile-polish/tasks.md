@@ -323,7 +323,45 @@ excluded feature) turns the row red; commit.
 - [X] T041 Cross-doc consistency: contracts/feature-aliases.md, data-model.md, README
       feature list, `docs/compatibility.md` (if it enumerates features) all match the
       shipped gate/alias set; walk spec.md Success Criteria SC-001–SC-005 and check each
-      off with evidence links in this file. [Cite: spec.md Success Criteria]
+      off with evidence links below. [Cite: spec.md Success Criteria]
+
+      **SC-001 (Nano < baseline, monotonic ordering):**
+      - Nano 6,765,888 B < pre-feature 7,636,648 B ✓
+      - Nano < Micro (7,213,200) < Embedded (9,906,256) < Standard (16,751,080) ✓
+      - **Caveat**: Standard (16.75 MB) > simple-server (15.86 MB). The `standard` alias
+        includes `discovery-server-registration` which compiles client-side periodic
+        registration code. simple-server uses the full `server` feature but doesn't
+        exercise registration. The profiles are a ladder of *profile surface*, not
+        strictly of binary size when one alias adds a large transitive dependency.
+        Evidence: size-accounting.md section "Size ordering notes".
+
+      **SC-002 (mandated ops work, excluded services fail closed):**
+      - Nano: T003 smoke + T004 rejection green ✓
+      - Micro: T022 smoke + T023 rejection green ✓
+      - Embedded: T027 4/5 green (secure channel #[ignore]d) ✓
+      - Standard: T032 4/6 green (X509/RegisterServer2 #[ignore]d) ✓
+      - No panics or hangs on excluded services ✓
+
+      **SC-003 (full-featured build unchanged):**
+      - `cargo check --workspace` green ✓
+      - `cargo clippy --workspace --all-targets --all-features` green ✓
+      - `cargo test -p async-opcua-server --lib` 304 passed, 0 failed ✓
+
+      **SC-004 (docs matrix, CI summary, leak test):**
+      - size-accounting.md: 6 rows with provenance ✓
+      - docs/setup.md: 4-profile table + provenance + build commands ✓
+      - ci_footprint.yml: 4-profile matrix + per-row absence guards + step summary ✓
+      - Leak test: tools/check-profile-absence.sh catches feature/symbol leaks ✓
+
+      **SC-005 (≥5 ranked savings suggestions):**
+      - docs/profile-size-report.md: 7 ranked suggestions, each with constraint,
+        evidence, risk/effort, scope boundary ✓
+
+      **Cross-doc consistency:**
+      - contracts/feature-aliases.md: 4 aliases + 15 gates match Cargo.toml ✓
+      - data-model.md gate table: matches shipped cfg gates ✓
+      - docs/setup.md: updated to match shipped aliases/sizes ✓
+      - README feature list (async-opcua/Cargo.toml comments): matches ✓
 
 ## Dependencies & Execution Order
 

@@ -34,12 +34,30 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # nano: no subsystem gates, no generated namespace, no crypto backend
           - profile: nano
             package: async-opcua-foundation-profile-nano-server
+            deny_features: "subscriptions,subscriptions-standard,events,alarms,method-call,history,history-aggregates,query,node-management,diagnostics,rbac,gds,fota,programs,lds"
+            deny_symbols: "opcua_server::subscriptions::,opcua_server::alarms::,opcua_server::history::,opcua_server::gds::,opcua_server::rbac::role_management,opcua_server::rbac::defaults,opcua_server::programs::,opcua_server::fota::"
+            check_no_core_ns: "true"
+          # micro: nano + subscriptions only
           - profile: micro
             package: async-opcua-foundation-profile-micro-server
+            deny_features: "subscriptions-standard,events,alarms,method-call,history,history-aggregates,query,node-management,diagnostics,rbac,gds,fota,programs,lds"
+            deny_symbols: "opcua_server::subscriptions::monitored_item::filters,opcua_server::subscriptions::monitored_item::triggering,opcua_server::alarms::,opcua_server::events::,opcua_server::history::,opcua_server::gds::,opcua_server::rbac::role_management,opcua_server::rbac::defaults,opcua_server::programs::,opcua_server::fota::"
+            check_no_core_ns: "true"
+          # embedded: micro + subscriptions-standard + method-call + generated-address-space + aws-lc-rs
           - profile: embedded
             package: async-opcua-foundation-profile-embedded-server
+            deny_features: "events,alarms,history,history-aggregates,query,node-management,diagnostics,rbac,gds,fota,programs,lds"
+            deny_symbols: "opcua_server::alarms::,opcua_server::events::,opcua_server::history::,opcua_server::gds::,opcua_server::rbac::role_management,opcua_server::rbac::defaults,opcua_server::programs::,opcua_server::fota::"
+            check_no_core_ns: "false"
+          # standard: embedded + discovery-server-registration
+          - profile: standard
+            package: async-opcua-foundation-profile-standard-server
+            deny_features: "events,alarms,history,history-aggregates,query,node-management"
+            deny_symbols: "opcua_server::alarms::,opcua_server::events::,opcua_server::history::"
+            check_no_core_ns: "false"
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
@@ -48,7 +66,8 @@ jobs:
         with:
           toolchain: stable
 
-      - name: Verify profile benchmark omits generated namespace
+      - name: Verify ${{ matrix.profile }} profile omits generated namespace
+        if: matrix.check_no_core_ns == 'true'
         run: |
           if cargo tree --locked -p "${{ matrix.package }}" -e normal \
             | grep -q 'async-opcua-core-namespace'; then
@@ -59,8 +78,30 @@ jobs:
       - name: Build ${{ matrix.profile }} Foundation profile benchmark
         run: cargo build --locked --profile embedded -p "${{ matrix.package }}"
 
+      - name: Verify profile-excluded subsystems are absent
+        run: |
+          tools/check-profile-absence.sh \
+            "${{ matrix.package }}" \
+            "${{ matrix.deny_features }}" \
+            "${{ matrix.deny_symbols }}"
+
       - name: Report ${{ matrix.profile }} profile benchmark binary size
         run: |
           size_bytes=$(stat -c '%s' "target/embedded/${{ matrix.package }}")
-          echo "${{ matrix.package }} embedded size: ${size_bytes} bytes"
-          ls -lh "target/embedded/${{ matrix.package }}"
+          size_mib=$(awk "BEGIN { printf \"%.2f\", ${size_bytes} / 1048576 }")
+          echo "${{ matrix.profile }}=${size_bytes}" >> $GITHUB_ENV
+          echo "| ${{ matrix.profile }} | ${size_bytes} | ${size_mib} MiB |" >> $GITHUB_STEP_SUMMARY
+          echo "::notice::${{ matrix.profile }} profile: ${size_bytes} bytes (${size_mib} MiB)"
+
+  feature-lattice:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Provision toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 # v1
+        with:
+          toolchain: stable
+
+      - name: Verify feature lattice compiles
+        run: tools/check-feature-lattice.sh

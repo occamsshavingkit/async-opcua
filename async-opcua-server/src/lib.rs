@@ -14,6 +14,7 @@ pub mod address_space;
 /// Mathematical aggregates (Part 13) support.
 #[cfg(feature = "history-aggregates")]
 pub mod aggregates;
+#[cfg(feature = "alarms")]
 pub mod alarms;
 /// Authentication helpers.
 pub mod auth;

@@ -1493,6 +1493,7 @@ impl SubscriptionCache {
         &self,
         session_id: u32,
         ids: &[u32],
+        #[cfg_attr(not(feature = "diagnostics"), allow(unused_variables))]
         info: Arc<ServerInfo>,
     ) -> Result<Vec<(StatusCode, Vec<MonitoredItemRef>)>, StatusCode> {
         let cache = {
@@ -1542,7 +1543,11 @@ impl SubscriptionCache {
             .unwrap_or_default()
     }
 
-    pub(crate) async fn teardown_session(&self, session_id: u32, info: &ServerInfo) {
+    pub(crate) async fn teardown_session(
+        &self,
+        session_id: u32,
+        #[cfg_attr(not(feature = "diagnostics"), allow(unused_variables))] info: &ServerInfo,
+    ) {
         let entry = {
             let mut lck = trace_write_lock!(self.inner);
             lck.session_subscriptions.remove(&session_id)

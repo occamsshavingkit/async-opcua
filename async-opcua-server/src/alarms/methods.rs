@@ -2,17 +2,13 @@
 
 use crate::address_space::AddressSpace;
 use crate::alarms::dialog::DialogRegistry;
-#[cfg(feature = "subscriptions")]
 use crate::alarms::dispatch::ServerAlarmEvent;
-#[cfg(feature = "subscriptions")]
 use crate::alarms::refresh_events::{RefreshEndEvent, RefreshStartEvent};
 use crate::alarms::registry::ConditionRegistry;
-#[cfg(feature = "subscriptions")]
 use crate::alarms::state_machine::Branch;
 use crate::alarms::state_machine::ConditionStateMachine;
 use crate::alarms::transitions::{acknowledge_alarm, confirm_alarm};
 use crate::node_manager::RequestContext;
-#[cfg(feature = "subscriptions")]
 use crate::MonitoredItemHandle;
 use opcua_core::events::AlarmEvent;
 use opcua_core::traits::ConditionMethodHandler;
@@ -361,7 +357,6 @@ impl ConditionRefreshHandler {
     }
 
     /// Callback executed when the ConditionRefresh method is called by a client.
-    #[cfg(feature = "subscriptions")]
     pub fn handle_condition_refresh(
         &self,
         context: &RequestContext,
@@ -372,7 +367,6 @@ impl ConditionRefreshHandler {
     }
 
     /// Callback executed when the ConditionRefresh2 method is called by a client.
-    #[cfg(feature = "subscriptions")]
     pub fn handle_condition_refresh2(
         &self,
         context: &RequestContext,
@@ -493,7 +487,6 @@ impl ConditionRefreshHandler {
         }
     }
 
-    #[cfg(feature = "subscriptions")]
     fn refresh_events(
         &self,
         context: &RequestContext,
@@ -644,20 +637,17 @@ pub fn register_condition_methods(
 ) {
     let handler = Arc::new(ConditionRefreshHandler::new(registry, address_space));
 
-    #[cfg(feature = "subscriptions")]
-    {
-        let refresh_handler = handler.clone();
-        core_node_manager.inner().add_method_callback_with_context(
-            MethodId::ConditionType_ConditionRefresh.into(),
-            move |ctx, _object_id, args| refresh_handler.handle_condition_refresh(ctx, args),
-        );
+    let refresh_handler = handler.clone();
+    core_node_manager.inner().add_method_callback_with_context(
+        MethodId::ConditionType_ConditionRefresh.into(),
+        move |ctx, _object_id, args| refresh_handler.handle_condition_refresh(ctx, args),
+    );
 
-        let refresh2_handler = handler.clone();
-        core_node_manager.inner().add_method_callback_with_context(
-            MethodId::ConditionType_ConditionRefresh2.into(),
-            move |ctx, _object_id, args| refresh2_handler.handle_condition_refresh2(ctx, args),
-        );
-    }
+    let refresh2_handler = handler.clone();
+    core_node_manager.inner().add_method_callback_with_context(
+        MethodId::ConditionType_ConditionRefresh2.into(),
+        move |ctx, _object_id, args| refresh2_handler.handle_condition_refresh2(ctx, args),
+    );
 
     let acknowledge_handler = handler.clone();
     core_node_manager.inner().add_method_callback_with_context(
@@ -724,19 +714,12 @@ pub fn register_dialog_condition_methods(
     );
 }
 
-fn notify_alarm_event(
-    #[cfg_attr(not(feature = "subscriptions"), allow(unused_variables))] context: &RequestContext,
-    #[cfg_attr(not(feature = "subscriptions"), allow(unused_variables))] event: &AlarmEvent,
-) {
-    #[cfg(feature = "subscriptions")]
-    {
-        let wrapper = ServerAlarmEvent { event };
-        let items = std::iter::once((&wrapper as &dyn Event, &event.source_node));
-        context.subscriptions.notify_events(items);
-    }
+fn notify_alarm_event(context: &RequestContext, event: &AlarmEvent) {
+    let wrapper = ServerAlarmEvent { event };
+    let items = std::iter::once((&wrapper as &dyn Event, &event.source_node));
+    context.subscriptions.notify_events(items);
 }
 
-#[cfg(feature = "subscriptions")]
 fn parse_u32_arg(args: &[Variant], index: usize) -> Result<u32, StatusCode> {
     let Some(arg) = args.get(index) else {
         return Err(StatusCode::BadInvalidArgument);
@@ -767,7 +750,6 @@ fn parse_localized_text_arg(args: &[Variant], index: usize) -> Result<LocalizedT
     }
 }
 
-#[cfg(feature = "subscriptions")]
 fn build_current_alarm_event(
     state_machine: &ConditionStateMachine,
     address_space: &AddressSpace,
@@ -795,7 +777,6 @@ fn build_current_alarm_event(
     }
 }
 
-#[cfg(feature = "subscriptions")]
 fn build_branch_alarm_event(
     state_machine: &ConditionStateMachine,
     branch: &Branch,

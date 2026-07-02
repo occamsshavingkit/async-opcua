@@ -130,7 +130,7 @@ rejection) green; symbol-absence script green; workspace suite (default features
 - [X] T018 [US1] Gate the LDS receive-side behind `lds`: `controller.rs:715,743`
       RegisterServer/RegisterServer2 arms + the bounded registry from feature 024;
       off ⇒ `BadServiceUnsupported` per-branch fault. [Cite: OPC 10000-12 §4.2.2/§5.1; OPC 10000-4 §5.5 RegisterServer/RegisterServer2]
-- [ ] T019 [US1] Gate alarms behind `alarms`: `alarms/` module decl, refs in
+- [X] T019 [US1] Gate alarms behind `alarms`: `alarms/` module decl, refs in
       `namespace/init.rs:5` and `node_manager/memory/simple.rs:13`, event dispatch
       touchpoints `alarms/dispatch.rs:110-114`, `alarms/methods.rs`. [Cite: OPC 10000-9]
 - [ ] T020 [US1] Gate the event engine behind `events`:

@@ -1,9 +1,10 @@
 use std::{
     collections::HashMap,
     sync::Arc,
-    time::Duration,
 };
-#[cfg(feature = "subscriptions")]
+#[cfg(any(feature = "subscriptions", feature = "alarms"))]
+use std::time::Duration;
+#[cfg(all(feature = "alarms", feature = "subscriptions"))]
 use std::sync::Weak;
 
 use async_trait::async_trait;
@@ -12,22 +13,24 @@ use opcua_nodes::{HasNodeId, NodeSetImport};
 
 use crate::{
     address_space::{read_node_value, write_node_value, AddressSpace, NodeType},
-    alarms::{AlarmSourceRegistry, LimitAlarm},
     node_manager::{
         DefaultTypeTree, NamespaceMetadata, NodeManagerBuilder, NodeManagersRef,
         ParsedReadValueId, RequestContext, ServerContext, WriteNode,
     },
 };
+#[cfg(feature = "alarms")]
+use crate::alarms::{AlarmSourceRegistry, LimitAlarm};
 #[cfg(feature = "history")]
 use crate::history::read::modification_infos_or_none;
 #[cfg(feature = "method-call")]
 use crate::node_manager::MethodCall;
 #[cfg(feature = "subscriptions")]
 use crate::{
-    alarms::ServerAlarmEvent,
     node_manager::{MonitoredItemRef, MonitoredItemUpdateRef, SyncSampler},
     CreateMonitoredItem, SubscriptionCache,
 };
+#[cfg(all(feature = "alarms", feature = "subscriptions"))]
+use crate::alarms::ServerAlarmEvent;
 use opcua_core::sync::RwLock;
 use opcua_types::{
     AttributeId, DataValue, NodeClass, NodeId, NumericRange, StatusCode, TimestampsToReturn,
@@ -182,8 +185,9 @@ pub struct SimpleNodeManagerImpl {
     history_backend: RwLock<Option<Arc<dyn crate::history::HistoryStorageBackend>>>,
     #[cfg(feature = "subscriptions")]
     subscriptions: RwLock<Option<Arc<SubscriptionCache>>>,
+    #[cfg(feature = "alarms")]
     alarm_sources: Arc<AlarmSourceRegistry>,
-    #[cfg(feature = "subscriptions")]
+    #[cfg(all(feature = "alarms", feature = "subscriptions"))]
     source_alarm_sampler_started: RwLock<bool>,
 }
 
@@ -194,14 +198,17 @@ impl InMemoryNodeManagerImpl for SimpleNodeManagerImpl {
         #[cfg(feature = "subscriptions")]
         {
             *self.subscriptions.write() = Some(context.subscriptions.clone());
-            let manager = self
-                .node_managers
-                .get_by_name::<SimpleNodeManager>(&self.name)
-                .expect("simple node manager must be registered before sampling alarm sources");
-            self.spawn_alarm_source_sampler(
-                Arc::clone(manager.address_space()),
-                Arc::downgrade(&context.subscriptions),
-            );
+            #[cfg(feature = "alarms")]
+            {
+                let manager = self
+                    .node_managers
+                    .get_by_name::<SimpleNodeManager>(&self.name)
+                    .expect("simple node manager must be registered before sampling alarm sources");
+                self.spawn_alarm_source_sampler(
+                    Arc::clone(manager.address_space()),
+                    Arc::downgrade(&context.subscriptions),
+                );
+            }
             self.samplers.run(
                 Duration::from_micros(
                     // If this is set too low the server will just spin at 100% CPU. Cap it at
@@ -372,7 +379,7 @@ impl InMemoryNodeManagerImpl for SimpleNodeManagerImpl {
         address_space: &RwLock<AddressSpace>,
         nodes_to_write: &mut [&mut WriteNode],
     ) -> Result<(), StatusCode> {
-        #[cfg(feature = "subscriptions")]
+        #[cfg(all(feature = "alarms", feature = "subscriptions"))]
         let mut source_writes: Vec<(NodeId, DataValue)> = Vec::new();
 
         for write in nodes_to_write {
@@ -392,7 +399,7 @@ impl InMemoryNodeManagerImpl for SimpleNodeManagerImpl {
             #[cfg(not(feature = "subscriptions"))]
             let _ = notification;
 
-            #[cfg(feature = "subscriptions")]
+            #[cfg(all(feature = "alarms", feature = "subscriptions"))]
             {
                 let source = &write.value().node_id;
                 if write.status().is_good()
@@ -404,7 +411,7 @@ impl InMemoryNodeManagerImpl for SimpleNodeManagerImpl {
             }
         }
 
-        #[cfg(feature = "subscriptions")]
+        #[cfg(all(feature = "alarms", feature = "subscriptions"))]
         if !source_writes.is_empty() {
             let mut address_space = trace_write_lock!(address_space);
 
@@ -879,8 +886,9 @@ impl SimpleNodeManagerImpl {
             history_backend: RwLock::new(None),
             #[cfg(feature = "subscriptions")]
             subscriptions: RwLock::new(None),
+            #[cfg(feature = "alarms")]
             alarm_sources: Arc::new(AlarmSourceRegistry::new()),
-            #[cfg(feature = "subscriptions")]
+            #[cfg(all(feature = "alarms", feature = "subscriptions"))]
             source_alarm_sampler_started: RwLock::new(false),
         }
     }
@@ -892,11 +900,13 @@ impl SimpleNodeManagerImpl {
     }
 
     /// Returns the registry of alarms bound to source Variables.
+    #[cfg(feature = "alarms")]
     pub fn alarm_source_registry(&self) -> &AlarmSourceRegistry {
         self.alarm_sources.as_ref()
     }
 
     /// Binds a limit alarm to a source Variable and registers it for source writes.
+    #[cfg(feature = "alarms")]
     pub fn monitor_alarm_source(&self, source: &NodeId, alarm: LimitAlarm) -> Arc<LimitAlarm> {
         self.node_managers
             .get_by_name::<SimpleNodeManager>(&self.name)
@@ -905,6 +915,7 @@ impl SimpleNodeManagerImpl {
     }
 
     /// Binds a limit alarm to a source Variable with opt-in periodic source sampling.
+    #[cfg(feature = "alarms")]
     pub fn monitor_alarm_source_sampled(
         &self,
         source: &NodeId,
@@ -917,6 +928,7 @@ impl SimpleNodeManagerImpl {
             .monitor_alarm_source_sampled(source, alarm, interval)
     }
 
+    #[cfg(feature = "alarms")]
     fn monitor_alarm_source_on_address_space(
         &self,
         address_space: &RwLock<AddressSpace>,
@@ -929,6 +941,7 @@ impl SimpleNodeManagerImpl {
         alarm
     }
 
+    #[cfg(feature = "alarms")]
     fn monitor_alarm_source_sampled_on_address_space(
         &self,
         address_space: &RwLock<AddressSpace>,
@@ -942,6 +955,7 @@ impl SimpleNodeManagerImpl {
         alarm
     }
 
+    #[cfg(feature = "alarms")]
     fn bind_alarm_source_on_address_space(
         address_space: &RwLock<AddressSpace>,
         source: &NodeId,
@@ -959,7 +973,7 @@ impl SimpleNodeManagerImpl {
         Arc::new(alarm)
     }
 
-    #[cfg(feature = "subscriptions")]
+    #[cfg(all(feature = "alarms", feature = "subscriptions"))]
     fn spawn_alarm_source_sampler(
         &self,
         address_space: Arc<RwLock<AddressSpace>>,
@@ -979,7 +993,7 @@ impl SimpleNodeManagerImpl {
         });
     }
 
-    #[cfg(feature = "subscriptions")]
+    #[cfg(all(feature = "alarms", feature = "subscriptions"))]
     async fn run_alarm_source_sampler(
         address_space: Arc<RwLock<AddressSpace>>,
         alarm_sources: Arc<AlarmSourceRegistry>,
@@ -1024,7 +1038,7 @@ impl SimpleNodeManagerImpl {
         }
     }
 
-    #[cfg(feature = "subscriptions")]
+    #[cfg(all(feature = "alarms", feature = "subscriptions"))]
     fn read_current_source_value(
         address_space: &RwLock<AddressSpace>,
         source: &NodeId,
@@ -1043,7 +1057,7 @@ impl SimpleNodeManagerImpl {
         )
     }
 
-    #[cfg(feature = "subscriptions")]
+    #[cfg(all(feature = "alarms", feature = "subscriptions"))]
     fn reevaluate_and_dispatch(
         alarm_sources: &AlarmSourceRegistry,
         space: &mut AddressSpace,
@@ -1065,7 +1079,7 @@ impl SimpleNodeManagerImpl {
     }
 
     /// Programmatically sets a source Variable value and re-evaluates bound alarms.
-    #[cfg(feature = "subscriptions")]
+    #[cfg(all(feature = "alarms", feature = "subscriptions"))]
     pub fn set_source_value(&self, source: &NodeId, value: DataValue) {
         if let Some(manager) = self
             .node_managers
@@ -1075,7 +1089,7 @@ impl SimpleNodeManagerImpl {
         }
     }
 
-    #[cfg(feature = "subscriptions")]
+    #[cfg(all(feature = "alarms", feature = "subscriptions"))]
     fn set_source_value_on_address_space(
         &self,
         address_space: &RwLock<AddressSpace>,
@@ -1312,6 +1326,7 @@ impl SimpleNodeManagerImpl {
 
 impl InMemoryNodeManager<SimpleNodeManagerImpl> {
     /// Binds a limit alarm to a source Variable and registers it for source writes.
+    #[cfg(feature = "alarms")]
     pub fn monitor_alarm_source(&self, source: &NodeId, alarm: LimitAlarm) -> Arc<LimitAlarm> {
         self.inner().monitor_alarm_source_on_address_space(
             self.address_space().as_ref(),
@@ -1321,6 +1336,7 @@ impl InMemoryNodeManager<SimpleNodeManagerImpl> {
     }
 
     /// Binds a limit alarm to a source Variable with opt-in periodic source sampling.
+    #[cfg(feature = "alarms")]
     pub fn monitor_alarm_source_sampled(
         &self,
         source: &NodeId,
@@ -1336,7 +1352,7 @@ impl InMemoryNodeManager<SimpleNodeManagerImpl> {
     }
 
     /// Programmatically sets a source Variable value and re-evaluates bound alarms.
-    #[cfg(feature = "subscriptions")]
+    #[cfg(all(feature = "alarms", feature = "subscriptions"))]
     pub fn set_source_value(&self, source: &NodeId, value: DataValue) {
         self.inner().set_source_value_on_address_space(
             self.address_space().as_ref(),

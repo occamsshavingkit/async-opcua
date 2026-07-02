@@ -67,13 +67,14 @@ use super::{
     view::{AddReferenceResult, ExternalReference, ExternalReferenceRequest, NodeMetadata},
     AddNodeItem, AddReferenceItem, AttributeProvider, BrowseNode, BrowsePathItem, DefaultTypeTree,
     DeleteNodeItem, DeleteReferenceItem, DynNodeManager, NodeManagerCore, NodeMutator,
-    QueryRequest, ReadNode, RegisterNodeItem, RequestContext, ServerContext, ViewProvider,
-    WriteNode,
+    ReadNode, RegisterNodeItem, RequestContext, ServerContext, ViewProvider, WriteNode,
 };
 #[cfg(feature = "history")]
 use super::{HistoryNode, HistoryProvider, HistoryUpdateDetails, HistoryUpdateNode};
 #[cfg(feature = "method-call")]
 use super::{MethodCall, MethodProvider};
+#[cfg(feature = "query")]
+use super::QueryRequest;
 #[cfg(feature = "subscriptions")]
 use super::{MonitoredItemProvider, MonitoredItemRef, MonitoredItemUpdateRef};
 
@@ -971,6 +972,7 @@ impl<TImpl: InMemoryNodeManagerImpl> ViewProvider for InMemoryNodeManager<TImpl>
             .await
     }
 
+    #[cfg(feature = "query")]
     async fn query(
         &self,
         context: &RequestContext,

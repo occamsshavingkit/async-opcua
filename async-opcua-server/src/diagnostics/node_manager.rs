@@ -15,14 +15,15 @@ use crate::{
         as_opaque_node_id, from_opaque_node_id, impl_translate_browse_paths_using_browse,
         AddReferenceResult, AttributeProvider, BrowseNode, BrowsePathItem, DynNodeManager,
         ExternalReferenceRequest, NodeManagerBuilder, NodeManagerCore, NodeManagersRef,
-        NodeMetadata, NodeMutator, QueryRequest, ReadNode, RequestContext, ServerContext,
-        ViewProvider,
+        NodeMetadata, NodeMutator, ReadNode, RequestContext, ServerContext, ViewProvider,
     },
 };
 #[cfg(feature = "history")]
 use crate::node_manager::HistoryProvider;
 #[cfg(feature = "method-call")]
 use crate::node_manager::MethodProvider;
+#[cfg(feature = "query")]
+use crate::node_manager::QueryRequest;
 #[cfg(feature = "subscriptions")]
 use crate::node_manager::{MonitoredItemProvider, SyncSampler};
 use opcua_types::{
@@ -724,6 +725,7 @@ impl ViewProvider for DiagnosticsNodeManager {
         Ok(())
     }
 
+    #[cfg(feature = "query")]
     async fn query(
         &self,
         _context: &RequestContext,

@@ -101,7 +101,7 @@ rejection) green; symbol-absence script green; workspace suite (default features
       task deliberately: the aggregate hooks are inline in the same `simple.rs`
       history-read path — splitting would make two dispatches edit the same functions.)
       [Cite: OPC 10000-11 §6.1/§6.5; OPC 10000-4 §5.11 HistoryRead/HistoryUpdate; OPC 10000-13 §5]
-- [ ] T011 [US1] Gate QueryFirst/QueryNext behind `query`: dispatch arms
+- [X] T011 [US1] Gate QueryFirst/QueryNext behind `query`: dispatch arms
       (`message_handler.rs:357-383` range), `session/services/query.rs`,
       `node_manager/query.rs`. [Cite: OPC 10000-4 Annex B.2.3/B.2.4 (Query service set in 1.05.07)]
 - [ ] T012 [US1] Gate AddNodes/AddReferences/DeleteNodes/DeleteReferences behind

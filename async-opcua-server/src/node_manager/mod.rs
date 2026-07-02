@@ -39,6 +39,7 @@ mod model_change;
 #[cfg(feature = "subscriptions")]
 mod monitored_items;
 mod node_management;
+#[cfg(feature = "query")]
 mod query;
 mod utils;
 mod view;
@@ -66,7 +67,6 @@ pub use {
     },
     model_change::GeneralModelChangeEvent,
     node_management::{AddNodeItem, AddReferenceItem, DeleteNodeItem, DeleteReferenceItem},
-    query::{ParsedNodeTypeDescription, ParsedQueryDataDescription, QueryRequest},
     utils::*,
     view::{
         impl_translate_browse_paths_using_browse, AddReferenceResult, BrowseNode, BrowsePathItem,
@@ -85,11 +85,14 @@ pub use {
 };
 #[cfg(feature = "subscriptions")]
 pub use monitored_items::{MonitoredItemRef, MonitoredItemUpdateRef};
+#[cfg(feature = "query")]
+pub use query::{ParsedNodeTypeDescription, ParsedQueryDataDescription, QueryRequest};
 
 pub(crate) use context::resolve_external_references;
 pub(crate) use context::DefaultTypeTreeGetter;
 #[cfg(feature = "history")]
 pub(crate) use history::HistoryReadDetails;
+#[cfg(feature = "query")]
 pub(crate) use query::QueryContinuationPoint;
 pub(crate) use view::{BrowseContinuationPoint, ExternalReferencesContPoint};
 
@@ -542,6 +545,7 @@ pub trait ViewProvider {
     /// The node manager should set a continuation point if it reaches
     /// limits, but is responsible for not exceeding max_data_sets_to_return
     /// and max_references_to_return.
+    #[cfg(feature = "query")]
     async fn query(
         &self,
         context: &RequestContext,

@@ -395,10 +395,12 @@ impl MessageHandler {
 
             RequestMessage::Write(request) => self.write(request, data),
 
+            #[cfg(feature = "query")]
             RequestMessage::QueryFirst(request) => {
                 async_service_call!(services::query_first, self, request, data)
             }
 
+            #[cfg(feature = "query")]
             RequestMessage::QueryNext(request) => {
                 async_service_call!(services::query_next, self, request, data)
             }

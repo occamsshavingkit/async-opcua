@@ -19,6 +19,7 @@ mod method;
 #[cfg(feature = "subscriptions")]
 mod monitored_items;
 mod node_management;
+#[cfg(feature = "query")]
 mod query;
 #[cfg(feature = "subscriptions")]
 mod subscriptions;
@@ -33,6 +34,7 @@ pub(super) use method::*;
 #[cfg(feature = "subscriptions")]
 pub(super) use monitored_items::*;
 pub(super) use node_management::*;
+#[cfg(feature = "query")]
 pub(super) use query::*;
 #[cfg(feature = "subscriptions")]
 pub(super) use subscriptions::*;

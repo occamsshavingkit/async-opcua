@@ -10,7 +10,9 @@ use crate::authenticator::UserToken;
 use crate::history::HistoryContinuationPointCache;
 use crate::identity_token::IdentityToken;
 use crate::info::ServerInfo;
-use crate::node_manager::{BrowseContinuationPoint, QueryContinuationPoint};
+use crate::node_manager::BrowseContinuationPoint;
+#[cfg(feature = "query")]
+use crate::node_manager::QueryContinuationPoint;
 #[cfg(feature = "history")]
 use super::continuation_points::ContinuationPoint;
 #[cfg(feature = "ecc")]
@@ -99,6 +101,7 @@ pub struct Session {
     #[cfg(feature = "history")]
     max_history_continuation_points: usize,
     /// Maximum number of continuation points for query.
+    #[cfg(feature = "query")]
     max_query_continuation_points: usize,
     /// Client application description
     application_description: ApplicationDescription,
@@ -114,6 +117,7 @@ pub struct Session {
     #[cfg(feature = "history")]
     history_continuation_points: HistoryContinuationPointCache,
     /// Continuation points for querying.
+    #[cfg(feature = "query")]
     query_continuation_points: ContinuationPointCache<QueryContinuationPoint>,
     /// User token.
     user_token: Option<UserToken>,
@@ -152,6 +156,7 @@ impl Session {
             info.config.limits.max_browse_continuation_points,
             crate::constants::MAX_BROWSE_CONTINUATION_POINTS,
         );
+        #[cfg(feature = "query")]
         let max_query_continuation_points = bounded_continuation_point_limit(
             info.config.limits.max_query_continuation_points,
             crate::constants::MAX_QUERY_CONTINUATION_POINTS,
@@ -184,6 +189,7 @@ impl Session {
             max_browse_continuation_points,
             #[cfg(feature = "history")]
             max_history_continuation_points: info.config.limits.max_history_continuation_points,
+            #[cfg(feature = "query")]
             max_query_continuation_points,
             browse_continuation_points: ContinuationPointCache::new(
                 max_browse_continuation_points,
@@ -194,6 +200,7 @@ impl Session {
                 info.config.limits.max_history_continuation_points,
                 HISTORY_CONTINUATION_POINT_TTL,
             ),
+            #[cfg(feature = "query")]
             query_continuation_points: ContinuationPointCache::new(
                 max_query_continuation_points,
                 BROWSE_QUERY_CONTINUATION_POINT_TTL,
@@ -400,6 +407,7 @@ impl Session {
         self.history_continuation_points.remove(id)
     }
 
+    #[cfg(feature = "query")]
     pub(crate) fn add_query_continuation_point(
         &mut self,
         id: &ByteString,
@@ -415,6 +423,7 @@ impl Session {
         }
     }
 
+    #[cfg(feature = "query")]
     pub(crate) fn remove_query_continuation_point(
         &mut self,
         id: &ByteString,
@@ -427,7 +436,7 @@ impl Session {
         self.browse_continuation_points.entry_count() as usize
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, feature = "query"))]
     fn query_continuation_point_count_for_test(&self) -> usize {
         self.query_continuation_points.entry_count() as usize
     }

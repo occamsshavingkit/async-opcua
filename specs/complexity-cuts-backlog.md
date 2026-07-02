@@ -92,10 +92,12 @@ references indexed `by_source`/`by_target`; node lookup is `HashMap` (O(1)).
 
 ## Overlaps existing backlog
 
-- **`Variant::range_of` MultipleRanges** (`async-opcua-types/src/variant/mod.rs:1609`): O(n·m), bounded
-  by `MAX_INDICES=10` (10× over the array) — a constant-factor, not a DoS. Fold the perf cleanup into
-  **conformance-gap-backlog Tier 2 #4 (NumericRange)** when that disjoint-range work is done
-  (sorted-merge the intervals, single pass).
+- **`Variant::range_of` MultipleRanges** — ~~O(n·m) bounded by `MAX_INDICES=10`~~ **RESOLVED, entry was
+  stale** (verified 2026-07-02, feature 052): feature 017's per-dimension rework replaced the
+  disjoint-scan with `array_range_selection` + `row_major_indices` — dimension-count mismatch exits in
+  O(dims) and the selection output is bounded by the stored array size. The `MAX_INDICES` cap was
+  therefore no longer load-bearing and was removed by feature 052 (P4-ATTR-06, Part 4 Annex A.3 has no
+  dimension limit) without reintroducing any O(n·m) path.
 
 ## Verified NOT a problem — do NOT re-investigate
 

@@ -1994,3 +1994,50 @@ fn range_of_multidim_single_index_fewer_dims_is_nodata() {
         StatusCode::BadIndexRangeNoData
     );
 }
+
+/// P4-ATTR-06 / Part 4 Annex A.3: no limit on dimension count — an 11-dimension per-dimension
+/// range must select from an 11-dimension array (the old parse cap made this BadIndexRangeInvalid).
+#[test]
+fn range_of_multidim_11d_block() {
+    // 11-D array of extent 2×1×…×1 (product 2), values [10, 20].
+    let dims: Vec<u32> = std::iter::once(2)
+        .chain(std::iter::repeat_n(1, 10))
+        .collect();
+    let v = multidim_i32(&[10, 20], &dims);
+    // Select element (1,0,…,0).
+    let range = nr("1,0,0,0,0,0,0,0,0,0,0");
+    let Variant::Array(a) = v.range_of(&range).unwrap() else {
+        panic!("expected array");
+    };
+    assert_eq!(a.values, vec![Variant::Int32(20)]);
+    assert_eq!(a.dimensions, Some(vec![1; 11]));
+}
+
+/// P4-ATTR-06: set_range_of with an 11-dimension range writes the selected block.
+#[test]
+fn set_range_of_multidim_11d() {
+    let dims: Vec<u32> = std::iter::once(2)
+        .chain(std::iter::repeat_n(1, 10))
+        .collect();
+    let mut v = multidim_i32(&[10, 20], &dims);
+    let other = multidim_i32(&[99], &[1; 11]);
+    v.set_range_of(&nr("1,0,0,0,0,0,0,0,0,0,0"), &other)
+        .expect("11-dim set_range_of should succeed");
+    let Variant::Array(a) = v else {
+        panic!("expected array")
+    };
+    assert_eq!(a.values, vec![Variant::Int32(10), Variant::Int32(99)]);
+}
+
+/// P4-ATTR-06: a huge (but input-bounded) dimension count against a small array fails fast with
+/// BadIndexRangeNoData — valid syntax, rank mismatch — with O(dims) work and no panic.
+#[test]
+fn range_of_multidim_1024d_rank_mismatch_is_nodata() {
+    let big = vec!["0"; 1024].join(",");
+    let range = nr(&big);
+    let v = multidim_i32(&[0, 1, 2, 3, 4, 5, 6, 7, 8], &[3, 3]);
+    assert_eq!(
+        v.range_of(&range).unwrap_err(),
+        StatusCode::BadIndexRangeNoData
+    );
+}

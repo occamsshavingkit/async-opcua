@@ -1,5 +1,5 @@
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan:
-specs/050-per-op-diagnostic-infos/plan.md
+specs/051-residual-diagnostic-infos/plan.md
 <!-- SPECKIT END -->

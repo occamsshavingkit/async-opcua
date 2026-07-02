@@ -391,11 +391,12 @@ pub(crate) async fn translate_browse_paths(
             .operational_limits
             .max_nodes_per_translate_browse_paths_to_node_ids
     );
+    let return_diagnostics = request.request.request_header.return_diagnostics;
 
     let mut items: Vec<_> = paths
         .iter()
         .enumerate()
-        .map(|(i, p)| BrowsePathItem::new_root(p, i))
+        .map(|(i, p)| BrowsePathItem::new_root(p, i, return_diagnostics))
         .collect();
 
     let mut idx = 0;
@@ -446,8 +447,14 @@ pub(crate) async fn translate_browse_paths(
                 }
 
                 for (n, input_index) in next {
-                    let item =
-                        BrowsePathItem::new(n, input_index, &items[input_index], idx, iteration);
+                    let item = BrowsePathItem::new(
+                        n,
+                        input_index,
+                        &items[input_index],
+                        idx,
+                        iteration,
+                        return_diagnostics,
+                    );
                     if item.path().is_empty() && item.unmatched_browse_name().is_none() {
                         final_results.push(item);
                     } else {
@@ -498,12 +505,19 @@ pub(crate) async fn translate_browse_paths(
             }
         }
     }
+    let diagnostic_infos: Vec<_> = items
+        .iter_mut()
+        .take(paths.len())
+        .map(|it| it.take_diagnostic_info())
+        .collect();
+    let pairs: Vec<_> = results.into_iter().zip(diagnostic_infos).collect();
+    let (results, diagnostic_infos) = consume_results(pairs, return_diagnostics);
 
     Response {
         message: TranslateBrowsePathsToNodeIdsResponse {
             response_header: ResponseHeader::new_good(request.request_handle),
-            results: Some(results),
-            diagnostic_infos: None,
+            results,
+            diagnostic_infos,
         }
         .into(),
         request_id: request.request_id,

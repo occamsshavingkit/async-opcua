@@ -42,7 +42,7 @@ use tracing_futures::Instrument;
 use crate::{
     authenticator::UserToken,
     info::ServerInfo,
-    node_manager::NodeManagers,
+    node_manager::{consume_results, NodeManagers},
     subscriptions::SubscriptionCache,
     transport::tcp::{ConnectionTransport, Request, TransportPollResult},
     transport::Connector,
@@ -746,34 +746,43 @@ impl<T: ConnectionTransport> SessionController<T> {
                     StatusCode::Good => self.info.apply_register_server(request.server.clone()),
                     e => e,
                 };
-                let configuration_results =
-                    request
-                        .discovery_configuration
-                        .as_ref()
-                        .map(|configurations| {
-                            configurations
-                                .iter()
-                                .map(|configuration| {
-                                    register_server2_configuration_result(
-                                        &self.info,
-                                        &request.server,
-                                        status,
-                                        configuration,
-                                    )
-                                })
-                                .collect()
-                        });
+                let configuration_results: Option<Vec<StatusCode>> = request
+                    .discovery_configuration
+                    .as_ref()
+                    .map(|configurations| {
+                        configurations
+                            .iter()
+                            .map(|configuration| {
+                                register_server2_configuration_result(
+                                    &self.info,
+                                    &request.server,
+                                    status,
+                                    configuration,
+                                )
+                            })
+                            .collect()
+                    });
                 #[cfg(feature = "discovery-mdns")]
                 if status == StatusCode::Good && !request.server.is_online {
                     self.info.remove_registered_mdns(&request.server.server_uri);
                 }
+                let (configuration_results, diagnostic_infos) =
+                    if let Some(configuration_results) = configuration_results {
+                        let pairs = configuration_results
+                            .into_iter()
+                            .map(|status| (status, None))
+                            .collect();
+                        consume_results(pairs, request.request_header.return_diagnostics)
+                    } else {
+                        (None, None)
+                    };
                 let mut message: ResponseMessage = RegisterServer2Response {
                     response_header: ResponseHeader::new_service_result(
                         &request.request_header,
                         status,
                     ),
                     configuration_results,
-                    diagnostic_infos: None,
+                    diagnostic_infos,
                 }
                 .into();
                 message.apply_return_diagnostics(request.request_header.return_diagnostics);

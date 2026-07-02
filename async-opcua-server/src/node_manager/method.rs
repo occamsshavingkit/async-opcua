@@ -88,10 +88,17 @@ impl IntoResult for MethodCall {
     type Result = CallMethodResult;
 
     fn into_result(self) -> (Self::Result, Option<DiagnosticInfo>) {
+        let input_argument_diagnostic_infos =
+            if !self.diagnostic_bits.is_empty() && !self.argument_results.is_empty() {
+                Some(vec![DiagnosticInfo::default(); self.argument_results.len()])
+            } else {
+                None
+            };
+
         (
             CallMethodResult {
                 status_code: self.status,
-                input_argument_diagnostic_infos: None,
+                input_argument_diagnostic_infos,
                 input_argument_results: if !self.argument_results.is_empty() {
                     Some(self.argument_results)
                 } else {
@@ -139,4 +146,64 @@ macro_rules! load_method_args {
         }
 
     };
+}
+
+#[cfg(test)]
+mod tests {
+    use super::MethodCall;
+    use opcua_types::{CallMethodRequest, DiagnosticBits, NodeId, StatusCode, Variant};
+
+    fn call_with_bad_args(bits: DiagnosticBits) -> MethodCall {
+        let mut call = MethodCall::new(
+            CallMethodRequest {
+                object_id: NodeId::new(1, "obj"),
+                method_id: NodeId::new(1, "method"),
+                input_arguments: Some(vec![Variant::from(1u32), Variant::from("wrong")]),
+            },
+            bits,
+        );
+        call.set_argument_error(vec![StatusCode::Good, StatusCode::BadTypeMismatch]);
+        call
+    }
+
+    /// Part 4 §5.12.2.2: inputArgumentDiagnosticInfos corresponds to the
+    /// inputArguments; present only when diagnostics were requested. Content
+    /// is not populated (node-manager extension point), only alignment.
+    #[test]
+    fn input_argument_diagnostic_infos_gated_on_diagnostic_bits() {
+        use super::IntoResult;
+
+        // Requested -> aligned with input_argument_results.
+        let call = call_with_bad_args(DiagnosticBits::OPERATIONAL_LEVEL_SYMBOLIC_ID);
+        let (result, _) = call.into_result();
+        let arg_results = result
+            .input_argument_results
+            .as_ref()
+            .expect("argument results set");
+        assert_eq!(arg_results.len(), 2);
+        let diags = result
+            .input_argument_diagnostic_infos
+            .as_ref()
+            .expect("nested inputArgumentDiagnosticInfos must be present when requested");
+        assert_eq!(diags.len(), arg_results.len());
+
+        // Not requested -> absent.
+        let call = call_with_bad_args(DiagnosticBits::empty());
+        let (result, _) = call.into_result();
+        assert!(result.input_argument_results.is_some());
+        assert!(result.input_argument_diagnostic_infos.is_none());
+
+        // No argument results -> nothing to align, absent even when requested.
+        let call = MethodCall::new(
+            CallMethodRequest {
+                object_id: NodeId::new(1, "obj"),
+                method_id: NodeId::new(1, "method"),
+                input_arguments: None,
+            },
+            DiagnosticBits::OPERATIONAL_LEVEL_SYMBOLIC_ID,
+        );
+        let (result, _) = call.into_result();
+        assert!(result.input_argument_results.is_none());
+        assert!(result.input_argument_diagnostic_infos.is_none());
+    }
 }

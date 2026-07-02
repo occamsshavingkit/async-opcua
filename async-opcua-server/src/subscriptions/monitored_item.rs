@@ -109,6 +109,7 @@ impl FilterType {
         filter: ExtensionObject,
         eu_range: Option<(f64, f64)>,
         type_tree: &dyn TypeTree,
+        diagnostic_bits: DiagnosticBits,
     ) -> (Option<ExtensionObject>, Result<FilterType, StatusCode>) {
         // Check if the filter is a supported filter type
         if filter.is_null() {
@@ -121,7 +122,13 @@ impl FilterType {
                 (None, res.map(FilterType::DataChangeFilter))
             },
             v: EventFilter => {
-                let (res, filter_res) = ParsedEventFilter::parse(v, type_tree);
+                let (mut res, filter_res) = ParsedEventFilter::parse(v, type_tree);
+                if !diagnostic_bits.is_empty() {
+                    if let Some(select_clause_results) = &res.select_clause_results {
+                        res.select_clause_diagnostic_infos =
+                            Some(vec![DiagnosticInfo::default(); select_clause_results.len()]);
+                    }
+                }
                 (
                     Some(ExtensionObject::from_message(res)),
                     filter_res.map(FilterType::EventFilter),
@@ -223,8 +230,12 @@ impl CreateMonitoredItem {
         type_tree: &dyn TypeTree,
         eu_range: Option<(f64, f64)>,
     ) -> Self {
-        let (filter_res, filter) =
-            FilterType::from_filter(req.requested_parameters.filter, eu_range, type_tree);
+        let (filter_res, filter) = FilterType::from_filter(
+            req.requested_parameters.filter,
+            eu_range,
+            type_tree,
+            diagnostic_bits,
+        );
         let sampling_interval =
             sanitize_sampling_interval(info, req.requested_parameters.sampling_interval);
         let queue_size = sanitize_queue_size(info, req.requested_parameters.queue_size as usize);
@@ -469,6 +480,7 @@ impl MonitoredItem {
         request: &MonitoredItemModifyRequest,
         eu_range: Option<(f64, f64)>,
         type_tree: &dyn TypeTree,
+        diagnostic_bits: DiagnosticBits,
     ) -> (Option<ExtensionObject>, StatusCode) {
         self.timestamps_to_return = timestamps_to_return;
         let eu_range = eu_range.or(self.eu_range);
@@ -476,6 +488,7 @@ impl MonitoredItem {
             request.requested_parameters.filter.clone(),
             eu_range,
             type_tree,
+            diagnostic_bits,
         );
         self.filter = match filter {
             Ok(f) => f,

@@ -380,6 +380,8 @@ pub(crate) async fn modify_monitored_items(
             .collect()
     };
 
+    let return_diagnostics = request.request.request_header.return_diagnostics;
+
     // Call modify first, then only pass successful modify's to the node managers.
     let results = {
         match request
@@ -391,6 +393,7 @@ pub(crate) async fn modify_monitored_items(
                 request.request.timestamps_to_return,
                 items_to_modify,
                 eu_ranges.into_iter().collect(),
+                return_diagnostics,
             )
             .await
         {
@@ -425,7 +428,6 @@ pub(crate) async fn modify_monitored_items(
         |node, node_manager| node.status_code().is_good() && node_manager.owns_node(node.node_id()),
     )
     .await;
-    let return_diagnostics = request.request.request_header.return_diagnostics;
     let pairs: Vec<(MonitoredItemModifyResult, Option<DiagnosticInfo>)> = results
         .into_iter()
         .map(|r| (r.into_result(), None))

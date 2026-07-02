@@ -293,8 +293,15 @@ impl HistoryUpdateNode {
         {
             self.status = StatusCode::BadHistoryOperationUnsupported;
         }
+        let diagnostic_infos = if !self.diagnostic_bits.is_empty() {
+            self.operation_results
+                .as_ref()
+                .map(|operation_results| vec![DiagnosticInfo::default(); operation_results.len()])
+        } else {
+            None
+        };
         HistoryUpdateResult {
-            diagnostic_infos: None,
+            diagnostic_infos,
             status_code: self.status,
             operation_results: self.operation_results,
         }
@@ -304,5 +311,70 @@ impl HistoryUpdateNode {
     /// to execute.
     pub fn details(&self) -> &HistoryUpdateDetails {
         &self.details
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::HistoryUpdateNode;
+    use crate::node_manager::HistoryUpdateDetails;
+    use opcua_types::{DeleteAtTimeDetails, DiagnosticBits, NodeId, StatusCode};
+
+    fn update_node(
+        bits: DiagnosticBits,
+        operation_results: Option<Vec<StatusCode>>,
+    ) -> HistoryUpdateNode {
+        let mut node = HistoryUpdateNode::new(
+            HistoryUpdateDetails::DeleteAtTime(DeleteAtTimeDetails {
+                node_id: NodeId::new(1, "hist"),
+                req_times: None,
+            }),
+            bits,
+        );
+        node.set_status(StatusCode::Good);
+        node.set_operation_results(operation_results);
+        node
+    }
+
+    /// Part 4 §5.10.5: HistoryUpdateResult.diagnosticInfos is the list of
+    /// diagnostic information for the operationResults; present only when
+    /// diagnostics were requested. Structural only (no content).
+    #[test]
+    fn history_update_result_diagnostic_infos_gated_on_diagnostic_bits() {
+        // Requested + operation results present -> aligned.
+        let node = update_node(
+            DiagnosticBits::OPERATIONAL_LEVEL_SYMBOLIC_ID,
+            Some(vec![
+                StatusCode::Good,
+                StatusCode::BadOutOfRange,
+                StatusCode::Good,
+            ]),
+        );
+        let result = node.into_result();
+        let ops = result
+            .operation_results
+            .as_ref()
+            .expect("operation results");
+        assert_eq!(ops.len(), 3);
+        let diags = result
+            .diagnostic_infos
+            .as_ref()
+            .expect("nested diagnosticInfos must be present when requested");
+        assert_eq!(diags.len(), ops.len());
+
+        // Not requested -> absent.
+        let node = update_node(
+            DiagnosticBits::empty(),
+            Some(vec![StatusCode::Good, StatusCode::BadOutOfRange]),
+        );
+        let result = node.into_result();
+        assert!(result.operation_results.is_some());
+        assert!(result.diagnostic_infos.is_none());
+
+        // No operation results -> nothing to align, absent even when requested.
+        let node = update_node(DiagnosticBits::OPERATIONAL_LEVEL_SYMBOLIC_ID, None);
+        let result = node.into_result();
+        assert!(result.operation_results.is_none());
+        assert!(result.diagnostic_infos.is_none());
     }
 }

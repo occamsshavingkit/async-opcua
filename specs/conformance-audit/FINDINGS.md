@@ -18,7 +18,7 @@
 > | P3-05 | **FIXED (feature 048)** | `ReferenceType::symmetric_inverse_name_is_valid()` node invariant (AddNodes already rejected it server-side) |
 > | P3-06 | **FIXED (feature 048)** | AddReferences rejects a 2nd HasTypeDefinition to any target |
 > | P3-07 | **FIXED (feature 048)** | VariableType subtype DataType/ValueRank refinement enforced on AddNodes |
-> | P3-09 | OPEN | `AccessLevelEx` optional Variable attribute not modeled |
+> | P3-09 | **FIXED (feature 053 US6)** | `AccessLevelEx` modeled on Variables (derived low byte ≡ AccessLevel, configurable extended bits, WriteMask bit 25) |
 > | P4-ATTR-02 | **FIXED-AS-VERIFIED (feature 053 US4)** | maxAge already honored at every refreshable-source seam; contract documented + locked in (incl. NaN/∞ no-panic) |
 > | P4-ATTR-03 | **FIXED (feature 053 US3)** | LocalizedText write locale rules (null-text delete, invariant-locale set, delete-all) + `Bad_LocaleNotSupported` locked in |
 > | P4-ATTR-04 | **FIXED (feature 053 US2)** | write range/enum validation → `Bad_OutOfRange` on EURange/enum-set violations |
@@ -125,7 +125,7 @@ P4-NODEMGMT-01.
 | P3-06 | S3 | C | ⚠ | §7.13 (5317) | `HasTypeDefinition` exactly-one-per-Object/Variable not enforced on insert. | open/UNCERTAIN (2026-07-01 reconcile: AddNodes creates exactly one `memory_mgr_impl.rs:189-202`; AddReferences blocks same-target dupes `:386` but not a *second* HasTypeDefinition to a *different* target → **FIXED feature 048**: [1..1] cardinality enforced) |
 | P3-07 | S3 | C | ⚠ | §6.2.8 | Type-refinement subtype rules not enforced: a subtype's DataType/ValueRank may only further-restrict the supertype's; setters accept arbitrary changes. | open (2026-07-01 reconcile: CONFIRMED — no subtype-refinement validation → **FIXED feature 048**: VariableType DataType/ValueRank refinement enforced) |
 | P3-08 | S3 | A | ⚠ | §5.2 | Base optional attrs `RolePermissions`/`UserRolePermissions`/`AccessRestrictions` un-modeled (relevant to Part 18 role security). | **FIXED** (2026-07-01 reconcile: feature 031 RBAC — `base.rs:31-33/81-95/118-124` models RolePermissions + AccessRestrictions on the base node, readable via `AttributeId::{RolePermissions,AccessRestrictions}`) |
-| P3-09 | S3 | C | ⚠ | §5.6 | Variable `AccessLevelEx` optional attribute not modeled. | open (2026-07-01 reconcile: CONFIRMED — `variable.rs` has `access_level`/`user_access_level` only; no `access_level_ex` field or `AttributeId::AccessLevelEx` handling) |
+| P3-09 | S3 | C | ⚠ | §5.6 | Variable `AccessLevelEx` optional attribute not modeled. | **FIXED** (2026-07-02, feature 053 US6: `Variable` gains derived `AccessLevelEx` — only extended bits stored, full value `(extended<<8)\|access_level` so the low byte can never diverge from AccessLevel per Part 3 §5.6.2; read/set attribute arms + `VariableBuilder::access_level_ex(AccessLevelExType)`; WriteMask bit 25 honored (§8.60); every existing Variable serves it with zero migration; non-Variables unchanged → `Bad_AttributeIdInvalid`. Tests: `access_level_ex_low_byte_mirrors_access_level`, `access_level_ex_extended_bits_configurable_and_writable`, `access_level_ex_invalid_on_non_variables`) |
 
 ## Part 2 — Security Model (+ Part 4 §6.1 mechanisms)
 **2-of-3 pass:** Claude (cert validation + SecureChannel crypto) + Codex (`FINDINGS-codex-p2.md`, 4).

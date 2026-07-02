@@ -2194,3 +2194,172 @@ async fn read_max_age_non_finite_does_not_panic() {
         assert_eq!(Some(Variant::Int32(7)), r[0].value, "maxAge={max_age}");
     }
 }
+
+// ---------------------------------------------------------------------------
+// Feature 053 US6 (P3-09): AccessLevelEx optional Variable attribute.
+// OPC UA Part 3 §5.6.2: AccessLevelEx (attribute id 27, AccessLevelExType,
+// UInt32) — the low 8 bits are identical to AccessLevel; extended bits add
+// nonatomicity/write-full-array-only/etc. Part 3 §8.60: WriteMask bit 25.
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn access_level_ex_low_byte_mirrors_access_level() {
+    let (tester, nm, session) = setup().await;
+    let id = nm.inner().next_node_id();
+    nm.inner().add_node(
+        nm.address_space(),
+        tester.handle.type_tree(),
+        VariableBuilder::new(&id, "AlxVar", "AlxVar")
+            .value(1i32)
+            .data_type(DataTypeId::Int32)
+            .access_level(AccessLevel::CURRENT_READ | AccessLevel::CURRENT_WRITE)
+            .user_access_level(AccessLevel::CURRENT_READ | AccessLevel::CURRENT_WRITE)
+            .build()
+            .into(),
+        &ObjectId::ObjectsFolder.into(),
+        &ReferenceTypeId::Organizes.into(),
+        Some(&VariableTypeId::BaseDataVariableType.into()),
+        Vec::new(),
+    );
+
+    let r = session
+        .read(
+            &[
+                read_value_id(AttributeId::AccessLevelEx, &id),
+                read_value_id(AttributeId::AccessLevel, &id),
+            ],
+            TimestampsToReturn::Both,
+            0.0,
+        )
+        .await
+        .unwrap();
+    let Some(Variant::UInt32(alx)) = r[0].value else {
+        panic!("AccessLevelEx must read as UInt32, got {:?}", r[0]);
+    };
+    let Some(Variant::Byte(al)) = r[1].value else {
+        panic!("AccessLevel must read as Byte, got {:?}", r[1]);
+    };
+    assert_eq!(
+        al as u32,
+        alx & 0xFF,
+        "Part 3 §5.6.2: the low byte of AccessLevelEx is identical to AccessLevel"
+    );
+
+    // The attribute also mirrors on a standard ns=0 Variable.
+    let r = session
+        .read(
+            &[
+                read_value_id(AttributeId::AccessLevelEx, VariableId::Server_ServiceLevel),
+                read_value_id(AttributeId::AccessLevel, VariableId::Server_ServiceLevel),
+            ],
+            TimestampsToReturn::Both,
+            0.0,
+        )
+        .await
+        .unwrap();
+    let Some(Variant::UInt32(alx)) = r[0].value else {
+        panic!("AccessLevelEx must read as UInt32, got {:?}", r[0]);
+    };
+    let Some(Variant::Byte(al)) = r[1].value else {
+        panic!("AccessLevel must read as Byte, got {:?}", r[1]);
+    };
+    assert_eq!(al as u32, alx & 0xFF);
+}
+
+#[tokio::test]
+async fn access_level_ex_invalid_on_non_variables() {
+    // AccessLevelEx exists only on Variables (Part 3 §5.9 attribute summary).
+    let (_tester, _nm, session) = setup().await;
+    let r = session
+        .read(
+            &[read_value_id(
+                AttributeId::AccessLevelEx,
+                NodeId::from(ObjectId::Server),
+            )],
+            TimestampsToReturn::Both,
+            0.0,
+        )
+        .await
+        .unwrap();
+    assert_eq!(Some(StatusCode::BadAttributeIdInvalid), r[0].status);
+}
+
+#[tokio::test]
+async fn access_level_ex_extended_bits_configurable_and_writable() {
+    use opcua::types::AccessLevelExType;
+
+    let (tester, nm, session) = setup().await;
+    let id = nm.inner().next_node_id();
+    nm.inner().add_node(
+        nm.address_space(),
+        tester.handle.type_tree(),
+        VariableBuilder::new(&id, "AlxExt", "AlxExt")
+            .value(1i32)
+            .data_type(DataTypeId::Int32)
+            .access_level(AccessLevel::CURRENT_READ)
+            .user_access_level(AccessLevel::CURRENT_READ)
+            .access_level_ex(AccessLevelExType::NonatomicRead)
+            .write_mask(WriteMask::ACCESS_LEVEL_EX)
+            .build()
+            .into(),
+        &ObjectId::ObjectsFolder.into(),
+        &ReferenceTypeId::Organizes.into(),
+        Some(&VariableTypeId::BaseDataVariableType.into()),
+        Vec::new(),
+    );
+
+    // Configured extended bit is served; low byte still mirrors AccessLevel.
+    let r = session
+        .read(
+            &[read_value_id(AttributeId::AccessLevelEx, &id)],
+            TimestampsToReturn::Both,
+            0.0,
+        )
+        .await
+        .unwrap();
+    let Some(Variant::UInt32(alx)) = r[0].value else {
+        panic!("expected UInt32, got {:?}", r[0]);
+    };
+    assert_ne!(
+        0,
+        alx & AccessLevelExType::NonatomicRead.bits() as u32,
+        "configured extended bit must be set: {alx:#x}"
+    );
+    assert_eq!(AccessLevel::CURRENT_READ.bits() as u32, alx & 0xFF);
+
+    // WriteMask bit 25 permits writing the attribute (Part 3 §8.60).
+    let wv = WriteValue {
+        node_id: id.clone(),
+        attribute_id: AttributeId::AccessLevelEx as u32,
+        index_range: NumericRange::None,
+        value: DataValue {
+            value: Some(Variant::UInt32(
+                AccessLevelExType::WriteFullArrayOnly.bits() as u32
+                    | AccessLevel::CURRENT_READ.bits() as u32,
+            )),
+            status: Some(StatusCode::Good),
+            source_timestamp: Some(DateTime::now()),
+            ..Default::default()
+        },
+    };
+    let statuses = session.write(&[wv]).await.unwrap();
+    assert_eq!(vec![StatusCode::Good], statuses);
+
+    let r = session
+        .read(
+            &[read_value_id(AttributeId::AccessLevelEx, &id)],
+            TimestampsToReturn::Both,
+            0.0,
+        )
+        .await
+        .unwrap();
+    let Some(Variant::UInt32(alx)) = r[0].value else {
+        panic!("expected UInt32, got {:?}", r[0]);
+    };
+    assert_ne!(0, alx & AccessLevelExType::WriteFullArrayOnly.bits() as u32);
+    assert_eq!(
+        0,
+        alx & AccessLevelExType::NonatomicRead.bits() as u32,
+        "write replaced the extended bits"
+    );
+}

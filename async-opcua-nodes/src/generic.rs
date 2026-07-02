@@ -124,6 +124,7 @@ pub fn new_node_from_attributes(
                 DataValue::default()
             },
             access_level: masked_or_default!(AttributeId::AccessLevel, a, access_level),
+            access_level_ex_extended: 0,
             user_access_level: masked_or_default!(
                 AttributeId::UserAccessLevel,
                 a,

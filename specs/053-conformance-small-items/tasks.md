@@ -182,15 +182,15 @@ configurable extended bits); non-Variables unchanged.
 **Independent test**: read attr 27 on plain + extended-bit Variables and on an Object
 (contracts §US6).
 
-- [ ] T028 [P] [US6] Claude: red-first tests — `read.rs`/`write.rs` integration + nodes-crate
+- [X] T028 [P] [US6] Claude: red-first tests — `read.rs`/`write.rs` integration + nodes-crate
   unit: low byte mirrors AccessLevel on any Variable; configured extended bit returned; Object →
   `Bad_AttributeIdInvalid`; set-attribute honors WriteMask bit 25. Part 3 §5.6.2, §8.60.
-- [ ] T029 [US6] codex: `async-opcua-nodes/src/variable.rs` — store extended bits only (derive
+- [X] T029 [US6] codex: `async-opcua-nodes/src/variable.rs` — store extended bits only (derive
   full value `(extended << 8) | access_level` so the low byte cannot diverge, research R6); read
   arm in `get_attribute_max_age` (:177-212), set arm in `set_attribute` (:215+), builder setter;
   write-mask mapping already exists (`utils.rs:107/:313`). One coherent job — the fragments have
   no independently observable behavior (atomicity note AT10). Part 3 §5.6.2.
-- [ ] T030 [US6] Update FINDINGS.md P3-09 row → FIXED with evidence; commit story 6.
+- [X] T030 [US6] Update FINDINGS.md P3-09 row → FIXED with evidence; commit story 6.
 
 ---
 

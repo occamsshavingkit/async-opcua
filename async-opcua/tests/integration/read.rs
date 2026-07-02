@@ -2050,3 +2050,146 @@ async fn localized_text_value_attribute_keeps_single_locale_semantics() {
         values[0].value
     );
 }
+
+// ---------------------------------------------------------------------------
+// Feature 053 US4 (P4-ATTR-02): Read maxAge semantics.
+// OPC UA Part 4 §5.11.2.2 (Table 47): maxAge = 0 → the server shall attempt to
+// read a new value from the data source; maxAge >= max Int32 → it shall attempt
+// a cached value; negative values are invalid. Verified architecture (053
+// research R4): read callbacks ARE the data source and are invoked on every
+// Read with the client's exact maxAge (fresh ≥ any freshness bound the client
+// can request), and plain in-memory values are their own source. These tests
+// lock that contract in, including the non-finite edge cases.
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn read_max_age_reaches_refreshable_sources() {
+    use opcua::server::node_manager::memory::{simple_node_manager, SimpleNodeManager};
+    use std::sync::Mutex;
+
+    let namespace = opcua::server::diagnostics::NamespaceMetadata {
+        namespace_uri: "urn:rustopcuatestserver".to_owned(),
+        namespace_index: 2,
+        ..Default::default()
+    };
+    let server = default_server().with_node_manager(simple_node_manager(namespace, "test"));
+    let mut tester = Tester::new(server, false).await;
+    let nm = tester
+        .handle
+        .node_managers()
+        .get_of_type::<SimpleNodeManager>()
+        .expect("SimpleNodeManager not found");
+    let (session, lp) = tester.connect_default().await.unwrap();
+    lp.spawn();
+    tokio::time::timeout(Duration::from_secs(2), session.wait_for_connection())
+        .await
+        .unwrap();
+
+    let id = NodeId::new(2, "max_age_source");
+    {
+        let mut space = nm.address_space().write();
+        let var = VariableBuilder::new(&id, "MaxAgeSource", "MaxAgeSource")
+            .value(0i32)
+            .data_type(DataTypeId::Int32)
+            .access_level(AccessLevel::CURRENT_READ)
+            .user_access_level(AccessLevel::CURRENT_READ)
+            .build();
+        space.insert(var, None::<&[(_, &NodeId, _)]>);
+    }
+
+    let seen: Arc<Mutex<Vec<f64>>> = Arc::new(Mutex::new(Vec::new()));
+    let seen_cb = seen.clone();
+    nm.inner().add_read_callback(id.clone(), move |_range, _ts, max_age| {
+        let mut seen = seen_cb.lock().unwrap();
+        seen.push(max_age);
+        // A fresh source read every invocation.
+        Ok(DataValue::new_now(seen.len() as i32))
+    });
+
+    // maxAge = 0: the server shall attempt a fresh source read → callback invoked.
+    let r = session
+        .read(
+            &[read_value_id(AttributeId::Value, &id)],
+            TimestampsToReturn::Both,
+            0.0,
+        )
+        .await
+        .unwrap();
+    assert_eq!(Some(Variant::Int32(1)), r[0].value);
+
+    // Mid-range maxAge is delivered verbatim to the source seam.
+    let r = session
+        .read(
+            &[read_value_id(AttributeId::Value, &id)],
+            TimestampsToReturn::Both,
+            12345.5,
+        )
+        .await
+        .unwrap();
+    assert_eq!(Some(Variant::Int32(2)), r[0].value);
+
+    // maxAge >= max Int32: a cached value is permitted; serving a fresh one
+    // satisfies any freshness bound. The parameter still reaches the source.
+    let r = session
+        .read(
+            &[read_value_id(AttributeId::Value, &id)],
+            TimestampsToReturn::Both,
+            i32::MAX as f64,
+        )
+        .await
+        .unwrap();
+    assert_eq!(Some(Variant::Int32(3)), r[0].value);
+
+    let seen = seen.lock().unwrap().clone();
+    assert_eq!(vec![0.0, 12345.5, i32::MAX as f64], seen);
+}
+
+#[tokio::test]
+async fn read_max_age_non_finite_does_not_panic() {
+    // Part 4 §5.11.2.2 defines maxAge as a Duration; negative is invalid
+    // (Bad_MaxAgeInvalid — existing behavior, regression-guarded here) and
+    // non-finite values must not crash the server. NaN fails no `< 0` guard, so
+    // the documented interpretation is: treated like any huge maxAge (cached
+    // permitted), never an error, never a panic.
+    let (tester, nm, session) = setup().await;
+    let id = nm.inner().next_node_id();
+    nm.inner().add_node(
+        nm.address_space(),
+        tester.handle.type_tree(),
+        VariableBuilder::new(&id, "MaxAgeEdge", "MaxAgeEdge")
+            .value(7i32)
+            .data_type(DataTypeId::Int32)
+            .access_level(AccessLevel::CURRENT_READ)
+            .user_access_level(AccessLevel::CURRENT_READ)
+            .build()
+            .into(),
+        &ObjectId::ObjectsFolder.into(),
+        &ReferenceTypeId::Organizes.into(),
+        Some(&VariableTypeId::BaseDataVariableType.into()),
+        Vec::new(),
+    );
+
+    // Negative → whole-service Bad_MaxAgeInvalid (existing contract).
+    let err = session
+        .read(
+            &[read_value_id(AttributeId::Value, &id)],
+            TimestampsToReturn::Both,
+            -1.0,
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(StatusCode::BadMaxAgeInvalid, err.status());
+
+    // NaN and +infinity: served without error (cached-permitted semantics).
+    for max_age in [f64::NAN, f64::INFINITY] {
+        let r = session
+            .read(
+                &[read_value_id(AttributeId::Value, &id)],
+                TimestampsToReturn::Both,
+                max_age,
+            )
+            .await
+            .unwrap();
+        assert_eq!(Some(Variant::Int32(7)), r[0].value, "maxAge={max_age}");
+    }
+}

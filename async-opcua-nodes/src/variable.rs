@@ -610,6 +610,11 @@ impl Variable {
     }
 
     /// Read the value of the variable.
+    ///
+    /// `max_age` is intentionally ignored for an in-memory variable: the stored
+    /// value is the data source at this layer, so any cached value satisfies OPC
+    /// UA Part 4 section 5.11.2.2 Table 47. There is no fresher source for
+    /// `Variable` itself to consult.
     pub fn value(
         &self,
         timestamps_to_return: TimestampsToReturn,

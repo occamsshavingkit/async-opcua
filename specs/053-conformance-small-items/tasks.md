@@ -120,20 +120,20 @@ values documented always-current; parameter never silently dropped for callback 
 **Independent test**: callback-backed node with controllable source timestamps, maxAge 0/mid/max
 (contracts §US4).
 
-- [ ] T019 [P] [US4] Claude: red-first tests — `SimpleNodeManager` callback-source tests (+
+- [X] T019 [P] [US4] Claude: red-first tests — `SimpleNodeManager` callback-source tests (+
   `read.rs` integration): maxAge=0 forces fresh sample; ≥ max Int32 permits cached; mid-range
   refreshes iff older; plain in-memory node self-consistent for any valid maxAge; negative maxAge
   still `Bad_MaxAgeInvalid` (regression); NaN/±infinity maxAge must not panic (NaN passes the
   `< 0.0` guard — document + test the chosen interpretation). Part 4 §5.11.2.2.
-- [ ] T020 [US4] codex: callback-path freshness — `node_manager/memory/simple.rs` callback
+- [X] T020 [US4] (VERIFY-BEFORE-FIX RESULT: no behavior gap — callbacks are invoked on every Read with the exact maxAge, so freshness ≥ any requested bound; task collapsed to contract documentation, merged with T021) codex: callback-path freshness — `node_manager/memory/simple.rs` callback
   invocation (:240-245): compare `DataValue.source_timestamp` age vs maxAge, trigger a fresh
   callback read when required (maxAge==0 or older-than); keep passing maxAge through to user
   callbacks. Part 4 §5.11.2.2.
-- [ ] T021 [US4] codex: sampler-backed freshness — the `SyncSampler`-backed internal sampled
+- [X] T021 [US4] (merged into the T020 documentation job — sampler caches verified to never serve the Read path; doc comments added at variable.rs value(), node.rs trait docs, simple.rs add_read_callback) codex: sampler-backed freshness — the `SyncSampler`-backed internal sampled
   values (`simple.rs:330/:338`): re-sample before answering when the cached value is older than
   maxAge; document the in-memory always-current contract where the sinks discard maxAge
   (`async-opcua-nodes/src/variable.rs:613`). Part 4 §5.11.2.2.
-- [ ] T022 [US4] Update FINDINGS.md P4-ATTR-02 row → FIXED (scoped per register note) with
+- [X] T022 [US4] Update FINDINGS.md P4-ATTR-02 row → FIXED (scoped per register note) with
   evidence; commit story 4.
 
 ---

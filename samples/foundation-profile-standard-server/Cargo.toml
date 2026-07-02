@@ -1,0 +1,33 @@
+[package]
+name = "async-opcua-foundation-profile-standard-server"
+version = "0.13.0"
+authors = ["Adam Lock <locka99@gmail.com>"]
+edition = "2021"
+publish = false
+
+[features]
+# Enables the profile behavior tests (tests/). NOT in default: under a unified
+# multi-package build feature unification inverts rejection semantics.
+# Run: cargo test -p async-opcua-foundation-profile-standard-server --features profile-tests
+profile-tests = []
+
+[dependencies]
+tokio = { version = "^1", default-features = false, features = ["macros", "rt", "signal"] }
+
+[dependencies.async-opcua]
+path = "../../async-opcua"
+features = ["standard"]
+default-features = false
+
+[dev-dependencies]
+tokio = { version = "^1", default-features = false, features = [
+  "macros",
+  "rt",
+  "net",
+  "time",
+] }
+
+[dev-dependencies.async-opcua]
+path = "../../async-opcua"
+features = ["client", "aws-lc-rs"]
+default-features = false

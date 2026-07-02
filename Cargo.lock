@@ -505,6 +505,7 @@ name = "async-opcua-foundation-profile-embedded-server"
 version = "0.13.0"
 dependencies = [
  "async-opcua",
+ "env_logger",
  "tokio",
 ]
 
@@ -518,6 +519,14 @@ dependencies = [
 
 [[package]]
 name = "async-opcua-foundation-profile-nano-server"
+version = "0.13.0"
+dependencies = [
+ "async-opcua",
+ "tokio",
+]
+
+[[package]]
+name = "async-opcua-foundation-profile-standard-server"
 version = "0.13.0"
 dependencies = [
  "async-opcua",

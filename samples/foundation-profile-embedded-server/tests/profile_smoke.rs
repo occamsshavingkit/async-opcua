@@ -31,7 +31,10 @@ use opcua::types::{
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "secure-channel test needs two-phase client connect; server cert IS generated"]
 async fn secure_channel_basic256sha256_sign_encrypt() {
-    let _ = env_logger::builder().is_test(true).parse_default_env().try_init();
+    let _ = env_logger::builder()
+        .is_test(true)
+        .parse_default_env()
+        .try_init();
     let tester = spawn_embedded().await;
 
     // Debug: check if server cert is loaded
@@ -45,7 +48,9 @@ async fn secure_channel_basic256sha256_sign_encrypt() {
     // Read the server's ServerStatus to confirm the session is functional.
     let values = session
         .read(
-            &[ReadValueId::from(NodeId::from(VariableId::Server_ServerStatus))],
+            &[ReadValueId::from(NodeId::from(
+                VariableId::Server_ServerStatus,
+            ))],
             TimestampsToReturn::Neither,
             0.0,
         )
@@ -266,7 +271,11 @@ async fn type_system_is_exposed() {
         .expect("Browse must succeed");
 
     assert!(
-        !browse_results[0].references.as_deref().unwrap_or_default().is_empty(),
+        !browse_results[0]
+            .references
+            .as_deref()
+            .unwrap_or_default()
+            .is_empty(),
         "Objects folder must contain nodes (Base Info Type System)"
     );
 }

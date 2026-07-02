@@ -245,7 +245,7 @@ tokens, LDS self-registration, Cancel proven; still no events/history/etc.
 
 ### Implementation (crate skeleton FIRST — tests need a crate to live in)
 
-- [ ] T031 [US4] Create `samples/foundation-profile-standard-server` (workspace member,
+- [X] T031 [US4] Create `samples/foundation-profile-standard-server` (workspace member,
       `publish = false`, `features = ["standard"]`, default-features off) with capacity
       config per data-model.md (≥50 sessions, ≥5 subscriptions, ≥500 monitored items);
       wire into the pre-push no-default check set. [Cite: Standard profile URI; Standard
@@ -271,11 +271,11 @@ tokens, LDS self-registration, Cancel proven; still no events/history/etc.
 
 ## Phase 6: User Story 5 — Measured Size Matrix and CI Guard (P5)
 
-- [ ] T034 [P] [US5] Measurement script `tools/footprint.sh`: builds each of the six
+- [X] T034 [P] [US5] Measurement script `tools/footprint.sh`: builds each of the six
       matrix packages in an ISOLATED cargo invocation (`--locked --profile embedded`),
       emits bytes + MiB + markdown rows; used identically by docs and CI (research.md
       R10 caveat is a hard rule in the script). [Cite: research.md R10/R12]
-- [ ] T035 [P] [US5] Lattice-check script `tools/check-feature-lattice.sh` (FR-006):
+- [X] T035 [P] [US5] Lattice-check script `tools/check-feature-lattice.sh` (FR-006):
       each alias standalone (`cargo check -p async-opcua --no-default-features
       --features <alias>`), each of the 15 gates individually disabled from the full
       server-crate surface (enumerated via `--no-default-features` + all-but-one),
@@ -316,7 +316,7 @@ excluded feature) turns the row red; commit.
 
 ## Phase 8: Polish & Final Verification
 
-- [ ] T040 Full pre-push gate: fmt, clippy `--workspace --all-targets --all-features`,
+- [X] T040 Full pre-push gate: fmt, clippy `--workspace --all-targets --all-features`,
       `RUSTFLAGS="-D warnings"` no-default checks (incl. all four foundation-profile
       crates), lattice script (T036), `cargo deny check advisories`, full workspace
       tests, integration suite. [Cite: SESSION-HANDOFF pre-push gate]

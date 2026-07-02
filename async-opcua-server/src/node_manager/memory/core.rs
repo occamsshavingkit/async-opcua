@@ -20,6 +20,7 @@ use crate::{
     address_space::{
         compute_user_role_permissions, read_node_value, AddressSpace, CoreNamespace, NodeType,
     },
+    #[cfg(not(feature = "history"))]
     config::HistoryServerCapabilities,
     node_manager::{
         NamespaceMetadata, NodeManagersRef, ParsedReadValueId, ParsedWriteValue, RequestContext,

@@ -32,8 +32,7 @@ pub const PROFILE_KEY: &str = "embedded";
 /// Human-readable benchmark name.
 pub const PROFILE_DISPLAY_NAME: &str = "Embedded 2017 UA Server Profile benchmark";
 /// The OPC Foundation profile URI this benchmark targets (reporting only).
-pub const PROFILE_TARGET_URI: &str =
-    "http://opcfoundation.org/UA-Profile/Server/EmbeddedUA2017";
+pub const PROFILE_TARGET_URI: &str = "http://opcfoundation.org/UA-Profile/Server/EmbeddedUA2017";
 /// One-line description of the served surface.
 pub const PROFILE_SURFACE: &str =
     "Micro surface plus Basic256Sha256 secure endpoints, standard data-change tier, method call";
@@ -124,8 +123,13 @@ fn demo_nodes(ns: u16) -> Vec<ImportedItem> {
             }],
         },
         ImportedItem {
-            node: Variable::new(&trigger_id, "demo_trigger_target", "demo_trigger_target", 0i32)
-                .into(),
+            node: Variable::new(
+                &trigger_id,
+                "demo_trigger_target",
+                "demo_trigger_target",
+                0i32,
+            )
+            .into(),
             references: vec![ImportedReference {
                 target_id: objects,
                 type_id: opcua::types::ReferenceTypeId::HasComponent.into(),
@@ -183,7 +187,9 @@ pub fn build_server(pki_dir: impl Into<PathBuf>) -> ServerBuilder {
         .private_key_path("private/private.pem")
         .discovery_urls(vec!["/".to_owned()])
         .with_node_manager(InMemoryNodeManagerBuilder::new(
-            move |context: ServerContext, address_space: &mut AddressSpace| -> SimpleNodeManagerImpl {
+            move |context: ServerContext,
+                  address_space: &mut AddressSpace|
+                  -> SimpleNodeManagerImpl {
                 let builder = SimpleNodeManagerBuilder::new_imports(
                     vec![Box::new(EmbeddedDemoNamespace)],
                     "embedded-demo",

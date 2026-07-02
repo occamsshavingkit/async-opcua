@@ -30,9 +30,9 @@ use opcua::server::{
     Limits, OperationalLimits, ServerBuilder, SubscriptionLimits, ANONYMOUS_USER_TOKEN_ID,
 };
 use opcua::types::{
-    BuildInfo, DataTypeId, DataValue, DateTime, ExtensionObject, LocalizedText, MessageSecurityMode,
-    NodeId, ObjectId, ObjectTypeId, ReferenceTypeId, ServerState, ServerStatusDataType, UAString,
-    VariableId, VariableTypeId,
+    BuildInfo, DataTypeId, DataValue, DateTime, ExtensionObject, LocalizedText,
+    MessageSecurityMode, NodeId, ObjectId, ObjectTypeId, ReferenceTypeId, ServerState,
+    ServerStatusDataType, UAString, VariableId, VariableTypeId,
 };
 
 /// Short profile key used for PKI directories and application URIs.
@@ -125,7 +125,9 @@ pub fn build_server(pki_dir: impl Into<PathBuf>) -> ServerBuilder {
         )
         .discovery_urls(vec!["/".to_owned()])
         .with_node_manager(InMemoryNodeManagerBuilder::new(
-            move |context: ServerContext, address_space: &mut AddressSpace| -> SimpleNodeManagerImpl {
+            move |context: ServerContext,
+                  address_space: &mut AddressSpace|
+                  -> SimpleNodeManagerImpl {
                 let builder = SimpleNodeManagerBuilder::new_imports(
                     vec![Box::new(MicroNamespace)],
                     "micro-ns0",
@@ -313,7 +315,10 @@ fn demo_counter_variable() -> ImportedItem {
                 VariableTypeId::BaseDataVariableType.into(),
                 ReferenceTypeId::HasTypeDefinition,
             ),
-            inverse_reference(ObjectId::ObjectsFolder.into(), ReferenceTypeId::HasComponent),
+            inverse_reference(
+                ObjectId::ObjectsFolder.into(),
+                ReferenceTypeId::HasComponent,
+            ),
         ],
     }
 }

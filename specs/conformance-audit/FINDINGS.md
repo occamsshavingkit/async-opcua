@@ -19,7 +19,8 @@
 > | P3-06 | **FIXED (feature 048)** | AddReferences rejects a 2nd HasTypeDefinition to any target |
 > | P3-07 | **FIXED (feature 048)** | VariableType subtype DataType/ValueRank refinement enforced on AddNodes |
 > | P3-09 | OPEN | `AccessLevelEx` optional Variable attribute not modeled |
-> | P4-ATTR-02/03/04 | DEFERRED (unchanged) | maxAge, LocalizedText-write locale, write range/enum validation |
+> | P4-ATTR-02/03 | DEFERRED (unchanged) | maxAge, LocalizedText-write locale |
+> | P4-ATTR-04 | **FIXED (feature 053 US2)** | write range/enum validation → `Bad_OutOfRange` on EURange/enum-set violations |
 >
 > **Likely NOT-A-BUG:** P5-03 (NamespaceMetadata NodeClass) — code is correct (ObjectType→Object; Property children→Variable); finding appears inverted.
 > **Newly confirmed FIXED (were open):** P4-SESS-07, P4-SESS-08, P4-DISC-02, P4-NODEMGMT-02, P4-MONITEM-03, P4-ATTR-05, P4-GEN-02, P4-GEN-03, P8-01, P6-JSON-02/03/04/05, P6-TCP-02/03/04, P3-02, P3-04, P3-08.
@@ -70,7 +71,7 @@ model(s) surfaced it.
 | P4-SUB-03 | S2 | C | ✅ | §5.13.2 | First Event discard places no `EventQueueOverflowEventType` in the queue (feature 030 gap). | **FIXED** (on the first overflow-discard for an event MonitoredItem with queue_size>1, an EventQueueOverflowEventType is placed as an extra queue entry — front when discardOldest=TRUE, end otherwise; never itself discarded. Test `event_queue_overflow_inserts_overflow_event`, red-first.) |
 | P4-ATTR-02 | S3 | C | ✅ | §5.11.2 T47 | `maxAge` (0=fresh, ≥maxInt32=cached) ignored — fine for in-memory; matters for slow external sources. | deferred |
 | P4-ATTR-03 | S3 | C | ✅ | §5.11.4 | LocalizedText write locale semantics / `Bad_LocaleNotSupported` not implemented. | deferred |
-| P4-ATTR-04 | S3 | C | ✅ | §5.11.4 T55 | No enum/range validation on writes → `Bad_OutOfRange` never returned (spec permits). | deferred |
+| P4-ATTR-04 | S3 | C | ✅ | §5.11.4 T55; P8 §5.3.2.2/§5.3.3.3-.4 | No enum/range validation on writes → `Bad_OutOfRange` never returned (spec permits). | **FIXED** (2026-07-02, feature 053 US2: shared write validator (`AddressSpace::validate_node_write` Value arm) now rejects numeric writes outside a Variable's `EURange` Property and integer writes not in the DataType's modeled `DataTypeDefinition::Enum` value set — scalar, whole-array and index-ranged, rejected before storage; unconstrained Variables untouched. Tests: `write_outside_eurange_is_rejected`, `write_array_element_outside_eurange_is_rejected`, `write_undefined_enum_value_is_rejected`, `write_unconstrained_integer_is_unaffected_by_range_validation`) |
 
 ## Part 6 — Mappings (encoding + transport)
 **3-of-3 pass:** Claude (binary/JSON DoS + transport) + Codex (`FINDINGS-codex-p6.md`) + Antigravity

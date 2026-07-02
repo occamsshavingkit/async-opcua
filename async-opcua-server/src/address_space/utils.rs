@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use crate::{
     info::ServerInfo,
     node_manager::{ParsedReadValueId, ParsedWriteValue, RequestContext, ServerContext},
@@ -5,10 +7,11 @@ use crate::{
     session::manager::{is_special_write_locale_id, locale_id_matches, normalized_locale_id},
 };
 use dashmap::DashMap;
-use opcua_nodes::TypeTree;
+use opcua_nodes::{NodeBase, TypeTree};
 use opcua_types::{
-    AttributeId, DataEncoding, DataTypeId, DataValue, DateTime, LocalizedText, NodeId,
-    NumericRange, PermissionType, RolePermissionType, StatusCode, TimestampsToReturn, Variant,
+    AttributeId, BrowseDirection, DataEncoding, DataTypeDefinition, DataTypeId, DataValue,
+    DateTime, LocalizedText, NodeId, NumericRange, PermissionType, QualifiedName, Range,
+    ReferenceTypeId, RolePermissionType, StatusCode, TimestampsToReturn, Variant,
     VariantScalarTypeId, VariantTypeId, WriteMask,
 };
 use tracing::debug;
@@ -365,6 +368,26 @@ pub fn validate_node_write(
     node_to_write: &ParsedWriteValue,
     type_tree: &dyn TypeTree,
 ) -> Result<(), StatusCode> {
+    validate_node_write_inner(None, node, context, node_to_write, type_tree)
+}
+
+pub(crate) fn validate_node_write_in_address_space(
+    address_space: &AddressSpace,
+    node: &NodeType,
+    context: &RequestContext,
+    node_to_write: &ParsedWriteValue,
+    type_tree: &dyn TypeTree,
+) -> Result<(), StatusCode> {
+    validate_node_write_inner(Some(address_space), node, context, node_to_write, type_tree)
+}
+
+fn validate_node_write_inner(
+    address_space: Option<&AddressSpace>,
+    node: &NodeType,
+    context: &RequestContext,
+    node_to_write: &ParsedWriteValue,
+    type_tree: &dyn TypeTree,
+) -> Result<(), StatusCode> {
     is_writable(context, node, node_to_write.attribute_id)?;
 
     if node_to_write.attribute_id != AttributeId::Value && node_to_write.index_range.has_range() {
@@ -380,12 +403,22 @@ pub fn validate_node_write(
 
     if node_to_write.attribute_id == AttributeId::Value {
         match node {
-            NodeType::Variable(var) => validate_value_to_write(
-                var,
-                value,
-                type_tree,
-                node_to_write.index_range.has_range(),
-            )?,
+            NodeType::Variable(var) => {
+                let has_index_range = node_to_write.index_range.has_range();
+                if let Some(address_space) = address_space {
+                    if !validate_modeled_enum_value_to_write(
+                        address_space,
+                        var,
+                        value,
+                        has_index_range,
+                    )? {
+                        validate_value_to_write(var, value, type_tree, has_index_range)?;
+                    }
+                    validate_value_against_eurange(address_space, var, value, type_tree)?;
+                } else {
+                    validate_value_to_write(var, value, type_tree, has_index_range)?;
+                }
+            }
             NodeType::VariableType(var_type) => validate_value_data_type_to_write(
                 var_type.data_type(),
                 var_type.value_rank(),
@@ -405,6 +438,159 @@ pub fn validate_node_write(
     );
 
     Ok(())
+}
+
+fn validate_modeled_enum_value_to_write(
+    address_space: &AddressSpace,
+    variable: &Variable,
+    value: &Variant,
+    has_index_range: bool,
+) -> Result<bool, StatusCode> {
+    let Some(valid_values) = modeled_enum_value_set(address_space, variable) else {
+        return Ok(false);
+    };
+
+    let Some(values_are_valid) = integer_values_are_in_enum_set(value, &valid_values) else {
+        return Ok(false);
+    };
+
+    validate_value_rank_to_write(variable.value_rank(), value.is_array(), has_index_range)?;
+
+    if values_are_valid {
+        Ok(true)
+    } else {
+        Err(StatusCode::BadOutOfRange)
+    }
+}
+
+fn modeled_enum_value_set(
+    address_space: &AddressSpace,
+    variable: &Variable,
+) -> Option<HashSet<i64>> {
+    let data_type = variable.data_type();
+    let data_type_node = address_space.find(&data_type)?;
+    let NodeType::DataType(data_type) = &*data_type_node else {
+        return None;
+    };
+    let Some(DataTypeDefinition::Enum(enum_definition)) = data_type.data_type_definition() else {
+        return None;
+    };
+    let fields = enum_definition.fields.as_ref()?;
+    if fields.is_empty() {
+        return None;
+    }
+
+    Some(fields.iter().map(|field| field.value).collect())
+}
+
+fn integer_values_are_in_enum_set(value: &Variant, valid_values: &HashSet<i64>) -> Option<bool> {
+    match value {
+        Variant::Array(array) => {
+            if array.values.is_empty() {
+                return None;
+            }
+
+            let mut values_are_valid = true;
+            for element in &array.values {
+                match scalar_integer_value_as_i64(element) {
+                    Ok(Some(value)) => values_are_valid &= valid_values.contains(&value),
+                    Ok(None) => return None,
+                    Err(()) => return Some(false),
+                };
+            }
+            Some(values_are_valid)
+        }
+        _ => match scalar_integer_value_as_i64(value) {
+            Ok(Some(value)) => Some(valid_values.contains(&value)),
+            Ok(None) => None,
+            Err(()) => Some(false),
+        },
+    }
+}
+
+fn scalar_integer_value_as_i64(value: &Variant) -> Result<Option<i64>, ()> {
+    match value {
+        Variant::SByte(value) => Ok(Some(i64::from(*value))),
+        Variant::Byte(value) => Ok(Some(i64::from(*value))),
+        Variant::Int16(value) => Ok(Some(i64::from(*value))),
+        Variant::UInt16(value) => Ok(Some(i64::from(*value))),
+        Variant::Int32(value) => Ok(Some(i64::from(*value))),
+        Variant::UInt32(value) => Ok(Some(i64::from(*value))),
+        Variant::Int64(value) => Ok(Some(*value)),
+        Variant::UInt64(value) if *value <= i64::MAX as u64 => Ok(Some(*value as i64)),
+        Variant::UInt64(_) => Err(()),
+        _ => Ok(None),
+    }
+}
+
+fn validate_value_against_eurange(
+    address_space: &AddressSpace,
+    variable: &Variable,
+    value: &Variant,
+    type_tree: &dyn TypeTree,
+) -> Result<(), StatusCode> {
+    let Some((low, high)) = read_variable_eurange(address_space, variable.node_id(), type_tree)
+    else {
+        return Ok(());
+    };
+
+    if numeric_values_are_in_range(value, low, high) {
+        Ok(())
+    } else {
+        Err(StatusCode::BadOutOfRange)
+    }
+}
+
+fn read_variable_eurange(
+    address_space: &AddressSpace,
+    source_node_id: &NodeId,
+    type_tree: &dyn TypeTree,
+) -> Option<(f64, f64)> {
+    let eurange_node = address_space.find_node_by_browse_name(
+        source_node_id,
+        Some((ReferenceTypeId::HasProperty, false)),
+        type_tree,
+        BrowseDirection::Forward,
+        QualifiedName::from("EURange"),
+    )?;
+
+    let value = eurange_node
+        .as_node()
+        .get_attribute(
+            TimestampsToReturn::Neither,
+            AttributeId::Value,
+            &NumericRange::None,
+            &DataEncoding::Binary,
+        )
+        .and_then(|data_value| data_value.value)?;
+
+    match value {
+        Variant::ExtensionObject(eurange) => eurange.inner_as::<Range>().and_then(|range| {
+            if range.low <= range.high {
+                Some((range.low, range.high))
+            } else {
+                None
+            }
+        }),
+        _ => None,
+    }
+}
+
+fn numeric_values_are_in_range(value: &Variant, low: f64, high: f64) -> bool {
+    match value {
+        Variant::Array(array) => array
+            .values
+            .iter()
+            .all(|element| scalar_numeric_value_is_in_range(element, low, high)),
+        _ => scalar_numeric_value_is_in_range(value, low, high),
+    }
+}
+
+fn scalar_numeric_value_is_in_range(value: &Variant, low: f64, high: f64) -> bool {
+    match value.as_f64() {
+        Some(value) => low <= value && value <= high,
+        None => true,
+    }
 }
 
 /// Return `true` if we support the given data encoding.

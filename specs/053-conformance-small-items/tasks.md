@@ -71,21 +71,21 @@ value unchanged; unconstrained Variables unaffected.
 **Independent test**: write matrix against an AnalogItem with EURange and an enum-typed Variable
 (contracts §US2).
 
-- [ ] T011 [P] [US2] Claude: red-first tests — `async-opcua/tests/integration/write.rs` + unit
+- [X] T011 [P] [US2] Claude: red-first tests — `async-opcua/tests/integration/write.rs` + unit
   tests in `async-opcua-server/src/address_space/utils.rs` (mod tests :708): out-of-range scalar
   rejected + value unchanged; in-range accepted; undefined enum value rejected, defined accepted
   (scalar AND array-element/index-ranged enum writes); index-ranged element out of range
   rejected; unconstrained Variable regression guard. Part 4 §5.11.4; Part 8 §5.3.3.3/.4.
-- [ ] T012 [US2] codex: EURange write validation in `validate_node_write`'s Value arm
+- [X] T012 [US2] codex: EURange write validation in `validate_node_write`'s Value arm
   (`address_space/utils.rs:381-398`, after RBAC/type checks, before `set_value_range`): resolve
   `EURange` via the `alarms/limit.rs:199 read_eurange` pattern; numeric scalar/array elements
   (incl. index-ranged) outside [low, high] → `BadOutOfRange`; no EURange → no check.
   Part 4 §5.11.4; Part 8 §5.3.2.2.
-- [ ] T013 [US2] codex: enumeration write validation in the same Value arm: resolve the DataType
+- [X] T013 [US2] codex: enumeration write validation in the same Value arm: resolve the DataType
   node's `DataTypeDefinition::Enum` fields (`async-opcua-nodes/src/data_type.rs:47`); values
   (scalar and array elements) not in the defined set → `BadOutOfRange`; no enum definition → no
   check. Part 4 §5.11.4; Part 8 §5.3.3.3/.4. (Depends: T012 — same call-site, land sequentially.)
-- [ ] T014 [US2] Update FINDINGS.md P4-ATTR-04 row → FIXED with evidence; commit story 2.
+- [X] T014 [US2] Update FINDINGS.md P4-ATTR-04 row → FIXED with evidence; commit story 2.
 
 ---
 

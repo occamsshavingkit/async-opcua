@@ -472,7 +472,7 @@ impl AddressSpace {
         node_to_write: &ParsedWriteValue,
         type_tree: &dyn TypeTree,
     ) -> Result<dashmap::mapref::one::RefMut<'a, NodeId, NodeType>, StatusCode> {
-        let Some(node) = self.find_mut(&node_to_write.node_id) else {
+        let Some(node) = self.find(&node_to_write.node_id) else {
             debug!(
                 "write_node_value result for read node id {}, attribute {:?} cannot find node",
                 node_to_write.node_id, node_to_write.attribute_id
@@ -480,7 +480,22 @@ impl AddressSpace {
             return Err(StatusCode::BadNodeIdUnknown);
         };
 
-        validate_node_write(&node, context, node_to_write, type_tree)?;
+        utils::validate_node_write_in_address_space(
+            self,
+            &node,
+            context,
+            node_to_write,
+            type_tree,
+        )?;
+        drop(node);
+
+        let Some(node) = self.find_mut(&node_to_write.node_id) else {
+            debug!(
+                "write_node_value result for read node id {}, attribute {:?} cannot find node",
+                node_to_write.node_id, node_to_write.attribute_id
+            );
+            return Err(StatusCode::BadNodeIdUnknown);
+        };
 
         Ok(node)
     }

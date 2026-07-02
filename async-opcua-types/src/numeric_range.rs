@@ -209,7 +209,6 @@ fn invalid_numeric_ranges() {
         "1,2,",
         "1,,2",
         "01234567890",
-        "0,1,2,3,4,5,6,7,8,9,10",
         "4294967296",
         "0:4294967296",
         "4294967296:0",
@@ -224,7 +223,34 @@ fn invalid_numeric_ranges() {
     }
 }
 
-const MAX_INDICES: usize = 10;
+/// P4-ATTR-06 / Part 4 Annex A.3: the NumericRange BNF is recursive with NO limit on the number
+/// of comma-separated dimensions — any spec-legal count must parse (the old MAX_INDICES=10 cap had
+/// no spec basis). Parse cost stays linear in input length.
+#[test]
+fn many_dimension_numeric_ranges() {
+    // 11 dimensions: previously the cap lock-in rejected exactly this.
+    let eleven = "0,1,2,3,4,5,6,7,8,9,10";
+    let range = eleven
+        .parse::<NumericRange>()
+        .expect("11 dims are spec-legal");
+    let NumericRange::MultipleRanges(ref ranges) = range else {
+        panic!("expected MultipleRanges");
+    };
+    assert_eq!(ranges.len(), 11);
+    // Display round-trips.
+    assert_eq!(range.to_string(), eleven);
+
+    // A large-but-input-bounded dimension count parses fine too.
+    let big = vec!["1:2"; 1024].join(",");
+    let range = big
+        .parse::<NumericRange>()
+        .expect("1024 dims are spec-legal");
+    let NumericRange::MultipleRanges(ref ranges) = range else {
+        panic!("expected MultipleRanges");
+    };
+    assert_eq!(ranges.len(), 1024);
+    assert_eq!(range.to_string(), big);
+}
 
 impl FromStr for NumericRange {
     type Err = NumericRangeError;
@@ -241,20 +267,16 @@ impl FromStr for NumericRange {
             let parts: Vec<_> = s.split(',').collect();
             match parts.len() {
                 1 => Self::parse_range(parts.first().ok_or(NumericRangeError)?),
-                2..=MAX_INDICES => {
-                    // Multi dimensions
+                _ => {
+                    // OPC UA Part 4 Annex A.3 uses recursive BNF for NumericRange and does not
+                    // cap dimension count. This is still bounded: one Vec entry per split part
+                    // from an already decoding-limit-bounded input string, so parse cost is linear.
                     let mut ranges = Vec::with_capacity(parts.len());
                     for p in &parts {
-                        if let Ok(range) = Self::parse_range(p) {
-                            ranges.push(range);
-                        } else {
-                            return Err(NumericRangeError);
-                        }
+                        ranges.push(Self::parse_range(p)?);
                     }
                     Ok(NumericRange::MultipleRanges(ranges))
                 }
-                // 0 parts, or more than MAX_INDICES (really????)
-                _ => Err(NumericRangeError),
             }
         }
     }

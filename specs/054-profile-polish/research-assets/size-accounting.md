@@ -12,7 +12,7 @@ functional servers.
 |-------|------------------|----------|-------|------|
 | nano (US1, T021) | 7,636,648 B (non-functional) | **6,765,888 B** (functional Nano 2017 surface) | −870,760 B (−11.4%) | 2026-07-02 |
 | micro (US2, T026) | 7,636,664 B (non-functional) | **7,213,200 B** (functional Micro 2017 surface) | −423,464 B (−5.5%) | 2026-07-02 |
-| embedded (US3) | 9,906,256 B (non-functional) | TBD | | |
+| embedded (US3, T030) | 9,906,256 B (non-functional) | **9,906,256 B** (functional Embedded 2017 surface) | 0 B (gated-out code was already LTO-dead-stripped) | 2026-07-02 |
 | standard (US4) | n/a (new) | TBD | | |
 | minimal-server (contrast) | 7,631,864 B | unchanged surface (base-server, all gates) | | |
 | simple-server (contrast) | 15,862,224 B | | | |

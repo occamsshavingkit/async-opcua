@@ -17,6 +17,7 @@ log/
 **/pki-client
 **/pki-server
 **/pki-ecc
+**/pki-embedded-test-*
 3rd-party/open62541/build/
 async-opcua/pki*
 async-opcua/certs

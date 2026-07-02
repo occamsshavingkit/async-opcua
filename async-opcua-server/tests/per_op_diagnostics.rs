@@ -22,14 +22,16 @@ use opcua_server::{ServerBuilder, ServerEndpoint, ServerHandle, ANONYMOUS_USER_T
 use opcua_types::{
     AttributeId, BrowseDescription, BrowseDirection, BrowseNextRequest, BrowsePath, BrowseRequest,
     BrowseResultMask, ContentFilter, CreateMonitoredItemsRequest, CreateSubscriptionRequest,
-    DateTime, DeleteMonitoredItemsRequest, DeleteRawModifiedDetails, DiagnosticBits,
-    ExtensionObject, HistoryReadRequest, HistoryReadValueId, HistoryUpdateRequest,
+    DateTime, DeleteMonitoredItemsRequest, DeleteRawModifiedDetails, DeleteSubscriptionsRequest,
+    DiagnosticBits, ExtensionObject, HistoryReadRequest, HistoryReadValueId, HistoryUpdateRequest,
     MessageSecurityMode, ModifyMonitoredItemsRequest, MonitoredItemCreateRequest,
     MonitoredItemModifyRequest, MonitoringMode, MonitoringParameters, NodeId, NodeTypeDescription,
-    NumericRange, ObjectId, ObjectTypeId, QualifiedName, QueryDataDescription, QueryFirstRequest,
-    ReadRawModifiedDetails, ReadValueId, ReferenceTypeId, RelativePath, RelativePathElement,
-    RequestHeader, SetMonitoringModeRequest, SetTriggeringRequest, TimestampsToReturn,
-    TranslateBrowsePathsToNodeIdsRequest, VariableId, ViewDescription,
+    NumericRange, ObjectId, ObjectTypeId, PublishRequest, QualifiedName, QueryDataDescription,
+    QueryFirstRequest, ReadRawModifiedDetails, ReadValueId, ReferenceTypeId, RelativePath,
+    RelativePathElement, RequestHeader, SetMonitoringModeRequest, SetPublishingModeRequest,
+    SetTriggeringRequest, SubscriptionAcknowledgement, TimestampsToReturn,
+    TransferSubscriptionsRequest, TranslateBrowsePathsToNodeIdsRequest, VariableId,
+    ViewDescription,
 };
 use tokio::net::TcpListener;
 
@@ -877,5 +879,172 @@ async fn translate_browse_paths_returns_aligned_diagnostic_infos_only_when_reque
         panic!("TranslateBrowsePaths should return TranslateBrowsePathsToNodeIdsResponse");
     };
     assert_eq!(response.results.as_ref().map(Vec::len), Some(2));
+    assert!(response.diagnostic_infos.is_none());
+}
+
+// ---------------------------------------------------------------------------
+// Feature 051 / US2: Subscription service set
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn set_publishing_mode_returns_aligned_diagnostic_infos_only_when_requested() {
+    let server = TestServer::start("set-publishing-mode-per-op-diagnostics").await;
+    let subscription_id = create_subscription(&server).await;
+
+    // 1) REQUESTED -> aligned array present. Mixed outcomes: valid + bogus id.
+    let request = SetPublishingModeRequest {
+        request_header: server.request_header(OP_BITS),
+        publishing_enabled: false,
+        subscription_ids: Some(vec![subscription_id, u32::MAX]),
+    };
+    let ResponseMessage::SetPublishingMode(response) = server.send(request).await else {
+        panic!("SetPublishingMode should return SetPublishingModeResponse");
+    };
+    let results = response.results.as_ref().expect("results");
+    assert_eq!(results.len(), 2);
+    let diags = response
+        .diagnostic_infos
+        .as_ref()
+        .expect("per-op diagnosticInfos must be present when requested");
+    assert_eq!(diags.len(), results.len());
+
+    // 2) NOT REQUESTED -> no array.
+    let request = SetPublishingModeRequest {
+        request_header: server.request_header(DiagnosticBits::empty()),
+        publishing_enabled: true,
+        subscription_ids: Some(vec![subscription_id, u32::MAX]),
+    };
+    let ResponseMessage::SetPublishingMode(response) = server.send(request).await else {
+        panic!("SetPublishingMode should return SetPublishingModeResponse");
+    };
+    assert_eq!(response.results.as_ref().map(Vec::len), Some(2));
+    assert!(response.diagnostic_infos.is_none());
+}
+
+#[tokio::test]
+async fn transfer_subscriptions_returns_aligned_diagnostic_infos_only_when_requested() {
+    let server = TestServer::start("transfer-subscriptions-per-op-diagnostics").await;
+    let subscription_id = create_subscription(&server).await;
+
+    // Transferring to the same session plus one bogus id: statuses are
+    // irrelevant to the structural contract, only alignment matters.
+    // 1) REQUESTED -> aligned array present.
+    let request = TransferSubscriptionsRequest {
+        request_header: server.request_header(OP_BITS),
+        subscription_ids: Some(vec![subscription_id, u32::MAX]),
+        send_initial_values: false,
+    };
+    let ResponseMessage::TransferSubscriptions(response) = server.send(request).await else {
+        panic!("TransferSubscriptions should return TransferSubscriptionsResponse");
+    };
+    let results = response.results.as_ref().expect("results");
+    assert_eq!(results.len(), 2);
+    let diags = response
+        .diagnostic_infos
+        .as_ref()
+        .expect("per-op diagnosticInfos must be present when requested");
+    assert_eq!(diags.len(), results.len());
+
+    // 2) NOT REQUESTED -> no array.
+    let request = TransferSubscriptionsRequest {
+        request_header: server.request_header(DiagnosticBits::empty()),
+        subscription_ids: Some(vec![subscription_id, u32::MAX]),
+        send_initial_values: false,
+    };
+    let ResponseMessage::TransferSubscriptions(response) = server.send(request).await else {
+        panic!("TransferSubscriptions should return TransferSubscriptionsResponse");
+    };
+    assert_eq!(response.results.as_ref().map(Vec::len), Some(2));
+    assert!(response.diagnostic_infos.is_none());
+}
+
+#[tokio::test]
+async fn delete_subscriptions_returns_aligned_diagnostic_infos_only_when_requested() {
+    let server = TestServer::start("delete-subscriptions-per-op-diagnostics").await;
+
+    // 1) REQUESTED -> aligned array present. Mixed outcomes: valid + bogus id.
+    let subscription_id = create_subscription(&server).await;
+    let request = DeleteSubscriptionsRequest {
+        request_header: server.request_header(OP_BITS),
+        subscription_ids: Some(vec![subscription_id, u32::MAX]),
+    };
+    let ResponseMessage::DeleteSubscriptions(response) = server.send(request).await else {
+        panic!("DeleteSubscriptions should return DeleteSubscriptionsResponse");
+    };
+    let results = response.results.as_ref().expect("results");
+    assert_eq!(results.len(), 2);
+    let diags = response
+        .diagnostic_infos
+        .as_ref()
+        .expect("per-op diagnosticInfos must be present when requested");
+    assert_eq!(diags.len(), results.len());
+
+    // 2) NOT REQUESTED -> no array.
+    let subscription_id = create_subscription(&server).await;
+    let request = DeleteSubscriptionsRequest {
+        request_header: server.request_header(DiagnosticBits::empty()),
+        subscription_ids: Some(vec![subscription_id, u32::MAX]),
+    };
+    let ResponseMessage::DeleteSubscriptions(response) = server.send(request).await else {
+        panic!("DeleteSubscriptions should return DeleteSubscriptionsResponse");
+    };
+    assert_eq!(response.results.as_ref().map(Vec::len), Some(2));
+    assert!(response.diagnostic_infos.is_none());
+}
+
+#[tokio::test]
+async fn publish_returns_aligned_diagnostic_infos_only_when_requested() {
+    let server = TestServer::start("publish-per-op-diagnostics").await;
+    // A live subscription with a short publishing interval so keep-alive /
+    // notification responses flow promptly.
+    let subscription_id = create_subscription(&server).await;
+    let _item_ids = create_two_items(&server, subscription_id).await;
+
+    // 1) REQUESTED, with one (bogus) acknowledgement -> ack results aligned
+    //    with the acknowledgements, diagnosticInfos aligned with the results.
+    let request = PublishRequest {
+        request_header: server.request_header(OP_BITS),
+        subscription_acknowledgements: Some(vec![SubscriptionAcknowledgement {
+            subscription_id,
+            sequence_number: 999_999,
+        }]),
+    };
+    let ResponseMessage::Publish(response) = server.send(request).await else {
+        panic!("Publish should return PublishResponse");
+    };
+    let results = response.results.as_ref().expect("ack results");
+    assert_eq!(results.len(), 1);
+    let diags = response
+        .diagnostic_infos
+        .as_ref()
+        .expect("per-op diagnosticInfos must be present when requested");
+    assert_eq!(diags.len(), results.len());
+
+    // 2) REQUESTED but NO acknowledgements -> nothing to align, no array.
+    let request = PublishRequest {
+        request_header: server.request_header(OP_BITS),
+        subscription_acknowledgements: None,
+    };
+    let ResponseMessage::Publish(response) = server.send(request).await else {
+        panic!("Publish should return PublishResponse");
+    };
+    assert!(response.results.is_none());
+    assert!(
+        response.diagnostic_infos.is_none(),
+        "no acknowledgements -> nothing to align -> no diagnosticInfos"
+    );
+
+    // 3) NOT REQUESTED -> no array.
+    let request = PublishRequest {
+        request_header: server.request_header(DiagnosticBits::empty()),
+        subscription_acknowledgements: Some(vec![SubscriptionAcknowledgement {
+            subscription_id,
+            sequence_number: 999_999,
+        }]),
+    };
+    let ResponseMessage::Publish(response) = server.send(request).await else {
+        panic!("Publish should return PublishResponse");
+    };
+    assert_eq!(response.results.as_ref().map(Vec::len), Some(1));
     assert!(response.diagnostic_infos.is_none());
 }

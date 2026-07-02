@@ -22,7 +22,8 @@ use opcua_nodes::{Event, TypeTree};
 use crate::{
     info::ServerInfo,
     node_manager::{
-        MonitoredItemRef, MonitoredItemUpdateRef, NodeManagersRef, TypeTreeForUserStatic,
+        consume_results, MonitoredItemRef, MonitoredItemUpdateRef, NodeManagersRef,
+        TypeTreeForUserStatic,
     },
     rbac,
     session::instance::Session,
@@ -31,11 +32,12 @@ use crate::{
 use opcua_core::{sync::RwLock, PublishResponseShared, RepublishResponseShared};
 use opcua_types::{
     AttributeId, CreateSubscriptionRequest, CreateSubscriptionResponse, DataValue, DateTime,
-    DateTimeUtc, ExtensionObject, ModifySubscriptionRequest, ModifySubscriptionResponse,
-    MonitoredItemCreateResult, MonitoredItemModifyRequest, MonitoredItemModifyResult,
-    MonitoringMode, NodeId, NotificationMessage, ObjectTypeId, PublishRequest, QualifiedName,
-    RepublishRequest, ResponseHeader, RolePermissionType, ServiceFault, SetPublishingModeRequest,
-    SetPublishingModeResponse, StatusCode, TimestampsToReturn, Variant,
+    DateTimeUtc, DiagnosticBits, DiagnosticInfo, ExtensionObject, ModifySubscriptionRequest,
+    ModifySubscriptionResponse, MonitoredItemCreateResult, MonitoredItemModifyRequest,
+    MonitoredItemModifyResult, MonitoringMode, NodeId, NotificationMessage, ObjectTypeId,
+    PublishRequest, QualifiedName, RepublishRequest, ResponseHeader, RolePermissionType,
+    ServiceFault, SetPublishingModeRequest, SetPublishingModeResponse, StatusCode,
+    TimestampsToReturn, Variant,
 };
 
 pub(super) struct RemovedSubscription {
@@ -44,6 +46,21 @@ pub(super) struct RemovedSubscription {
 }
 
 type PendingPublishResponse = (PendingPublish, Arc<NotificationMessage>, u32);
+
+fn publish_ack_diagnostics(
+    ack_results: Option<Vec<StatusCode>>,
+    bits: DiagnosticBits,
+) -> (Option<Vec<StatusCode>>, Option<Vec<DiagnosticInfo>>) {
+    let Some(ack_results) = ack_results else {
+        return (None, None);
+    };
+
+    let pairs: Vec<(StatusCode, Option<DiagnosticInfo>)> = ack_results
+        .into_iter()
+        .map(|status| (status, None))
+        .collect();
+    consume_results(pairs, bits)
+}
 
 pub(super) struct PendingRefreshDrain {
     subscription_id: u32,
@@ -329,21 +346,26 @@ impl SessionSubscriptions {
             return Err(StatusCode::BadNothingToDo);
         }
 
-        let mut results = Vec::new();
+        let mut pairs = Vec::with_capacity(ids.len());
         for id in ids {
-            results.push(match self.subscriptions.get_mut(id) {
-                Some(sub) => {
-                    sub.set_publishing_enabled(request.publishing_enabled);
-                    sub.reset_lifetime_counter();
-                    StatusCode::Good
-                }
-                None => StatusCode::BadSubscriptionIdInvalid,
-            })
+            pairs.push((
+                match self.subscriptions.get_mut(id) {
+                    Some(sub) => {
+                        sub.set_publishing_enabled(request.publishing_enabled);
+                        sub.reset_lifetime_counter();
+                        StatusCode::Good
+                    }
+                    None => StatusCode::BadSubscriptionIdInvalid,
+                },
+                None,
+            ));
         }
+        let (results, diagnostic_infos) =
+            consume_results(pairs, request.request_header.return_diagnostics);
         Ok(SetPublishingModeResponse {
             response_header: ResponseHeader::new_good(&request.request_header),
-            results: Some(results),
-            diagnostic_infos: None,
+            results,
+            diagnostic_infos,
         })
     }
 
@@ -795,6 +817,9 @@ impl SessionSubscriptions {
                 break;
             };
             let (subscription_id, notification) = self.pending_status_changes.pop_front().unwrap();
+            let return_diagnostics = publish_request.request.request_header.return_diagnostics;
+            let (results, diagnostic_infos) =
+                publish_ack_diagnostics(publish_request.ack_results, return_diagnostics);
             let _ = publish_request.response.send(
                 PublishResponseShared {
                     response_header: ResponseHeader::new_timestamped_service_result(
@@ -806,8 +831,8 @@ impl SessionSubscriptions {
                     available_sequence_numbers: None,
                     more_notifications: false,
                     notification_message: notification,
-                    results: publish_request.ack_results,
-                    diagnostic_infos: None,
+                    results,
+                    diagnostic_infos,
                 }
                 .into(),
             );
@@ -1028,6 +1053,9 @@ impl SessionSubscriptions {
             // to the list. This makes sure that the available sequence numbers list is not empty and contains
             // the NonAckedPublish we just added.
             let available_sequence_numbers = self.available_sequence_numbers(subscription_id);
+            let return_diagnostics = publish_request.request.request_header.return_diagnostics;
+            let (results, diagnostic_infos) =
+                publish_ack_diagnostics(publish_request.ack_results, return_diagnostics);
             let _ = publish_request.response.send(
                 PublishResponseShared {
                     response_header: ResponseHeader::new_timestamped_service_result(
@@ -1040,8 +1068,8 @@ impl SessionSubscriptions {
                     // Only set more_notifications on the last publish response.
                     more_notifications: is_last && more_notifications,
                     notification_message: Arc::clone(&notification),
-                    results: publish_request.ack_results,
-                    diagnostic_infos: None,
+                    results,
+                    diagnostic_infos,
                 }
                 .into(),
             );

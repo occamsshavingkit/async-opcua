@@ -38,7 +38,7 @@ use opcua_types::{
     TransferSubscriptionsResponse, Variant,
 };
 
-use crate::node_manager::RequestContextInner;
+use crate::node_manager::{consume_results, RequestContextInner};
 
 use super::{
     authenticator::UserToken,
@@ -1448,10 +1448,14 @@ impl SubscriptionCache {
             res.available_sequence_numbers = available_sequence_numbers;
         }
 
+        let pairs: Vec<_> = results.into_iter().map(|r| (r.1, None)).collect();
+        let (results, diagnostic_infos) =
+            consume_results(pairs, req.request_header.return_diagnostics);
+
         TransferSubscriptionsResponse {
             response_header: ResponseHeader::new_good(&req.request_header),
-            results: Some(results.into_iter().map(|r| r.1).collect()),
-            diagnostic_infos: None,
+            results,
+            diagnostic_infos,
         }
     }
 }

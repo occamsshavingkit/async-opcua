@@ -1,5 +1,5 @@
 use crate::{
-    node_manager::{NodeManagers, RequestContext},
+    node_manager::{consume_results, NodeManagers, RequestContext},
     session::{controller::Response, message_handler::Request},
     SubscriptionCache,
 };
@@ -20,6 +20,7 @@ pub(crate) async fn delete_subscriptions(
         request.request.subscription_ids,
         request.info.operational_limits.max_subscriptions_per_call
     );
+    let return_diagnostics = request.request.request_header.return_diagnostics;
 
     let results = match delete_subscriptions_inner(
         node_managers,
@@ -32,12 +33,14 @@ pub(crate) async fn delete_subscriptions(
         Ok(r) => r,
         Err(e) => return service_fault!(request, e),
     };
+    let pairs: Vec<_> = results.into_iter().map(|result| (result, None)).collect();
+    let (results, diagnostic_infos) = consume_results(pairs, return_diagnostics);
 
     Response {
         message: DeleteSubscriptionsResponse {
             response_header: ResponseHeader::new_good(request.request_handle),
-            results: Some(results),
-            diagnostic_infos: None,
+            results,
+            diagnostic_infos,
         }
         .into(),
         request_id: request.request_id,

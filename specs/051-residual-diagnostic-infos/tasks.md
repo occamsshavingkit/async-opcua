@@ -39,20 +39,20 @@ observable contract. Shared mechanism: `consume_results` + blanket `IntoResult` 
 
 ## Phase 4: US2 — Subscription service set (P1)
 
-- [ ] T105 [US2] SetPublishingMode (§5.14.4): in
+- [X] T105 [US2] SetPublishingMode (§5.14.4): in
   `async-opcua-server/src/subscriptions/session_subscriptions.rs::set_publishing_mode`, emit
   `(StatusCode, None)` pairs via `consume_results(pairs, request.request_header.return_diagnostics)`.
-- [ ] T106 [US2] DeleteSubscriptions (§5.14.8): in
+- [X] T106 [US2] DeleteSubscriptions (§5.14.8): in
   `async-opcua-server/src/session/services/subscriptions.rs`, same pairs treatment.
-- [ ] T107 [US2] TransferSubscriptions (§5.14.7): in `async-opcua-server/src/subscriptions/mod.rs`
+- [X] T107 [US2] TransferSubscriptions (§5.14.7): in `async-opcua-server/src/subscriptions/mod.rs`
   `transfer(...)`, pairs from `results.into_iter().map(|r| (r.1, None))` → `consume_results` with
   `req.request_header.return_diagnostics`.
-- [ ] T108 [US2] Publish (§5.14.5.2): BOTH wire `PublishResponseShared` sites in
+- [X] T108 [US2] Publish (§5.14.5.2): BOTH wire `PublishResponseShared` sites in
   `session_subscriptions.rs` (~:799 deliver_pending_status_changes, ~:1032 main delivery): when
   `publish_request.ack_results` is `Some(v)` → pairs → `consume_results` with
   `publish_request.request.request_header.return_diagnostics`; when `None` → both `None`. The
   `#[cfg(test)]` bench site in `subscriptions/subscription.rs` is out of scope.
-- [ ] T109 [P] [US2] Independent red-first tests in `tests/per_op_diagnostics.rs`: SetPublishingMode
+- [X] T109 [P] [US2] Independent red-first tests in `tests/per_op_diagnostics.rs`: SetPublishingMode
   (1 valid + 1 bogus id, len 2), DeleteSubscriptions (same), TransferSubscriptions (own sub, len 1),
   Publish (bogus ack, results Some(len 1) on first keep-alive; plus requested-but-no-acks → `None`).
 

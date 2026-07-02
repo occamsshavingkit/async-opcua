@@ -48,9 +48,8 @@ NodeClasses, and data types; read them and verify plausible live values; toggle 
    `SessionsDiagnosticsSummary.SessionDiagnosticsArray`, **Then** each returns one entry per live
    subscription/session with counters consistent with actual server state.
 3. **Given** `EnabledFlag` is written to `false` (by a client with sufficient rights or by server
-   configuration), **When** a client reads the diagnostics arrays, **Then** the server behaves per
-   Part 5 (diagnostics not collected; arrays empty or `BadNotReadable`-class status) and reading
-   `EnabledFlag` returns `false`.
+   configuration), **When** a client reads the diagnostics arrays, **Then** each array reads as
+   empty (diagnostics not collected, per Part 5) and reading `EnabledFlag` returns `false`.
 4. **Given** an anonymous/low-privilege session, **When** it attempts to write `EnabledFlag`,
    **Then** the write is rejected with an access-denied status.
 
@@ -85,28 +84,36 @@ write.
 
 ### User Story 3 - LocalizedText writes follow locale rules (P4-ATTR-03) (Priority: P2)
 
-A client writing a `LocalizedText` value experiences the locale semantics of OPC UA Part 4
-§5.11.4 (Write / Table 60 rules): writing text for a locale updates that locale's text without
-discarding other stored locales, writing a null text for a locale deletes that locale entry, and
-writing with a locale the server does not support yields `Bad_LocaleNotSupported`.
+A client writing a `LocalizedText` **attribute** (DisplayName, Description, InverseName)
+experiences the locale semantics of OPC UA Part 4 §5.11.4.1: writing text for a locale updates
+that locale's text without discarding other stored locales, writing a null text for a locale
+deletes that locale entry, and writing with a locale the server does not support yields
+`Bad_LocaleNotSupported`. For the **Value** attribute the spec leaves behavior server-specific;
+this server keeps single-locale value semantics, locked in by test.
 
 **Why this priority**: Multi-locale servers currently lose or mishandle per-locale text on write;
 the failure is observable but narrower in blast radius than US2.
 
-**Independent Test**: On a writable LocalizedText Variable, exercise add-locale, update-locale,
-delete-locale, and unsupported-locale writes and verify stored per-locale state after each step.
+**Independent Test**: On a writable LocalizedText attribute (e.g. Description of a test node),
+exercise add-locale, update-locale, delete-locale, unsupported-locale, and null-locale writes and
+verify stored per-locale state after each step.
 
 **Acceptance Scenarios**:
 
-1. **Given** a Variable holding text for locale "en", **When** a client writes text with locale
-   "de" (a server-supported locale), **Then** both "en" and "de" texts are subsequently readable
-   (each session reads its negotiated locale).
-2. **Given** stored texts for "en" and "de", **When** a client writes a LocalizedText with locale
-   "de" and null/empty text, **Then** the "de" entry is removed and "en" remains.
+1. **Given** a node's Description holds text for locale "en", **When** a client writes Description
+   text with locale "de" (a server-supported locale), **Then** both "en" and "de" texts are
+   subsequently readable (each session reads its negotiated locale).
+2. **Given** stored Description texts for "en" and "de", **When** a client writes a LocalizedText
+   with locale "de" and null/empty text, **Then** the "de" entry is removed and "en" remains.
 3. **Given** a server whose supported-locale set excludes "xx", **When** a client writes a
-   LocalizedText with locale "xx", **Then** the per-operation result is `Bad_LocaleNotSupported`.
-4. **Given** a write of a LocalizedText with a null locale, **Then** the server applies the
-   Part 4 default-locale rule (updates the invariant/default text) rather than rejecting.
+   LocalizedText attribute with locale "xx", **Then** the per-operation result is
+   `Bad_LocaleNotSupported` and the stored texts are unchanged.
+4. **Given** a write of a LocalizedText attribute with a null locale, **Then** the server applies
+   the Part 4 default-locale rule (updates the invariant/default text) rather than rejecting.
+5. **Given** a Variable whose Value is a LocalizedText, **When** clients write values with
+   different locales, **Then** the server's documented single-locale value semantics hold (last
+   write wins as a whole value) — the server-specific choice permitted by Part 4 §5.11.4.1,
+   locked in by test.
 
 ---
 
@@ -257,7 +264,9 @@ its children match the Part 5 model; the register row carries a final status wit
 - **FR-002**: Diagnostics values read from FR-001 nodes MUST reflect live server state (one array
   entry per live subscription/session) while `EnabledFlag` is true, and follow Part 5 semantics
   when false. [P5-04]
-- **FR-003**: `EnabledFlag` write access MUST be restricted (rejected for unprivileged sessions). [P5-04]
+- **FR-003**: `EnabledFlag` write access MUST be restricted (rejected for unprivileged sessions),
+  and `SessionSecurityDiagnosticsArray` MUST be readable only by administrative sessions (it
+  exposes per-session security parameters). [P5-04]
 - **FR-004**: Write operations MUST return `Bad_OutOfRange` per OPC UA Part 4 §5.11.4 when the
   written value violates the Variable's modeled EURange or enumeration value set, leaving the
   stored value unchanged; Variables without such constraints are unaffected. [P4-ATTR-04]

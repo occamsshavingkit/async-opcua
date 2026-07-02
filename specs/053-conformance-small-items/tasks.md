@@ -34,7 +34,8 @@ session+subscription, toggle `EnabledFlag`, verify gating (contracts/service-beh
   no behavior change. Data sources for Part 5 §6.3.3 arrays.
 - [ ] T003 [P] [US1] Claude: red-first tests — extend `async-opcua/tests/integration/read.rs`
   (`test_diagnostics` :1285 area) + `browse.rs`: children present with standard NodeIds/type
-  definitions; arrays return one entry per live subscription/session with plausible counters;
+  definitions (assert ALL Table-11 mandatory members incl. the already-served
+  `ServerDiagnosticsSummary`, for SC-002); arrays return one entry per live subscription/session with plausible counters;
   `EnabledFlag` reads config state; unprivileged `EnabledFlag` write → `Bad_UserAccessDenied`;
   disabled → empty arrays; `SessionSecurityDiagnosticsArray` denied to non-admin. Part 5 §6.3.3.
 - [ ] T004 [US1] codex: serve the five NodeIds — extend `is_mapped`/`get` in
@@ -62,8 +63,9 @@ value unchanged; unconstrained Variables unaffected.
 
 - [ ] T007 [P] [US2] Claude: red-first tests — `async-opcua/tests/integration/write.rs` + unit
   tests in `async-opcua-server/src/address_space/utils.rs` (mod tests :708): out-of-range scalar
-  rejected + value unchanged; in-range accepted; undefined enum value rejected, defined accepted;
-  index-ranged element out of range rejected; unconstrained Variable regression guard.
+  rejected + value unchanged; in-range accepted; undefined enum value rejected, defined accepted
+  (scalar AND array-element/index-ranged enum writes); index-ranged element out of range
+  rejected; unconstrained Variable regression guard.
   Part 4 §5.11.4; Part 8 §5.3.3.3/.4.
 - [ ] T008 [US2] codex: implement the check in `validate_node_write`'s Value arm
   (`address_space/utils.rs:381-398`, after RBAC/type checks, before `set_value_range`): resolve
@@ -105,7 +107,8 @@ values documented always-current; parameter never silently dropped for callback 
 - [ ] T013 [P] [US4] Claude: red-first tests — `SimpleNodeManager` callback-source tests (+
   `read.rs` integration): maxAge=0 forces fresh sample; ≥ max Int32 permits cached; mid-range
   refreshes iff older; plain in-memory node self-consistent for any valid maxAge; negative maxAge
-  still `Bad_MaxAgeInvalid` (regression). Part 4 §5.11.2.2.
+  still `Bad_MaxAgeInvalid` (regression); NaN/±infinity maxAge must not panic (NaN passes the
+  `< 0.0` guard — document + test the chosen interpretation). Part 4 §5.11.2.2.
 - [ ] T014 [US4] codex: freshness decision in `node_manager/memory/simple.rs` (callback invocation
   :240-245 and the `SyncSampler`-backed internal sampled values :330/:338): compare
   `DataValue.source_timestamp` age vs maxAge, trigger fresh sample/callback when required; keep
@@ -130,8 +133,9 @@ thresholds (contracts §US5).
   :780, `modify_…_with_eurange_succeeds` :1051): filter follows the new range; exactly one
   notification carries `SemanticsChanged`; unrelated items unaffected; EURange-removed fail-safe.
   Part 8 §5.2, §5.3.2.2.
-- [ ] T017 [US5] codex: event-driven refresh — signal from the Value write path when the written
-  node is an `EURange` property of a monitored Variable → `SubscriptionCache` → affected
+- [ ] T017 [US5] codex: event-driven refresh — signal at the address-space value-set layer (so
+  BOTH client Writes and server-side value updates fire it) when the changed node is an `EURange`
+  property of a monitored Variable → `SubscriptionCache` → affected
   `MonitoredItem`s re-resolve the range (reuse `modify()` seam :476-497 / `get_eu_range`
   machinery in `session/services/monitored_items.rs:35-98`) and arm a one-shot
   `semantics_changed` flag ORed into the next queued notification via

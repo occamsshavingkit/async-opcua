@@ -10,9 +10,21 @@ implementing codex dispatch); one task per codex dispatch; every task cites its 
 Part/§ or profile Conformance Unit so the reference MCP can ground it; FINDINGS-style
 doc rows ride with the story that closes them; one commit per user story.
 
-**Tests**: this feature's spec demands verification at three levels (behavior, rejection,
-absence) — test tasks are therefore included and MUST be committed red (or
-red-equivalent: failing script/assertion) before their implementation tasks.
+**Status-code naming**: spec.md writes `Bad_ServiceUnsupported` (spec style); tasks and
+code use the Rust `StatusCode` names (`BadServiceUnsupported`,
+`BadMonitoredItemFilterUnsupported`, `BadAggregateNotSupported`). Same codes.
+
+**Test-graph unification caveat**: the in-sample behavior tests run under `cargo test`,
+where dev-dependencies (the in-tree client) unify features on shared crates. This does
+NOT invalidate rejection tests — the client never enables `async-opcua-server` subsystem
+gates — but binary-absence claims are ONLY valid against `cargo build` artifacts, which
+ignore dev-deps. Keep behavior verification in tests and absence verification in
+`tools/check-profile-absence.sh` against the built binary; never add a dev-dependency to
+a profile sample that enables server-crate subsystem features.
+
+**Tests**: verification is at three levels (behavior, rejection, absence) — test tasks
+MUST be committed red (or red-equivalent: failing script/assertion) before their
+implementation tasks.
 
 ## Phase 1: Setup (blocking all stories)
 
@@ -52,14 +64,15 @@ rejection) green; symbol-absence script green; workspace suite (default features
 - [ ] T004 [P] [US1] Nano rejection test in
       `samples/foundation-profile-nano-server/tests/service_rejection.rs`:
       CreateSubscription, Publish, Call, HistoryRead, QueryFirst, AddNodes each answered
-      `Bad_ServiceUnsupported` via raw `UARequest` builders (error-mode convention, memory
+      `BadServiceUnsupported` via raw `UARequest` builders (error-mode convention, memory
       `errormode-selftest-campaign`), then a follow-up Read on the same session still
       succeeds (no corruption). RED today (these services currently succeed).
       [Cite: OPC 10000-4 §4.4 service fault; constitution IV]
 - [ ] T005 [P] [US1] Symbol/dependency absence script
       `tools/check-profile-absence.sh <package> <deny-features> <deny-symbols>`:
       `cargo tree -e features` deny-list + `nm -C` sentinel check (SubscriptionCache,
-      alarm, history sentinels for nano). RED today. [Cite: spec FR-009; research.md R12]
+      alarm, history sentinels for nano) against the BUILT binary (see test-graph
+      unification caveat above). RED today. [Cite: spec FR-009; research.md R12]
 
 ### Implementation (one gate per task; each leaves full build green)
 
@@ -84,7 +97,9 @@ rejection) green; symbol-absence script green; workspace suite (default features
       `history-aggregates`: dispatch arms `message_handler.rs:347-353`,
       `services/{history_read,history_update}.rs`, backend surface
       `node_manager/memory/simple.rs:163,435-780,821`, `aggregates/` +
-      `memory/simple.rs:518-522`, `config/capabilities.rs` aggregate wiring.
+      `memory/simple.rs:518-522`, `config/capabilities.rs` aggregate wiring. (Kept as ONE
+      task deliberately: the aggregate hooks are inline in the same `simple.rs`
+      history-read path — splitting would make two dispatches edit the same functions.)
       [Cite: OPC 10000-11 §6.4; OPC 10000-13 §5]
 - [ ] T011 [US1] Gate QueryFirst/QueryNext behind `query`: dispatch arms
       (`message_handler.rs:357-383` range), `session/services/query.rs`,
@@ -94,7 +109,8 @@ rejection) green; symbol-absence script green; workspace suite (default features
       `node_manager/node_management.rs` (+ write-validation cluster refs).
       [Cite: OPC 10000-4 §5.8]
 - [ ] T013 [US1] Gate diagnostics behind `diagnostics`: node-manager registration
-      `builder.rs:61`, `diagnostics/` module, `ServerDiagnostics` wiring `server.rs:31`,
+      `builder.rs:61` (composes with the surrounding `generated-address-space` cfg
+      block), `diagnostics/` module, `ServerDiagnostics` wiring `server.rs:31`,
       `info.rs:221`. [Cite: OPC 10000-5 §6.3 — Base Info Diagnostics is OPTIONAL at every
       2017 rung]
 - [ ] T014 [US1] Gate RBAC behind `rbac` with the R6 stub: `rbac/` module,
@@ -102,21 +118,27 @@ rejection) green; symbol-absence script green; workspace suite (default features
       under `cfg(not)` by an always-empty-roles unit resolver;
       `enforce_role_based_access` config rejected at validation when feature off.
       [Cite: OPC 10000-18; Core 2017 "Security Role Server Authorization" is OPTIONAL]
-- [ ] T015 [US1] Gate GDS methods behind `gds` (`gds/mod.rs:34` registrations) and FOTA
-      behind `fota` (`fota/`, `info.rs:226` cfg-field, `server.rs:422`).
-      [Cite: OPC 10000-12 §7; OPC 10000-21]
-- [ ] T016 [US1] Gate programs behind `programs` (`programs/mod.rs:12`) and the LDS
-      receive-side behind `lds` (`controller.rs:715,743` RegisterServer/RegisterServer2
-      arms + bounded registry from feature 024). [Cite: OPC 10000-10; OPC 10000-12 §6.4]
-- [ ] T017 [US1] Gate alarms behind `alarms`: `alarms/` module decl, refs in
+- [ ] T015 [US1] Gate GDS methods behind `gds`: `gds/mod.rs:34` registrations
+      (cert-management, push, pull). Self-contained module — decl + registration gating
+      only. [Cite: OPC 10000-12 §7]
+- [ ] T016 [US1] Gate FOTA behind `fota`: `fota/` module decl, `info.rs:226`
+      `fota_cleanup` cfg-field (mdns-field pattern), `server.rs:422` init.
+      [Cite: OPC 10000-21]
+- [ ] T017 [US1] Gate programs behind `programs`: `programs/mod.rs:12`
+      (`register_program`, `ProgramMethodHandler`). Self-contained.
+      [Cite: OPC 10000-10]
+- [ ] T018 [US1] Gate the LDS receive-side behind `lds`: `controller.rs:715,743`
+      RegisterServer/RegisterServer2 arms + the bounded registry from feature 024;
+      off ⇒ `BadServiceUnsupported` per-branch fault. [Cite: OPC 10000-12 §6.4]
+- [ ] T019 [US1] Gate alarms behind `alarms`: `alarms/` module decl, refs in
       `namespace/init.rs:5` and `node_manager/memory/simple.rs:13`, event dispatch
       touchpoints `alarms/dispatch.rs:110-114`, `alarms/methods.rs`. [Cite: OPC 10000-9]
-- [ ] T018 [US1] Gate the event engine behind `events`:
+- [ ] T020 [US1] Gate the event engine behind `events`:
       `session/services/subscription/{filter,where_clause,select}.rs`,
       `subscriptions/mod.rs:1205,1213` notify paths, `subscriptions/notify.rs`; event
-      monitored items rejected `Bad_MonitoredItemFilterUnsupported` when off.
+      monitored items rejected `BadMonitoredItemFilterUnsupported` when off.
       [Cite: OPC 10000-4 §7.22.3 EventFilter]
-- [ ] T019 [US1] Switch `samples/foundation-profile-nano-server` to
+- [ ] T021 [US1] Switch `samples/foundation-profile-nano-server` to
       `features = ["nano"]` + Nano capacity config (≥1 session), minimal hand-rolled
       address space satisfying Address Space Base / Base Info Core Structure; verify
       T003–T005 green and record the measured size. [Cite: Nano profile URI; Core 2017
@@ -131,34 +153,35 @@ basic data-change monitoring works; deadband/triggering/events/methods compiled 
 
 ### Tests (red first)
 
-- [ ] T020 [P] [US2] Micro smoke test in
+- [ ] T022 [P] [US2] Micro smoke test in
       `samples/foundation-profile-micro-server/tests/profile_smoke.rs`: CreateSubscription
-      → CreateMonitoredItems (value change, queue size 1) → Publish notification flow;
-      two parallel sessions. [Cite: Embedded DataChange Subscription facet CUs — Monitor
-      Basic/Items 2/QueueSize_1/Value Change, Subscription Basic/Publish Min 02,
-      PublishRequest Queue Overflow; Session Minimum 2 Parallel; OPC 10000-4 §5.13/§5.14]
-- [ ] T021 [P] [US2] Micro rejection test in
+      → CreateMonitoredItems (value change, queue size 1) → Publish notification flow,
+      including publish-queue overflow handling; two parallel sessions. [Cite: Embedded
+      DataChange Subscription facet CUs — Monitor Basic/Items 2/QueueSize_1/Value Change,
+      Subscription Basic/Publish Min 02, PublishRequest Queue Overflow; Session Minimum 2
+      Parallel; OPC 10000-4 §5.13/§5.14]
+- [ ] T023 [P] [US2] Micro rejection test in
       `samples/foundation-profile-micro-server/tests/service_rejection.rs`: deadband
-      DataChangeFilter → `Bad_MonitoredItemFilterUnsupported`; EventFilter item →
-      `Bad_MonitoredItemFilterUnsupported`; SetTriggering → `Bad_ServiceUnsupported`;
-      Call → `Bad_ServiceUnsupported`; sessions stay healthy. RED until T022/T023.
+      DataChangeFilter → `BadMonitoredItemFilterUnsupported`; EventFilter item →
+      `BadMonitoredItemFilterUnsupported`; SetTriggering → `BadServiceUnsupported`;
+      Call → `BadServiceUnsupported`; sessions stay healthy. RED until T024/T025.
       [Cite: OPC 10000-4 §7.22.2 DataChangeFilter, §5.13.6 SetTriggering]
 
 ### Implementation
 
-- [ ] T022 [US2] Split deadband out of `subscriptions/monitored_item.rs` into
+- [ ] T024 [US2] Split deadband out of `subscriptions/monitored_item.rs` into
       `subscriptions/monitored_item/filters.rs` gated by `subscriptions-standard`; the
       ungated path rejects filter-bearing create/modify with
-      `Bad_MonitoredItemFilterUnsupported` (fail-closed, never silently ignore a filter).
+      `BadMonitoredItemFilterUnsupported` (fail-closed, never silently ignore a filter).
       Pure move + gate; deadband tests (`monitored_item.rs:1293,1337`) ride along.
       [Cite: OPC 10000-4 §7.22.2; OPC 10000-8 §6.2 PercentDeadband]
-- [ ] T023 [US2] Split triggering into `subscriptions/monitored_item/triggering.rs` +
+- [ ] T025 [US2] Split triggering into `subscriptions/monitored_item/triggering.rs` +
       orchestration gates (`session_subscriptions.rs:571`, `subscriptions/mod.rs:1425`,
       SetTriggering dispatch arm) behind `subscriptions-standard`.
       [Cite: OPC 10000-4 §5.13.6 Monitor Triggering]
-- [ ] T024 [US2] Switch `samples/foundation-profile-micro-server` to
+- [ ] T026 [US2] Switch `samples/foundation-profile-micro-server` to
       `features = ["micro"]` + capacity config (≥2 sessions, ≥1 subscription, ≥2
-      monitored items); verify T020/T021 + absence script (no deadband/trigger/event
+      monitored items); verify T022/T023 + absence script (no deadband/trigger/event
       sentinels) green; record measured size (must sit strictly between nano and
       embedded). [Cite: Micro profile URI]
 
@@ -172,7 +195,7 @@ GetMonitoredItems/ResendData work; advertised capabilities honest.
 
 ### Tests (red first)
 
-- [ ] T025 [P] [US3] Embedded smoke test in
+- [ ] T027 [P] [US3] Embedded smoke test in
       `samples/foundation-profile-embedded-server/tests/profile_smoke.rs`: Basic256Sha256
       Sign&Encrypt channel against the server's application-instance certificate;
       deadband-filtered monitored item; SetTriggering; Call GetMonitoredItems + ResendData;
@@ -182,19 +205,19 @@ GetMonitoredItems/ResendData work; advertised capabilities honest.
 
 ### Implementation
 
-- [ ] T026 [US3] Gate the builtin Server methods GetMonitoredItems/ResendData
+- [ ] T028 [US3] Gate the builtin Server methods GetMonitoredItems/ResendData
       (`node_manager/memory/core.rs:1030-1068`) under `method-call` +
       `subscriptions-standard`; when gated out they are absent (not faulting stubs).
       [Cite: OPC 10000-5 §9.1 GetMonitoredItems / §9.2 ResendData]
-- [ ] T027 [US3] Advertised-capability honesty (FR-004): cfg-adjust
+- [ ] T029 [US3] Advertised-capability honesty (FR-004): cfg-adjust
       `node_manager/memory/core.rs:712-806` capability/limit nodes,
       `HistoryServerCapabilities` (`:798+`, `config/capabilities.rs`), and
       `OperationalLimits` fields so gated-out services advertise false/absent; verify
       against the full build (all-on ⇒ unchanged values). [Cite: OPC 10000-5 §6.3.2
       ServerCapabilitiesType; spec FR-004]
-- [ ] T028 [US3] Switch `samples/foundation-profile-embedded-server` to
+- [ ] T030 [US3] Switch `samples/foundation-profile-embedded-server` to
       `features = ["embedded"]` + capacity config (≥2 subscriptions, ≥100 monitored
-      items) + demo certificate provisioning for the smoke test; verify T025 + absence
+      items) + demo certificate provisioning for the smoke test; verify T027 + absence
       script (no alarm/history/query sentinels) green; record measured size.
       [Cite: Embedded profile URI]
 
@@ -205,24 +228,27 @@ GetMonitoredItems/ResendData work; advertised capabilities honest.
 **Goal**: `standard` alias = embedded + `discovery-server-registration`; X509 user
 tokens, LDS self-registration, Cancel proven; still no events/history/etc.
 
-### Tests (red first)
+### Implementation (crate skeleton FIRST — tests need a crate to live in)
 
-- [ ] T029 [P] [US4] Standard smoke test in
-      `samples/foundation-profile-standard-server/tests/profile_smoke.rs` (crate created
-      red-first with a placeholder main): X509 user-token activation over Sign&Encrypt;
-      RegisterServer2 flow against an in-process `lds`-featured peer server; Cancel of an
-      outstanding request returns per Part 4 §5.6.5; capacity config asserts ≥50
-      sessions / ≥5 subscriptions / ≥500 monitored items. [Cite: Standard 2017 CUs —
-      Security User X509, Discovery Register/Register2, Session Cancel, Session Minimum
-      50 Parallel, Enhanced DataChange facet; OPC 10000-12 §6.4]
-
-### Implementation
-
-- [ ] T030 [US4] Create `samples/foundation-profile-standard-server` (workspace member,
+- [ ] T031 [US4] Create `samples/foundation-profile-standard-server` (workspace member,
       `publish = false`, `features = ["standard"]`, default-features off) with capacity
-      config per data-model.md; wire into the pre-push no-default check set.
-      [Cite: Standard profile URI]
-- [ ] T031 [US4] Verify the standard composition end-to-end: T029 green, absence script
+      config per data-model.md (≥50 sessions, ≥5 subscriptions, ≥500 monitored items);
+      wire into the pre-push no-default check set. [Cite: Standard profile URI; Standard
+      2017 CUs Session Minimum 50 Parallel, Enhanced DataChange facet]
+
+### Tests (red against unfinished composition)
+
+- [ ] T032 [P] [US4] Standard smoke test in
+      `samples/foundation-profile-standard-server/tests/profile_smoke.rs`: X509
+      user-token activation over Sign&Encrypt; RegisterServer2 flow against an in-process
+      `lds`-featured peer server (valid under the test-graph unification caveat — the
+      binary absence check is separate); Cancel of an outstanding request per Part 4
+      §5.6.5. [Cite: Standard 2017 CUs — Security User X509, Discovery
+      Register/Register2, Session Cancel; OPC 10000-12 §6.4]
+
+### Verification
+
+- [ ] T033 [US4] Verify the standard composition end-to-end: T032 green, absence script
       (no alarm/history/query/gds sentinels) green, measured size strictly between
       embedded and simple-server; record size. [Cite: spec SC-001]
 
@@ -230,20 +256,21 @@ tokens, LDS self-registration, Cancel proven; still no events/history/etc.
 
 ## Phase 6: User Story 5 — Measured Size Matrix and CI Guard (P5)
 
-- [ ] T032 [P] [US5] Measurement script `tools/footprint.sh`: builds each of the six
+- [ ] T034 [P] [US5] Measurement script `tools/footprint.sh`: builds each of the six
       matrix packages in an ISOLATED cargo invocation (`--locked --profile embedded`),
       emits bytes + MiB + markdown rows; used identically by docs and CI (research.md
       R10 caveat is a hard rule in the script). [Cite: research.md R10/R12]
-- [ ] T033 [US5] Rework `.github/workflows/ci_footprint.yml`: 4-profile matrix (add
+- [ ] T035 [US5] Rework `.github/workflows/ci_footprint.yml`: 4-profile matrix (add
       standard row), per-row guards — `cargo tree -e features` deny-list, symbol
       spot-check via `tools/check-profile-absence.sh`, `$GITHUB_STEP_SUMMARY` table rows
       from `tools/footprint.sh` output. [Cite: spec FR-009]
-- [ ] T034 [US5] FR-006 lattice compile checks: CI leg + local script — each alias
+- [ ] T036 [US5] FR-006 lattice compile checks: CI leg + local script — each alias
       standalone (`cargo check -p async-opcua --no-default-features --features <alias>`),
-      each of the 15 gates individually disabled from the full server-crate surface,
-      no-default baseline; document the sampling rationale (not 2^15) in the workflow.
+      each of the 15 gates individually disabled from the full server-crate surface
+      (enumerated via `--no-default-features` + all-but-one), no-default baseline;
+      document the sampling rationale (not 2^15) in the workflow.
       [Cite: spec FR-006; plan.md Complexity Tracking]
-- [ ] T035 [US5] `docs/setup.md`: replace the 041 benchmark section with the six-row
+- [ ] T037 [US5] `docs/setup.md`: replace the 041 benchmark section with the six-row
       measured matrix (bytes, MiB, delta per rung) + provenance (arch/profile/rustc/date)
       + one-package-per-invocation caveat + feature-unification note + Nano/Micro
       security-posture note (policy None, plaintext-or-cert-encrypted tokens, pure-Rust
@@ -255,11 +282,11 @@ excluded feature) turns the row red; commit.
 
 ## Phase 7: User Story 6 — Further-Savings Report (P6)
 
-- [ ] T036 [US6] Symbol/section accounting for the four profile binaries (`cargo bloat`
+- [ ] T038 [US6] Symbol/section accounting for the four profile binaries (`cargo bloat`
       if available, else `nm --size-sort`/`size -A`), recorded as evidence tables under
       `specs/054-profile-polish/research-assets/size-accounting.md`.
       [Cite: research.md R11]
-- [ ] T037 [US6] Write `docs/profile-size-report.md`: ≥5 ranked, non-overlapping
+- [ ] T039 [US6] Write `docs/profile-size-report.md`: ≥5 ranked, non-overlapping
       suggestions (seed list research.md R11 — pruned type-only nodeset, None-only crypto
       build, tokio slimming, DateTime/chrono replacement, config-parsing gate,
       panic-machinery trade-off, monomorphization hotspots), each with blocking
@@ -270,30 +297,33 @@ excluded feature) turns the row red; commit.
 
 ## Phase 8: Polish & Final Verification
 
-- [ ] T038 Full pre-push gate: fmt, clippy `--workspace --all-targets --all-features`,
+- [ ] T040 Full pre-push gate: fmt, clippy `--workspace --all-targets --all-features`,
       `RUSTFLAGS="-D warnings"` no-default checks (incl. all four foundation-profile
-      crates), lattice script (T034), `cargo deny check advisories`, full workspace
+      crates), lattice script (T036), `cargo deny check advisories`, full workspace
       tests, integration suite. [Cite: SESSION-HANDOFF pre-push gate]
-- [ ] T039 Cross-doc consistency: contracts/feature-aliases.md, data-model.md, README
+- [ ] T041 Cross-doc consistency: contracts/feature-aliases.md, data-model.md, README
       feature list, `docs/compatibility.md` (if it enumerates features) all match the
-      shipped gate/alias set; spec Success Criteria walked and checked off in this file.
+      shipped gate/alias set; walk spec.md Success Criteria SC-001–SC-005 and check each
+      off with evidence links in this file. [Cite: spec.md Success Criteria]
 
 ## Dependencies & Execution Order
 
 - Setup (T001–T002) blocks everything.
-- US1 (T003–T019) is the MVP and blocks US2 (needs gates + spine), US2 blocks US3
+- US1 (T003–T021) is the MVP and blocks US2 (needs gates + spine), US2 blocks US3
   (subscriptions-standard), US3 blocks US4 (embedded base). US5 needs US1–US4 sizes;
   US6 needs US5's binaries/accounting.
 - Within each story: test tasks [P] first (committed red), then gates in listed order
-  (spine → trait → module for US1), sample switch last.
-- Parallel opportunities: T003/T004/T005; T020/T021; gates T009–T018 touch disjoint
-  modules and may proceed as parallel dispatches ONLY if same-file collisions are
-  excluded (message_handler.rs arms are shared — serialize tasks touching it: T006,
-  T009, T010, T011, T012; see memory `feature-034` parallel-PR same-file hazard).
+  (spine → trait → module for US1), sample switch last. Exception US4: crate skeleton
+  (T031) precedes its tests (T032) — a test file needs a crate to live in.
+- Parallel opportunities: T003/T004/T005; T022/T023; gates T009–T020 touch mostly
+  disjoint modules and may proceed as parallel dispatches ONLY if same-file collisions
+  are excluded — tasks touching `session/message_handler.rs` (T006, T009, T010, T011,
+  T012, T018) MUST be serialized (memory `feature-034` parallel-PR same-file hazard);
+  `lib.rs` module-decl edits (T008, T015–T020) likewise serialize on that file.
 
 ## Implementation Strategy
 
-MVP = Phase 1 + Phase 2 (US1): after T019 the Nano build exists, measured, guarded, and
+MVP = Phase 1 + Phase 2 (US1): after T021 the Nano build exists, measured, guarded, and
 the full build is regression-proven — ship-worthy alone. Each later story is one rung and
 one commit. If any single gate proves architecturally infeasible within its task (e.g.
 trait-surface fallout too broad), STOP, record the constraint, and move that cut to the

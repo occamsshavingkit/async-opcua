@@ -42,7 +42,7 @@ combined builds, research.md R10)
 network-reachable paths in gated builds fail closed (`BadServiceUnsupported` /
 `Bad_MonitoredItemFilterUnsupported`), never panic (constitution IV); advertised
 capabilities must match compiled surface (FR-004)  
-**Scale/Scope**: ~13 new server-crate features; splits in `subscriptions/monitored_item.rs`
+**Scale/Scope**: 15 new server-crate features; splits in `subscriptions/monitored_item.rs`
 and the `NodeManager` trait surface; 4 facade aliases; 1 new sample crate
 (`foundation-profile-standard-server`); CI workflow rework; docs; report
 
@@ -129,4 +129,4 @@ No constitution violations. Two structural risks tracked for the analyze pass:
 | Risk | Mitigation |
 |------|-----------|
 | `NodeManager` trait surface changes per feature (cfg-gated methods) | additive-only: features add methods; all in-tree impls gated consistently; full build unchanged |
-| Combination explosion (13 gates) | FR-006 CI checks: each alias standalone + each single gate off full + no-default; not the full 2^13 lattice (documented sampling rationale) |
+| Combination explosion (15 gates) | FR-006 CI checks: each alias standalone + each single gate off full + no-default; not the full 2^13 lattice (documented sampling rationale) |

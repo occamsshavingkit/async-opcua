@@ -12,6 +12,10 @@ use parking_lot::RwLock;
 use tokio::sync::{mpsc, Notify};
 use tracing::{error, info};
 
+#[cfg(feature = "fota")]
+use crate::fota::cleanup::cleanup_session;
+#[cfg(feature = "subscriptions")]
+use crate::subscriptions::SubscriptionCache;
 use crate::{
     authenticator::UserToken,
     config::ANONYMOUS_USER_TOKEN_ID,
@@ -20,10 +24,6 @@ use crate::{
     node_manager::{NodeManagers, RequestContext, RequestContextInner},
     rbac::resolver::ResolvedIdentity,
 };
-#[cfg(feature = "fota")]
-use crate::fota::cleanup::cleanup_session;
-#[cfg(feature = "subscriptions")]
-use crate::subscriptions::SubscriptionCache;
 use opcua_types::{
     ActivateSessionRequest, ActivateSessionResponse, ByteString, CloseSessionRequest,
     CloseSessionResponse, CreateSessionRequest, CreateSessionResponse, EndpointDescription, Error,
@@ -636,8 +636,7 @@ impl SessionManager {
         session: Arc<RwLock<Session>>,
         session_id_numeric: u32,
         node_managers: NodeManagers,
-        #[cfg(feature = "subscriptions")]
-        subscriptions: Arc<SubscriptionCache>,
+        #[cfg(feature = "subscriptions")] subscriptions: Arc<SubscriptionCache>,
     ) {
         let (sender, receiver) = mpsc::channel(SESSION_ACTOR_QUEUE_CAPACITY);
         self.register_actor_sender(authentication_token.clone(), sender);
@@ -692,8 +691,7 @@ impl SessionManager {
         draft: CreateSessionDraft,
         channel: &mut SecureChannel,
         node_managers: NodeManagers,
-        #[cfg(feature = "subscriptions")]
-        subscriptions: Arc<SubscriptionCache>,
+        #[cfg(feature = "subscriptions")] subscriptions: Arc<SubscriptionCache>,
     ) -> Result<CreateSessionResponse, StatusCode> {
         // OPC-10000-4 5.7.2: CreateSession publishes a Session and its
         // authentication token, so the global session limit must be checked

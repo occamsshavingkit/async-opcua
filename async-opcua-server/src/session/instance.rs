@@ -4,6 +4,8 @@ use std::time::{Duration, Instant};
 use arc_swap::ArcSwap;
 use tracing::error;
 
+#[cfg(feature = "history")]
+use super::continuation_points::ContinuationPoint;
 use super::manager::next_session_id;
 use crate::authenticator::UserToken;
 #[cfg(feature = "history")]
@@ -13,8 +15,6 @@ use crate::info::ServerInfo;
 use crate::node_manager::BrowseContinuationPoint;
 #[cfg(feature = "query")]
 use crate::node_manager::QueryContinuationPoint;
-#[cfg(feature = "history")]
-use super::continuation_points::ContinuationPoint;
 #[cfg(feature = "ecc")]
 use opcua_crypto::SecurityPolicy;
 use opcua_crypto::X509;

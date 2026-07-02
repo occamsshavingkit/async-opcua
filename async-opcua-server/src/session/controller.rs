@@ -40,6 +40,10 @@ use opcua_types::{ExtensionObject, RegisterServer2Response, RegisterServerRespon
 use tokio_util::sync::CancellationToken;
 use tracing_futures::Instrument;
 
+#[cfg(feature = "lds")]
+use crate::node_manager::consume_results;
+#[cfg(feature = "subscriptions")]
+use crate::subscriptions::SubscriptionCache;
 use crate::{
     authenticator::UserToken,
     info::ServerInfo,
@@ -47,10 +51,6 @@ use crate::{
     transport::tcp::{ConnectionTransport, Request, TransportPollResult},
     transport::Connector,
 };
-#[cfg(feature = "lds")]
-use crate::node_manager::consume_results;
-#[cfg(feature = "subscriptions")]
-use crate::subscriptions::SubscriptionCache;
 
 use super::{
     actor::SessionMessage,
@@ -211,8 +211,7 @@ where
         session_manager: Arc<RwLock<SessionManager>>,
         certificate_store: Arc<RwLock<CertificateStore>>,
         node_managers: NodeManagers,
-        #[cfg(feature = "subscriptions")]
-        subscriptions: Arc<SubscriptionCache>,
+        #[cfg(feature = "subscriptions")] subscriptions: Arc<SubscriptionCache>,
     ) -> Self {
         Self {
             connector,
@@ -281,8 +280,7 @@ impl<T: ConnectionTransport> SessionController<T> {
         certificate_store: Arc<RwLock<CertificateStore>>,
         info: Arc<ServerInfo>,
         node_managers: NodeManagers,
-        #[cfg(feature = "subscriptions")]
-        subscriptions: Arc<SubscriptionCache>,
+        #[cfg(feature = "subscriptions")] subscriptions: Arc<SubscriptionCache>,
     ) -> Self {
         let mut channel = SecureChannel::new(
             certificate_store.clone(),
@@ -517,8 +515,8 @@ impl<T: ConnectionTransport> SessionController<T> {
                 } else {
                     #[cfg(feature = "diagnostics")]
                     {
-                    self.info.diagnostics.inc_rejected_requests();
-                    self.info.diagnostics.inc_security_rejected_requests();
+                        self.info.diagnostics.inc_rejected_requests();
+                        self.info.diagnostics.inc_security_rejected_requests();
                     }
                 }
                 match res {
@@ -884,8 +882,8 @@ impl<T: ConnectionTransport> SessionController<T> {
                         e.apply_return_diagnostics(return_diagnostics);
                         #[cfg(feature = "diagnostics")]
                         {
-                        self.info.diagnostics.inc_rejected_requests();
-                        self.info.diagnostics.inc_security_rejected_requests();
+                            self.info.diagnostics.inc_rejected_requests();
+                            self.info.diagnostics.inc_security_rejected_requests();
                         }
                         dispatch_service_failure(
                             #[cfg(feature = "events")]
@@ -1039,15 +1037,15 @@ impl<T: ConnectionTransport> SessionController<T> {
             Err(e) => {
                 #[cfg(feature = "diagnostics")]
                 {
-                self.info.diagnostics.inc_rejected_requests();
-                if matches!(
-                    e,
-                    StatusCode::BadSessionIdInvalid
-                        | StatusCode::BadSecurityChecksFailed
-                        | StatusCode::BadUserAccessDenied
-                ) {
-                    self.info.diagnostics.inc_security_rejected_requests();
-                }
+                    self.info.diagnostics.inc_rejected_requests();
+                    if matches!(
+                        e,
+                        StatusCode::BadSessionIdInvalid
+                            | StatusCode::BadSecurityChecksFailed
+                            | StatusCode::BadUserAccessDenied
+                    ) {
+                        self.info.diagnostics.inc_security_rejected_requests();
+                    }
                 }
 
                 ServiceFault::new(request_handle, e).into()

@@ -9,13 +9,13 @@ use opcua_types::{
     QualifiedName, ReferenceTypeId, StatusCode, Variant,
 };
 
+#[cfg(feature = "method-call")]
+use crate::node_manager::memory::CoreNodeManager;
 use crate::{
     address_space::{AddressSpace, ObjectBuilder},
     node_manager::RequestContext,
     rbac::{resolver::RoleResolver, rules::IdentityMappingRule, WellKnownRole},
 };
-#[cfg(feature = "method-call")]
-use crate::node_manager::memory::CoreNodeManager;
 
 #[cfg(feature = "method-call")]
 type Handler = fn(

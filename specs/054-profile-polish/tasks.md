@@ -178,7 +178,7 @@ basic data-change monitoring works; deadband/triggering/events/methods compiled 
 
 ### Implementation
 
-- [ ] T024 [US2] Split deadband out of `subscriptions/monitored_item.rs` into
+- [X] T024 [US2] Split deadband out of `subscriptions/monitored_item.rs` into
       `subscriptions/monitored_item/filters.rs` gated by `subscriptions-standard`; the
       ungated path rejects filter-bearing create/modify with
       `BadMonitoredItemFilterUnsupported` (fail-closed, never silently ignore a filter).

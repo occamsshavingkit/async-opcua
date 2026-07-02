@@ -138,10 +138,8 @@ impl SessionSubscriptions {
         user_token: PersistentSessionKey,
         session: Arc<RwLock<Session>>,
         type_tree_for_user: Arc<dyn TypeTreeForUserStatic>,
-        #[cfg(feature = "events")]
-        node_managers: NodeManagersRef,
-        #[cfg(feature = "events")]
-        enforce_role_based_access: bool,
+        #[cfg(feature = "events")] node_managers: NodeManagersRef,
+        #[cfg(feature = "events")] enforce_role_based_access: bool,
     ) -> Self {
         Self {
             user_token,
@@ -456,7 +454,7 @@ impl SessionSubscriptions {
         info: &ServerInfo,
         timestamps_to_return: TimestampsToReturn,
         requests: Vec<MonitoredItemModifyRequest>,
-        eu_ranges: HashMap<u32, (f64, f64)>,
+        #[cfg(feature = "subscriptions-standard")] eu_ranges: HashMap<u32, (f64, f64)>,
         type_tree: &dyn TypeTree,
         diagnostic_bits: DiagnosticBits,
     ) -> Result<Vec<MonitoredItemUpdateRef>, StatusCode> {
@@ -466,11 +464,13 @@ impl SessionSubscriptions {
         let mut results = Vec::with_capacity(requests.len());
         for request in requests {
             if let Some(item) = sub.get_mut(&request.monitored_item_id) {
+                #[cfg(feature = "subscriptions-standard")]
                 let eu_range = eu_ranges.get(&request.monitored_item_id).copied();
                 let (filter_result, status) = item.modify(
                     info,
                     timestamps_to_return,
                     &request,
+                    #[cfg(feature = "subscriptions-standard")]
                     eu_range,
                     type_tree,
                     diagnostic_bits,
@@ -512,6 +512,7 @@ impl SessionSubscriptions {
         Ok(results)
     }
 
+    #[cfg(feature = "subscriptions-standard")]
     pub(super) fn monitored_item_node_ids(
         &self,
         subscription_id: u32,
@@ -1190,6 +1191,7 @@ impl SessionSubscriptions {
                     };
                     sub.notify_data_value(&handle.monitored_item_id, value, &now);
                 }
+                #[cfg(feature = "subscriptions-standard")]
                 NotificationWorkItem::RangeChanged { handle, low, high } => {
                     let Some(sub) = self.subscriptions.get_mut(&handle.subscription_id) else {
                         processed += 1;
@@ -1244,6 +1246,7 @@ impl SessionSubscriptions {
                         sub.notify_data_value(&handle.monitored_item_id, value, &now);
                     }
                 }
+                #[cfg(feature = "subscriptions-standard")]
                 NotificationWorkItem::RangeChanged { handle, low, high } => {
                     if let Some(sub) = self.subscriptions.get_mut(&handle.subscription_id) {
                         sub.notify_eu_range_changed(&handle.monitored_item_id, low, high);

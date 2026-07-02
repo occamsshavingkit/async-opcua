@@ -10,9 +10,9 @@ use opcua_types::{
 };
 use uuid::Uuid;
 
-use crate::{identity_token::IdentityToken, info::ServerInfo, ANONYMOUS_USER_TOKEN_ID};
 #[cfg(feature = "events")]
 use crate::subscriptions::SubscriptionCache;
+use crate::{identity_token::IdentityToken, info::ServerInfo, ANONYMOUS_USER_TOKEN_ID};
 
 const AUDIT_FAILURE_SEVERITY: u16 = 900;
 const AUDIT_SUCCESS_SEVERITY: u16 = 100;
@@ -431,8 +431,7 @@ impl EventField for ServerAuditEvent {
 }
 
 pub(crate) fn dispatch_activate_session(
-    #[cfg(feature = "events")]
-    subscriptions: &Arc<SubscriptionCache>,
+    #[cfg(feature = "events")] subscriptions: &Arc<SubscriptionCache>,
     info: &ServerInfo,
     request: &ActivateSessionRequest,
     session_id: Option<NodeId>,
@@ -455,8 +454,7 @@ pub(crate) fn dispatch_activate_session(
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn dispatch_create_session(
-    #[cfg(feature = "events")]
-    subscriptions: &Arc<SubscriptionCache>,
+    #[cfg(feature = "events")] subscriptions: &Arc<SubscriptionCache>,
     info: &ServerInfo,
     request: &CreateSessionRequest,
     session_id: Option<NodeId>,
@@ -515,8 +513,7 @@ fn certificate_event_type(status: StatusCode) -> Option<ObjectTypeId> {
 ///
 /// A no-op for status codes that are not certificate-validation failures.
 pub(crate) fn dispatch_certificate_audit(
-    #[cfg(feature = "events")]
-    subscriptions: &Arc<SubscriptionCache>,
+    #[cfg(feature = "events")] subscriptions: &Arc<SubscriptionCache>,
     info: &ServerInfo,
     request_header: &RequestHeader,
     certificate: ByteString,
@@ -540,8 +537,7 @@ pub(crate) fn dispatch_certificate_audit(
 /// The certificate validation finding selects the certificate event subtype, while the emitted
 /// audit outcome is successful because the enclosing operation was allowed to continue.
 pub(crate) fn dispatch_suppressed_certificate_audit_success(
-    #[cfg(feature = "events")]
-    subscriptions: &Arc<SubscriptionCache>,
+    #[cfg(feature = "events")] subscriptions: &Arc<SubscriptionCache>,
     info: &ServerInfo,
     request_header: &RequestHeader,
     certificate: ByteString,
@@ -570,8 +566,7 @@ pub(crate) fn dispatch_suppressed_certificate_audit_success(
 ///
 /// A no-op for status codes that are not certificate-validation failures.
 pub(crate) fn dispatch_open_secure_channel_certificate_audit(
-    #[cfg(feature = "events")]
-    subscriptions: &Arc<SubscriptionCache>,
+    #[cfg(feature = "events")] subscriptions: &Arc<SubscriptionCache>,
     info: &ServerInfo,
     request_header: &RequestHeader,
     certificate: ByteString,
@@ -605,8 +600,7 @@ pub(crate) fn dispatch_open_secure_channel_certificate_audit(
 ///
 /// A no-op for status codes that are not certificate-validation failures.
 pub(crate) fn dispatch_user_certificate_audit(
-    #[cfg(feature = "events")]
-    subscriptions: &Arc<SubscriptionCache>,
+    #[cfg(feature = "events")] subscriptions: &Arc<SubscriptionCache>,
     info: &ServerInfo,
     request_header: &RequestHeader,
     certificate: ByteString,
@@ -626,8 +620,7 @@ pub(crate) fn dispatch_user_certificate_audit(
 }
 
 fn dispatch_certificate_audit_with_action(
-    #[cfg(feature = "events")]
-    subscriptions: &Arc<SubscriptionCache>,
+    #[cfg(feature = "events")] subscriptions: &Arc<SubscriptionCache>,
     info: &ServerInfo,
     request_header: &RequestHeader,
     certificate: ByteString,
@@ -662,8 +655,7 @@ struct CertificateAuditDetails {
 }
 
 fn dispatch_certificate_audit_event(
-    #[cfg(feature = "events")]
-    subscriptions: &Arc<SubscriptionCache>,
+    #[cfg(feature = "events")] subscriptions: &Arc<SubscriptionCache>,
     info: &ServerInfo,
     request_header: &RequestHeader,
     details: CertificateAuditDetails,
@@ -685,8 +677,7 @@ fn dispatch_certificate_audit_event(
 /// Emits an AuditCertificateMismatchEventType when the certificate presented at CreateSession does
 /// not match the certificate securing the channel at ActivateSession (Part 4 §A.2 / §5.6.3).
 pub(crate) fn dispatch_certificate_mismatch(
-    #[cfg(feature = "events")]
-    subscriptions: &Arc<SubscriptionCache>,
+    #[cfg(feature = "events")] subscriptions: &Arc<SubscriptionCache>,
     info: &ServerInfo,
     request_header: &RequestHeader,
     session_id: Option<NodeId>,
@@ -707,8 +698,7 @@ pub(crate) fn dispatch_certificate_mismatch(
 
 /// Emits an AuditCancelEventType recording a Cancel request against the session (Part 4 §A.5).
 pub(crate) fn dispatch_cancel(
-    #[cfg(feature = "events")]
-    subscriptions: &Arc<SubscriptionCache>,
+    #[cfg(feature = "events")] subscriptions: &Arc<SubscriptionCache>,
     info: &ServerInfo,
     request_header: &RequestHeader,
     session_id: Option<NodeId>,
@@ -731,8 +721,7 @@ pub(crate) fn dispatch_cancel(
 /// Emits an AuditOpenSecureChannelEventType for an OpenSecureChannel request (Part 4 §A.3).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn dispatch_open_secure_channel(
-    #[cfg(feature = "events")]
-    subscriptions: &Arc<SubscriptionCache>,
+    #[cfg(feature = "events")] subscriptions: &Arc<SubscriptionCache>,
     info: &ServerInfo,
     request_header: &RequestHeader,
     secure_channel_id: u32,
@@ -764,8 +753,7 @@ pub(crate) fn dispatch_open_secure_channel(
 }
 
 pub(crate) fn dispatch_service_failure(
-    #[cfg(feature = "events")]
-    subscriptions: &Arc<SubscriptionCache>,
+    #[cfg(feature = "events")] subscriptions: &Arc<SubscriptionCache>,
     info: &ServerInfo,
     context: &AuditEventContext,
     status: StatusCode,
@@ -788,8 +776,7 @@ pub(crate) fn dispatch_service_failure(
 
 #[cfg(feature = "method-call")]
 pub(crate) fn dispatch_method_audit(
-    #[cfg(feature = "events")]
-    subscriptions: &Arc<SubscriptionCache>,
+    #[cfg(feature = "events")] subscriptions: &Arc<SubscriptionCache>,
     info: &ServerInfo,
     context: &AuditEventContext,
     method_id: &NodeId,
@@ -808,8 +795,7 @@ pub(crate) fn dispatch_method_audit(
 }
 
 pub(crate) fn dispatch_write_audit(
-    #[cfg(feature = "events")]
-    subscriptions: &Arc<SubscriptionCache>,
+    #[cfg(feature = "events")] subscriptions: &Arc<SubscriptionCache>,
     info: &ServerInfo,
     context: &AuditEventContext,
     node_id: &NodeId,
@@ -830,8 +816,7 @@ pub(crate) fn dispatch_write_audit(
 }
 
 pub(crate) fn dispatch_response_failure(
-    #[cfg(feature = "events")]
-    subscriptions: &Arc<SubscriptionCache>,
+    #[cfg(feature = "events")] subscriptions: &Arc<SubscriptionCache>,
     info: &ServerInfo,
     context: &AuditEventContext,
     response: &ResponseMessage,

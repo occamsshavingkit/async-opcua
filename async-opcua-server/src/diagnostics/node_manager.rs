@@ -1,24 +1,14 @@
+#[cfg(feature = "subscriptions")]
+use std::time::Duration;
 use std::{
     collections::{BTreeMap, VecDeque},
     sync::Arc,
 };
-#[cfg(feature = "subscriptions")]
-use std::time::Duration;
 
 use async_trait::async_trait;
 use opcua_nodes::{DefaultTypeTree, TypeTree};
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    address_space::{compute_user_role_permissions, AccessLevel},
-    node_manager::{
-        as_opaque_node_id, from_opaque_node_id, impl_translate_browse_paths_using_browse,
-        AddReferenceResult, AttributeProvider, BrowseNode, BrowsePathItem, DynNodeManager,
-        ExternalReferenceRequest, NodeManagerBuilder, NodeManagerCore, NodeManagersRef,
-        NamespaceMetadata, NodeMetadata, NodeMutator, ReadNode, RequestContext, ServerContext,
-        ViewProvider,
-    },
-};
 #[cfg(feature = "history")]
 use crate::node_manager::HistoryProvider;
 #[cfg(feature = "method-call")]
@@ -27,11 +17,21 @@ use crate::node_manager::MethodProvider;
 use crate::node_manager::QueryRequest;
 #[cfg(feature = "subscriptions")]
 use crate::node_manager::{MonitoredItemProvider, SyncSampler};
+use crate::{
+    address_space::{compute_user_role_permissions, AccessLevel},
+    node_manager::{
+        as_opaque_node_id, from_opaque_node_id, impl_translate_browse_paths_using_browse,
+        AddReferenceResult, AttributeProvider, BrowseNode, BrowsePathItem, DynNodeManager,
+        ExternalReferenceRequest, NamespaceMetadata, NodeManagerBuilder, NodeManagerCore,
+        NodeManagersRef, NodeMetadata, NodeMutator, ReadNode, RequestContext, ServerContext,
+        ViewProvider,
+    },
+};
 use opcua_types::{
     AccessLevelExType, AccessRestrictionType, AttributeId, BrowseDirection, DataTypeId, DataValue,
-    DateTime, ExpandedNodeId, ExtensionObject, IdType, LocalizedText, NodeClass, NodeId,
-    ObjectId, ObjectTypeId, QualifiedName, ReferenceDescription, ReferenceTypeId,
-    RolePermissionType, StatusCode, TimestampsToReturn, VariableTypeId, Variant,
+    DateTime, ExpandedNodeId, ExtensionObject, IdType, LocalizedText, NodeClass, NodeId, ObjectId,
+    ObjectTypeId, QualifiedName, ReferenceDescription, ReferenceTypeId, RolePermissionType,
+    StatusCode, TimestampsToReturn, VariableTypeId, Variant,
 };
 
 fn apply_namespace_metadata_defaults(

@@ -4,10 +4,12 @@ use std::sync::Arc;
 use opcua_core::trace_write_lock;
 use tracing::{debug_span, Instrument};
 
+#[cfg(feature = "history")]
+use crate::node_manager::{
+    HistoryNode, HistoryReadDetails, HistoryUpdateDetails, HistoryUpdateNode,
+};
 use crate::{
-    node_manager::{
-        consume_results, DynNodeManager, NodeManagers, ReadNode, RequestContext,
-    },
+    node_manager::{consume_results, DynNodeManager, NodeManagers, ReadNode, RequestContext},
     session::{
         controller::Response,
         message_handler::Request,
@@ -15,19 +17,13 @@ use crate::{
     },
 };
 #[cfg(feature = "history")]
-use crate::node_manager::{
-    HistoryNode, HistoryReadDetails, HistoryUpdateDetails, HistoryUpdateNode,
-};
-use opcua_types::{
-    ReadRequest, ReadResponse, ResponseHeader, StatusCode, TimestampsToReturn,
-};
-#[cfg(feature = "history")]
 use opcua_types::{
     ByteString, DeleteAtTimeDetails, DiagnosticInfo, ExtensionObject, HistoryReadRequest,
     HistoryReadResponse, HistoryReadResult, HistoryUpdateRequest, HistoryUpdateResponse,
     HistoryUpdateResult, NodeId, ObjectId,
 };
-#[cfg_attr(not(feature = "subscriptions"), allow(dead_code))]
+use opcua_types::{ReadRequest, ReadResponse, ResponseHeader, StatusCode, TimestampsToReturn};
+#[cfg_attr(not(feature = "subscriptions-standard"), allow(dead_code))]
 pub(crate) async fn read(node_managers: NodeManagers, request: Request<ReadRequest>) -> Response {
     let context = request.context();
     let nodes_to_read = take_service_items!(

@@ -10,6 +10,7 @@ pub(crate) enum NotificationWorkItem {
         handle: MonitoredItemHandle,
         value: DataValue,
     },
+    #[cfg(feature = "subscriptions-standard")]
     RangeChanged {
         handle: MonitoredItemHandle,
         low: f64,

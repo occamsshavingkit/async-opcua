@@ -87,7 +87,8 @@ pub trait HistoryStorageBackend: Send + Sync {
         #[cfg_attr(not(feature = "history-aggregates"), allow(unused_variables))] node_id: &NodeId,
         #[cfg_attr(not(feature = "history-aggregates"), allow(unused_variables))]
         start_time: DateTime,
-        #[cfg_attr(not(feature = "history-aggregates"), allow(unused_variables))] end_time: DateTime,
+        #[cfg_attr(not(feature = "history-aggregates"), allow(unused_variables))]
+        end_time: DateTime,
         #[cfg_attr(not(feature = "history-aggregates"), allow(unused_variables))]
         processing_interval: f64,
         #[cfg_attr(not(feature = "history-aggregates"), allow(unused_variables))]
@@ -116,57 +117,57 @@ pub trait HistoryStorageBackend: Send + Sync {
 
         #[cfg(feature = "history-aggregates")]
         {
-        if continuation_point.is_some() {
-            return Err(StatusCode::BadContinuationPointInvalid);
-        }
-
-        let mut raw_values = Vec::new();
-        let mut next_token = None;
-        loop {
-            let (values, _modification_infos, token) = self
-                .read_raw_modified(
-                    node_id, start_time, end_time, 100_000, true, false, next_token,
-                )
-                .await?;
-            raw_values.extend(values);
-
-            let Some(token) = token else {
-                break;
-            };
-            next_token = Some(token);
-        }
-
-        raw_values.sort_by_key(get_value_timestamp);
-
-        let annotation_times: Vec<DateTime> = if aggregate_type == &NodeId::new(0u16, 2351u32) {
-            match self.read_annotations(node_id, &[], None).await {
-                Ok((dvs, _)) => {
-                    let mut timestamps: Vec<DateTime> = dvs
-                        .iter()
-                        .map(get_value_timestamp)
-                        .filter(|timestamp| *timestamp >= start_time && *timestamp <= end_time)
-                        .collect();
-                    timestamps.sort();
-                    timestamps
-                }
-                Err(_) => Vec::new(),
+            if continuation_point.is_some() {
+                return Err(StatusCode::BadContinuationPointInvalid);
             }
-        } else {
-            Vec::new()
-        };
 
-        let processed_values = compute_processed_intervals(
-            &raw_values,
-            aggregate_type,
-            aggregate_configuration,
-            start_time,
-            end_time,
-            processing_interval,
-            stepped,
-            &annotation_times,
-        );
+            let mut raw_values = Vec::new();
+            let mut next_token = None;
+            loop {
+                let (values, _modification_infos, token) = self
+                    .read_raw_modified(
+                        node_id, start_time, end_time, 100_000, true, false, next_token,
+                    )
+                    .await?;
+                raw_values.extend(values);
 
-        Ok((processed_values, None))
+                let Some(token) = token else {
+                    break;
+                };
+                next_token = Some(token);
+            }
+
+            raw_values.sort_by_key(get_value_timestamp);
+
+            let annotation_times: Vec<DateTime> = if aggregate_type == &NodeId::new(0u16, 2351u32) {
+                match self.read_annotations(node_id, &[], None).await {
+                    Ok((dvs, _)) => {
+                        let mut timestamps: Vec<DateTime> = dvs
+                            .iter()
+                            .map(get_value_timestamp)
+                            .filter(|timestamp| *timestamp >= start_time && *timestamp <= end_time)
+                            .collect();
+                        timestamps.sort();
+                        timestamps
+                    }
+                    Err(_) => Vec::new(),
+                }
+            } else {
+                Vec::new()
+            };
+
+            let processed_values = compute_processed_intervals(
+                &raw_values,
+                aggregate_type,
+                aggregate_configuration,
+                start_time,
+                end_time,
+                processing_interval,
+                stepped,
+                &annotation_times,
+            );
+
+            Ok((processed_values, None))
         }
     }
 

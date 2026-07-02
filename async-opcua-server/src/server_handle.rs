@@ -14,11 +14,9 @@ use opcua_types::{LocalizedText, ServerState};
 
 use crate::{reverse_connect::ReverseConnectHandle, ServerStatusWrapper};
 
-use super::{
-    info::ServerInfo, node_manager::NodeManagers, session::manager::SessionManager,
-};
 #[cfg(feature = "subscriptions")]
 use super::SubscriptionCache;
+use super::{info::ServerInfo, node_manager::NodeManagers, session::manager::SessionManager};
 use crate::metrics::ServerMetricsSnapshot;
 
 /// Reference to a server instance containing tools to modify the server
@@ -44,8 +42,7 @@ impl ServerHandle {
         info: Arc<ServerInfo>,
         certificate_store: Arc<RwLock<opcua_crypto::CertificateStore>>,
         service_level: Arc<AtomicU8>,
-        #[cfg(feature = "subscriptions")]
-        subscriptions: Arc<SubscriptionCache>,
+        #[cfg(feature = "subscriptions")] subscriptions: Arc<SubscriptionCache>,
         node_managers: NodeManagers,
         session_manager: Arc<RwLock<SessionManager>>,
         type_tree: Arc<RwLock<DefaultTypeTree>>,

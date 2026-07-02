@@ -382,6 +382,7 @@ impl Subscription {
         }
     }
 
+    #[cfg(feature = "subscriptions-standard")]
     pub(super) fn notify_eu_range_changed(&mut self, id: &u32, low: f64, high: f64) {
         if let Some(item) = self.monitored_items.get_mut(id) {
             item.notify_eu_range_changed(low, high);

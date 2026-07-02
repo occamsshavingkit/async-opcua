@@ -190,7 +190,11 @@ pub struct ServerInfo {
     pub(crate) role_resolver: Arc<RwLock<RoleResolver>>,
     /// Per-namespace default RolePermissions and AccessRestrictions.
     #[cfg_attr(
-        not(any(feature = "rbac", feature = "generated-address-space", feature = "diagnostics")),
+        not(any(
+            feature = "rbac",
+            feature = "generated-address-space",
+            feature = "diagnostics"
+        )),
         allow(dead_code)
     )]
     pub(crate) namespace_defaults: NamespaceDefaults,

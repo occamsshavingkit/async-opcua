@@ -246,10 +246,9 @@ pub fn register_program(
         {
             let mut space = opcua_core::trace_write_lock!(address_space);
 
-            let start_method =
-                opcua_nodes::MethodBuilder::new(&start_method_id, "Start", "Start")
-                    .component_of(parent_id.clone())
-                    .build();
+            let start_method = opcua_nodes::MethodBuilder::new(&start_method_id, "Start", "Start")
+                .component_of(parent_id.clone())
+                .build();
             space.insert(
                 start_method,
                 Some(&[(
@@ -285,10 +284,9 @@ pub fn register_program(
                 )]),
             );
 
-            let halt_method =
-                opcua_nodes::MethodBuilder::new(&halt_method_id, "Halt", "Halt")
-                    .component_of(parent_id.clone())
-                    .build();
+            let halt_method = opcua_nodes::MethodBuilder::new(&halt_method_id, "Halt", "Halt")
+                .component_of(parent_id.clone())
+                .build();
             space.insert(
                 halt_method,
                 Some(&[(
@@ -298,10 +296,9 @@ pub fn register_program(
                 )]),
             );
 
-            let reset_method =
-                opcua_nodes::MethodBuilder::new(&reset_method_id, "Reset", "Reset")
-                    .component_of(parent_id.clone())
-                    .build();
+            let reset_method = opcua_nodes::MethodBuilder::new(&reset_method_id, "Reset", "Reset")
+                .component_of(parent_id.clone())
+                .build();
             space.insert(
                 reset_method,
                 Some(&[(

@@ -24,21 +24,19 @@ use std::{
 use async_trait::async_trait;
 use hashbrown::HashMap;
 
-use crate::{
-    address_space::{
-        NodeType, ReferenceDirection,
-    },
-    rbac,
-};
+#[cfg(feature = "subscriptions")]
+use crate::address_space::read_node_value;
+#[cfg(any(feature = "history", feature = "events"))]
+use crate::address_space::EventNotifier;
 #[cfg(feature = "history")]
 use crate::{
     address_space::{user_access_level, AccessLevel},
     session::continuation_points::ContinuationPoint,
 };
-#[cfg(any(feature = "history", feature = "events"))]
-use crate::address_space::EventNotifier;
-#[cfg(feature = "subscriptions")]
-use crate::address_space::read_node_value;
+use crate::{
+    address_space::{NodeType, ReferenceDirection},
+    rbac,
+};
 #[cfg(feature = "subscriptions")]
 use crate::{subscriptions::CreateMonitoredItem, SubscriptionCache};
 use opcua_core::sync::RwLock;
@@ -46,21 +44,23 @@ use opcua_core::sync::RwLock;
 use opcua_types::argument::Argument;
 #[cfg(feature = "method-call")]
 use opcua_types::DataEncoding;
-#[cfg(any(feature = "subscriptions", feature = "method-call"))]
-use opcua_types::{NumericRange, Variant};
 use opcua_types::{
     AccessRestrictionType, AttributeId, BrowseDescriptionResultMask, BrowseDirection,
     ExpandedNodeId, NodeClass, NodeId, PermissionType, ReferenceDescription, ReferenceTypeId,
     RolePermissionType, StatusCode, TimestampsToReturn,
 };
+#[cfg(feature = "subscriptions")]
+use opcua_types::{DataValue, DateTime, MonitoringMode};
+#[cfg(any(feature = "subscriptions", feature = "method-call"))]
+use opcua_types::{NumericRange, Variant};
 #[cfg(feature = "history")]
 use opcua_types::{
     ReadAnnotationDataDetails, ReadAtTimeDetails, ReadEventDetails, ReadProcessedDetails,
     ReadRawModifiedDetails,
 };
-#[cfg(feature = "subscriptions")]
-use opcua_types::{DataValue, DateTime, MonitoringMode};
 
+#[cfg(feature = "query")]
+use super::QueryRequest;
 use super::{
     build::NodeManagerBuilder,
     view::{AddReferenceResult, ExternalReference, ExternalReferenceRequest, NodeMetadata},
@@ -68,14 +68,12 @@ use super::{
     NamespaceMetadata, NodeManagerCore, NodeMutator, ReadNode, RegisterNodeItem, RequestContext,
     ServerContext, ViewProvider, WriteNode,
 };
+#[cfg(feature = "node-management")]
+use super::{AddNodeItem, AddReferenceItem, DeleteNodeItem, DeleteReferenceItem};
 #[cfg(feature = "history")]
 use super::{HistoryNode, HistoryProvider, HistoryUpdateDetails, HistoryUpdateNode};
 #[cfg(feature = "method-call")]
 use super::{MethodCall, MethodProvider};
-#[cfg(feature = "node-management")]
-use super::{AddNodeItem, AddReferenceItem, DeleteNodeItem, DeleteReferenceItem};
-#[cfg(feature = "query")]
-use super::QueryRequest;
 #[cfg(feature = "subscriptions")]
 use super::{MonitoredItemProvider, MonitoredItemRef, MonitoredItemUpdateRef};
 
@@ -1105,8 +1103,7 @@ impl<TImpl: InMemoryNodeManagerImpl> MonitoredItemProvider for InMemoryNodeManag
             .iter()
             .filter(|it| {
                 it.attribute() == AttributeId::Value
-                    || (cfg!(feature = "events")
-                        && it.attribute() == AttributeId::EventNotifier)
+                    || (cfg!(feature = "events") && it.attribute() == AttributeId::EventNotifier)
             })
             .copied()
             .collect();
@@ -1123,8 +1120,7 @@ impl<TImpl: InMemoryNodeManagerImpl> MonitoredItemProvider for InMemoryNodeManag
             .iter()
             .filter(|it| {
                 it.attribute() == AttributeId::Value
-                    || (cfg!(feature = "events")
-                        && it.attribute() == AttributeId::EventNotifier)
+                    || (cfg!(feature = "events") && it.attribute() == AttributeId::EventNotifier)
             })
             .copied()
             .collect();
@@ -1136,8 +1132,7 @@ impl<TImpl: InMemoryNodeManagerImpl> MonitoredItemProvider for InMemoryNodeManag
             .iter()
             .filter(|it| {
                 it.attribute() == AttributeId::Value
-                    || (cfg!(feature = "events")
-                        && it.attribute() == AttributeId::EventNotifier)
+                    || (cfg!(feature = "events") && it.attribute() == AttributeId::EventNotifier)
             })
             .copied()
             .collect();

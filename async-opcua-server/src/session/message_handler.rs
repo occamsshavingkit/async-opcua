@@ -11,9 +11,9 @@ use std::time::Instant;
 
 #[cfg(feature = "subscriptions")]
 use chrono::Utc;
-use opcua_core::{Message, RequestMessage};
 #[cfg(feature = "subscriptions")]
 use opcua_core::ResponseMessage;
+use opcua_core::{Message, RequestMessage};
 use parking_lot::RwLock;
 use tokio::{
     sync::{mpsc, oneshot},
@@ -28,9 +28,7 @@ use tracing_futures::Instrument;
 use crate::{
     authenticator::UserToken,
     info::ServerInfo,
-    node_manager::{
-        get_namespaces_for_user, NodeManagers, RequestContext, RequestContextInner,
-    },
+    node_manager::{get_namespaces_for_user, NodeManagers, RequestContext, RequestContextInner},
     session::{
         audit::{self, AuditEventContext},
         services,
@@ -41,14 +39,12 @@ use crate::{
     node_manager::{consume_results, MonitoredItemRef, ReadNode},
     subscriptions::{PendingPublish, SubscriptionCache},
 };
+#[cfg(feature = "subscriptions")]
+use opcua_types::{AttributeId, PublishRequest, SetTriggeringRequest, SetTriggeringResponse};
 use opcua_types::{
     CancelResponse, DataValue, DiagnosticBits, DiagnosticInfo, NamespaceMap, NodeId, ReadRequest,
     ReadResponse, ReadValueId, ResponseHeader, ServiceFault, StatusCode, TimestampsToReturn,
     UAString, WriteRequest, WriteResponse,
-};
-#[cfg(feature = "subscriptions")]
-use opcua_types::{
-    AttributeId, PublishRequest, SetTriggeringRequest, SetTriggeringResponse,
 };
 
 use super::{actor::SessionMessage, controller::Response, instance::Session};
@@ -137,8 +133,7 @@ impl<T> Request<T> {
         request_handle: u32,
         session: Arc<RwLock<Session>>,
         token: UserToken,
-        #[cfg(feature = "subscriptions")]
-        subscriptions: Arc<SubscriptionCache>,
+        #[cfg(feature = "subscriptions")] subscriptions: Arc<SubscriptionCache>,
         session_id: u32,
     ) -> Self {
         Self {
@@ -171,8 +166,7 @@ fn request_context_from_parts(
     session: Arc<RwLock<Session>>,
     info: Arc<ServerInfo>,
     token: UserToken,
-    #[cfg(feature = "subscriptions")]
-    subscriptions: Arc<SubscriptionCache>,
+    #[cfg(feature = "subscriptions")] subscriptions: Arc<SubscriptionCache>,
     session_id: u32,
 ) -> RequestContext {
     // Keep context construction centralized so default TypeTree access can use
@@ -229,8 +223,7 @@ impl MessageHandler {
     pub(super) fn new(
         info: Arc<ServerInfo>,
         node_managers: NodeManagers,
-        #[cfg(feature = "subscriptions")]
-        subscriptions: Arc<SubscriptionCache>,
+        #[cfg(feature = "subscriptions")] subscriptions: Arc<SubscriptionCache>,
     ) -> Self {
         Self {
             node_managers,
@@ -848,8 +841,7 @@ impl MessageHandler {
         request: Box<WriteRequest>,
         data: RequestData,
         info: Arc<ServerInfo>,
-        #[cfg(feature = "events")]
-        subscriptions: Arc<SubscriptionCache>,
+        #[cfg(feature = "events")] subscriptions: Arc<SubscriptionCache>,
     ) -> Response {
         let request = *request;
         let Some(nodes_to_write) = request.nodes_to_write else {

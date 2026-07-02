@@ -1,44 +1,41 @@
-use std::{
-    collections::HashMap,
-    sync::Arc,
-};
-#[cfg(any(feature = "subscriptions", feature = "alarms"))]
-use std::time::Duration;
 #[cfg(all(feature = "alarms", feature = "subscriptions"))]
 use std::sync::Weak;
+#[cfg(any(feature = "subscriptions", feature = "alarms"))]
+use std::time::Duration;
+use std::{collections::HashMap, sync::Arc};
 
 use async_trait::async_trait;
 use opcua_core::{trace_read_lock, trace_write_lock};
 use opcua_nodes::{HasNodeId, NodeSetImport};
 
-use crate::{
-    address_space::{read_node_value, write_node_value, AddressSpace, NodeType},
-    node_manager::{
-        DefaultTypeTree, NamespaceMetadata, NodeManagerBuilder, NodeManagersRef,
-        ParsedReadValueId, RequestContext, ServerContext, WriteNode,
-    },
-};
+#[cfg(all(feature = "alarms", feature = "subscriptions"))]
+use crate::alarms::ServerAlarmEvent;
 #[cfg(feature = "alarms")]
 use crate::alarms::{AlarmSourceRegistry, LimitAlarm};
 #[cfg(feature = "history")]
 use crate::history::read::modification_infos_or_none;
 #[cfg(feature = "method-call")]
 use crate::node_manager::MethodCall;
+use crate::{
+    address_space::{read_node_value, write_node_value, AddressSpace, NodeType},
+    node_manager::{
+        DefaultTypeTree, NamespaceMetadata, NodeManagerBuilder, NodeManagersRef, ParsedReadValueId,
+        RequestContext, ServerContext, WriteNode,
+    },
+};
 #[cfg(feature = "subscriptions")]
 use crate::{
     node_manager::{MonitoredItemRef, MonitoredItemUpdateRef, SyncSampler},
     CreateMonitoredItem, SubscriptionCache,
 };
-#[cfg(all(feature = "alarms", feature = "subscriptions"))]
-use crate::alarms::ServerAlarmEvent;
 use opcua_core::sync::RwLock;
+#[cfg(feature = "subscriptions")]
+use opcua_types::MonitoringMode;
+#[cfg(feature = "method-call")]
+use opcua_types::Variant;
 use opcua_types::{
     AttributeId, DataValue, NodeClass, NodeId, NumericRange, StatusCode, TimestampsToReturn,
 };
-#[cfg(feature = "method-call")]
-use opcua_types::Variant;
-#[cfg(feature = "subscriptions")]
-use opcua_types::MonitoringMode;
 
 use super::{
     InMemoryNodeManager, InMemoryNodeManagerBuilder, InMemoryNodeManagerImpl,
@@ -567,23 +564,23 @@ impl InMemoryNodeManagerImpl for SimpleNodeManagerImpl {
             let _ = backend;
             #[cfg(feature = "history-aggregates")]
             {
-            let stepped: Vec<bool> = {
-                let space = trace_read_lock!(address_space);
-                nodes
-                    .iter()
-                    .map(|n| crate::aggregates::resolve_stepped(&space, n.node_id()))
-                    .collect()
-            };
+                let stepped: Vec<bool> = {
+                    let space = trace_read_lock!(address_space);
+                    nodes
+                        .iter()
+                        .map(|n| crate::aggregates::resolve_stepped(&space, n.node_id()))
+                        .collect()
+                };
 
-            crate::aggregates::read_processed_aggregates(
-                &backend,
-                context,
-                details,
-                nodes,
-                timestamps_to_return,
-                &stepped,
-            )
-            .await
+                crate::aggregates::read_processed_aggregates(
+                    &backend,
+                    context,
+                    details,
+                    nodes,
+                    timestamps_to_return,
+                    &stepped,
+                )
+                .await
             }
             #[cfg(not(feature = "history-aggregates"))]
             {

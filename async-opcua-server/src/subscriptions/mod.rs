@@ -10,7 +10,9 @@ mod subscription;
 
 use std::{cell::RefCell, hash::Hash, sync::Arc, time::Instant};
 
-use hashbrown::{Equivalent, HashMap, HashSet};
+#[cfg(feature = "subscriptions-standard")]
+use hashbrown::HashSet;
+use hashbrown::{Equivalent, HashMap};
 pub use monitored_item::{CreateMonitoredItem, MonitoredItem};
 use opcua_core::{trace_read_lock, trace_write_lock, RepublishResponseShared, ResponseMessage};
 #[cfg(feature = "events")]
@@ -29,14 +31,16 @@ pub use notify::{SubscriptionEventNotifier, SubscriptionEventNotifierBatch};
 
 use opcua_core::sync::{Mutex, RwLock};
 
+#[cfg(feature = "subscriptions-standard")]
+use opcua_types::Range;
 use opcua_types::{
     node_id::{IdentifierRef, IntoNodeIdRef, NodeIdRef},
     AttributeId, CreateSubscriptionRequest, CreateSubscriptionResponse, DataEncoding, DataValue,
     DateTime, DateTimeUtc, DiagnosticBits, MessageSecurityMode, ModifySubscriptionRequest,
     ModifySubscriptionResponse, MonitoredItemCreateResult, MonitoredItemModifyRequest,
-    MonitoringMode, NodeId, NotificationMessage, NumericRange, PublishRequest, Range,
-    RepublishRequest, ResponseHeader, SetPublishingModeRequest, SetPublishingModeResponse,
-    StatusCode, TimestampsToReturn, TransferResult, TransferSubscriptionsRequest,
+    MonitoringMode, NodeId, NotificationMessage, NumericRange, PublishRequest, RepublishRequest,
+    ResponseHeader, SetPublishingModeRequest, SetPublishingModeResponse, StatusCode,
+    TimestampsToReturn, TransferResult, TransferSubscriptionsRequest,
     TransferSubscriptionsResponse, Variant,
 };
 
@@ -103,10 +107,8 @@ impl SessionEntry {
         key: PersistentSessionKey,
         session: Arc<RwLock<Session>>,
         type_tree: Arc<dyn TypeTreeForUserStatic>,
-        #[cfg(feature = "events")]
-        node_managers: NodeManagersRef,
-        #[cfg(feature = "events")]
-        enforce_role_based_access: bool,
+        #[cfg(feature = "events")] node_managers: NodeManagersRef,
+        #[cfg(feature = "events")] enforce_role_based_access: bool,
         cleanup_tx: mpsc::UnboundedSender<SubscriptionCleanup>,
     ) -> Self {
         let subs = SessionSubscriptions::new(
@@ -155,6 +157,7 @@ struct SubscriptionCacheInner {
     /// Map from notifier node ID to monitored item handles.
     monitored_items: HashMap<MonitoredItemKey, HashMap<MonitoredItemHandle, MonitoredItemEntry>>,
     /// Map from EURange property node ID to percent-deadband monitored item handles.
+    #[cfg(feature = "subscriptions-standard")]
     eu_range_monitored_items: HashMap<NodeId, HashSet<MonitoredItemHandle>>,
 }
 
@@ -179,6 +182,7 @@ struct PendingDataNotifications {
     items: Vec<(MonitoredItemHandle, DataValue)>,
 }
 
+#[cfg(feature = "subscriptions-standard")]
 struct PendingRangeNotifications {
     subscription_handle: SubscriptionActorHandle,
     items: Vec<(MonitoredItemHandle, f64, f64)>,
@@ -371,6 +375,7 @@ fn push_pending_data_notifications(by_subscription: HashMap<(u32, u32), PendingD
     }
 }
 
+#[cfg(feature = "subscriptions-standard")]
 fn push_pending_range_notifications(
     by_subscription: HashMap<(u32, u32), PendingRangeNotifications>,
 ) {
@@ -382,6 +387,7 @@ fn push_pending_range_notifications(
     }
 }
 
+#[cfg(feature = "subscriptions-standard")]
 fn eu_range_from_data_value(value: &DataValue) -> Option<(f64, f64)> {
     let Some(Variant::ExtensionObject(value)) = value.value.as_ref() else {
         return None;
@@ -484,6 +490,7 @@ impl SubscriptionCache {
                 session_subscriptions: HashMap::new(),
                 subscription_to_session: HashMap::new(),
                 monitored_items: HashMap::new(),
+                #[cfg(feature = "subscriptions-standard")]
                 eu_range_monitored_items: HashMap::new(),
             }),
             #[cfg(feature = "events")]
@@ -789,6 +796,7 @@ impl SubscriptionCache {
         }
     }
 
+    #[cfg(feature = "subscriptions-standard")]
     fn replace_eu_range_registration(
         inner: &mut SubscriptionCacheInner,
         handle: MonitoredItemHandle,
@@ -804,6 +812,7 @@ impl SubscriptionCache {
         }
     }
 
+    #[cfg(feature = "subscriptions-standard")]
     fn remove_eu_range_registration(
         inner: &mut SubscriptionCacheInner,
         handle: MonitoredItemHandle,
@@ -814,6 +823,7 @@ impl SubscriptionCache {
         });
     }
 
+    #[cfg(feature = "subscriptions-standard")]
     fn cleanup_monitored_item_refs(inner: &mut SubscriptionCacheInner, items: &[MonitoredItemRef]) {
         for item in items {
             let key = MonitoredItemKeyRef {
@@ -821,6 +831,25 @@ impl SubscriptionCache {
                 attribute_id: item.attribute(),
             };
             Self::remove_eu_range_registration(inner, item.handle());
+            let remove_key = if let Some(handles) = inner.monitored_items.get_mut(&key) {
+                handles.remove(&item.handle());
+                handles.is_empty()
+            } else {
+                false
+            };
+            if remove_key {
+                inner.monitored_items.remove(&key);
+            }
+        }
+    }
+
+    #[cfg(not(feature = "subscriptions-standard"))]
+    fn cleanup_monitored_item_refs(inner: &mut SubscriptionCacheInner, items: &[MonitoredItemRef]) {
+        for item in items {
+            let key = MonitoredItemKeyRef {
+                id: item.node_id().into(),
+                attribute_id: item.attribute(),
+            };
             let remove_key = if let Some(handles) = inner.monitored_items.get_mut(&key) {
                 handles.remove(&item.handle());
                 handles.is_empty()
@@ -1047,6 +1076,7 @@ impl SubscriptionCache {
             .map(|entry| (session_id, entry.handle()))
     }
 
+    #[cfg(feature = "subscriptions-standard")]
     fn eu_range_route_snapshot(
         &self,
         eu_range_node_id: &NodeId,
@@ -1101,6 +1131,7 @@ impl SubscriptionCache {
         items: impl Iterator<Item = (DataValue, &'a NodeId, AttributeId)>,
     ) {
         let mut by_subscription: HashMap<(u32, u32), PendingDataNotifications> = HashMap::new();
+        #[cfg(feature = "subscriptions-standard")]
         let mut by_range_subscription: HashMap<(u32, u32), PendingRangeNotifications> =
             HashMap::new();
 
@@ -1121,6 +1152,7 @@ impl SubscriptionCache {
                 }
             }
 
+            #[cfg(feature = "subscriptions-standard")]
             if attribute_id == AttributeId::Value {
                 if let Some((low, high)) = eu_range_from_data_value(&dv) {
                     for (session_id, subscription_id, subscription_handle, handle) in
@@ -1140,6 +1172,7 @@ impl SubscriptionCache {
         }
 
         push_pending_data_notifications(by_subscription);
+        #[cfg(feature = "subscriptions-standard")]
         push_pending_range_notifications(by_range_subscription);
     }
 
@@ -1153,18 +1186,24 @@ impl SubscriptionCache {
         sample: impl Fn(&NodeId, AttributeId, &NumericRange, &DataEncoding) -> Option<DataValue>,
     ) {
         let mut by_subscription: HashMap<(u32, u32), PendingDataNotifications> = HashMap::new();
+        #[cfg(feature = "subscriptions-standard")]
         let mut by_range_subscription: HashMap<(u32, u32), PendingRangeNotifications> =
             HashMap::new();
 
         for (id, attribute_id) in items {
             let route_batches = self.data_route_snapshot(id, attribute_id).into_batches();
+            #[cfg(feature = "subscriptions-standard")]
             let range_routes = if attribute_id == AttributeId::Value {
                 self.eu_range_route_snapshot(id)
             } else {
                 Vec::new()
             };
+            #[cfg(feature = "subscriptions-standard")]
+            let no_range_routes = range_routes.is_empty();
+            #[cfg(not(feature = "subscriptions-standard"))]
+            let no_range_routes = true;
 
-            if route_batches.is_empty() && range_routes.is_empty() {
+            if route_batches.is_empty() && no_range_routes {
                 continue;
             }
 
@@ -1192,6 +1231,7 @@ impl SubscriptionCache {
                 }
             }
 
+            #[cfg(feature = "subscriptions-standard")]
             if !range_routes.is_empty() {
                 let Some(value) = sample(
                     id,
@@ -1219,6 +1259,7 @@ impl SubscriptionCache {
         }
 
         push_pending_data_notifications(by_subscription);
+        #[cfg(feature = "subscriptions-standard")]
         push_pending_range_notifications(by_range_subscription);
     }
 
@@ -1308,11 +1349,14 @@ impl SubscriptionCache {
                         },
                     );
 
-                    Self::replace_eu_range_registration(
-                        &mut lck,
-                        create.handle(),
-                        create.eu_range_node_id().cloned(),
-                    );
+                    #[cfg(feature = "subscriptions-standard")]
+                    {
+                        Self::replace_eu_range_registration(
+                            &mut lck,
+                            create.handle(),
+                            create.eu_range_node_id().cloned(),
+                        );
+                    }
                 }
             }
         }
@@ -1328,8 +1372,8 @@ impl SubscriptionCache {
         info: Arc<ServerInfo>,
         timestamps_to_return: TimestampsToReturn,
         requests: Vec<MonitoredItemModifyRequest>,
-        eu_ranges: HashMap<u32, (f64, f64)>,
-        eu_range_node_ids: HashMap<u32, NodeId>,
+        #[cfg(feature = "subscriptions-standard")] eu_ranges: HashMap<u32, (f64, f64)>,
+        #[cfg(feature = "subscriptions-standard")] eu_range_node_ids: HashMap<u32, NodeId>,
         diagnostic_bits: DiagnosticBits,
     ) -> Result<Vec<MonitoredItemUpdateRef>, StatusCode> {
         let Some(cache) = ({
@@ -1350,6 +1394,7 @@ impl SubscriptionCache {
                     &info,
                     timestamps_to_return,
                     requests,
+                    #[cfg(feature = "subscriptions-standard")]
                     eu_ranges,
                     type_tree.get(),
                     diagnostic_bits,
@@ -1358,6 +1403,7 @@ impl SubscriptionCache {
             .await
             .map_err(|_| StatusCode::BadNoSubscription)??;
 
+        #[cfg(feature = "subscriptions-standard")]
         {
             let mut lck = trace_write_lock!(self.inner);
             for update in &result {
@@ -1375,6 +1421,7 @@ impl SubscriptionCache {
         Ok(result)
     }
 
+    #[cfg(feature = "subscriptions-standard")]
     pub(crate) async fn monitored_item_node_ids(
         &self,
         session_id: u32,
@@ -1510,8 +1557,7 @@ impl SubscriptionCache {
         &self,
         session_id: u32,
         ids: &[u32],
-        #[cfg_attr(not(feature = "diagnostics"), allow(unused_variables))]
-        info: Arc<ServerInfo>,
+        #[cfg_attr(not(feature = "diagnostics"), allow(unused_variables))] info: Arc<ServerInfo>,
     ) -> Result<Vec<(StatusCode, Vec<MonitoredItemRef>)>, StatusCode> {
         let cache = {
             let lck = trace_read_lock!(self.inner);

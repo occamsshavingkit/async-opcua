@@ -1,11 +1,11 @@
 use hashbrown::HashMap;
 #[cfg(feature = "events")]
 use opcua_nodes::Event;
+#[cfg(feature = "events")]
+use opcua_types::ObjectId;
 use opcua_types::{
     node_id::IntoNodeIdRef, AttributeId, DataEncoding, DataValue, DateTime, NumericRange, Variant,
 };
-#[cfg(feature = "events")]
-use opcua_types::ObjectId;
 use parking_lot::RwLockReadGuard;
 
 use crate::{

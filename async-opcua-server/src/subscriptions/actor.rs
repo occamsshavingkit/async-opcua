@@ -189,14 +189,14 @@ impl SubscriptionActor {
             let drained = {
                 #[cfg(feature = "events")]
                 {
-                // Keep the read context scoped to this synchronous drain chunk.
-                let type_tree = self.type_tree_for_user.get_type_tree();
-                self.subs.drain_ring_chunk(
-                    self.ring.as_ref(),
-                    type_tree.get(),
-                    RING_DRAIN_EVENT_CHUNK,
-                    &mut self.pending_refresh,
-                )
+                    // Keep the read context scoped to this synchronous drain chunk.
+                    let type_tree = self.type_tree_for_user.get_type_tree();
+                    self.subs.drain_ring_chunk(
+                        self.ring.as_ref(),
+                        type_tree.get(),
+                        RING_DRAIN_EVENT_CHUNK,
+                        &mut self.pending_refresh,
+                    )
                 }
                 #[cfg(not(feature = "events"))]
                 {

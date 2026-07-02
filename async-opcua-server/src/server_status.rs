@@ -1,16 +1,16 @@
+#[cfg(feature = "subscriptions")]
+use std::time::Duration;
 use std::{
     sync::{Arc, OnceLock},
     time::Instant,
 };
-#[cfg(feature = "subscriptions")]
-use std::time::Duration;
 
 use opcua_core::sync::Mutex;
+#[cfg(feature = "subscriptions")]
+use opcua_types::{AttributeId, DataValue, MonitoringMode, NodeId, VariableId};
 use opcua_types::{
     BuildInfo, DateTime, ExtensionObject, LocalizedText, ServerState, ServerStatusDataType,
 };
-#[cfg(feature = "subscriptions")]
-use opcua_types::{AttributeId, DataValue, MonitoringMode, NodeId, VariableId};
 
 #[cfg(feature = "subscriptions")]
 use crate::node_manager::SyncSampler;

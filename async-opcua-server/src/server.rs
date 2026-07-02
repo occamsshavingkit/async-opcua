@@ -41,6 +41,8 @@ use crate::{
 };
 use opcua_types::{DateTime, LocalizedText, ServerState, UAString};
 
+#[cfg(feature = "subscriptions")]
+use super::subscriptions::SubscriptionCache;
 use super::{
     authenticator::DefaultAuthenticator,
     builder::ServerBuilder,
@@ -51,8 +53,6 @@ use super::{
     session::manager::SessionManager,
     ServerCapabilities,
 };
-#[cfg(feature = "subscriptions")]
-use super::subscriptions::SubscriptionCache;
 
 struct ConnectionInfo {
     command_send: tokio::sync::mpsc::Sender<ControllerCommand>,

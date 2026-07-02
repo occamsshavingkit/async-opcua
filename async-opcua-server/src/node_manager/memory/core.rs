@@ -1,8 +1,8 @@
 use std::sync::Arc;
-#[cfg(feature = "diagnostics")]
-use std::time::Instant;
 #[cfg(feature = "subscriptions")]
 use std::time::Duration;
+#[cfg(feature = "diagnostics")]
+use std::time::Instant;
 
 use async_trait::async_trait;
 #[cfg(feature = "diagnostics")]
@@ -10,6 +10,12 @@ use chrono::Duration as ChronoDuration;
 use chrono::Offset;
 use hashbrown::HashMap;
 
+#[cfg(all(feature = "method-call", feature = "subscriptions-standard"))]
+use crate::load_method_args;
+#[cfg(feature = "method-call")]
+use crate::node_manager::MethodCall;
+#[cfg(all(feature = "diagnostics", feature = "subscriptions"))]
+use crate::subscriptions::SessionSubscriptionDiagnosticsSummary;
 use crate::{
     address_space::{
         compute_user_role_permissions, read_node_value, AddressSpace, CoreNamespace, NodeType,
@@ -29,37 +35,30 @@ use crate::{
         manager::{locale_ids_for_session, SessionManager},
     },
 };
-#[cfg(all(feature = "method-call", feature = "subscriptions-standard"))]
-use crate::load_method_args;
-#[cfg(feature = "method-call")]
-use crate::node_manager::MethodCall;
 #[cfg(feature = "subscriptions")]
 use crate::{
     node_manager::{MonitoredItemRef, MonitoredItemUpdateRef, SyncSampler},
     subscriptions::CreateMonitoredItem,
 };
-#[cfg(all(feature = "diagnostics", feature = "subscriptions"))]
-use crate::subscriptions::SessionSubscriptionDiagnosticsSummary;
 use opcua_core::sync::RwLock;
 #[cfg(any(feature = "diagnostics", feature = "method-call"))]
 use opcua_core::trace_read_lock;
 #[cfg(feature = "method-call")]
 use opcua_core::trace_write_lock;
+#[cfg(feature = "subscriptions")]
+use opcua_types::MonitoringMode;
+#[cfg(feature = "diagnostics")]
+use opcua_types::{
+    profiles, AttributeId, ByteString, SessionDiagnosticsDataType,
+    SessionSecurityDiagnosticsDataType, UAString,
+};
 use opcua_types::{
     DataValue, DateTime, ExtensionObject, IdType, Identifier, NodeId, NumericRange, ObjectId,
     ReferenceTypeId, RolePermissionType, StatusCode, TimeZoneDataType, TimestampsToReturn,
     VariableId, Variant,
 };
-#[cfg(feature = "diagnostics")]
-use opcua_types::{
-    profiles, AttributeId, ByteString, SessionDiagnosticsDataType,
-    SessionSecurityDiagnosticsDataType,
-    UAString,
-};
 #[cfg(all(feature = "method-call", feature = "subscriptions-standard"))]
 use opcua_types::{MethodId, VariantScalarTypeId, VariantTypeId};
-#[cfg(feature = "subscriptions")]
-use opcua_types::MonitoringMode;
 
 use super::{InMemoryNodeManager, InMemoryNodeManagerImpl, InMemoryNodeManagerImplBuilder};
 
@@ -359,8 +358,7 @@ impl InMemoryNodeManagerImpl for CoreNodeManagerImpl {
 impl CoreNodeManagerImpl {
     pub(super) fn new(
         node_managers: NodeManagersRef,
-        #[cfg(feature = "diagnostics")]
-        session_manager: Arc<RwLock<SessionManager>>,
+        #[cfg(feature = "diagnostics")] session_manager: Arc<RwLock<SessionManager>>,
         status: Arc<ServerStatusWrapper>,
     ) -> Self {
         Self {

@@ -12,16 +12,16 @@ use std::{
 use async_trait::async_trait;
 use opcua_core::sync::RwLock;
 use opcua_nodes::DefaultTypeTree;
-use opcua_types::{NodeId, RolePermissionType, StatusCode, TimestampsToReturn};
 #[cfg(feature = "node-management")]
 use opcua_types::ExpandedNodeId;
+#[cfg(feature = "subscriptions")]
+use opcua_types::MonitoringMode;
+use opcua_types::{NodeId, RolePermissionType, StatusCode, TimestampsToReturn};
 #[cfg(feature = "history")]
 use opcua_types::{
     ReadAnnotationDataDetails, ReadAtTimeDetails, ReadEventDetails, ReadProcessedDetails,
     ReadRawModifiedDetails,
 };
-#[cfg(feature = "subscriptions")]
-use opcua_types::MonitoringMode;
 use tokio::sync::OnceCell;
 
 mod attributes;
@@ -38,9 +38,9 @@ mod method;
 mod method_typed;
 #[cfg(feature = "events")]
 mod model_change;
-mod namespace_metadata;
 #[cfg(feature = "subscriptions")]
 mod monitored_items;
+mod namespace_metadata;
 #[cfg(feature = "node-management")]
 mod node_management;
 #[cfg(feature = "query")]
@@ -48,16 +48,26 @@ mod query;
 mod utils;
 mod view;
 
-use crate::{session::manager::SessionManager, ServerStatusWrapper};
 #[cfg(feature = "history")]
 use crate::session::continuation_points::ContinuationPoint;
+use crate::{session::manager::SessionManager, ServerStatusWrapper};
 
+#[cfg(feature = "subscriptions")]
+use super::subscriptions::CreateMonitoredItem;
 #[cfg(feature = "subscriptions")]
 use super::SubscriptionCache;
 use super::{authenticator::AuthManager, info::ServerInfo};
-#[cfg(feature = "subscriptions")]
-use super::subscriptions::CreateMonitoredItem;
 
+#[cfg(feature = "history")]
+pub use history::{HistoryNode, HistoryResult, HistoryUpdateDetails, HistoryUpdateNode};
+#[cfg(feature = "events")]
+pub use model_change::GeneralModelChangeEvent;
+#[cfg(feature = "subscriptions")]
+pub use monitored_items::{MonitoredItemRef, MonitoredItemUpdateRef};
+#[cfg(feature = "node-management")]
+pub use node_management::{AddNodeItem, AddReferenceItem, DeleteNodeItem, DeleteReferenceItem};
+#[cfg(feature = "query")]
+pub use query::{ParsedNodeTypeDescription, ParsedQueryDataDescription, QueryRequest};
 pub use {
     attributes::{ParsedReadValueId, ParsedWriteValue, ReadNode, WriteNode},
     build::NodeManagerBuilder,
@@ -72,10 +82,6 @@ pub use {
         ExternalReference, ExternalReferenceRequest, NodeMetadata, RegisterNodeItem,
     },
 };
-#[cfg(feature = "events")]
-pub use model_change::GeneralModelChangeEvent;
-#[cfg(feature = "history")]
-pub use history::{HistoryNode, HistoryResult, HistoryUpdateDetails, HistoryUpdateNode};
 #[cfg(feature = "method-call")]
 pub use {
     method::MethodCall,
@@ -84,12 +90,6 @@ pub use {
         MethodHandlerWithContext,
     },
 };
-#[cfg(feature = "node-management")]
-pub use node_management::{AddNodeItem, AddReferenceItem, DeleteNodeItem, DeleteReferenceItem};
-#[cfg(feature = "subscriptions")]
-pub use monitored_items::{MonitoredItemRef, MonitoredItemUpdateRef};
-#[cfg(feature = "query")]
-pub use query::{ParsedNodeTypeDescription, ParsedQueryDataDescription, QueryRequest};
 
 pub(crate) use context::resolve_external_references;
 pub(crate) use context::DefaultTypeTreeGetter;
@@ -787,12 +787,7 @@ pub trait NodeManager:
     feature = "history"
 ))]
 pub trait NodeManager:
-    NodeManagerCore
-    + AttributeProvider
-    + ViewProvider
-    + MethodProvider
-    + NodeMutator
-    + HistoryProvider
+    NodeManagerCore + AttributeProvider + ViewProvider + MethodProvider + NodeMutator + HistoryProvider
 {
 }
 
@@ -814,7 +809,12 @@ pub trait NodeManager:
     not(feature = "history")
 ))]
 pub trait NodeManager:
-    NodeManagerCore + AttributeProvider + ViewProvider + MethodProvider + NodeMutator + MonitoredItemProvider
+    NodeManagerCore
+    + AttributeProvider
+    + ViewProvider
+    + MethodProvider
+    + NodeMutator
+    + MonitoredItemProvider
 {
 }
 
@@ -835,7 +835,8 @@ pub trait NodeManager:
     feature = "method-call",
     not(feature = "history")
 ))]
-pub trait NodeManager: NodeManagerCore + AttributeProvider + ViewProvider + MethodProvider + NodeMutator
+pub trait NodeManager:
+    NodeManagerCore + AttributeProvider + ViewProvider + MethodProvider + NodeMutator
 {
 }
 

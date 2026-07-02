@@ -1,12 +1,12 @@
 use std::{ops::Deref, sync::Arc};
 
+#[cfg(feature = "subscriptions")]
+use crate::SubscriptionCache;
 use crate::{
     authenticator::{AuthManager, UserToken},
     info::{ServerInfo, TypeTreeSnapshot},
     session::instance::Session,
 };
-#[cfg(feature = "subscriptions")]
-use crate::SubscriptionCache;
 use opcua_core::{sync::RwLock, trace_read_lock};
 use opcua_nodes::TypeTree;
 use opcua_types::{BrowseDescriptionResultMask, MessageSecurityMode, NodeId};

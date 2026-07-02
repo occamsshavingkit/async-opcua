@@ -1,4 +1,6 @@
-use std::{collections::HashMap, sync::Arc};
+#[cfg(feature = "subscriptions-standard")]
+use std::collections::HashMap;
+use std::sync::Arc;
 
 use crate::{
     node_manager::{
@@ -14,21 +16,27 @@ use crate::{
     },
     subscriptions::CreateMonitoredItem,
 };
+#[cfg(feature = "subscriptions-standard")]
 use opcua_core::ResponseMessage;
+#[cfg(feature = "subscriptions-standard")]
 use opcua_types::{
-    AttributeId, BrowsePath, CreateMonitoredItemsRequest, CreateMonitoredItemsResponse,
-    DataChangeFilter, DeadbandType, DeleteMonitoredItemsRequest, DeleteMonitoredItemsResponse,
-    DiagnosticInfo, ModifyMonitoredItemsRequest, ModifyMonitoredItemsResponse,
-    MonitoredItemModifyResult, MonitoringMode, NodeId, Range, ReadRequest, ReferenceTypeId,
-    RelativePath, RelativePathElement, RequestHeader, ResponseHeader, SetMonitoringModeRequest,
-    SetMonitoringModeResponse, StatusCode, TimestampsToReturn,
+    AttributeId, BrowsePath, DataChangeFilter, DeadbandType, NodeId, Range, ReadRequest,
+    ReferenceTypeId, RelativePath, RelativePathElement, RequestHeader,
     TranslateBrowsePathsToNodeIdsRequest, Variant,
+};
+use opcua_types::{
+    CreateMonitoredItemsRequest, CreateMonitoredItemsResponse, DeleteMonitoredItemsRequest,
+    DeleteMonitoredItemsResponse, DiagnosticInfo, ModifyMonitoredItemsRequest,
+    ModifyMonitoredItemsResponse, MonitoredItemModifyResult, MonitoringMode, ResponseHeader,
+    SetMonitoringModeRequest, SetMonitoringModeResponse, StatusCode, TimestampsToReturn,
 };
 use tracing::debug_span;
 use tracing_futures::Instrument;
 
+#[cfg(feature = "subscriptions-standard")]
 use super::{read, translate_browse_paths};
 
+#[cfg(feature = "subscriptions-standard")]
 struct EuRangeResolution {
     property_node_id: NodeId,
     range: (f64, f64),
@@ -37,6 +45,7 @@ struct EuRangeResolution {
 // OPC-UA is sometimes very painful. In order to actually implement percent-deadband, we need to
 // fetch the EURange property from the node hierarchy. This method does that by calling TranslateBrowsePaths
 // and then Read.
+#[cfg(feature = "subscriptions-standard")]
 async fn get_eu_range(
     items: &[&NodeId],
     context: &RequestContext,
@@ -190,8 +199,10 @@ pub(crate) async fn create_monitored_items(
         return service_fault!(request, StatusCode::BadTooManyMonitoredItems);
     }
 
+    #[cfg(feature = "subscriptions-standard")]
     // Try to get EURange for each item with a percent deadband filter.
     let mut items_needing_deadband = Vec::new();
+    #[cfg(feature = "subscriptions-standard")]
     for item in &items_to_create {
         let Some(filter) = item
             .requested_parameters
@@ -205,6 +216,7 @@ pub(crate) async fn create_monitored_items(
             items_needing_deadband.push(&item.item_to_monitor.node_id);
         }
     }
+    #[cfg(feature = "subscriptions-standard")]
     let ranges = get_eu_range(&items_needing_deadband, &context, &node_managers).await;
 
     // Type metadata for monitored item construction must come through the request context getter:
@@ -217,22 +229,37 @@ pub(crate) async fn create_monitored_items(
         items_to_create
             .into_iter()
             .map(|r| {
-                let eu_range = ranges.get(&r.item_to_monitor.node_id);
-                let range = eu_range.map(|resolution| resolution.range);
-                let eu_range_node_id =
-                    eu_range.map(|resolution| resolution.property_node_id.clone());
-                let mut item = CreateMonitoredItem::new(
-                    r,
-                    request.info.monitored_item_id_handle.next(),
-                    request.request.subscription_id,
-                    &request.info,
-                    request.request.timestamps_to_return,
-                    return_diagnostics,
-                    type_tree.get(),
-                    range,
-                );
-                item.set_eu_range_node_id(eu_range_node_id);
-                item
+                #[cfg(feature = "subscriptions-standard")]
+                {
+                    let eu_range = ranges.get(&r.item_to_monitor.node_id);
+                    let range = eu_range.map(|resolution| resolution.range);
+                    let eu_range_node_id =
+                        eu_range.map(|resolution| resolution.property_node_id.clone());
+                    let mut item = CreateMonitoredItem::new(
+                        r,
+                        request.info.monitored_item_id_handle.next(),
+                        request.request.subscription_id,
+                        &request.info,
+                        request.request.timestamps_to_return,
+                        return_diagnostics,
+                        type_tree.get(),
+                        range,
+                    );
+                    item.set_eu_range_node_id(eu_range_node_id);
+                    item
+                }
+                #[cfg(not(feature = "subscriptions-standard"))]
+                {
+                    CreateMonitoredItem::new(
+                        r,
+                        request.info.monitored_item_id_handle.next(),
+                        request.request.subscription_id,
+                        &request.info,
+                        request.request.timestamps_to_return,
+                        return_diagnostics,
+                        type_tree.get(),
+                    )
+                }
             })
             .collect()
     };
@@ -352,7 +379,9 @@ pub(crate) async fn modify_monitored_items(
         request.info.operational_limits.max_monitored_items_per_call
     );
 
+    #[cfg(feature = "subscriptions-standard")]
     let mut percent_deadband_item_ids = Vec::new();
+    #[cfg(feature = "subscriptions-standard")]
     for item in &items_to_modify {
         let Some(filter) = item
             .requested_parameters
@@ -367,6 +396,7 @@ pub(crate) async fn modify_monitored_items(
         }
     }
 
+    #[cfg(feature = "subscriptions-standard")]
     let (eu_ranges, eu_range_node_ids) = if percent_deadband_item_ids.is_empty() {
         (HashMap::new(), HashMap::new())
     } else {
@@ -407,7 +437,9 @@ pub(crate) async fn modify_monitored_items(
                 request.info.clone(),
                 request.request.timestamps_to_return,
                 items_to_modify,
+                #[cfg(feature = "subscriptions-standard")]
                 eu_ranges.into_iter().collect(),
+                #[cfg(feature = "subscriptions-standard")]
                 eu_range_node_ids.into_iter().collect(),
                 return_diagnostics,
             )

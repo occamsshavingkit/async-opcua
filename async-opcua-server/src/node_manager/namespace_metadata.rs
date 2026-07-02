@@ -1,6 +1,4 @@
-use opcua_types::{
-    AccessRestrictionType, DateTime, IdType, NumericRange, RolePermissionType,
-};
+use opcua_types::{AccessRestrictionType, DateTime, IdType, NumericRange, RolePermissionType};
 
 /// Namespace metadata exposed in the namespace array and used by node managers.
 #[derive(Default, Clone, Debug)]

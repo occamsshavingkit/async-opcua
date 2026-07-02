@@ -28,7 +28,7 @@ mod view;
 
 use std::{future::Future, sync::Arc};
 
-#[cfg(any(feature = "history", feature = "subscriptions"))]
+#[cfg(any(feature = "history", feature = "subscriptions-standard"))]
 pub(super) use attribute::*;
 #[cfg(feature = "method-call")]
 pub(super) use method::*;

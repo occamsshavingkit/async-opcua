@@ -79,7 +79,9 @@ pub(crate) mod defaults {
 
     impl NamespaceDefaults {
         /// Ignores configured RBAC defaults when RBAC is compiled out.
-        pub(crate) fn from_config(_config_defaults: &BTreeMap<u16, NamespaceDefaultConfig>) -> Self {
+        pub(crate) fn from_config(
+            _config_defaults: &BTreeMap<u16, NamespaceDefaultConfig>,
+        ) -> Self {
             Self
         }
 

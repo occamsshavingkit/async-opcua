@@ -6,12 +6,12 @@ use async_trait::async_trait;
 use opcua_core::{events::AlarmEvent, sync::RwLock};
 #[cfg(feature = "events")]
 use opcua_nodes::{DefaultTypeTree, Event, EventField};
+#[cfg(feature = "events")]
+use opcua_types::{AttributeId, NumericRange, UAString};
 use opcua_types::{
     ByteString, DataValue, DateTime, EventFilter, HistoryEventFieldList, NodeId, ObjectTypeId,
     PerformUpdateType, QualifiedName, SimpleAttributeOperand, StatusCode, Variant,
 };
-#[cfg(feature = "events")]
-use opcua_types::{AttributeId, NumericRange, UAString};
 
 use crate::history::{HistoryRawModifiedResult, HistoryStorageBackend};
 #[cfg(feature = "events")]
@@ -76,70 +76,64 @@ impl HistoryStorageBackend for InMemoryEventHistory {
     ) -> Result<(Vec<HistoryEventFieldList>, Option<Vec<u8>>), StatusCode> {
         #[cfg(not(feature = "events"))]
         {
-            let _ = (
-                node_id,
-                start_time,
-                end_time,
-                num_values_per_node,
-                filter,
-            );
+            let _ = (node_id, start_time, end_time, num_values_per_node, filter);
             return Err(StatusCode::BadHistoryOperationUnsupported);
         }
 
         #[cfg(feature = "events")]
         {
-        let type_tree = DefaultTypeTree::new();
-        let (_, parsed) = ParsedEventFilter::parse(filter.clone(), &type_tree);
-        let parsed = parsed?;
+            let type_tree = DefaultTypeTree::new();
+            let (_, parsed) = ParsedEventFilter::parse(filter.clone(), &type_tree);
+            let parsed = parsed?;
 
-        let mut events = self
-            .events
-            .read()
-            .get(node_id)
-            .map(|events| events.iter().cloned().collect::<Vec<_>>())
-            .unwrap_or_default();
-        events.sort_by_key(|event| event.time);
-
-        let limit = (num_values_per_node > 0).then_some(num_values_per_node as usize);
-        let mut field_lists = Vec::new();
-        for event in events
-            .into_iter()
-            .filter(|event| event_time_in_range(event.time, start_time, end_time))
-        {
-            // ponytail: reverse reads use the same inclusive range but keep ascending order.
-            if !has_event_read_capacity(limit, field_lists.len()) {
-                // ponytail: this backend truncates to num_values_per_node without a continuation.
-                break;
-            }
-
-            let event = HistoryAlarmEvent { event: &event };
-            if let Some(fields) = parsed.evaluate(&event, 0, &type_tree) {
-                field_lists.push(HistoryEventFieldList {
-                    event_fields: fields.event_fields,
-                });
-            }
-        }
-
-        if has_event_read_capacity(limit, field_lists.len()) {
-            let inserted_events = self
-                .inserted_events
+            let mut events = self
+                .events
                 .read()
                 .get(node_id)
-                .map(|events| events.values().cloned().collect::<Vec<_>>())
+                .map(|events| events.iter().cloned().collect::<Vec<_>>())
                 .unwrap_or_default();
+            events.sort_by_key(|event| event.time);
 
-            for event in inserted_events {
-                // ponytail: inserted events are returned with the field shape they were written
-                // with, without cross-filter re-evaluation. Upgrade path: store the full event
-                // and re-evaluate it against the read filter.
+            let limit = (num_values_per_node > 0).then_some(num_values_per_node as usize);
+            let mut field_lists = Vec::new();
+            for event in events
+                .into_iter()
+                .filter(|event| event_time_in_range(event.time, start_time, end_time))
+            {
+                // ponytail: reverse reads use the same inclusive range but keep ascending order.
                 if !has_event_read_capacity(limit, field_lists.len()) {
+                    // ponytail: this backend truncates to num_values_per_node without a continuation.
                     break;
                 }
-                field_lists.push(event);
-            }
-        }
 
-        Ok((field_lists, None))
+                let event = HistoryAlarmEvent { event: &event };
+                if let Some(fields) = parsed.evaluate(&event, 0, &type_tree) {
+                    field_lists.push(HistoryEventFieldList {
+                        event_fields: fields.event_fields,
+                    });
+                }
+            }
+
+            if has_event_read_capacity(limit, field_lists.len()) {
+                let inserted_events = self
+                    .inserted_events
+                    .read()
+                    .get(node_id)
+                    .map(|events| events.values().cloned().collect::<Vec<_>>())
+                    .unwrap_or_default();
+
+                for event in inserted_events {
+                    // ponytail: inserted events are returned with the field shape they were written
+                    // with, without cross-filter re-evaluation. Upgrade path: store the full event
+                    // and re-evaluate it against the read filter.
+                    if !has_event_read_capacity(limit, field_lists.len()) {
+                        break;
+                    }
+                    field_lists.push(event);
+                }
+            }
+
+            Ok((field_lists, None))
         }
     }
 

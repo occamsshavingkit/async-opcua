@@ -2,6 +2,10 @@ use async_trait::async_trait;
 #[cfg(feature = "method-call")]
 use std::sync::Arc;
 
+#[cfg(all(feature = "node-management", feature = "events"))]
+use crate::node_manager::GeneralModelChangeEvent;
+#[cfg(feature = "method-call")]
+use crate::node_manager::MethodCall;
 use crate::{
     address_space::AddressSpace,
     node_manager::{
@@ -22,23 +26,25 @@ use crate::{
     node_manager::{HistoryNode, HistoryUpdateNode},
     session::continuation_points::ContinuationPoint,
 };
-#[cfg(feature = "method-call")]
-use crate::node_manager::MethodCall;
-#[cfg(all(feature = "node-management", feature = "events"))]
-use crate::node_manager::GeneralModelChangeEvent;
 #[cfg(feature = "subscriptions")]
 use crate::{
     node_manager::{MonitoredItemRef, MonitoredItemUpdateRef},
     subscriptions::CreateMonitoredItem,
 };
 use opcua_core::sync::RwLock;
-#[cfg(feature = "node-management")]
-use opcua_nodes::{
-    DataType, Method, NodeBase, Object, ObjectType, ReferenceType, TypeTree, Variable, VariableType,
-    View,
-};
 #[cfg(all(feature = "node-management", feature = "events"))]
 use opcua_nodes::Event;
+#[cfg(feature = "node-management")]
+use opcua_nodes::{
+    DataType, Method, NodeBase, Object, ObjectType, ReferenceType, TypeTree, Variable,
+    VariableType, View,
+};
+#[cfg(feature = "subscriptions")]
+use opcua_types::MonitoringMode;
+#[cfg(all(feature = "node-management", feature = "events"))]
+use opcua_types::ObjectId;
+#[cfg(any(feature = "method-call", feature = "node-management"))]
+use opcua_types::Variant;
 #[cfg(feature = "node-management")]
 use opcua_types::{
     AddNodeAttributes, AttributesMask, BrowseDirection, DataTypeId, ExpandedNodeId, LocalizedText,
@@ -50,12 +56,6 @@ use opcua_types::{
     ReadAnnotationDataDetails, ReadAtTimeDetails, ReadEventDetails, ReadProcessedDetails,
     ReadRawModifiedDetails,
 };
-#[cfg(all(feature = "node-management", feature = "events"))]
-use opcua_types::ObjectId;
-#[cfg(feature = "subscriptions")]
-use opcua_types::MonitoringMode;
-#[cfg(any(feature = "method-call", feature = "node-management"))]
-use opcua_types::Variant;
 
 #[cfg(feature = "node-management")]
 const MODEL_CHANGE_NODE_ADDED: u8 = 1;

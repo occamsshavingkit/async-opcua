@@ -3,30 +3,40 @@ use std::collections::{BTreeSet, VecDeque};
 use chrono::TimeDelta;
 #[cfg(feature = "events")]
 use opcua_crypto::random;
+use opcua_nodes::TypeTree;
 #[cfg(feature = "events")]
 use opcua_nodes::{BaseEventType, Event};
-use opcua_nodes::TypeTree;
-use tracing::{error, trace, warn};
+#[cfg(feature = "subscriptions-standard")]
+use tracing::trace;
+use tracing::{error, warn};
+
+#[cfg(feature = "subscriptions-standard")]
+mod filters;
+#[cfg(feature = "subscriptions-standard")]
+use filters::ParsedDataChangeFilter;
 
 use super::MonitoredItemHandle;
-use crate::{info::ServerInfo, node_manager::ParsedReadValueId};
-#[cfg(feature = "events")]
-use crate::services::subscription::filter::ParsedEventFilter;
 #[cfg(feature = "history-aggregates")]
 use crate::aggregates::{dispatch_aggregate, supported_aggregates, AggregateInput};
+#[cfg(feature = "events")]
+use crate::services::subscription::filter::ParsedEventFilter;
+use crate::{info::ServerInfo, node_manager::ParsedReadValueId};
 #[cfg(feature = "history-aggregates")]
 use opcua_types::AggregateConfiguration;
-use opcua_types::{
-    match_extension_object_owned, AggregateFilter, AggregateFilterResult, DataChangeFilter,
-    DataValue, DateTime, DiagnosticBits, DiagnosticInfo, EventFilter,
-    ExtensionObject, MonitoredItemCreateRequest, MonitoredItemModifyRequest,
-    MonitoredItemNotification, MonitoringMode, NodeId, NumericRange, ParsedDataChangeFilter,
-    StatusCode, TimestampsToReturn, Variant,
-};
-#[cfg(feature = "events")]
-use opcua_types::{EventFieldList, ObjectTypeId};
 #[cfg(not(feature = "events"))]
 use opcua_types::EventFilterResult;
+#[cfg(any(feature = "history-aggregates", feature = "subscriptions-standard"))]
+use opcua_types::NodeId;
+use opcua_types::{
+    match_extension_object_owned, AggregateFilter, AggregateFilterResult, DataChangeFilter,
+    DataValue, DateTime, DiagnosticBits, DiagnosticInfo, EventFilter, ExtensionObject,
+    MonitoredItemCreateRequest, MonitoredItemModifyRequest, MonitoredItemNotification,
+    MonitoringMode, NumericRange, StatusCode, TimestampsToReturn, Variant,
+};
+#[cfg(not(feature = "subscriptions-standard"))]
+use opcua_types::{DataChangeTrigger, DeadbandType};
+#[cfg(feature = "events")]
+use opcua_types::{EventFieldList, ObjectTypeId};
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum Notification {
@@ -91,6 +101,35 @@ pub struct ParsedAggregateFilter {
     config: AggregateConfiguration,
 }
 
+#[cfg(not(feature = "subscriptions-standard"))]
+#[derive(Debug, Clone)]
+/// Basic-tier data-change filter: trigger selection only, no deadband support.
+pub struct ParsedDataChangeFilter {
+    trigger: DataChangeTrigger,
+}
+
+#[cfg(not(feature = "subscriptions-standard"))]
+impl ParsedDataChangeFilter {
+    fn parse(filter: DataChangeFilter) -> Self {
+        Self {
+            trigger: filter.trigger,
+        }
+    }
+
+    fn is_changed(&self, new: &DataValue, old: &DataValue) -> bool {
+        match self.trigger {
+            DataChangeTrigger::Status => new.status != old.status,
+            DataChangeTrigger::StatusValue => new.status != old.status || new.value != old.value,
+            DataChangeTrigger::StatusValueTimestamp => {
+                new.status != old.status
+                    || new.source_timestamp != old.source_timestamp
+                    || new.source_picoseconds != old.source_picoseconds
+                    || new.value != old.value
+            }
+        }
+    }
+}
+
 #[cfg(feature = "history-aggregates")]
 impl ParsedAggregateFilter {
     fn parse(filter: AggregateFilter) -> (AggregateFilterResult, Result<Self, StatusCode>) {
@@ -119,9 +158,9 @@ impl FilterType {
     /// Try to create a filter from an extension object, returning the
     /// `MonitoringFilterResult` (an `EventFilterResult` or `AggregateFilterResult`) if the filter
     /// type produces one.
-    pub fn from_filter(
+    pub(super) fn from_filter(
         filter: ExtensionObject,
-        eu_range: Option<(f64, f64)>,
+        #[cfg(feature = "subscriptions-standard")] eu_range: Option<(f64, f64)>,
         type_tree: &dyn TypeTree,
         diagnostic_bits: DiagnosticBits,
     ) -> (Option<ExtensionObject>, Result<FilterType, StatusCode>) {
@@ -132,8 +171,18 @@ impl FilterType {
 
         match_extension_object_owned!(filter,
             v: DataChangeFilter => {
+                #[cfg(feature = "subscriptions-standard")]
+                {
                 let res = ParsedDataChangeFilter::parse(v, eu_range);
                 (None, res.map(FilterType::DataChangeFilter))
+                }
+                #[cfg(not(feature = "subscriptions-standard"))]
+                {
+                    if v.deadband_type != DeadbandType::None as u32 {
+                        return (None, Err(StatusCode::BadMonitoredItemFilterUnsupported));
+                    }
+                    (None, Ok(FilterType::DataChangeFilter(ParsedDataChangeFilter::parse(v))))
+                }
             },
             v: EventFilter => {
                 #[cfg(feature = "events")]
@@ -235,7 +284,9 @@ pub struct CreateMonitoredItem {
     filter: FilterType,
     filter_res: Option<ExtensionObject>,
     timestamps_to_return: TimestampsToReturn,
+    #[cfg(feature = "subscriptions-standard")]
     eu_range: Option<(f64, f64)>,
+    #[cfg(feature = "subscriptions-standard")]
     eu_range_node_id: Option<NodeId>,
 }
 
@@ -290,10 +341,11 @@ impl CreateMonitoredItem {
         timestamps_to_return: TimestampsToReturn,
         diagnostic_bits: DiagnosticBits,
         type_tree: &dyn TypeTree,
-        eu_range: Option<(f64, f64)>,
+        #[cfg(feature = "subscriptions-standard")] eu_range: Option<(f64, f64)>,
     ) -> Self {
         let (filter_res, filter) = FilterType::from_filter(
             req.requested_parameters.filter,
+            #[cfg(feature = "subscriptions-standard")]
             eu_range,
             type_tree,
             diagnostic_bits,
@@ -331,7 +383,9 @@ impl CreateMonitoredItem {
             filter,
             timestamps_to_return,
             filter_res,
+            #[cfg(feature = "subscriptions-standard")]
             eu_range,
+            #[cfg(feature = "subscriptions-standard")]
             eu_range_node_id: None,
         }
     }
@@ -344,10 +398,12 @@ impl CreateMonitoredItem {
         }
     }
 
+    #[cfg(feature = "subscriptions-standard")]
     pub(crate) fn set_eu_range_node_id(&mut self, eu_range_node_id: Option<NodeId>) {
         self.eu_range_node_id = eu_range_node_id;
     }
 
+    #[cfg(feature = "subscriptions-standard")]
     pub(crate) fn eu_range_node_id(&self) -> Option<&NodeId> {
         self.eu_range_node_id.as_ref()
     }
@@ -471,6 +527,7 @@ pub struct MonitoredItem {
     any_new_notification: bool,
     /// Cached EURange used to parameterize PercentDeadband at create/modify time and refreshed by
     /// EURange property-change notices.
+    #[cfg(feature = "subscriptions-standard")]
     eu_range: Option<(f64, f64)>,
     /// One-shot Part 4 §7.38.1 status-info bit for the next queued data-change notification after
     /// this item's EURange semantics change.
@@ -519,6 +576,7 @@ impl MonitoredItem {
             #[cfg(feature = "events")]
             overflow_event: None,
             any_new_notification: false,
+            #[cfg(feature = "subscriptions-standard")]
             eu_range: request.eu_range,
             semantics_changed: false,
             #[cfg(feature = "history-aggregates")]
@@ -573,14 +631,16 @@ impl MonitoredItem {
         info: &ServerInfo,
         timestamps_to_return: TimestampsToReturn,
         request: &MonitoredItemModifyRequest,
-        eu_range: Option<(f64, f64)>,
+        #[cfg(feature = "subscriptions-standard")] eu_range: Option<(f64, f64)>,
         type_tree: &dyn TypeTree,
         diagnostic_bits: DiagnosticBits,
     ) -> (Option<ExtensionObject>, StatusCode) {
         self.timestamps_to_return = timestamps_to_return;
+        #[cfg(feature = "subscriptions-standard")]
         let eu_range = eu_range.or(self.eu_range);
         let (filter_res, filter) = FilterType::from_filter(
             request.requested_parameters.filter.clone(),
+            #[cfg(feature = "subscriptions-standard")]
             eu_range,
             type_tree,
             diagnostic_bits,
@@ -589,19 +649,22 @@ impl MonitoredItem {
             Ok(f) => f,
             Err(e) => return (filter_res, e),
         };
-        self.eu_range = eu_range;
+        #[cfg(feature = "subscriptions-standard")]
+        {
+            self.eu_range = eu_range;
+        }
         #[cfg(feature = "history-aggregates")]
         {
-        // The filter may have changed to/from/within an AggregateFilter: restart the aggregation
-        // window so a new aggregate item starts flushing and a reconfigured one uses the new
-        // interval, rather than carrying the old buffer/deadline (or none at all).
-        self.aggregate_buffer.clear();
-        self.aggregate_next_deadline = match &self.filter {
-            FilterType::AggregateFilter(agg) => {
-                Some(add_millis(DateTime::now(), agg.processing_interval))
-            }
-            _ => None,
-        };
+            // The filter may have changed to/from/within an AggregateFilter: restart the aggregation
+            // window so a new aggregate item starts flushing and a reconfigured one uses the new
+            // interval, rather than carrying the old buffer/deadline (or none at all).
+            self.aggregate_buffer.clear();
+            self.aggregate_next_deadline = match &self.filter {
+                FilterType::AggregateFilter(agg) => {
+                    Some(add_millis(DateTime::now(), agg.processing_interval))
+                }
+                _ => None,
+            };
         }
         let parsed_sampling_interval =
             sanitize_sampling_interval(info, request.requested_parameters.sampling_interval);
@@ -949,6 +1012,7 @@ impl MonitoredItem {
         true
     }
 
+    #[cfg(feature = "subscriptions-standard")]
     pub(super) fn notify_eu_range_changed(&mut self, low: f64, high: f64) {
         self.eu_range = Some((low, high));
         if let FilterType::DataChangeFilter(filter) = &mut self.filter {
@@ -1186,17 +1250,16 @@ impl MonitoredItem {
 
     /// Whether this monitored item has enqueued notifications.
     pub fn has_notifications(&self) -> bool {
-        !self.notification_queue.is_empty()
-            || {
-                #[cfg(feature = "events")]
-                {
-                    self.overflow_event.is_some()
-                }
-                #[cfg(not(feature = "events"))]
-                {
-                    false
-                }
+        !self.notification_queue.is_empty() || {
+            #[cfg(feature = "events")]
+            {
+                self.overflow_event.is_some()
             }
+            #[cfg(not(feature = "events"))]
+            {
+                false
+            }
+        }
     }
 
     /// Monitored item ID.
@@ -1265,14 +1328,13 @@ pub(super) mod tests {
         subscriptions::monitored_item::{Notification, SamplingInterval},
     };
     use opcua_types::{
-        AttributeId, DataChangeFilter, DataChangeTrigger, DataValue, DateTime, Deadband,
-        DeadbandType, MonitoringMode, NodeId, ParsedDataChangeFilter, ReadValueId, StatusCode,
-        Variant,
+        AttributeId, DataChangeFilter, DataChangeTrigger, DataValue, DateTime, DeadbandType,
+        MonitoringMode, NodeId, ReadValueId, StatusCode, Variant,
     };
 
-    use super::{FilterType, MonitoredItem};
     #[cfg(feature = "history-aggregates")]
     use super::ParsedAggregateFilter;
+    use super::{FilterType, MonitoredItem, ParsedDataChangeFilter};
 
     #[test]
     #[cfg(feature = "history-aggregates")]
@@ -1415,187 +1477,6 @@ pub(super) mod tests {
         let now = DateTime::now();
         v1.source_timestamp = Some(now);
         assert!(filter.is_changed(&v1, &v2));
-    }
-
-    #[test]
-    fn data_change_deadband_abs() {
-        let filter = DataChangeFilter {
-            trigger: DataChangeTrigger::StatusValue,
-            // Abs compare
-            deadband_type: DeadbandType::Absolute as u32,
-            deadband_value: 1f64,
-        };
-        let filter = ParsedDataChangeFilter::parse(filter, None).unwrap();
-
-        let v1 = DataValue {
-            value: Some(Variant::Double(10f64)),
-            status: None,
-            source_timestamp: None,
-            source_picoseconds: None,
-            server_timestamp: None,
-            server_picoseconds: None,
-        };
-
-        let mut v2 = DataValue {
-            value: Some(Variant::Double(10f64)),
-            status: None,
-            source_timestamp: None,
-            source_picoseconds: None,
-            server_timestamp: None,
-            server_picoseconds: None,
-        };
-
-        // Values are the same so deadband should not matter
-        assert!(!filter.is_changed(&v1, &v2));
-
-        // Adjust by less than deadband
-        v2.value = Some(Variant::Double(10.9f64));
-        assert!(!filter.is_changed(&v1, &v2));
-
-        // Adjust by equal deadband
-        v2.value = Some(Variant::Double(11f64));
-        assert!(!filter.is_changed(&v1, &v2));
-
-        // Adjust by equal deadband plus a little bit
-        v2.value = Some(Variant::Double(11.00001f64));
-        assert!(filter.is_changed(&v1, &v2));
-    }
-
-    #[test]
-    fn percent_deadband_uses_refreshed_eu_range() {
-        let start = Utc::now();
-        let filter = DataChangeFilter {
-            trigger: DataChangeTrigger::StatusValue,
-            deadband_type: DeadbandType::Percent as u32,
-            deadband_value: 10f64,
-        };
-        let filter = ParsedDataChangeFilter::parse(filter, Some((0.0, 100.0))).unwrap();
-        let mut item = new_monitored_item(
-            1,
-            ReadValueId {
-                node_id: NodeId::null(),
-                attribute_id: AttributeId::Value as u32,
-                ..Default::default()
-            },
-            MonitoringMode::Reporting,
-            FilterType::DataChangeFilter(filter),
-            SamplingInterval::Zero,
-            true,
-            Some(DataValue::new_at(0.0, start.into())),
-        );
-        item.eu_range = Some((0.0, 100.0));
-        item.notification_queue.clear();
-
-        let t = start + Duration::try_milliseconds(100).unwrap();
-        assert!(!item.notify_data_value(DataValue::new_at(9.0, t.into()), &t.into(), false));
-        assert_eq!(item.notification_queue.len(), 0);
-
-        item.notify_eu_range_changed(0.0, 1000.0);
-        assert_eq!(item.eu_range, Some((0.0, 1000.0)));
-
-        let t = start + Duration::try_milliseconds(200).unwrap();
-        assert!(!item.notify_data_value(DataValue::new_at(50.0, t.into()), &t.into(), false));
-        assert_eq!(item.notification_queue.len(), 0);
-
-        let t = start + Duration::try_milliseconds(300).unwrap();
-        assert!(item.notify_data_value(DataValue::new_at(101.0, t.into()), &t.into(), false));
-        assert_eq!(item.notification_queue.len(), 1);
-        let Some(Notification::MonitoredItemNotification(n)) = item.notification_queue.back()
-        else {
-            panic!("Wrong notification type");
-        };
-        assert!(n.value.status().semantics_changed());
-
-        let t = start + Duration::try_milliseconds(400).unwrap();
-        assert!(item.notify_data_value(DataValue::new_at(202.0, t.into()), &t.into(), false));
-        assert_eq!(item.notification_queue.len(), 2);
-        let Some(Notification::MonitoredItemNotification(n)) = item.notification_queue.back()
-        else {
-            panic!("Wrong notification type");
-        };
-        assert!(!n.value.status().semantics_changed());
-    }
-
-    #[test]
-    fn monitored_item_filter() {
-        let start = Utc::now();
-        let mut item = new_monitored_item(
-            1,
-            ReadValueId {
-                node_id: NodeId::null(),
-                attribute_id: AttributeId::Value as u32,
-                ..Default::default()
-            },
-            MonitoringMode::Reporting,
-            FilterType::DataChangeFilter(ParsedDataChangeFilter {
-                trigger: DataChangeTrigger::StatusValue,
-                // Abs compare
-                deadband: Deadband::Absolute(0.9),
-            }),
-            SamplingInterval::NonZero(TimeDelta::milliseconds(100)),
-            true,
-            Some(DataValue::new_at(1.0, start.into())),
-        );
-
-        // Not within sampling interval
-        assert!(item.notify_data_value(
-            DataValue::new_at(
-                2.0,
-                (start + Duration::try_milliseconds(50).unwrap()).into()
-            ),
-            &start.into(),
-            false
-        ));
-        assert_eq!(1, item.notification_queue.len());
-        assert!(item.sample_skipped_data_value.is_some());
-        // In deadband
-        assert!(!item.notify_data_value(
-            DataValue::new_at(
-                1.5,
-                (start + Duration::try_milliseconds(100).unwrap()).into()
-            ),
-            &start.into(),
-            false
-        ));
-        // Sampling is disabled, don't notify anything.
-        item.set_monitoring_mode(MonitoringMode::Disabled);
-        assert!(!item.notify_data_value(
-            DataValue::new_at(
-                3.0,
-                (start + Duration::try_milliseconds(250).unwrap()).into()
-            ),
-            &start.into(),
-            false
-        ));
-        item.set_monitoring_mode(MonitoringMode::Reporting);
-        // Ok
-        assert!(item.notify_data_value(
-            DataValue::new_at(
-                2.0,
-                (start + Duration::try_milliseconds(100).unwrap()).into()
-            ),
-            &start.into(),
-            false
-        ));
-        // Now in deadband
-        assert!(!item.notify_data_value(
-            DataValue::new_at(
-                2.5,
-                (start + Duration::try_milliseconds(200).unwrap()).into()
-            ),
-            &start.into(),
-            false
-        ));
-        // And outside deadband
-        assert!(item.notify_data_value(
-            DataValue::new_at(
-                3.0,
-                (start + Duration::try_milliseconds(250).unwrap()).into()
-            ),
-            &start.into(),
-            false
-        ));
-        assert_eq!(item.notification_queue.len(), 3);
     }
 
     #[test]

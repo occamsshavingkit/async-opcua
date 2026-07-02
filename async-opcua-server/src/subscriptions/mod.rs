@@ -1493,6 +1493,7 @@ impl SubscriptionCache {
         result
     }
 
+    #[cfg(feature = "subscriptions-standard")]
     pub(crate) async fn set_triggering(
         &self,
         session_id: u32,

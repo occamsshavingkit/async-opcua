@@ -25,6 +25,8 @@ use tracing::{debug_span, warn};
 #[cfg(feature = "subscriptions")]
 use tracing_futures::Instrument;
 
+#[cfg(feature = "subscriptions-standard")]
+use crate::node_manager::consume_results;
 use crate::{
     authenticator::UserToken,
     info::ServerInfo,
@@ -36,16 +38,18 @@ use crate::{
 };
 #[cfg(feature = "subscriptions")]
 use crate::{
-    node_manager::{consume_results, MonitoredItemRef, ReadNode},
+    node_manager::{MonitoredItemRef, ReadNode},
     subscriptions::{PendingPublish, SubscriptionCache},
 };
 #[cfg(feature = "subscriptions")]
-use opcua_types::{AttributeId, PublishRequest, SetTriggeringRequest, SetTriggeringResponse};
+use opcua_types::{AttributeId, PublishRequest};
 use opcua_types::{
     CancelResponse, DataValue, DiagnosticBits, DiagnosticInfo, NamespaceMap, NodeId, ReadRequest,
     ReadResponse, ReadValueId, ResponseHeader, ServiceFault, StatusCode, TimestampsToReturn,
     UAString, WriteRequest, WriteResponse,
 };
+#[cfg(feature = "subscriptions-standard")]
+use opcua_types::{SetTriggeringRequest, SetTriggeringResponse};
 
 use super::{actor::SessionMessage, controller::Response, instance::Session};
 
@@ -305,7 +309,7 @@ impl MessageHandler {
                 async_service_call!(services::delete_monitored_items, self, request, data)
             }
 
-            #[cfg(feature = "subscriptions")]
+            #[cfg(feature = "subscriptions-standard")]
             RequestMessage::SetTriggering(request) => self.set_triggering(*request, data),
 
             #[cfg(feature = "subscriptions")]
@@ -664,7 +668,7 @@ impl MessageHandler {
         get_namespaces_for_user(&ctx, &self.node_managers)
     }
 
-    #[cfg(feature = "subscriptions")]
+    #[cfg(feature = "subscriptions-standard")]
     fn set_triggering(
         &self,
         request: SetTriggeringRequest,

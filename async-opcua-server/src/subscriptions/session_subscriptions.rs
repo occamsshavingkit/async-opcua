@@ -565,6 +565,7 @@ impl SessionSubscriptions {
         Ok(results)
     }
 
+    #[cfg(feature = "subscriptions-standard")]
     fn filter_links(links: Vec<u32>, sub: &Subscription) -> (Vec<u32>, Vec<StatusCode>) {
         let mut to_apply = Vec::with_capacity(links.len());
         let mut results = Vec::with_capacity(links.len());
@@ -580,6 +581,7 @@ impl SessionSubscriptions {
         (to_apply, results)
     }
 
+    #[cfg(feature = "subscriptions-standard")]
     pub(super) fn set_triggering(
         &mut self,
         subscription_id: u32,

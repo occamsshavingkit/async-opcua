@@ -785,6 +785,7 @@ impl Subscription {
         self.state == SubscriptionState::Closed && self.notifications.is_empty()
     }
 
+    #[cfg(feature = "subscriptions-standard")]
     fn handle_triggers(
         &mut self,
         now: &DateTimeUtc,
@@ -867,7 +868,7 @@ impl Subscription {
         now: &DateTimeUtc,
         resend_data: bool,
         max_notifications: usize,
-        triggers: &mut Vec<(u32, u32)>,
+        #[cfg(feature = "subscriptions-standard")] triggers: &mut Vec<(u32, u32)>,
         notifications: &mut Vec<Notification>,
         messages: &mut Vec<NotificationMessage>,
         sequence_numbers: &mut Handle,
@@ -876,6 +877,7 @@ impl Subscription {
         monitored_item.maybe_enqueue_skipped_value(&(*now).into());
         monitored_item.maybe_flush_aggregate(&(*now).into());
 
+        #[cfg(feature = "subscriptions-standard")]
         if monitored_item.is_sampling() && monitored_item.has_new_notifications() {
             triggers.extend(
                 monitored_item
@@ -916,10 +918,9 @@ impl Subscription {
         data_change_notification_pool: &mut DataChangeNotificationVecPool,
     ) -> Vec<NotificationMessage> {
         let mut messages = Vec::new();
-        let NotificationBuffer {
-            notifications,
-            triggers,
-        } = buffer;
+        let notifications = &mut buffer.notifications;
+        #[cfg(feature = "subscriptions-standard")]
+        let triggers = &mut buffer.triggers;
 
         // If resend data is true, we must visit ever monitored item
         if resend_data {
@@ -929,6 +930,7 @@ impl Subscription {
                     now,
                     resend_data,
                     self.max_notifications_per_publish,
+                    #[cfg(feature = "subscriptions-standard")]
                     triggers,
                     notifications,
                     &mut messages,
@@ -946,6 +948,7 @@ impl Subscription {
                     now,
                     resend_data,
                     self.max_notifications_per_publish,
+                    #[cfg(feature = "subscriptions-standard")]
                     triggers,
                     notifications,
                     &mut messages,
@@ -955,6 +958,7 @@ impl Subscription {
             }
         }
 
+        #[cfg(feature = "subscriptions-standard")]
         self.handle_triggers(
             now,
             triggers,
@@ -1959,6 +1963,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "subscriptions-standard")]
     fn monitored_item_triggers() {
         let mut buffer = super::NotificationBuffer::new();
         let mut data_change_notification_pool = DataChangeNotificationVecPool::default();

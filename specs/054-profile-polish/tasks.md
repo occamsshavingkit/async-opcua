@@ -184,7 +184,7 @@ basic data-change monitoring works; deadband/triggering/events/methods compiled 
       `BadMonitoredItemFilterUnsupported` (fail-closed, never silently ignore a filter).
       Pure move + gate; deadband tests (`monitored_item.rs:1293,1337`) ride along.
       [Cite: OPC 10000-4 §7.22.2; OPC 10000-8 §7.2 PercentDeadband]
-- [ ] T025 [US2] Split triggering into `subscriptions/monitored_item/triggering.rs` +
+- [X] T025 [US2] Split triggering into `subscriptions/monitored_item/triggering.rs` +
       orchestration gates (`session_subscriptions.rs:571`, `subscriptions/mod.rs:1425`,
       SetTriggering dispatch arm) behind `subscriptions-standard`.
       [Cite: OPC 10000-4 §5.13.5 SetTriggering]

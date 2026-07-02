@@ -14,6 +14,7 @@ use super::monitored_item::Notification;
 #[derive(Debug, Default)]
 pub struct NotificationBuffer {
     pub(crate) notifications: Vec<Notification>,
+    #[cfg(feature = "subscriptions-standard")]
     pub(crate) triggers: Vec<(u32, u32)>,
 }
 
@@ -25,6 +26,7 @@ impl NotificationBuffer {
     /// Clear the buffer contents for reuse, retaining allocated capacity.
     pub(crate) fn reset(&mut self) {
         self.notifications.clear();
+        #[cfg(feature = "subscriptions-standard")]
         self.triggers.clear();
     }
 
@@ -63,6 +65,7 @@ mod tests {
         for _ in 0..64 {
             buffer.notifications.push(notification());
         }
+        #[cfg(feature = "subscriptions-standard")]
         buffer.triggers.push((1, 2));
         assert_eq!(buffer.len(), 64);
         let grown_capacity = buffer.notification_capacity();
@@ -71,6 +74,7 @@ mod tests {
         for _ in 0..100 {
             buffer.reset();
             assert!(buffer.is_empty());
+            #[cfg(feature = "subscriptions-standard")]
             assert!(buffer.triggers.is_empty());
             assert_eq!(buffer.notification_capacity(), grown_capacity);
         }

@@ -1,4 +1,4 @@
-use std::collections::{BTreeSet, VecDeque};
+use std::collections::VecDeque;
 
 use chrono::TimeDelta;
 #[cfg(feature = "events")]
@@ -13,7 +13,11 @@ use tracing::{error, warn};
 #[cfg(feature = "subscriptions-standard")]
 mod filters;
 #[cfg(feature = "subscriptions-standard")]
+mod triggering;
+#[cfg(feature = "subscriptions-standard")]
 use filters::ParsedDataChangeFilter;
+#[cfg(feature = "subscriptions-standard")]
+use triggering::TriggeredItems;
 
 use super::MonitoredItemHandle;
 #[cfg(feature = "history-aggregates")]
@@ -505,7 +509,8 @@ pub struct MonitoredItem {
     monitoring_mode: MonitoringMode,
     // Triggered items are other monitored items in the same subscription which are reported if this
     // monitored item changes.
-    triggered_items: BTreeSet<u32>,
+    #[cfg(feature = "subscriptions-standard")]
+    triggered_items: TriggeredItems,
     client_handle: u32,
     sampling_interval: SamplingInterval,
     filter: FilterType,
@@ -524,6 +529,7 @@ pub struct MonitoredItem {
     sample_skipped_data_value: Option<DataValue>,
     /// The skipped value was sampled before the currently pending SemanticsChanged bit was armed.
     sample_skipped_before_semantics_changed: bool,
+    #[cfg(feature = "subscriptions-standard")]
     any_new_notification: bool,
     /// Cached EURange used to parameterize PercentDeadband at create/modify time and refreshed by
     /// EURange property-change notices.
@@ -562,7 +568,8 @@ impl MonitoredItem {
             id: request.id,
             item_to_monitor: request.item_to_monitor.clone(),
             monitoring_mode: request.monitoring_mode,
-            triggered_items: BTreeSet::new(),
+            #[cfg(feature = "subscriptions-standard")]
+            triggered_items: TriggeredItems::new(),
             client_handle: request.client_handle,
             sampling_interval: parse_sampling_interval(request.sampling_interval),
             filter: request.filter.clone(),
@@ -575,6 +582,8 @@ impl MonitoredItem {
             notification_queue: VecDeque::new(),
             #[cfg(feature = "events")]
             overflow_event: None,
+            #[cfg(feature = "subscriptions-standard")]
+            #[cfg(feature = "subscriptions-standard")]
             any_new_notification: false,
             #[cfg(feature = "subscriptions-standard")]
             eu_range: request.eu_range,
@@ -1073,15 +1082,23 @@ impl MonitoredItem {
 
         if let Some(ev) = overflow_event {
             self.overflow_event = Some(ev);
-            self.any_new_notification = true;
+            self.mark_new_notification();
         }
         self.enqueue_notification(notif);
 
         true
     }
 
-    fn enqueue_notification(&mut self, notification: impl Into<Notification>) {
+    #[cfg(feature = "subscriptions-standard")]
+    fn mark_new_notification(&mut self) {
         self.any_new_notification = true;
+    }
+
+    #[cfg(not(feature = "subscriptions-standard"))]
+    fn mark_new_notification(&mut self) {}
+
+    fn enqueue_notification(&mut self, notification: impl Into<Notification>) {
+        self.mark_new_notification();
         let overflow = self.notification_queue.len() == self.queue_size;
         let notification = notification.into();
         if !overflow {
@@ -1186,15 +1203,6 @@ impl MonitoredItem {
         self.last_data_value.is_some()
     }
 
-    /// Return `true` if this item has any new notifications.
-    /// Note that this clears the `any_new_notification` flag and should
-    /// be used with care.
-    pub(super) fn has_new_notifications(&mut self) -> bool {
-        let any_new = self.any_new_notification;
-        self.any_new_notification = false;
-        any_new
-    }
-
     pub(super) fn pop_notification(&mut self) -> Option<Notification> {
         // The overflow indicator (Part 4 §5.13.2) sits at the front of the queue when
         // discardOldest is TRUE, otherwise at the end.
@@ -1215,21 +1223,6 @@ impl MonitoredItem {
         }
     }
 
-    /// Adds or removes other monitored items which will be triggered when this monitored item changes
-    pub(super) fn set_triggering(&mut self, items_to_add: &[u32], items_to_remove: &[u32]) {
-        // Spec says to process remove items before adding new ones.
-        items_to_remove.iter().for_each(|i| {
-            self.triggered_items.remove(i);
-        });
-        items_to_add.iter().for_each(|i| {
-            self.triggered_items.insert(*i);
-        });
-    }
-
-    pub(super) fn remove_dead_trigger(&mut self, id: u32) {
-        self.triggered_items.remove(&id);
-    }
-
     /// Whether this monitored item is currently reporting new values.
     pub fn is_reporting(&self) -> bool {
         matches!(self.monitoring_mode, MonitoringMode::Reporting)
@@ -1241,11 +1234,6 @@ impl MonitoredItem {
             self.monitoring_mode,
             MonitoringMode::Reporting | MonitoringMode::Sampling
         )
-    }
-
-    /// Items that are triggered by updates to this monitored item.
-    pub fn triggered_items(&self) -> &BTreeSet<u32> {
-        &self.triggered_items
     }
 
     /// Whether this monitored item has enqueued notifications.
@@ -1376,6 +1364,7 @@ pub(super) mod tests {
             id,
             item_to_monitor: ParsedReadValueId::parse(item_to_monitor).unwrap(),
             monitoring_mode,
+            #[cfg(feature = "subscriptions-standard")]
             triggered_items: Default::default(),
             client_handle: Default::default(),
             sampling_interval,

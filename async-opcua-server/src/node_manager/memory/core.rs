@@ -20,14 +20,14 @@ use crate::{
     address_space::{
         compute_user_role_permissions, read_node_value, AddressSpace, CoreNamespace, NodeType,
     },
-    #[cfg(not(feature = "history"))]
-    config::HistoryServerCapabilities,
     node_manager::{
         NamespaceMetadata, NodeManagersRef, ParsedReadValueId, ParsedWriteValue, RequestContext,
         ServerContext, WriteNode,
     },
     ServerCapabilities, ServerStatusWrapper,
 };
+#[cfg(not(feature = "history"))]
+use crate::config::HistoryServerCapabilities;
 #[cfg(feature = "diagnostics")]
 use crate::{
     config::ANONYMOUS_USER_TOKEN_ID,

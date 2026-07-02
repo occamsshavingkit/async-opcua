@@ -253,7 +253,7 @@ tokens, LDS self-registration, Cancel proven; still no events/history/etc.
 
 ### Tests (red against unfinished composition)
 
-- [ ] T032 [P] [US4] Standard smoke test in
+- [X] T032 [P] [US4] Standard smoke test in
       `samples/foundation-profile-standard-server/tests/profile_smoke.rs`: X509
       user-token activation over Sign&Encrypt; RegisterServer2 flow against an in-process
       `lds`-featured peer server (valid under the test-graph unification caveat — the
@@ -263,7 +263,7 @@ tokens, LDS self-registration, Cancel proven; still no events/history/etc.
 
 ### Verification
 
-- [ ] T033 [US4] Verify the standard composition end-to-end: T032 green, absence script
+- [X] T033 [US4] Verify the standard composition end-to-end: T032 green, absence script
       (no alarm/history/query/gds sentinels) green, measured size strictly between
       embedded and simple-server; record size in research-assets/size-accounting.md. [Cite: spec SC-001]
 
@@ -282,14 +282,14 @@ tokens, LDS self-registration, Cancel proven; still no events/history/etc.
       no-default baseline; script header documents the sampling rationale (not 2^15).
       Script only — no workflow edits (those are T036).
       [Cite: spec FR-006; plan.md Complexity Tracking]
-- [ ] T036 [US5] Rework `.github/workflows/ci_footprint.yml` (single owner of this
+- [X] T036 [US5] Rework `.github/workflows/ci_footprint.yml` (single owner of this
       file): 4-profile matrix (add standard row), per-row guards — `cargo tree -e
       features` deny-list + symbol spot-check via `tools/check-profile-absence.sh`,
       `$GITHUB_STEP_SUMMARY` table rows from `tools/footprint.sh`, a lattice job
       running `tools/check-feature-lattice.sh`, and per-profile behavior tests via
       isolated `cargo test -p <sample> --features profile-tests` (rbac sentinels per
       research-assets/size-accounting.md guard notes). [Cite: spec FR-009; spec FR-006]
-- [ ] T037 [US5] `docs/setup.md`: replace the 041 benchmark section with the six-row
+- [X] T037 [US5] `docs/setup.md`: replace the 041 benchmark section with the six-row
       measured matrix (bytes, MiB, delta per rung) + provenance (arch/profile/rustc/date)
       + one-package-per-invocation caveat + feature-unification note + Nano/Micro
       security-posture note (policy None, plaintext-or-cert-encrypted tokens, pure-Rust
@@ -301,11 +301,11 @@ excluded feature) turns the row red; commit.
 
 ## Phase 7: User Story 6 — Further-Savings Report (P6)
 
-- [ ] T038 [US6] Symbol/section accounting for the four profile binaries (`cargo bloat`
+- [X] T038 [US6] Symbol/section accounting for the four profile binaries (`cargo bloat`
       if available, else `nm --size-sort`/`size -A`), extending the per-story size log in
       `specs/054-profile-polish/research-assets/size-accounting.md` with evidence tables.
       [Cite: research.md R11]
-- [ ] T039 [US6] Write `docs/profile-size-report.md`: ≥5 ranked, non-overlapping
+- [X] T039 [US6] Write `docs/profile-size-report.md`: ≥5 ranked, non-overlapping
       suggestions (seed list research.md R11 — pruned type-only nodeset, None-only crypto
       build, tokio slimming, DateTime/chrono replacement, config-parsing gate,
       panic-machinery trade-off, monomorphization hotspots), each with blocking
@@ -320,7 +320,7 @@ excluded feature) turns the row red; commit.
       `RUSTFLAGS="-D warnings"` no-default checks (incl. all four foundation-profile
       crates), lattice script (T036), `cargo deny check advisories`, full workspace
       tests, integration suite. [Cite: SESSION-HANDOFF pre-push gate]
-- [ ] T041 Cross-doc consistency: contracts/feature-aliases.md, data-model.md, README
+- [X] T041 Cross-doc consistency: contracts/feature-aliases.md, data-model.md, README
       feature list, `docs/compatibility.md` (if it enumerates features) all match the
       shipped gate/alias set; walk spec.md Success Criteria SC-001–SC-005 and check each
       off with evidence links in this file. [Cite: spec.md Success Criteria]

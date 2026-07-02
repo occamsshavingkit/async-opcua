@@ -99,10 +99,10 @@ observable contract. Shared mechanism: `consume_results` + blanket `IntoResult` 
 
 ## Phase 7: Polish
 
-- [ ] T117 Grep gate re-run (050 pattern): no wire-response per-op/nested diagnostics `None` remains
+- [X] T117 Grep gate re-run (050 pattern): no wire-response per-op/nested diagnostics `None` remains
   except documented N/A. Update FINDINGS.md P4-GEN-04 → FIXED (per-site list, ActivateSession N/A
   rationale).
-- [ ] T118 Full gate: `cargo test -p async-opcua-server`, workspace `check --all-targets`, clippy
+- [X] T118 Full gate: `cargo test -p async-opcua-server`, workspace `check --all-targets`, clippy
   all-features/default/no-default, `cargo fmt --all` — clean.
 
 ## Dependencies & Strategy

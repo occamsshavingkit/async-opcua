@@ -34,9 +34,12 @@ use opcua_types::{
     ModifySubscriptionResponse, MonitoredItemCreateResult, MonitoredItemModifyRequest,
     MonitoringMode, NodeId, NotificationMessage, NumericRange, PublishRequest, Range,
     RepublishRequest, ResponseHeader, SetPublishingModeRequest, SetPublishingModeResponse,
-    StatusCode, SubscriptionDiagnosticsDataType, TimestampsToReturn, TransferResult,
-    TransferSubscriptionsRequest, TransferSubscriptionsResponse, Variant,
+    StatusCode, TimestampsToReturn, TransferResult, TransferSubscriptionsRequest,
+    TransferSubscriptionsResponse, Variant,
 };
+
+#[cfg(feature = "generated-address-space")]
+use opcua_types::SubscriptionDiagnosticsDataType;
 
 use crate::node_manager::{consume_results, RequestContextInner};
 
@@ -379,6 +382,7 @@ fn eu_range_from_data_value(value: &DataValue) -> Option<(f64, f64)> {
     (range.low <= range.high).then_some((range.low, range.high))
 }
 
+#[cfg(feature = "generated-address-space")] // consumed only by the core node manager
 fn session_subscription_diagnostics(
     subscriptions: &mut SessionSubscriptions,
 ) -> Vec<SubscriptionDiagnosticsDataType> {
@@ -397,6 +401,7 @@ fn session_subscription_diagnostics(
     diagnostics
 }
 
+#[cfg(feature = "generated-address-space")] // consumed only by the core node manager
 fn subscription_diagnostics_row(
     session_id: &NodeId,
     subscription: &Subscription,
@@ -422,11 +427,13 @@ fn subscription_diagnostics_row(
 }
 
 #[derive(Debug, Clone, Copy, Default)]
+#[cfg(feature = "generated-address-space")] // consumed only by the core node manager
 pub(crate) struct SessionSubscriptionDiagnosticsSummary {
     pub subscription_count: u32,
     pub monitored_item_count: u32,
 }
 
+#[cfg(feature = "generated-address-space")] // consumed only by the core node manager
 fn session_subscription_diagnostics_summary(
     subscriptions: &mut SessionSubscriptions,
 ) -> SessionSubscriptionDiagnosticsSummary {
@@ -447,6 +454,7 @@ fn session_subscription_diagnostics_summary(
     summary
 }
 
+#[cfg(feature = "generated-address-space")] // consumed only by the core node manager
 fn usize_to_u32_saturating(value: usize) -> u32 {
     value.min(u32::MAX as usize) as u32
 }
@@ -513,6 +521,7 @@ impl SubscriptionCache {
         cache.legacy(move |subs| f(subs)).await.ok()
     }
 
+    #[cfg(feature = "generated-address-space")] // consumed only by the core node manager
     pub(crate) async fn subscription_diagnostics(&self) -> Vec<SubscriptionDiagnosticsDataType> {
         let handles = {
             let inner = trace_read_lock!(self.inner);
@@ -534,6 +543,7 @@ impl SubscriptionCache {
         diagnostics
     }
 
+    #[cfg(feature = "generated-address-space")] // consumed only by the core node manager
     pub(crate) async fn session_diagnostics_summaries(
         &self,
     ) -> HashMap<u32, SessionSubscriptionDiagnosticsSummary> {

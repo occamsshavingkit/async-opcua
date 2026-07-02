@@ -12,6 +12,8 @@
 //! nano build must answer every one of these with `BadServiceUnsupported` and keep
 //! the session healthy.
 
+#![cfg(feature = "profile-tests")]
+
 mod common;
 
 use common::{connect, spawn_nano};

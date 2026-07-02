@@ -38,10 +38,17 @@ nm -C target/embedded/async-opcua-foundation-profile-nano-server 2>/dev/null \
 
 ## Verify behavior (profile smoke)
 
+```bash
+cargo test -p async-opcua-foundation-profile-nano-server --features profile-tests
+```
+
 Each sample serves its profile's mandated ops; excluded services must fault cleanly, e.g.
 CreateSubscription against the nano sample → `Bad_ServiceUnsupported`, deadband filter
 against micro → `Bad_MonitoredItemFilterUnsupported`. Smoke tests live with the samples
-and run against the in-tree client.
+and run against the in-tree client. They are gated behind the sample's non-default
+`profile-tests` feature: a multi-package run (`cargo test --workspace`) unifies the full
+feature set into the test build and inverts rejection semantics — ONLY the isolated
+invocation above is valid.
 
 ## Feature-lattice compile checks (FR-006)
 

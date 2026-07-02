@@ -15,12 +15,16 @@ code use the Rust `StatusCode` names (`BadServiceUnsupported`,
 `BadMonitoredItemFilterUnsupported`, `BadAggregateNotSupported`). Same codes.
 
 **Test-graph unification caveat**: the in-sample behavior tests run under `cargo test`,
-where dev-dependencies (the in-tree client) unify features on shared crates. This does
-NOT invalidate rejection tests — the client never enables `async-opcua-server` subsystem
-gates — but binary-absence claims are ONLY valid against `cargo build` artifacts, which
-ignore dev-deps. Keep behavior verification in tests and absence verification in
-`tools/check-profile-absence.sh` against the built binary; never add a dev-dependency to
-a profile sample that enables server-crate subsystem features.
+where dev-dependencies (the in-tree client) unify features on shared crates. The client
+never enables `async-opcua-server` subsystem gates, BUT a multi-package invocation does:
+`cargo test --workspace` unifies the full feature set into the sample's test build and
+INVERTS the rejection semantics (measured: CreateSubscription succeeds again). The
+profile behavior tests are therefore gated behind each sample's non-default
+`profile-tests` feature — inert in workspace runs, exercised via isolated
+`cargo test -p <sample> --features profile-tests` (pre-push + CI footprint jobs).
+Binary-absence claims are ONLY valid against `cargo build` artifacts (dev-deps ignored):
+`tools/check-profile-absence.sh`. Never add a dev-dependency to a profile sample that
+enables server-crate subsystem features.
 
 **Tests**: verification is at three levels (behavior, rejection, absence) — test tasks
 MUST be committed red (or red-equivalent: failing script/assertion) before their
@@ -138,7 +142,7 @@ rejection) green; symbol-absence script green; workspace suite (default features
       `subscriptions/mod.rs:1205,1213` notify paths, `subscriptions/notify.rs`; event
       monitored items rejected `BadMonitoredItemFilterUnsupported` when off.
       [Cite: OPC 10000-4 §7.22.3 EventFilter]
-- [ ] T021 [US1] Switch `samples/foundation-profile-nano-server` to
+- [X] T021 [US1] Switch `samples/foundation-profile-nano-server` to
       `features = ["nano"]` + Nano capacity config (≥1 session), minimal hand-rolled
       NODE MANAGER + address space satisfying Address Space Base / Base Info Core
       Structure. (T003 finding: the 041 sample binary never actually ran — base-server
@@ -276,8 +280,10 @@ tokens, LDS self-registration, Cancel proven; still no events/history/etc.
 - [ ] T036 [US5] Rework `.github/workflows/ci_footprint.yml` (single owner of this
       file): 4-profile matrix (add standard row), per-row guards — `cargo tree -e
       features` deny-list + symbol spot-check via `tools/check-profile-absence.sh`,
-      `$GITHUB_STEP_SUMMARY` table rows from `tools/footprint.sh`, and a lattice job
-      running `tools/check-feature-lattice.sh`. [Cite: spec FR-009; spec FR-006]
+      `$GITHUB_STEP_SUMMARY` table rows from `tools/footprint.sh`, a lattice job
+      running `tools/check-feature-lattice.sh`, and per-profile behavior tests via
+      isolated `cargo test -p <sample> --features profile-tests` (rbac sentinels per
+      research-assets/size-accounting.md guard notes). [Cite: spec FR-009; spec FR-006]
 - [ ] T037 [US5] `docs/setup.md`: replace the 041 benchmark section with the six-row
       measured matrix (bytes, MiB, delta per rung) + provenance (arch/profile/rustc/date)
       + one-package-per-invocation caveat + feature-unification note + Nano/Micro

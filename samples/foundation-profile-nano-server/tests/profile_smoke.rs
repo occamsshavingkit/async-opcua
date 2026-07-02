@@ -13,6 +13,8 @@
 //! size. Every case here is red via connection-refused until T021 gives the sample a
 //! minimal hand-rolled node manager/address space (plus the demo user-name token).
 
+#![cfg(feature = "profile-tests")]
+
 mod common;
 
 use common::{connect, spawn_nano};

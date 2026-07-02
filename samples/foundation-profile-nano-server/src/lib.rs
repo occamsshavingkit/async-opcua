@@ -7,10 +7,19 @@
 use std::path::PathBuf;
 
 use opcua::crypto::SecurityPolicy;
-use opcua::server::{
-    Limits, OperationalLimits, ServerBuilder, SubscriptionLimits, ANONYMOUS_USER_TOKEN_ID,
+use opcua::nodes::{
+    ImportedItem, ImportedReference, NodeSetImport, NodeSetNamespaceMapper, ObjectBuilder,
+    ReferenceTypeBuilder, VariableBuilder,
 };
-use opcua::types::MessageSecurityMode;
+use opcua::server::{
+    node_manager::memory::simple_node_manager_imports, Limits, OperationalLimits, ServerBuilder,
+    ServerUserToken, SubscriptionLimits, ANONYMOUS_USER_TOKEN_ID,
+};
+use opcua::types::{
+    BuildInfo, DataTypeId, DateTime, ExtensionObject, LocalizedText, MessageSecurityMode, NodeId,
+    ObjectId, ObjectTypeId, ReferenceTypeId, ServerState, ServerStatusDataType, UAString,
+    VariableId, VariableTypeId,
+};
 
 /// Short profile key used for PKI directories and application URIs.
 pub const PROFILE_KEY: &str = "nano";
@@ -57,10 +66,29 @@ pub fn profile_limits() -> Limits {
     }
 }
 
+struct NanoNamespace;
+
+impl NodeSetImport for NanoNamespace {
+    fn register_namespaces(&self, _namespaces: &mut NodeSetNamespaceMapper) {}
+
+    fn get_own_namespaces(&self) -> Vec<String> {
+        vec![NAMESPACE_URI.to_owned()]
+    }
+
+    fn load<'a>(
+        &'a self,
+        _namespaces: &'a NodeSetNamespaceMapper,
+    ) -> Box<dyn Iterator<Item = ImportedItem> + 'a> {
+        Box::new(nano_namespace_nodes().into_iter())
+    }
+}
+
+const NAMESPACE_URI: &str = "http://opcfoundation.org/UA/";
+
 /// Build the Nano benchmark server: policy-None endpoint, anonymous identity,
 /// profile-shaped limits.
 pub fn build_server(pki_dir: impl Into<PathBuf>) -> ServerBuilder {
-    let user_token_ids = [ANONYMOUS_USER_TOKEN_ID];
+    let user_token_ids = [ANONYMOUS_USER_TOKEN_ID, DEMO_USER_TOKEN_ID];
 
     ServerBuilder::new()
         .application_name(format!("async-opcua {PROFILE_DISPLAY_NAME}"))
@@ -70,6 +98,10 @@ pub fn build_server(pki_dir: impl Into<PathBuf>) -> ServerBuilder {
         .product_uri("https://github.com/freeopcua/async-opcua")
         .pki_dir(pki_dir)
         .limits(profile_limits())
+        .add_user_token(
+            DEMO_USER_TOKEN_ID,
+            ServerUserToken::user_pass(DEMO_USERNAME, DEMO_PASSWORD),
+        )
         .add_endpoint(
             "none",
             (
@@ -80,6 +112,181 @@ pub fn build_server(pki_dir: impl Into<PathBuf>) -> ServerBuilder {
             ),
         )
         .discovery_urls(vec!["/".to_owned()])
+        .with_node_manager(simple_node_manager_imports(
+            vec![Box::new(NanoNamespace)],
+            "nano-ns0",
+        ))
+}
+
+fn nano_namespace_nodes() -> Vec<ImportedItem> {
+    let start_time = DateTime::now();
+    let server_status = ServerStatusDataType {
+        start_time,
+        current_time: DateTime::now(),
+        state: ServerState::Running,
+        build_info: BuildInfo {
+            product_uri: UAString::from("https://github.com/freeopcua/async-opcua"),
+            product_name: UAString::from(PROFILE_DISPLAY_NAME),
+            ..Default::default()
+        },
+        seconds_till_shutdown: 0,
+        shutdown_reason: LocalizedText::null(),
+    };
+
+    vec![
+        reference_type(
+            ReferenceTypeId::HierarchicalReferences,
+            "HierarchicalReferences",
+            ReferenceTypeId::References,
+            true,
+        ),
+        reference_type(
+            ReferenceTypeId::Organizes,
+            "Organizes",
+            ReferenceTypeId::HierarchicalReferences,
+            false,
+        ),
+        folder(ObjectId::RootFolder, "Root", None),
+        folder(
+            ObjectId::ObjectsFolder,
+            "Objects",
+            Some(ObjectId::RootFolder.into()),
+        ),
+        folder(
+            ObjectId::TypesFolder,
+            "Types",
+            Some(ObjectId::RootFolder.into()),
+        ),
+        folder(
+            ObjectId::ViewsFolder,
+            "Views",
+            Some(ObjectId::RootFolder.into()),
+        ),
+        folder(
+            ObjectId::ObjectTypesFolder,
+            "ObjectTypes",
+            Some(ObjectId::TypesFolder.into()),
+        ),
+        object(ObjectId::Server, "Server", ObjectId::ObjectsFolder),
+        variable(
+            VariableId::Server_ServerStatus,
+            "ServerStatus",
+            DataTypeId::ServerStatusDataType,
+            ExtensionObject::from_message(server_status),
+            VariableTypeId::BaseDataVariableType,
+            ObjectId::Server.into(),
+        ),
+        variable(
+            VariableId::Server_ServerStatus_StartTime,
+            "StartTime",
+            DataTypeId::UtcTime,
+            start_time,
+            VariableTypeId::PropertyType,
+            VariableId::Server_ServerStatus.into(),
+        ),
+        variable(
+            VariableId::Server_ServerStatus_CurrentTime,
+            "CurrentTime",
+            DataTypeId::UtcTime,
+            DateTime::now(),
+            VariableTypeId::PropertyType,
+            VariableId::Server_ServerStatus.into(),
+        ),
+        variable(
+            VariableId::Server_ServerStatus_State,
+            "State",
+            DataTypeId::ServerState,
+            ServerState::Running as i32,
+            VariableTypeId::PropertyType,
+            VariableId::Server_ServerStatus.into(),
+        ),
+    ]
+}
+
+fn reference_type(
+    node_id: ReferenceTypeId,
+    browse_name: &str,
+    super_type: ReferenceTypeId,
+    is_abstract: bool,
+) -> ImportedItem {
+    ImportedItem {
+        node: ReferenceTypeBuilder::new(&node_id.into(), browse_name, browse_name)
+            .is_abstract(is_abstract)
+            .build()
+            .into(),
+        references: vec![inverse_reference(
+            super_type.into(),
+            ReferenceTypeId::HasSubtype,
+        )],
+    }
+}
+
+fn folder(node_id: ObjectId, browse_name: &str, parent: Option<NodeId>) -> ImportedItem {
+    let mut references = vec![forward_reference(
+        ObjectTypeId::FolderType.into(),
+        ReferenceTypeId::HasTypeDefinition,
+    )];
+    if let Some(parent) = parent {
+        references.push(inverse_reference(parent, ReferenceTypeId::Organizes));
+    }
+    ImportedItem {
+        node: ObjectBuilder::new(&node_id.into(), browse_name, browse_name)
+            .build()
+            .into(),
+        references,
+    }
+}
+
+fn object(node_id: ObjectId, browse_name: &str, parent: ObjectId) -> ImportedItem {
+    ImportedItem {
+        node: ObjectBuilder::new(&node_id.into(), browse_name, browse_name)
+            .build()
+            .into(),
+        references: vec![
+            forward_reference(
+                ObjectTypeId::ServerType.into(),
+                ReferenceTypeId::HasTypeDefinition,
+            ),
+            inverse_reference(parent.into(), ReferenceTypeId::Organizes),
+        ],
+    }
+}
+
+fn variable(
+    node_id: VariableId,
+    browse_name: &str,
+    data_type: DataTypeId,
+    value: impl Into<opcua::types::Variant>,
+    type_definition: VariableTypeId,
+    parent: NodeId,
+) -> ImportedItem {
+    ImportedItem {
+        node: VariableBuilder::new(&node_id.into(), browse_name, browse_name)
+            .data_type(data_type)
+            .value(value)
+            .build()
+            .into(),
+        references: vec![
+            forward_reference(type_definition.into(), ReferenceTypeId::HasTypeDefinition),
+            inverse_reference(parent, ReferenceTypeId::HasComponent),
+        ],
+    }
+}
+
+fn forward_reference(target_id: NodeId, type_id: ReferenceTypeId) -> ImportedReference {
+    ImportedReference {
+        target_id,
+        type_id: type_id.into(),
+        is_forward: true,
+    }
+}
+
+fn inverse_reference(target_id: NodeId, type_id: ReferenceTypeId) -> ImportedReference {
+    ImportedReference {
+        target_id,
+        type_id: type_id.into(),
+        is_forward: false,
+    }
 }
 
 #[cfg(test)]

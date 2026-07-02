@@ -43,10 +43,11 @@ use crate::{
     authenticator::UserToken,
     info::ServerInfo,
     node_manager::{consume_results, NodeManagers},
-    subscriptions::SubscriptionCache,
     transport::tcp::{ConnectionTransport, Request, TransportPollResult},
     transport::Connector,
 };
+#[cfg(feature = "subscriptions")]
+use crate::subscriptions::SubscriptionCache;
 
 use super::{
     actor::SessionMessage,
@@ -119,6 +120,7 @@ pub(crate) struct SessionController<T: ConnectionTransport> {
     certificate_store: Arc<RwLock<CertificateStore>>,
     node_managers: NodeManagers,
     message_handler: MessageHandler,
+    #[cfg(feature = "subscriptions")]
     subscriptions: Arc<SubscriptionCache>,
     pending_messages: FuturesUnordered<Pin<Box<PendingMessageResponse>>>,
     max_inflight: usize,
@@ -189,6 +191,7 @@ pub(crate) struct SessionStarter<T> {
     session_manager: Arc<RwLock<SessionManager>>,
     certificate_store: Arc<RwLock<CertificateStore>>,
     node_managers: NodeManagers,
+    #[cfg(feature = "subscriptions")]
     subscriptions: Arc<SubscriptionCache>,
 }
 
@@ -203,6 +206,7 @@ where
         session_manager: Arc<RwLock<SessionManager>>,
         certificate_store: Arc<RwLock<CertificateStore>>,
         node_managers: NodeManagers,
+        #[cfg(feature = "subscriptions")]
         subscriptions: Arc<SubscriptionCache>,
     ) -> Self {
         Self {
@@ -211,6 +215,7 @@ where
             session_manager,
             certificate_store,
             node_managers,
+            #[cfg(feature = "subscriptions")]
             subscriptions,
         }
     }
@@ -257,6 +262,7 @@ where
             self.certificate_store,
             self.info,
             self.node_managers,
+            #[cfg(feature = "subscriptions")]
             self.subscriptions,
         );
         controller.run(command).await
@@ -270,6 +276,7 @@ impl<T: ConnectionTransport> SessionController<T> {
         certificate_store: Arc<RwLock<CertificateStore>>,
         info: Arc<ServerInfo>,
         node_managers: NodeManagers,
+        #[cfg(feature = "subscriptions")]
         subscriptions: Arc<SubscriptionCache>,
     ) -> Self {
         let mut channel = SecureChannel::new(
@@ -289,8 +296,10 @@ impl<T: ConnectionTransport> SessionController<T> {
             message_handler: MessageHandler::new(
                 info.clone(),
                 node_managers,
+                #[cfg(feature = "subscriptions")]
                 subscriptions.clone(),
             ),
+            #[cfg(feature = "subscriptions")]
             subscriptions,
             deadline: Instant::now()
                 + Duration::from_secs(info.config.tcp_config.hello_timeout as u64),
@@ -416,6 +425,7 @@ impl<T: ConnectionTransport> SessionController<T> {
         }
 
         dispatch_suppressed_certificate_audit_success(
+            #[cfg(feature = "subscriptions")]
             &self.subscriptions,
             &self.info,
             &request.request_header,
@@ -480,6 +490,7 @@ impl<T: ConnectionTransport> SessionController<T> {
                     _ => opcua_types::ByteString::null(),
                 };
                 dispatch_open_secure_channel(
+                    #[cfg(feature = "subscriptions")]
                     &self.subscriptions,
                     &self.info,
                     &r.request_header,
@@ -537,12 +548,14 @@ impl<T: ConnectionTransport> SessionController<T> {
                 )
                 .and_then(|draft| {
                     let node_managers = self.node_managers.clone();
+                    #[cfg(feature = "subscriptions")]
                     let subscriptions = self.subscriptions.clone();
                     let mut mgr = trace_write_lock!(self.session_manager);
                     mgr.commit_create_session_draft(
                         draft,
                         &mut self.channel,
                         node_managers,
+                        #[cfg(feature = "subscriptions")]
                         subscriptions,
                     )
                 });
@@ -555,6 +568,7 @@ impl<T: ConnectionTransport> SessionController<T> {
                     Err(status) => (None, None, *status),
                 };
                 dispatch_create_session(
+                    #[cfg(feature = "subscriptions")]
                     &self.subscriptions,
                     &self.info,
                     &request,
@@ -567,6 +581,7 @@ impl<T: ConnectionTransport> SessionController<T> {
                 // AuditCertificateEventType subtype (no-op for non-certificate failures).
                 if status.is_bad() {
                     dispatch_certificate_audit(
+                        #[cfg(feature = "subscriptions")]
                         &self.subscriptions,
                         &self.info,
                         &request.request_header,
@@ -603,6 +618,7 @@ impl<T: ConnectionTransport> SessionController<T> {
                 let session_id =
                     self.session_id_for_token(&request.request_header.authentication_token);
                 dispatch_activate_session(
+                    #[cfg(feature = "subscriptions")]
                     &self.subscriptions,
                     &self.info,
                     &request,
@@ -833,6 +849,7 @@ impl<T: ConnectionTransport> SessionController<T> {
                         self.info.diagnostics.inc_rejected_requests();
                         self.info.diagnostics.inc_security_rejected_requests();
                         dispatch_service_failure(
+                            #[cfg(feature = "subscriptions")]
                             &self.subscriptions,
                             &self.info,
                             &unauthenticated_audit_context,
@@ -878,6 +895,7 @@ impl<T: ConnectionTransport> SessionController<T> {
                     super::message_handler::HandleMessageResult::AsyncMessage(mut handle) => {
                         let audit_context = audit_context.clone();
                         let info = self.info.clone();
+                        #[cfg(feature = "subscriptions")]
                         let subscriptions = self.subscriptions.clone();
                         self.pending_messages
                             .push(Box::pin(async move {
@@ -909,6 +927,7 @@ impl<T: ConnectionTransport> SessionController<T> {
                                 if let Ok(response) = &mut response {
                                     response.message.apply_return_diagnostics(return_diagnostics);
                                     dispatch_response_failure(
+                                        #[cfg(feature = "subscriptions")]
                                         &subscriptions,
                                         &info,
                                         &audit_context,
@@ -927,6 +946,7 @@ impl<T: ConnectionTransport> SessionController<T> {
                         );
                         self.response_metrics(&s);
                         dispatch_response_failure(
+                            #[cfg(feature = "subscriptions")]
                             &self.subscriptions,
                             &self.info,
                             &audit_context,
@@ -1147,6 +1167,7 @@ impl<T: ConnectionTransport> SessionController<T> {
                     let validation_status = e.status();
                     error!("OpenSecureChannel rejected: client certificate failed validation: {e}");
                     dispatch_open_secure_channel_certificate_audit(
+                        #[cfg(feature = "subscriptions")]
                         &self.subscriptions,
                         &self.info,
                         &request.request_header,

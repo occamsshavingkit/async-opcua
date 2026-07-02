@@ -15,6 +15,7 @@ use tracing_futures::Instrument;
 
 pub(crate) async fn call(node_managers: NodeManagers, request: Request<CallRequest>) -> Response {
     let context = request.context();
+    #[cfg(feature = "subscriptions")]
     let subscriptions = request.subscriptions.clone();
     let info = request.info.clone();
     let audit_context = {
@@ -96,6 +97,7 @@ pub(crate) async fn call(node_managers: NodeManagers, request: Request<CallReque
 
     for call in &calls {
         audit::dispatch_method_audit(
+            #[cfg(feature = "subscriptions")]
             &subscriptions,
             &info,
             &audit_context,

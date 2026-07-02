@@ -4,8 +4,9 @@ use crate::{
     authenticator::{AuthManager, UserToken},
     info::{ServerInfo, TypeTreeSnapshot},
     session::instance::Session,
-    SubscriptionCache,
 };
+#[cfg(feature = "subscriptions")]
+use crate::SubscriptionCache;
 use opcua_core::{sync::RwLock, trace_read_lock};
 use opcua_nodes::TypeTree;
 use opcua_types::{BrowseDescriptionResultMask, MessageSecurityMode, NodeId};
@@ -156,6 +157,7 @@ pub struct RequestContextInner {
     /// Wrapper to get a type tree
     pub type_tree_getter: Arc<dyn TypeTreeForUser>,
     /// Subscription cache, containing all subscriptions on the server.
+    #[cfg(feature = "subscriptions")]
     pub subscriptions: Arc<SubscriptionCache>,
     /// Server info object, containing configuration and other shared server
     /// state.
@@ -220,6 +222,7 @@ impl RequestContext {
     }
 
     /// Get the subscription cache.
+    #[cfg(feature = "subscriptions")]
     pub fn subscriptions(&self) -> &SubscriptionCache {
         &self.subscriptions
     }

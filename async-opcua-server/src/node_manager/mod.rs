@@ -40,10 +40,9 @@ use crate::{
     ServerStatusWrapper,
 };
 
-use super::{
-    authenticator::AuthManager, info::ServerInfo, subscriptions::CreateMonitoredItem,
-    SubscriptionCache,
-};
+#[cfg(feature = "subscriptions")]
+use super::SubscriptionCache;
+use super::{authenticator::AuthManager, info::ServerInfo, subscriptions::CreateMonitoredItem};
 
 pub use {
     attributes::{ParsedReadValueId, ParsedWriteValue, ReadNode, WriteNode},
@@ -255,6 +254,7 @@ pub struct ServerContext {
     /// Manager containing the server's live sessions.
     pub session_manager: Arc<RwLock<SessionManager>>,
     /// Cache containing the subscriptions managed by the server.
+    #[cfg(feature = "subscriptions")]
     pub subscriptions: Arc<SubscriptionCache>,
     /// General server state and configuration.
     pub info: Arc<ServerInfo>,

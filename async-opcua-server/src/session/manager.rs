@@ -20,8 +20,9 @@ use crate::{
     info::ServerInfo,
     node_manager::{NodeManagers, RequestContext, RequestContextInner},
     rbac::resolver::ResolvedIdentity,
-    subscriptions::SubscriptionCache,
 };
+#[cfg(feature = "subscriptions")]
+use crate::subscriptions::SubscriptionCache;
 use opcua_types::{
     ActivateSessionRequest, ActivateSessionResponse, ByteString, CloseSessionRequest,
     CloseSessionResponse, CreateSessionRequest, CreateSessionResponse, EndpointDescription, Error,
@@ -634,6 +635,7 @@ impl SessionManager {
         session: Arc<RwLock<Session>>,
         session_id_numeric: u32,
         node_managers: NodeManagers,
+        #[cfg(feature = "subscriptions")]
         subscriptions: Arc<SubscriptionCache>,
     ) {
         let (sender, receiver) = mpsc::channel(SESSION_ACTOR_QUEUE_CAPACITY);
@@ -650,6 +652,7 @@ impl SessionManager {
                 user_roles,
                 type_tree: self.info.type_tree.clone(),
                 type_tree_getter: self.info.type_tree_getter.clone(),
+                #[cfg(feature = "subscriptions")]
                 subscriptions,
                 info: self.info.clone(),
             }),
@@ -687,6 +690,7 @@ impl SessionManager {
         draft: CreateSessionDraft,
         channel: &mut SecureChannel,
         node_managers: NodeManagers,
+        #[cfg(feature = "subscriptions")]
         subscriptions: Arc<SubscriptionCache>,
     ) -> Result<CreateSessionResponse, StatusCode> {
         // OPC-10000-4 5.7.2: CreateSession publishes a Session and its
@@ -736,6 +740,7 @@ impl SessionManager {
             session_arc,
             session_id_numeric,
             node_managers,
+            #[cfg(feature = "subscriptions")]
             subscriptions,
         );
         self.refresh_client_response_body_limit_for_channel(channel);
@@ -853,6 +858,7 @@ impl SessionManager {
 
 // This is a non-self method to avoid holding the manager
 // across an await point.
+#[cfg_attr(not(feature = "subscriptions"), allow(unused_variables))]
 pub(crate) async fn close_session(
     mgr_lck: &RwLock<SessionManager>,
     channel: &mut SecureChannel,
@@ -912,6 +918,7 @@ pub(crate) async fn close_session(
     }
     info!("Closed session with ID {}", terminated.session_id);
 
+    #[cfg(feature = "subscriptions")]
     if request.delete_subscriptions {
         if let Some(token) = token {
             handler
@@ -1058,6 +1065,7 @@ pub(crate) async fn activate_session(
                     Some(session.session_id().clone())
                 };
                 audit::dispatch_user_certificate_audit(
+                    #[cfg(feature = "subscriptions")]
                     handler.subscriptions(),
                     &info,
                     &request.request_header,
@@ -1077,6 +1085,7 @@ pub(crate) async fn activate_session(
             };
             for finding in &validation.suppressed_findings {
                 audit::dispatch_user_certificate_audit(
+                    #[cfg(feature = "subscriptions")]
                     handler.subscriptions(),
                     &info,
                     &request.request_header,
@@ -1128,6 +1137,7 @@ pub(crate) async fn activate_session(
                 .map(|cert| cert.as_byte_string())
                 .unwrap_or_else(ByteString::null);
             audit::dispatch_certificate_mismatch(
+                #[cfg(feature = "subscriptions")]
                 handler.subscriptions(),
                 &info,
                 &request.request_header,
@@ -1227,11 +1237,14 @@ pub(crate) async fn activate_session(
         channel.set_namespaces(namespaces);
     }
 
+    #[cfg(feature = "subscriptions")]
     if user_changed {
         handler
             .revalidate_monitored_items_for_user(session_lck, session_id, user_token)
             .await;
     }
+    #[cfg(not(feature = "subscriptions"))]
+    let _ = user_changed;
 
     // TODO: Audit
 

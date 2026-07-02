@@ -9,13 +9,16 @@ use opcua_types::{
     NodeId, ServerState, ServerStatusDataType, VariableId,
 };
 
-use crate::{node_manager::SyncSampler, SubscriptionCache};
+use crate::node_manager::SyncSampler;
+#[cfg(feature = "subscriptions")]
+use crate::SubscriptionCache;
 
 // Note: some of these are unused if the generated namespace feature is disabled.
 
 /// Wrapper for managing the `ServerStatus` variable on the server.
 pub struct ServerStatusWrapper {
     status: Arc<Mutex<ServerStatusDataType>>,
+    #[cfg(feature = "subscriptions")]
     subscriptions: Arc<SubscriptionCache>,
     #[allow(unused)]
     sampler: SyncSampler,
@@ -31,8 +34,12 @@ struct ShutdownTarget {
 
 #[allow(unused)]
 impl ServerStatusWrapper {
-    pub(crate) fn new(build_info: BuildInfo, subscriptions: Arc<SubscriptionCache>) -> Self {
+    pub(crate) fn new(
+        build_info: BuildInfo,
+        #[cfg(feature = "subscriptions")] subscriptions: Arc<SubscriptionCache>,
+    ) -> Self {
         let sampler = SyncSampler::new();
+        #[cfg(feature = "subscriptions")]
         sampler.run(Duration::from_secs(1), subscriptions.clone());
 
         Self {
@@ -44,6 +51,7 @@ impl ServerStatusWrapper {
                 seconds_till_shutdown: 0,
                 shutdown_reason: LocalizedText::null(),
             })),
+            #[cfg(feature = "subscriptions")]
             subscriptions,
             sampler,
             shutdown: Arc::new(OnceLock::new()),
@@ -139,6 +147,7 @@ impl ServerStatusWrapper {
         &self.sampler
     }
 
+    #[cfg(feature = "subscriptions")]
     fn notify_status_object_change(&self) {
         self.subscriptions.maybe_notify(
             [(&VariableId::Server_ServerStatus.into(), AttributeId::Value)].into_iter(),
@@ -158,6 +167,7 @@ impl ServerStatusWrapper {
     /// behavior.
     pub fn set_state(&self, state: ServerState) {
         self.status.lock().state = state;
+        #[cfg(feature = "subscriptions")]
         self.subscriptions.notify_data_change(
             [(
                 DataValue::new_now(state as i32),
@@ -166,6 +176,7 @@ impl ServerStatusWrapper {
             )]
             .into_iter(),
         );
+        #[cfg(feature = "subscriptions")]
         self.notify_status_object_change();
     }
 

@@ -245,6 +245,7 @@ impl SessionActor {
                 // the same server state.
                 type_tree: self.context.type_tree.clone(),
                 type_tree_getter: self.context.type_tree_getter.clone(),
+                #[cfg(feature = "subscriptions")]
                 subscriptions: self.context.subscriptions.clone(),
                 info: self.context.info.clone(),
             }),

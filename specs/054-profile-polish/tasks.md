@@ -76,7 +76,7 @@ rejection) green; symbol-absence script green; workspace suite (default features
 
 ### Implementation (one gate per task; each leaves full build green)
 
-- [ ] T006 [US1] Gate the subscription spine behind `subscriptions`: cfg fields +
+- [X] T006 [US1] Gate the subscription spine behind `subscriptions`: cfg fields +
       constructors + dispatch arms in `async-opcua-server/src/session/message_handler.rs`
       (arms → fallback `:408-421`), `session/controller.rs:46`, `session/manager.rs:23`,
       `session/audit.rs:13`, `server.rs:430`; use the `discovery-mdns` cfg-field pattern

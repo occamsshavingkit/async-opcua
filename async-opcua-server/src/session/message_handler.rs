@@ -5,36 +5,50 @@
     clippy::panic
 )]
 
-use std::{sync::Arc, time::Instant};
+use std::sync::Arc;
+#[cfg(feature = "subscriptions")]
+use std::time::Instant;
 
+#[cfg(feature = "subscriptions")]
 use chrono::Utc;
-use opcua_core::{Message, RequestMessage, ResponseMessage};
+use opcua_core::{Message, RequestMessage};
+#[cfg(feature = "subscriptions")]
+use opcua_core::ResponseMessage;
 use parking_lot::RwLock;
 use tokio::{
     sync::{mpsc, oneshot},
     task::JoinHandle,
 };
-use tracing::{debug, debug_span, warn};
+use tracing::debug;
+#[cfg(feature = "subscriptions")]
+use tracing::{debug_span, warn};
+#[cfg(feature = "subscriptions")]
 use tracing_futures::Instrument;
 
 use crate::{
     authenticator::UserToken,
     info::ServerInfo,
     node_manager::{
-        consume_results, get_namespaces_for_user, MonitoredItemRef, NodeManagers, ReadNode,
-        RequestContext, RequestContextInner,
+        get_namespaces_for_user, NodeManagers, RequestContext, RequestContextInner,
     },
     session::{
         audit::{self, AuditEventContext},
         services,
     },
+};
+#[cfg(feature = "subscriptions")]
+use crate::{
+    node_manager::{consume_results, MonitoredItemRef, ReadNode},
     subscriptions::{PendingPublish, SubscriptionCache},
 };
 use opcua_types::{
-    AttributeId, CancelResponse, DataValue, DiagnosticBits, DiagnosticInfo, NamespaceMap, NodeId,
-    PublishRequest, ReadRequest, ReadResponse, ReadValueId, ResponseHeader, ServiceFault,
-    SetTriggeringRequest, SetTriggeringResponse, StatusCode, TimestampsToReturn, UAString,
-    WriteRequest, WriteResponse,
+    CancelResponse, DataValue, DiagnosticBits, DiagnosticInfo, NamespaceMap, NodeId, ReadRequest,
+    ReadResponse, ReadValueId, ResponseHeader, ServiceFault, StatusCode, TimestampsToReturn,
+    UAString, WriteRequest, WriteResponse,
+};
+#[cfg(feature = "subscriptions")]
+use opcua_types::{
+    AttributeId, PublishRequest, SetTriggeringRequest, SetTriggeringResponse,
 };
 
 use super::{actor::SessionMessage, controller::Response, instance::Session};
@@ -45,6 +59,7 @@ use super::{actor::SessionMessage, controller::Response, instance::Session};
 pub(crate) struct MessageHandler {
     node_managers: NodeManagers,
     info: Arc<ServerInfo>,
+    #[cfg(feature = "subscriptions")]
     subscriptions: Arc<SubscriptionCache>,
 }
 
@@ -58,12 +73,14 @@ pub(crate) enum HandleMessageResult {
     SyncMessage(Response),
 }
 
+#[cfg(feature = "subscriptions")]
 pub(crate) struct PendingPublishRequest {
     request_id: u32,
     request_handle: u32,
     recv: tokio::sync::oneshot::Receiver<ResponseMessage>,
 }
 
+#[cfg(feature = "subscriptions")]
 impl PendingPublishRequest {
     /// Receive a publish request response.
     /// This may take a long time, since publish requests can be open for
@@ -95,6 +112,7 @@ pub(super) struct Request<T> {
     pub info: Arc<ServerInfo>,
     pub session: Arc<RwLock<Session>>,
     pub token: UserToken,
+    #[cfg(feature = "subscriptions")]
     pub subscriptions: Arc<SubscriptionCache>,
     pub session_id: u32,
 }
@@ -119,6 +137,7 @@ impl<T> Request<T> {
         request_handle: u32,
         session: Arc<RwLock<Session>>,
         token: UserToken,
+        #[cfg(feature = "subscriptions")]
         subscriptions: Arc<SubscriptionCache>,
         session_id: u32,
     ) -> Self {
@@ -129,6 +148,7 @@ impl<T> Request<T> {
             info,
             session,
             token,
+            #[cfg(feature = "subscriptions")]
             subscriptions,
             session_id,
         }
@@ -140,6 +160,7 @@ impl<T> Request<T> {
             self.session.clone(),
             self.info.clone(),
             self.token.clone(),
+            #[cfg(feature = "subscriptions")]
             self.subscriptions.clone(),
             self.session_id,
         )
@@ -150,6 +171,7 @@ fn request_context_from_parts(
     session: Arc<RwLock<Session>>,
     info: Arc<ServerInfo>,
     token: UserToken,
+    #[cfg(feature = "subscriptions")]
     subscriptions: Arc<SubscriptionCache>,
     session_id: u32,
 ) -> RequestContext {
@@ -166,6 +188,7 @@ fn request_context_from_parts(
             user_roles,
             type_tree: info.type_tree.clone(),
             type_tree_getter: info.type_tree_getter.clone(),
+            #[cfg(feature = "subscriptions")]
             subscriptions,
             info,
         }),
@@ -184,6 +207,7 @@ macro_rules! async_service_call {
                 $r.request_handle,
                 $r.session,
                 $r.token,
+                #[cfg(feature = "subscriptions")]
                 $slf.subscriptions.clone(),
                 $r.session_id,
             ),
@@ -205,16 +229,19 @@ impl MessageHandler {
     pub(super) fn new(
         info: Arc<ServerInfo>,
         node_managers: NodeManagers,
+        #[cfg(feature = "subscriptions")]
         subscriptions: Arc<SubscriptionCache>,
     ) -> Self {
         Self {
             node_managers,
             info,
+            #[cfg(feature = "subscriptions")]
             subscriptions,
         }
     }
 
     /// The subscription cache used to dispatch server events (e.g. audit events).
+    #[cfg(feature = "subscriptions")]
     pub(crate) fn subscriptions(&self) -> &Arc<SubscriptionCache> {
         &self.subscriptions
     }
@@ -264,26 +291,33 @@ impl MessageHandler {
                 async_service_call!(services::unregister_nodes, self, request, data)
             }
 
+            #[cfg(feature = "subscriptions")]
             RequestMessage::CreateMonitoredItems(request) => {
                 async_service_call!(services::create_monitored_items, self, request, data)
             }
 
+            #[cfg(feature = "subscriptions")]
             RequestMessage::ModifyMonitoredItems(request) => {
                 async_service_call!(services::modify_monitored_items, self, request, data)
             }
 
+            #[cfg(feature = "subscriptions")]
             RequestMessage::SetMonitoringMode(request) => {
                 async_service_call!(services::set_monitoring_mode, self, request, data)
             }
 
+            #[cfg(feature = "subscriptions")]
             RequestMessage::DeleteMonitoredItems(request) => {
                 async_service_call!(services::delete_monitored_items, self, request, data)
             }
 
+            #[cfg(feature = "subscriptions")]
             RequestMessage::SetTriggering(request) => self.set_triggering(*request, data),
 
+            #[cfg(feature = "subscriptions")]
             RequestMessage::Publish(request) => self.publish(request, data),
 
+            #[cfg(feature = "subscriptions")]
             RequestMessage::Republish(request) => {
                 let subscriptions = self.subscriptions.clone();
                 HandleMessageResult::AsyncMessage(tokio::task::spawn(async move {
@@ -292,6 +326,7 @@ impl MessageHandler {
                 }))
             }
 
+            #[cfg(feature = "subscriptions")]
             RequestMessage::CreateSubscription(request) => {
                 let request = self.get_request(data, *request);
                 HandleMessageResult::AsyncMessage(tokio::task::spawn(async move {
@@ -304,6 +339,7 @@ impl MessageHandler {
                 }))
             }
 
+            #[cfg(feature = "subscriptions")]
             RequestMessage::ModifySubscription(request) => {
                 let subscriptions = self.subscriptions.clone();
                 let info = self.info.clone();
@@ -315,6 +351,7 @@ impl MessageHandler {
                 }))
             }
 
+            #[cfg(feature = "subscriptions")]
             RequestMessage::SetPublishingMode(request) => {
                 let subscriptions = self.subscriptions.clone();
                 HandleMessageResult::AsyncMessage(tokio::task::spawn(async move {
@@ -325,6 +362,7 @@ impl MessageHandler {
                 }))
             }
 
+            #[cfg(feature = "subscriptions")]
             RequestMessage::TransferSubscriptions(request) => {
                 let request = self.get_request(data, *request);
                 HandleMessageResult::AsyncMessage(tokio::task::spawn(async move {
@@ -340,6 +378,7 @@ impl MessageHandler {
                 }))
             }
 
+            #[cfg(feature = "subscriptions")]
             RequestMessage::DeleteSubscriptions(request) => {
                 async_service_call!(services::delete_subscriptions, self, request, data)
             }
@@ -388,6 +427,7 @@ impl MessageHandler {
                 // there is nothing outstanding to cancel; respond Good with cancelCount = 0.
                 let session_id = Some(data.session.read().session_id().clone());
                 audit::dispatch_cancel(
+                    #[cfg(feature = "subscriptions")]
                     &self.subscriptions,
                     &self.info,
                     &request.request_header,
@@ -423,6 +463,7 @@ impl MessageHandler {
     }
 
     /// Delete the subscriptions from a session.
+    #[cfg(feature = "subscriptions")]
     pub(super) async fn delete_session_subscriptions(
         &mut self,
         session_id: u32,
@@ -444,6 +485,7 @@ impl MessageHandler {
             session,
             self.info.clone(),
             token,
+            #[cfg(feature = "subscriptions")]
             self.subscriptions.clone(),
             session_id,
         );
@@ -464,6 +506,7 @@ impl MessageHandler {
             .await;
     }
 
+    #[cfg(feature = "subscriptions")]
     pub(super) async fn revalidate_monitored_items_for_user(
         &mut self,
         session: Arc<RwLock<Session>>,
@@ -474,6 +517,7 @@ impl MessageHandler {
             session,
             self.info.clone(),
             token,
+            #[cfg(feature = "subscriptions")]
             self.subscriptions.clone(),
             session_id,
         );
@@ -610,12 +654,14 @@ impl MessageHandler {
             session,
             self.info.clone(),
             token,
+            #[cfg(feature = "subscriptions")]
             self.subscriptions.clone(),
             session_id,
         );
         get_namespaces_for_user(&ctx, &self.node_managers)
     }
 
+    #[cfg(feature = "subscriptions")]
     fn set_triggering(
         &self,
         request: SetTriggeringRequest,
@@ -667,6 +713,7 @@ impl MessageHandler {
             dt.request_handle,
             dt.session,
             dt.token,
+            #[cfg(feature = "subscriptions")]
             self.subscriptions.clone(),
             dt.session_id,
         )
@@ -771,16 +818,26 @@ impl MessageHandler {
 
     fn write(&self, request: Box<WriteRequest>, data: RequestData) -> HandleMessageResult {
         let info = self.info.clone();
+        #[cfg(feature = "subscriptions")]
         let subscriptions = self.subscriptions.clone();
         HandleMessageResult::AsyncMessage(tokio::task::spawn(async move {
-            Self::write_via_actor(request, data, info, subscriptions).await
+            Self::write_via_actor(
+                request,
+                data,
+                info,
+                #[cfg(feature = "subscriptions")]
+                subscriptions,
+            )
+            .await
         }))
     }
 
+    #[cfg_attr(not(feature = "subscriptions"), allow(unused_variables))]
     async fn write_via_actor(
         request: Box<WriteRequest>,
         data: RequestData,
         info: Arc<ServerInfo>,
+        #[cfg(feature = "subscriptions")]
         subscriptions: Arc<SubscriptionCache>,
     ) -> Response {
         let request = *request;
@@ -840,6 +897,7 @@ impl MessageHandler {
         };
         for (target, status) in write_targets.iter().zip(&results) {
             audit::dispatch_write_audit(
+                #[cfg(feature = "subscriptions")]
                 &subscriptions,
                 &info,
                 &audit_context,
@@ -888,6 +946,7 @@ impl MessageHandler {
         }
     }
 
+    #[cfg(feature = "subscriptions")]
     fn publish(&self, request: Box<PublishRequest>, data: RequestData) -> HandleMessageResult {
         let now = Utc::now();
         let now_instant = Instant::now();

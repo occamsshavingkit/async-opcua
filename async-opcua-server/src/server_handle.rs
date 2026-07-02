@@ -8,14 +8,17 @@ use tokio_util::sync::CancellationToken;
 use tracing::info;
 
 use opcua_core::sync::RwLock;
-use opcua_types::{AttributeId, DataValue, LocalizedText, ServerState, VariableId};
+#[cfg(feature = "subscriptions")]
+use opcua_types::{AttributeId, DataValue, VariableId};
+use opcua_types::{LocalizedText, ServerState};
 
 use crate::{reverse_connect::ReverseConnectHandle, ServerStatusWrapper};
 
 use super::{
     info::ServerInfo, node_manager::NodeManagers, session::manager::SessionManager,
-    SubscriptionCache,
 };
+#[cfg(feature = "subscriptions")]
+use super::SubscriptionCache;
 use crate::metrics::ServerMetricsSnapshot;
 
 /// Reference to a server instance containing tools to modify the server
@@ -25,6 +28,7 @@ pub struct ServerHandle {
     info: Arc<ServerInfo>,
     certificate_store: Arc<RwLock<opcua_crypto::CertificateStore>>,
     service_level: Arc<AtomicU8>,
+    #[cfg(feature = "subscriptions")]
     subscriptions: Arc<SubscriptionCache>,
     node_managers: NodeManagers,
     session_manager: Arc<RwLock<SessionManager>>,
@@ -40,6 +44,7 @@ impl ServerHandle {
         info: Arc<ServerInfo>,
         certificate_store: Arc<RwLock<opcua_crypto::CertificateStore>>,
         service_level: Arc<AtomicU8>,
+        #[cfg(feature = "subscriptions")]
         subscriptions: Arc<SubscriptionCache>,
         node_managers: NodeManagers,
         session_manager: Arc<RwLock<SessionManager>>,
@@ -52,6 +57,7 @@ impl ServerHandle {
             info,
             certificate_store,
             service_level,
+            #[cfg(feature = "subscriptions")]
             subscriptions,
             node_managers,
             session_manager,
@@ -78,6 +84,7 @@ impl ServerHandle {
     }
 
     /// Get a reference to the subscription cache.
+    #[cfg(feature = "subscriptions")]
     pub fn subscriptions(&self) -> &Arc<SubscriptionCache> {
         &self.subscriptions
     }
@@ -86,6 +93,7 @@ impl ServerHandle {
     pub fn set_service_level(&self, sl: u8) {
         self.service_level
             .store(sl, std::sync::atomic::Ordering::Relaxed);
+        #[cfg(feature = "subscriptions")]
         self.subscriptions.notify_data_change(
             [(
                 DataValue::new_now(sl),

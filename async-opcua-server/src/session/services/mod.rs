@@ -15,9 +15,11 @@ macro_rules! take_service_items {
 
 mod attribute;
 mod method;
+#[cfg(feature = "subscriptions")]
 mod monitored_items;
 mod node_management;
 mod query;
+#[cfg(feature = "subscriptions")]
 mod subscriptions;
 mod view;
 
@@ -25,9 +27,11 @@ use std::{future::Future, sync::Arc};
 
 pub(super) use attribute::*;
 pub(super) use method::*;
+#[cfg(feature = "subscriptions")]
 pub(super) use monitored_items::*;
 pub(super) use node_management::*;
 pub(super) use query::*;
+#[cfg(feature = "subscriptions")]
 pub(super) use subscriptions::*;
 pub(super) use view::*;
 

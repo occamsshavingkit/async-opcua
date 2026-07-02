@@ -26,6 +26,7 @@ mod view;
 
 use std::{future::Future, sync::Arc};
 
+#[cfg(feature = "history")]
 pub(super) use attribute::*;
 #[cfg(feature = "method-call")]
 pub(super) use method::*;

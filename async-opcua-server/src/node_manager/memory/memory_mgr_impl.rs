@@ -7,10 +7,13 @@ use crate::{
     diagnostics::NamespaceMetadata,
     node_manager::{
         audit_events, AddNodeItem, AddReferenceItem, DeleteNodeItem, DeleteReferenceItem,
-        HistoryNode, HistoryUpdateNode, ParsedReadValueId, RegisterNodeItem, RequestContext,
-        ServerContext, WriteNode,
+        ParsedReadValueId, RegisterNodeItem, RequestContext, ServerContext, WriteNode,
     },
     rbac,
+};
+#[cfg(feature = "history")]
+use crate::{
+    node_manager::{HistoryNode, HistoryUpdateNode},
     session::continuation_points::ContinuationPoint,
 };
 #[cfg(feature = "method-call")]
@@ -30,8 +33,12 @@ use opcua_nodes::Event;
 use opcua_types::{
     AddNodeAttributes, AttributesMask, BrowseDirection, DataTypeId, DataValue, ExpandedNodeId,
     LocalizedText, ModelChangeStructureDataType, NodeClass, NodeId, PermissionType,
+    ReferenceTypeId, StatusCode, TimestampsToReturn, Variant, WriteMask,
+};
+#[cfg(feature = "history")]
+use opcua_types::{
     ReadAnnotationDataDetails, ReadAtTimeDetails, ReadEventDetails, ReadProcessedDetails,
-    ReadRawModifiedDetails, ReferenceTypeId, StatusCode, TimestampsToReturn, Variant, WriteMask,
+    ReadRawModifiedDetails,
 };
 #[cfg(feature = "subscriptions")]
 use opcua_types::ObjectId;
@@ -1392,6 +1399,7 @@ pub trait InMemoryNodeManagerImpl: Send + Sync + 'static {
     /// to the `nodes` list of type either `HistoryData` or `HistoryModifiedData`
     ///
     /// Nodes are verified to be readable before this is called.
+    #[cfg(feature = "history")]
     async fn history_read_raw_modified(
         &self,
         context: &RequestContext,
@@ -1406,6 +1414,7 @@ pub trait InMemoryNodeManagerImpl: Send + Sync + 'static {
     /// to the `nodes` list of type `HistoryData`.
     ///
     /// Nodes are verified to be readable before this is called.
+    #[cfg(feature = "history")]
     async fn history_read_processed(
         &self,
         context: &RequestContext,
@@ -1421,6 +1430,7 @@ pub trait InMemoryNodeManagerImpl: Send + Sync + 'static {
     /// to the `nodes` list of type `HistoryData`.
     ///
     /// Nodes are verified to be readable before this is called.
+    #[cfg(feature = "history")]
     async fn history_read_at_time(
         &self,
         context: &RequestContext,
@@ -1435,6 +1445,7 @@ pub trait InMemoryNodeManagerImpl: Send + Sync + 'static {
     /// to the `nodes` list of type `HistoryEvent`.
     ///
     /// Nodes are verified to be readable before this is called.
+    #[cfg(feature = "history")]
     async fn history_read_events(
         &self,
         context: &RequestContext,
@@ -1449,6 +1460,7 @@ pub trait InMemoryNodeManagerImpl: Send + Sync + 'static {
     /// results to the `nodes` list of type `Annotation`.
     ///
     /// Nodes are verified to be readable before this is called.
+    #[cfg(feature = "history")]
     async fn history_read_annotations(
         &self,
         context: &RequestContext,
@@ -1460,6 +1472,7 @@ pub trait InMemoryNodeManagerImpl: Send + Sync + 'static {
     }
 
     /// Release a history continuation point after the service removes it from the session cache.
+    #[cfg(feature = "history")]
     async fn history_release_continuation_point(
         &self,
         context: &RequestContext,
@@ -1473,6 +1486,7 @@ pub trait InMemoryNodeManagerImpl: Send + Sync + 'static {
     /// status codes to the `nodes` list as appropriate.
     ///
     /// Nodes are verified to be writable before this is called.
+    #[cfg(feature = "history")]
     async fn history_update(
         &self,
         context: &RequestContext,

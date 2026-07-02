@@ -383,10 +383,12 @@ impl MessageHandler {
                 async_service_call!(services::delete_subscriptions, self, request, data)
             }
 
+            #[cfg(feature = "history")]
             RequestMessage::HistoryRead(request) => {
                 async_service_call!(services::history_read, self, request, data)
             }
 
+            #[cfg(feature = "history")]
             RequestMessage::HistoryUpdate(request) => {
                 async_service_call!(services::history_update, self, request, data)
             }

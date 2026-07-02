@@ -7,15 +7,18 @@ use tracing::{error, trace, warn};
 
 use super::MonitoredItemHandle;
 use crate::{
-    aggregates::{dispatch_aggregate, supported_aggregates, AggregateInput},
     info::ServerInfo,
     node_manager::ParsedReadValueId,
     services::subscription::filter::ParsedEventFilter,
 };
+#[cfg(feature = "history-aggregates")]
+use crate::aggregates::{dispatch_aggregate, supported_aggregates, AggregateInput};
+#[cfg(feature = "history-aggregates")]
+use opcua_types::AggregateConfiguration;
 use opcua_types::{
-    match_extension_object_owned, AggregateConfiguration, AggregateFilter, AggregateFilterResult,
-    DataChangeFilter, DataValue, DateTime, DiagnosticBits, DiagnosticInfo, EventFieldList,
-    EventFilter, ExtensionObject, MonitoredItemCreateRequest, MonitoredItemModifyRequest,
+    match_extension_object_owned, AggregateFilter, AggregateFilterResult, DataChangeFilter,
+    DataValue, DateTime, DiagnosticBits, DiagnosticInfo, EventFieldList, EventFilter,
+    ExtensionObject, MonitoredItemCreateRequest, MonitoredItemModifyRequest,
     MonitoredItemNotification, MonitoringMode, NodeId, NumericRange, ObjectTypeId,
     ParsedDataChangeFilter, StatusCode, TimestampsToReturn, Variant,
 };
@@ -63,6 +66,7 @@ pub enum FilterType {
     None,
     DataChangeFilter(ParsedDataChangeFilter),
     EventFilter(ParsedEventFilter),
+    #[cfg(feature = "history-aggregates")]
     AggregateFilter(ParsedAggregateFilter),
 }
 
@@ -71,6 +75,7 @@ pub enum FilterType {
 /// The item buffers sampled values and, each `processing_interval`, emits one aggregated value
 /// computed by the Part-13 aggregate engine instead of reporting raw data changes.
 #[derive(Debug, Clone)]
+#[cfg(feature = "history-aggregates")]
 pub struct ParsedAggregateFilter {
     aggregate_type: NodeId,
     /// Processing interval in milliseconds (validated > 0).
@@ -78,6 +83,7 @@ pub struct ParsedAggregateFilter {
     config: AggregateConfiguration,
 }
 
+#[cfg(feature = "history-aggregates")]
 impl ParsedAggregateFilter {
     fn parse(filter: AggregateFilter) -> (AggregateFilterResult, Result<Self, StatusCode>) {
         // The server honours the requested values; revised == requested.
@@ -135,11 +141,26 @@ impl FilterType {
                 )
             },
             v: AggregateFilter => {
+                #[cfg(feature = "history-aggregates")]
+                {
                 let (res, filter_res) = ParsedAggregateFilter::parse(v);
                 (
                     Some(ExtensionObject::from_message(res)),
                     filter_res.map(FilterType::AggregateFilter),
                 )
+                }
+                #[cfg(not(feature = "history-aggregates"))]
+                {
+                    let result = AggregateFilterResult {
+                        revised_start_time: v.start_time,
+                        revised_processing_interval: v.processing_interval,
+                        revised_aggregate_configuration: v.aggregate_configuration,
+                    };
+                    (
+                        Some(ExtensionObject::from_message(result)),
+                        Err(StatusCode::BadAggregateNotSupported),
+                    )
+                }
             },
             _ => {
                 error!(
@@ -415,12 +436,15 @@ pub struct MonitoredItem {
     semantics_changed: bool,
     /// For an AggregateFilter item: sampled values buffered for the current/next processing interval
     /// (assumed time-ordered, as samples arrive with monotonic source timestamps).
+    #[cfg(feature = "history-aggregates")]
     aggregate_buffer: Vec<DataValue>,
     /// For an AggregateFilter item: the end timestamp of the next processing interval to emit.
+    #[cfg(feature = "history-aggregates")]
     aggregate_next_deadline: Option<DateTime>,
 }
 
 /// Adds `millis` to a timestamp, saturating on overflow.
+#[cfg(feature = "history-aggregates")]
 fn add_millis(time: DateTime, millis: f64) -> DateTime {
     time.as_chrono()
         .checked_add_signed(TimeDelta::microseconds((millis * 1000.0) as i64))
@@ -455,29 +479,41 @@ impl MonitoredItem {
             any_new_notification: false,
             eu_range: request.eu_range,
             semantics_changed: false,
+            #[cfg(feature = "history-aggregates")]
             aggregate_buffer: Vec::new(),
+            #[cfg(feature = "history-aggregates")]
             aggregate_next_deadline: None,
         };
         let now = DateTime::now();
-        if let FilterType::AggregateFilter(agg) = &v.filter {
+        #[cfg(feature = "history-aggregates")]
+        let is_aggregate_filter = if let FilterType::AggregateFilter(agg) = &v.filter {
             // The first aggregate is emitted one processing interval after creation; no initial
             // value notification (an aggregate reports computed values, not the raw current value).
             v.aggregate_next_deadline = Some(add_millis(now, agg.processing_interval));
-        } else if let Some(val) = request.initial_value.as_ref() {
-            v.notify_data_value(val.clone(), &now, true);
+            true
         } else {
-            v.notify_data_value(
-                DataValue {
-                    value: Some(Variant::Empty),
-                    status: Some(StatusCode::BadWaitingForInitialData),
-                    source_timestamp: Some(now),
-                    source_picoseconds: None,
-                    server_timestamp: Some(now),
-                    server_picoseconds: None,
-                },
-                &now,
-                true,
-            );
+            false
+        };
+        #[cfg(not(feature = "history-aggregates"))]
+        let is_aggregate_filter = false;
+
+        if !is_aggregate_filter {
+            if let Some(val) = request.initial_value.as_ref() {
+                v.notify_data_value(val.clone(), &now, true);
+            } else {
+                v.notify_data_value(
+                    DataValue {
+                        value: Some(Variant::Empty),
+                        status: Some(StatusCode::BadWaitingForInitialData),
+                        source_timestamp: Some(now),
+                        source_picoseconds: None,
+                        server_timestamp: Some(now),
+                        server_picoseconds: None,
+                    },
+                    &now,
+                    true,
+                );
+            }
         }
         v
     }
@@ -511,6 +547,8 @@ impl MonitoredItem {
             Err(e) => return (filter_res, e),
         };
         self.eu_range = eu_range;
+        #[cfg(feature = "history-aggregates")]
+        {
         // The filter may have changed to/from/within an AggregateFilter: restart the aggregation
         // window so a new aggregate item starts flushing and a reconfigured one uses the new
         // interval, rather than carrying the old buffer/deadline (or none at all).
@@ -521,6 +559,7 @@ impl MonitoredItem {
             }
             _ => None,
         };
+        }
         let parsed_sampling_interval =
             sanitize_sampling_interval(info, request.requested_parameters.sampling_interval);
         self.sampling_interval = parse_sampling_interval(parsed_sampling_interval);
@@ -628,6 +667,7 @@ impl MonitoredItem {
 
     /// For an AggregateFilter item, emit one aggregated value for each processing interval that has
     /// fully elapsed at `now`, computed over the buffered samples. Returns true if any was enqueued.
+    #[cfg(feature = "history-aggregates")]
     pub(super) fn maybe_flush_aggregate(&mut self, now: &DateTime) -> bool {
         let (aggregate_type, processing_interval, config) = match &self.filter {
             FilterType::AggregateFilter(agg) => (
@@ -714,6 +754,12 @@ impl MonitoredItem {
         true
     }
 
+    #[cfg(not(feature = "history-aggregates"))]
+    pub(super) fn maybe_flush_aggregate(&mut self, _now: &DateTime) -> bool {
+        false
+    }
+
+    #[cfg(feature = "history-aggregates")]
     fn apply_timestamps_to_return(&self, value: &mut DataValue) {
         match self.timestamps_to_return {
             TimestampsToReturn::Neither | TimestampsToReturn::Invalid => {
@@ -781,6 +827,7 @@ impl MonitoredItem {
 
         // AggregateFilter items don't report raw changes: buffer the sample and let
         // `maybe_flush_aggregate` emit one computed value per processing interval.
+        #[cfg(feature = "history-aggregates")]
         if matches!(self.filter, FilterType::AggregateFilter(_)) {
             self.aggregate_buffer.push(value);
             return true;
@@ -863,10 +910,11 @@ impl MonitoredItem {
         if let FilterType::DataChangeFilter(filter) = &mut self.filter {
             filter.update_eu_range(low, high);
         }
-        if !matches!(
-            self.filter,
-            FilterType::EventFilter(_) | FilterType::AggregateFilter(_)
-        ) {
+        let event_or_aggregate = matches!(self.filter, FilterType::EventFilter(_));
+        #[cfg(feature = "history-aggregates")]
+        let event_or_aggregate =
+            event_or_aggregate || matches!(self.filter, FilterType::AggregateFilter(_));
+        if !event_or_aggregate {
             if self.sample_skipped_data_value.is_some() {
                 self.sample_skipped_before_semantics_changed = true;
             }
@@ -1148,9 +1196,12 @@ pub(super) mod tests {
         Variant,
     };
 
-    use super::{FilterType, MonitoredItem, ParsedAggregateFilter};
+    use super::{FilterType, MonitoredItem};
+    #[cfg(feature = "history-aggregates")]
+    use super::ParsedAggregateFilter;
 
     #[test]
+    #[cfg(feature = "history-aggregates")]
     fn aggregate_filter_parse_validates_type_and_interval() {
         use opcua_types::{AggregateConfiguration, AggregateFilter};
         let make = |aggregate_type: NodeId, processing_interval: f64| AggregateFilter {
@@ -1204,7 +1255,9 @@ pub(super) mod tests {
             any_new_notification: false,
             eu_range: None,
             semantics_changed: false,
+            #[cfg(feature = "history-aggregates")]
             aggregate_buffer: Vec::new(),
+            #[cfg(feature = "history-aggregates")]
             aggregate_next_deadline: None,
         };
 

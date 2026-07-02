@@ -12,6 +12,7 @@
 
 pub mod address_space;
 /// Mathematical aggregates (Part 13) support.
+#[cfg(feature = "history-aggregates")]
 pub mod aggregates;
 pub mod alarms;
 /// Authentication helpers.
@@ -34,6 +35,7 @@ pub mod fota;
 /// Global Discovery Server (GDS) support.
 pub mod gds;
 /// Historical data access (HDA) support.
+#[cfg(feature = "history")]
 pub mod history;
 mod identity_token;
 mod info;
@@ -63,6 +65,7 @@ mod transport;
 
 pub use builder::ServerBuilder;
 pub use config::*;
+#[cfg(feature = "history")]
 pub use history::{attach_annotations_property, InMemoryDataHistory, InMemoryEventHistory};
 pub use identity_token::IdentityToken;
 pub use info::ServerInfo;

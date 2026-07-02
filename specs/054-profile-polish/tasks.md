@@ -93,7 +93,7 @@ rejection) green; symbol-absence script green; workspace suite (default features
 - [X] T009 [US1] Gate Call service behind `method-call`: `session/services/method.rs`,
       dispatch arm `message_handler.rs:365`, method-registration surface (typed_method
       path stays compiled only with the feature). [Cite: OPC 10000-4 §5.12 Method service set]
-- [ ] T010 [US1] Gate history behind `history` and aggregates behind
+- [X] T010 [US1] Gate history behind `history` and aggregates behind
       `history-aggregates`: dispatch arms `message_handler.rs:347-353`,
       `services/{history_read,history_update}.rs`, backend surface
       `node_manager/memory/simple.rs:163,435-780,821`, `aggregates/` +

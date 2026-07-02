@@ -1,6 +1,7 @@
 //! Server service helpers.
 
 /// HistoryRead service helpers.
+#[cfg(feature = "history")]
 pub mod history_read;
 /// Node access authorization helpers.
 pub mod node_access;

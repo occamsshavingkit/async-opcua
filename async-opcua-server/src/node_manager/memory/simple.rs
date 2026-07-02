@@ -13,12 +13,13 @@ use opcua_nodes::{HasNodeId, NodeSetImport};
 use crate::{
     address_space::{read_node_value, write_node_value, AddressSpace, NodeType},
     alarms::{AlarmSourceRegistry, LimitAlarm},
-    history::read::modification_infos_or_none,
     node_manager::{
         DefaultTypeTree, NodeManagerBuilder, NodeManagersRef, ParsedReadValueId, RequestContext,
         ServerContext, WriteNode,
     },
 };
+#[cfg(feature = "history")]
+use crate::history::read::modification_infos_or_none;
 #[cfg(feature = "method-call")]
 use crate::node_manager::MethodCall;
 #[cfg(feature = "subscriptions")]
@@ -177,6 +178,7 @@ pub struct SimpleNodeManagerImpl {
     name: String,
     #[cfg(feature = "subscriptions")]
     samplers: SyncSampler,
+    #[cfg(feature = "history")]
     history_backend: RwLock<Option<Arc<dyn crate::history::HistoryStorageBackend>>>,
     #[cfg(feature = "subscriptions")]
     subscriptions: RwLock<Option<Arc<SubscriptionCache>>>,
@@ -465,6 +467,7 @@ impl InMemoryNodeManagerImpl for SimpleNodeManagerImpl {
         Ok(())
     }
 
+    #[cfg(feature = "history")]
     async fn history_read_raw_modified(
         &self,
         _context: &RequestContext,
@@ -535,12 +538,17 @@ impl InMemoryNodeManagerImpl for SimpleNodeManagerImpl {
         }
     }
 
+    #[cfg(feature = "history")]
     async fn history_read_processed(
         &self,
+        #[cfg_attr(not(feature = "history-aggregates"), allow(unused_variables))]
         context: &RequestContext,
+        #[cfg_attr(not(feature = "history-aggregates"), allow(unused_variables))]
         address_space: &RwLock<AddressSpace>,
+        #[cfg_attr(not(feature = "history-aggregates"), allow(unused_variables))]
         details: &opcua_types::ReadProcessedDetails,
         nodes: &mut [&mut &mut crate::node_manager::history::HistoryNode],
+        #[cfg_attr(not(feature = "history-aggregates"), allow(unused_variables))]
         timestamps_to_return: TimestampsToReturn,
     ) -> Result<(), StatusCode> {
         let backend = {
@@ -548,6 +556,10 @@ impl InMemoryNodeManagerImpl for SimpleNodeManagerImpl {
             guard.clone()
         };
         if let Some(backend) = backend {
+            #[cfg(not(feature = "history-aggregates"))]
+            let _ = backend;
+            #[cfg(feature = "history-aggregates")]
+            {
             let stepped: Vec<bool> = {
                 let space = trace_read_lock!(address_space);
                 nodes
@@ -565,11 +577,21 @@ impl InMemoryNodeManagerImpl for SimpleNodeManagerImpl {
                 &stepped,
             )
             .await
+            }
+            #[cfg(not(feature = "history-aggregates"))]
+            {
+                let _ = timestamps_to_return;
+                for node in nodes {
+                    node.set_status(StatusCode::BadAggregateNotSupported);
+                }
+                Ok(())
+            }
         } else {
             Err(StatusCode::BadHistoryOperationUnsupported)
         }
     }
 
+    #[cfg(feature = "history")]
     async fn history_read_events(
         &self,
         _context: &RequestContext,
@@ -629,6 +651,7 @@ impl InMemoryNodeManagerImpl for SimpleNodeManagerImpl {
         }
     }
 
+    #[cfg(feature = "history")]
     async fn history_read_annotations(
         &self,
         _context: &RequestContext,
@@ -690,6 +713,7 @@ impl InMemoryNodeManagerImpl for SimpleNodeManagerImpl {
         }
     }
 
+    #[cfg(feature = "history")]
     async fn history_release_continuation_point(
         &self,
         _context: &RequestContext,
@@ -716,6 +740,7 @@ impl InMemoryNodeManagerImpl for SimpleNodeManagerImpl {
         }
     }
 
+    #[cfg(feature = "history")]
     async fn history_update(
         &self,
         _context: &RequestContext,
@@ -850,6 +875,7 @@ impl SimpleNodeManagerImpl {
             node_managers,
             #[cfg(feature = "subscriptions")]
             samplers: SyncSampler::new(),
+            #[cfg(feature = "history")]
             history_backend: RwLock::new(None),
             #[cfg(feature = "subscriptions")]
             subscriptions: RwLock::new(None),
@@ -860,6 +886,7 @@ impl SimpleNodeManagerImpl {
     }
 
     /// Sets the historical storage backend for this node manager.
+    #[cfg(feature = "history")]
     pub fn set_history_backend(&self, backend: Arc<dyn crate::history::HistoryStorageBackend>) {
         *self.history_backend.write() = Some(backend);
     }

@@ -1,3 +1,4 @@
+#[cfg(feature = "history-aggregates")]
 use crate::aggregates::engine::{compute_processed_intervals, get_value_timestamp};
 use async_trait::async_trait;
 use moka::future::Cache;
@@ -83,15 +84,38 @@ pub trait HistoryStorageBackend: Send + Sync {
     #[allow(clippy::too_many_arguments)]
     async fn read_processed(
         &self,
-        node_id: &NodeId,
+        #[cfg_attr(not(feature = "history-aggregates"), allow(unused_variables))] node_id: &NodeId,
+        #[cfg_attr(not(feature = "history-aggregates"), allow(unused_variables))]
         start_time: DateTime,
-        end_time: DateTime,
+        #[cfg_attr(not(feature = "history-aggregates"), allow(unused_variables))] end_time: DateTime,
+        #[cfg_attr(not(feature = "history-aggregates"), allow(unused_variables))]
         processing_interval: f64,
+        #[cfg_attr(not(feature = "history-aggregates"), allow(unused_variables))]
         aggregate_type: &NodeId,
+        #[cfg_attr(not(feature = "history-aggregates"), allow(unused_variables))]
         aggregate_configuration: &AggregateConfiguration,
-        stepped: bool,
+        #[cfg_attr(not(feature = "history-aggregates"), allow(unused_variables))] stepped: bool,
         continuation_point: Option<Vec<u8>>,
     ) -> Result<(Vec<DataValue>, Option<Vec<u8>>), StatusCode> {
+        #[cfg(not(feature = "history-aggregates"))]
+        {
+            let _ = (
+                node_id,
+                start_time,
+                end_time,
+                processing_interval,
+                aggregate_type,
+                aggregate_configuration,
+                stepped,
+            );
+            if continuation_point.is_some() {
+                return Err(StatusCode::BadContinuationPointInvalid);
+            }
+            return Err(StatusCode::BadAggregateNotSupported);
+        }
+
+        #[cfg(feature = "history-aggregates")]
+        {
         if continuation_point.is_some() {
             return Err(StatusCode::BadContinuationPointInvalid);
         }
@@ -143,6 +167,7 @@ pub trait HistoryStorageBackend: Send + Sync {
         );
 
         Ok((processed_values, None))
+        }
     }
 
     /// Reads historical events from the history backend.

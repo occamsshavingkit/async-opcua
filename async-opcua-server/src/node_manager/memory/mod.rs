@@ -26,12 +26,18 @@ use hashbrown::HashMap;
 
 use crate::{
     address_space::{
-        user_access_level, AccessLevel, EventNotifier, NodeType, ReferenceDirection,
+        NodeType, ReferenceDirection,
     },
     diagnostics::NamespaceMetadata,
     rbac,
+};
+#[cfg(feature = "history")]
+use crate::{
+    address_space::{user_access_level, AccessLevel},
     session::continuation_points::ContinuationPoint,
 };
+#[cfg(any(feature = "history", feature = "subscriptions"))]
+use crate::address_space::EventNotifier;
 #[cfg(feature = "subscriptions")]
 use crate::address_space::read_node_value;
 #[cfg(feature = "subscriptions")]
@@ -45,9 +51,13 @@ use opcua_types::DataEncoding;
 use opcua_types::{NumericRange, Variant};
 use opcua_types::{
     AccessRestrictionType, AttributeId, BrowseDescriptionResultMask, BrowseDirection,
-    ExpandedNodeId, NodeClass, NodeId, PermissionType, ReadAnnotationDataDetails,
-    ReadAtTimeDetails, ReadEventDetails, ReadProcessedDetails, ReadRawModifiedDetails,
-    ReferenceDescription, ReferenceTypeId, RolePermissionType, StatusCode, TimestampsToReturn,
+    ExpandedNodeId, NodeClass, NodeId, PermissionType, ReferenceDescription, ReferenceTypeId,
+    RolePermissionType, StatusCode, TimestampsToReturn,
+};
+#[cfg(feature = "history")]
+use opcua_types::{
+    ReadAnnotationDataDetails, ReadAtTimeDetails, ReadEventDetails, ReadProcessedDetails,
+    ReadRawModifiedDetails,
 };
 #[cfg(feature = "subscriptions")]
 use opcua_types::{DataValue, DateTime, MonitoringMode};
@@ -56,10 +66,12 @@ use super::{
     build::NodeManagerBuilder,
     view::{AddReferenceResult, ExternalReference, ExternalReferenceRequest, NodeMetadata},
     AddNodeItem, AddReferenceItem, AttributeProvider, BrowseNode, BrowsePathItem, DefaultTypeTree,
-    DeleteNodeItem, DeleteReferenceItem, DynNodeManager, HistoryNode, HistoryProvider,
-    HistoryUpdateDetails, HistoryUpdateNode, NodeManagerCore, NodeMutator, QueryRequest, ReadNode,
-    RegisterNodeItem, RequestContext, ServerContext, ViewProvider, WriteNode,
+    DeleteNodeItem, DeleteReferenceItem, DynNodeManager, NodeManagerCore, NodeMutator,
+    QueryRequest, ReadNode, RegisterNodeItem, RequestContext, ServerContext, ViewProvider,
+    WriteNode,
 };
+#[cfg(feature = "history")]
+use super::{HistoryNode, HistoryProvider, HistoryUpdateDetails, HistoryUpdateNode};
 #[cfg(feature = "method-call")]
 use super::{MethodCall, MethodProvider};
 #[cfg(feature = "subscriptions")]
@@ -506,6 +518,7 @@ impl<TImpl: InMemoryNodeManagerImpl> InMemoryNodeManager<TImpl> {
         }
     }
 
+    #[cfg(feature = "history")]
     fn validate_history_read_nodes<'a, 'b>(
         &self,
         context: &RequestContext,
@@ -559,6 +572,7 @@ impl<TImpl: InMemoryNodeManagerImpl> InMemoryNodeManager<TImpl> {
         valid
     }
 
+    #[cfg(feature = "history")]
     fn validate_history_write_nodes<'a, 'b>(
         &self,
         context: &RequestContext,
@@ -1122,6 +1136,7 @@ impl<TImpl: InMemoryNodeManagerImpl> MonitoredItemProvider for InMemoryNodeManag
 }
 
 #[async_trait]
+#[cfg(feature = "history")]
 impl<TImpl: InMemoryNodeManagerImpl> HistoryProvider for InMemoryNodeManager<TImpl> {
     async fn history_read_raw_modified(
         &self,

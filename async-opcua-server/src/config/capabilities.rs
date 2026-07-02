@@ -59,9 +59,19 @@ impl Default for HistoryServerCapabilities {
             server_timestamp_supported: false,
             update_data: false,
             update_event: false,
-            aggregates: crate::aggregates::engine::supported_aggregates(),
+            aggregates: default_history_aggregates(),
         }
     }
+}
+
+#[cfg(feature = "history-aggregates")]
+fn default_history_aggregates() -> Vec<NodeId> {
+    crate::aggregates::engine::supported_aggregates()
+}
+
+#[cfg(not(feature = "history-aggregates"))]
+fn default_history_aggregates() -> Vec<NodeId> {
+    Vec::new()
 }
 
 #[derive(Debug, Clone, Default)]

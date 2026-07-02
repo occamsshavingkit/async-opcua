@@ -549,6 +549,11 @@ impl SessionManager {
         session
     }
 
+    /// Return a snapshot of all live sessions.
+    pub fn snapshot_sessions(&self) -> Vec<Arc<RwLock<Session>>> {
+        self.sessions.values().map(Arc::clone).collect()
+    }
+
     /// Register an authentication token for direct session lookup.
     pub fn register_token(&self, token: NodeId, session: Arc<RwLock<Session>>) {
         self.closed_auth_tokens.remove(&token);

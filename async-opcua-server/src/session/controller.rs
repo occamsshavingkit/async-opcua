@@ -369,7 +369,7 @@ impl<T: ConnectionTransport> SessionController<T> {
     }
 
     fn response_metrics(&self, msg: &Response) {
-        if self.info.diagnostics.enabled {
+        if self.info.diagnostics.enabled() {
             let status = msg.message.response_header().service_result;
             if status.is_bad() {
                 self.info.diagnostics.inc_rejected_requests();

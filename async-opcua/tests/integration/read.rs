@@ -1,13 +1,19 @@
 //! Read service integration tests — OPC UA Part 4 v1.05 §5.11.2 (Attribute Service Set / Read).
 
-use std::{sync::atomic::Ordering, time::Duration};
+use std::{
+    sync::{atomic::Ordering, Arc},
+    time::Duration,
+};
 
-use crate::utils::{client_user_token, default_client, default_server, test_node_manager, Tester};
+use crate::utils::{
+    client_user_token, default_client, default_server, test_node_manager, ChannelNotifications,
+    Tester,
+};
 
 use super::utils::{array_value, read_value_id, read_value_ids, setup};
 use chrono::TimeDelta;
 use opcua::{
-    client::HistoryReadAction,
+    client::{HistoryReadAction, Session},
     server::address_space::{
         AccessLevel, DataTypeBuilder, EventNotifier, MethodBuilder, ObjectBuilder,
         ObjectTypeBuilder, ReferenceTypeBuilder, VariableBuilder, VariableTypeBuilder, ViewBuilder,
@@ -15,8 +21,9 @@ use opcua::{
     types::{
         AttributeId, DataTypeId, DataValue, DateTime, HistoryData, HistoryReadValueId,
         LocalizedText, NodeClass, NodeId, ObjectId, ObjectTypeId, QualifiedName,
-        ReadRawModifiedDetails, ReadValueId, ReferenceTypeId, StatusCode, TimestampsToReturn,
-        VariableId, VariableTypeId, Variant, WriteMask, WriteValue,
+        ReadRawModifiedDetails, ReadValueId, ReferenceTypeId, SessionDiagnosticsDataType,
+        StatusCode, SubscriptionDiagnosticsDataType, TimestampsToReturn, VariableId,
+        VariableTypeId, Variant, WriteMask, WriteValue,
     },
 };
 use opcua_client::{services::Read, DefaultRetryPolicy, ExponentialBackoff, UARequest};
@@ -1571,4 +1578,259 @@ async fn min_supported_sample_rate_value_matches_duration_datatype() {
         "Value must be a Double (Duration), got {:?}",
         r[0].value
     );
+}
+
+// ---------------------------------------------------------------------------
+// Feature 053 US1 (P5-04): ServerDiagnosticsType mandatory children.
+// OPC UA Part 5 v1.05 §6.3.3 (Table 11): EnabledFlag, SubscriptionDiagnosticsArray and
+// SessionsDiagnosticsSummary (SessionDiagnosticsArray + SessionSecurityDiagnosticsArray)
+// are Mandatory members of ServerDiagnosticsType and must serve live data.
+// ---------------------------------------------------------------------------
+
+async fn connect_diagnostics_tester(diagnostics: bool) -> (Tester, Arc<Session>) {
+    let server = default_server().diagnostics_enabled(diagnostics);
+    let mut tester = Tester::new(server, false).await;
+    let (session, lp) = tester
+        .connect(
+            opcua_crypto::SecurityPolicy::Aes128Sha256RsaOaep,
+            opcua_types::MessageSecurityMode::SignAndEncrypt,
+            client_user_token(),
+        )
+        .await
+        .unwrap();
+    lp.spawn();
+    tokio::time::timeout(Duration::from_secs(5), session.wait_for_connection())
+        .await
+        .unwrap();
+    (tester, session)
+}
+
+#[tokio::test]
+async fn server_diagnostics_enabled_flag_reflects_config() {
+    // Part 5 §6.3.3: EnabledFlag is a mandatory Boolean Property of ServerDiagnosticsType,
+    // TRUE while the server is collecting diagnostics.
+    let (_tester, session) = connect_diagnostics_tester(true).await;
+    let r = session
+        .read(
+            &[ReadValueId::new_value(
+                VariableId::Server_ServerDiagnostics_EnabledFlag.into(),
+            )],
+            TimestampsToReturn::Both,
+            0.0,
+        )
+        .await
+        .unwrap();
+    assert_eq!(Some(StatusCode::Good), r[0].status);
+    assert_eq!(Some(Variant::Boolean(true)), r[0].value);
+}
+
+#[tokio::test]
+async fn server_diagnostics_arrays_report_live_entries() {
+    // Part 5 §6.3.3: SubscriptionDiagnosticsArray has one SubscriptionDiagnosticsDataType
+    // entry per live subscription; SessionDiagnosticsArray one SessionDiagnosticsDataType
+    // entry per live session.
+    let (_tester, session) = connect_diagnostics_tester(true).await;
+    let (notifs, _data, _) = ChannelNotifications::new();
+    let sub_id = session
+        .create_subscription(Duration::from_millis(500), 100, 20, 1000, 0, true, notifs)
+        .await
+        .unwrap();
+
+    let r = session
+        .read(
+            &[
+                ReadValueId::new_value(
+                    VariableId::Server_ServerDiagnostics_SubscriptionDiagnosticsArray.into(),
+                ),
+                ReadValueId::new_value(
+                    VariableId::Server_ServerDiagnostics_SessionsDiagnosticsSummary_SessionDiagnosticsArray.into(),
+                ),
+            ],
+            TimestampsToReturn::Both,
+            0.0,
+        )
+        .await
+        .unwrap();
+
+    let subs = array_value(&r[0]);
+    assert_eq!(1, subs.len(), "one live subscription expected: {:?}", r[0]);
+    let Variant::ExtensionObject(sub_diag) = &subs[0] else {
+        panic!("expected ExtensionObject, got {:?}", subs[0]);
+    };
+    let sub_diag: &SubscriptionDiagnosticsDataType = sub_diag.inner_as().unwrap();
+    assert_eq!(sub_id, sub_diag.subscription_id);
+    assert_eq!(500.0, sub_diag.publishing_interval);
+    assert!(sub_diag.publishing_enabled);
+    assert_eq!(0, sub_diag.monitored_item_count);
+
+    let sessions = array_value(&r[1]);
+    assert_eq!(1, sessions.len(), "one live session expected: {:?}", r[1]);
+    let Variant::ExtensionObject(sess_diag) = &sessions[0] else {
+        panic!("expected ExtensionObject, got {:?}", sessions[0]);
+    };
+    let sess_diag: &SessionDiagnosticsDataType = sess_diag.inner_as().unwrap();
+    assert!(!sess_diag.session_id.is_null());
+    assert_eq!(1, sess_diag.current_subscriptions_count);
+    // The subscription's diagnostics row must point back at this session.
+    assert_eq!(sess_diag.session_id, sub_diag.session_id);
+}
+
+#[tokio::test]
+async fn server_diagnostics_disabled_reads_false_and_empty_arrays() {
+    // Part 5 §6.3.3: with EnabledFlag == FALSE the server is not collecting diagnostics;
+    // the diagnostics arrays read as empty.
+    let (_tester, session) = connect_diagnostics_tester(false).await;
+    let r = session
+        .read(
+            &[
+                ReadValueId::new_value(
+                    VariableId::Server_ServerDiagnostics_EnabledFlag.into(),
+                ),
+                ReadValueId::new_value(
+                    VariableId::Server_ServerDiagnostics_SubscriptionDiagnosticsArray.into(),
+                ),
+                ReadValueId::new_value(
+                    VariableId::Server_ServerDiagnostics_SessionsDiagnosticsSummary_SessionDiagnosticsArray.into(),
+                ),
+            ],
+            TimestampsToReturn::Both,
+            0.0,
+        )
+        .await
+        .unwrap();
+    assert_eq!(Some(Variant::Boolean(false)), r[0].value);
+    assert!(
+        array_value(&r[1]).is_empty(),
+        "SubscriptionDiagnosticsArray must read empty while disabled: {:?}",
+        r[1]
+    );
+    assert!(
+        array_value(&r[2]).is_empty(),
+        "SessionDiagnosticsArray must read empty while disabled: {:?}",
+        r[2]
+    );
+}
+
+#[tokio::test]
+async fn session_security_diagnostics_requires_security_privilege() {
+    // Part 5 §6.3.5/§7.15: SessionSecurityDiagnostics content is security-related and
+    // must only be exposed to sessions holding the security-diagnostics privilege; the
+    // ordinary read_diagnostics privilege is NOT sufficient. Fail closed.
+    let (_tester, session) = connect_diagnostics_tester(true).await;
+    let r = session
+        .read(
+            &[ReadValueId::new_value(
+                VariableId::Server_ServerDiagnostics_SessionsDiagnosticsSummary_SessionSecurityDiagnosticsArray.into(),
+            )],
+            TimestampsToReturn::Both,
+            0.0,
+        )
+        .await
+        .unwrap();
+    assert_eq!(Some(StatusCode::BadUserAccessDenied), r[0].status);
+}
+
+#[tokio::test]
+async fn server_diagnostics_privileged_toggle_and_security_array() {
+    // Part 5 §6.3.3: a session holding the diagnostics-write privilege can toggle
+    // EnabledFlag (disabling collection empties the arrays); Part 5 §6.3.5/§7.15: the
+    // security-diagnostics privilege exposes SessionSecurityDiagnosticsArray rows.
+    use crate::utils::CLIENT_USERPASS_ID;
+    use opcua::server::ServerUserToken;
+    use opcua::types::SessionSecurityDiagnosticsDataType;
+
+    let server = default_server().diagnostics_enabled(true).add_user_token(
+        CLIENT_USERPASS_ID,
+        ServerUserToken::user_pass(
+            CLIENT_USERPASS_ID,
+            &format!("{CLIENT_USERPASS_ID}_password"),
+        )
+        .read_diagnostics(true)
+        .write_diagnostics(true)
+        .read_security_diagnostics(true),
+    );
+    let mut tester = Tester::new(server, false).await;
+    let (session, lp) = tester
+        .connect(
+            opcua_crypto::SecurityPolicy::Aes128Sha256RsaOaep,
+            opcua_types::MessageSecurityMode::SignAndEncrypt,
+            client_user_token(),
+        )
+        .await
+        .unwrap();
+    lp.spawn();
+    tokio::time::timeout(Duration::from_secs(5), session.wait_for_connection())
+        .await
+        .unwrap();
+
+    // Security array: one row for this session, with its actual security parameters.
+    let r = session
+        .read(
+            &[ReadValueId::new_value(
+                VariableId::Server_ServerDiagnostics_SessionsDiagnosticsSummary_SessionSecurityDiagnosticsArray.into(),
+            )],
+            TimestampsToReturn::Both,
+            0.0,
+        )
+        .await
+        .unwrap();
+    let rows = array_value(&r[0]);
+    assert_eq!(1, rows.len(), "one live session expected: {:?}", r[0]);
+    let Variant::ExtensionObject(row) = &rows[0] else {
+        panic!("expected ExtensionObject, got {:?}", rows[0]);
+    };
+    let row: &SessionSecurityDiagnosticsDataType = row.inner_as().unwrap();
+    assert!(!row.session_id.is_null());
+    assert_eq!(
+        opcua::types::MessageSecurityMode::SignAndEncrypt,
+        row.security_mode
+    );
+
+    // Privileged EnabledFlag write: disable, observe empty arrays + false, re-enable.
+    let enabled_flag: NodeId = VariableId::Server_ServerDiagnostics_EnabledFlag.into();
+    let write = |value: bool| WriteValue {
+        node_id: enabled_flag.clone(),
+        attribute_id: AttributeId::Value as u32,
+        index_range: NumericRange::None,
+        value: DataValue {
+            value: Some(Variant::Boolean(value)),
+            status: Some(StatusCode::Good),
+            source_timestamp: Some(DateTime::now()),
+            ..Default::default()
+        },
+    };
+    let statuses = session.write(&[write(false)]).await.unwrap();
+    assert_eq!(vec![StatusCode::Good], statuses);
+
+    let r = session
+        .read(
+            &[
+                ReadValueId::new_value(enabled_flag.clone()),
+                ReadValueId::new_value(
+                    VariableId::Server_ServerDiagnostics_SubscriptionDiagnosticsArray.into(),
+                ),
+            ],
+            TimestampsToReturn::Both,
+            0.0,
+        )
+        .await
+        .unwrap();
+    assert_eq!(Some(Variant::Boolean(false)), r[0].value);
+    assert!(
+        array_value(&r[1]).is_empty(),
+        "arrays must read empty after EnabledFlag=false: {:?}",
+        r[1]
+    );
+
+    let statuses = session.write(&[write(true)]).await.unwrap();
+    assert_eq!(vec![StatusCode::Good], statuses);
+    let r = session
+        .read(
+            &[ReadValueId::new_value(enabled_flag.clone())],
+            TimestampsToReturn::Both,
+            0.0,
+        )
+        .await
+        .unwrap();
+    assert_eq!(Some(Variant::Boolean(true)), r[0].value);
 }

@@ -34,8 +34,8 @@ use opcua_types::{
     ModifySubscriptionResponse, MonitoredItemCreateResult, MonitoredItemModifyRequest,
     MonitoringMode, NodeId, NotificationMessage, NumericRange, PublishRequest, RepublishRequest,
     ResponseHeader, SetPublishingModeRequest, SetPublishingModeResponse, StatusCode,
-    TimestampsToReturn, TransferResult, TransferSubscriptionsRequest,
-    TransferSubscriptionsResponse, Variant,
+    SubscriptionDiagnosticsDataType, TimestampsToReturn, TransferResult,
+    TransferSubscriptionsRequest, TransferSubscriptionsResponse, Variant,
 };
 
 use crate::node_manager::{consume_results, RequestContextInner};
@@ -353,6 +353,78 @@ fn push_pending_data_notifications(by_subscription: HashMap<(u32, u32), PendingD
     }
 }
 
+fn session_subscription_diagnostics(
+    subscriptions: &mut SessionSubscriptions,
+) -> Vec<SubscriptionDiagnosticsDataType> {
+    let session_id = trace_read_lock!(subscriptions.session())
+        .session_id()
+        .clone();
+    let subscription_ids = subscriptions.subscription_ids();
+    let mut diagnostics = Vec::with_capacity(subscription_ids.len());
+
+    for subscription_id in subscription_ids {
+        if let Some(subscription) = subscriptions.get(subscription_id) {
+            diagnostics.push(subscription_diagnostics_row(&session_id, subscription));
+        }
+    }
+
+    diagnostics
+}
+
+fn subscription_diagnostics_row(
+    session_id: &NodeId,
+    subscription: &Subscription,
+) -> SubscriptionDiagnosticsDataType {
+    SubscriptionDiagnosticsDataType {
+        session_id: session_id.clone(),
+        subscription_id: subscription.id(),
+        priority: subscription.priority(),
+        publishing_interval: subscription.publishing_interval().as_secs_f64() * 1000.0,
+        max_keep_alive_count: subscription.max_keep_alive_counter(),
+        max_lifetime_count: subscription.max_lifetime_counter(),
+        max_notifications_per_publish: usize_to_u32_saturating(
+            subscription.max_notifications_per_publish(),
+        ),
+        publishing_enabled: subscription.publishing_enabled(),
+        current_keep_alive_count: subscription.current_keep_alive_counter(),
+        current_lifetime_count: subscription.current_lifetime_counter(),
+        discarded_message_count: subscription.discarded_message_count(),
+        monitored_item_count: usize_to_u32_saturating(subscription.monitored_item_count()),
+        next_sequence_number: subscription.next_sequence_number(),
+        ..Default::default()
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct SessionSubscriptionDiagnosticsSummary {
+    pub subscription_count: u32,
+    pub monitored_item_count: u32,
+}
+
+fn session_subscription_diagnostics_summary(
+    subscriptions: &mut SessionSubscriptions,
+) -> SessionSubscriptionDiagnosticsSummary {
+    let subscription_ids = subscriptions.subscription_ids();
+    let mut summary = SessionSubscriptionDiagnosticsSummary {
+        subscription_count: usize_to_u32_saturating(subscription_ids.len()),
+        ..Default::default()
+    };
+
+    for subscription_id in subscription_ids {
+        if let Some(subscription) = subscriptions.get(subscription_id) {
+            summary.monitored_item_count = summary
+                .monitored_item_count
+                .saturating_add(usize_to_u32_saturating(subscription.monitored_item_count()));
+        }
+    }
+
+    summary
+}
+
+fn usize_to_u32_saturating(value: usize) -> u32 {
+    value.min(u32::MAX as usize) as u32
+}
+
 impl SubscriptionCache {
     #[allow(dead_code)]
     pub(crate) fn new(limits: SubscriptionLimits) -> Self {
@@ -412,6 +484,51 @@ impl SubscriptionCache {
         }?;
 
         cache.legacy(move |subs| f(subs)).await.ok()
+    }
+
+    pub(crate) async fn subscription_diagnostics(&self) -> Vec<SubscriptionDiagnosticsDataType> {
+        let handles = {
+            let inner = trace_read_lock!(self.inner);
+            inner
+                .session_subscriptions
+                .values()
+                .map(SessionEntry::handle)
+                .collect::<Vec<_>>()
+        };
+
+        let mut diagnostics = Vec::new();
+        for handle in handles {
+            if let Ok(mut session_diagnostics) =
+                handle.legacy(session_subscription_diagnostics).await
+            {
+                diagnostics.append(&mut session_diagnostics);
+            }
+        }
+        diagnostics
+    }
+
+    pub(crate) async fn session_diagnostics_summaries(
+        &self,
+    ) -> HashMap<u32, SessionSubscriptionDiagnosticsSummary> {
+        let handles = {
+            let inner = trace_read_lock!(self.inner);
+            inner
+                .session_subscriptions
+                .iter()
+                .map(|(&session_id, entry)| (session_id, entry.handle()))
+                .collect::<Vec<_>>()
+        };
+
+        let mut summaries = HashMap::with_capacity(handles.len());
+        for (session_id, handle) in handles {
+            if let Ok(summary) = handle
+                .legacy(session_subscription_diagnostics_summary)
+                .await
+            {
+                summaries.insert(session_id, summary);
+            }
+        }
+        summaries
     }
 
     #[allow(dead_code)]
@@ -1523,7 +1640,7 @@ mod tests {
         authenticator::UserToken,
         identity_token::{IdentityToken, POLICY_ID_ANONYMOUS},
         node_manager::{RequestContext, RequestContextInner, ServerContext},
-        session::instance::Session,
+        session::{instance::Session, manager::SessionManager},
         ServerBuilder, ServerStatusWrapper, SubscriptionCache,
     };
 
@@ -1770,6 +1887,10 @@ mod tests {
             );
             let session_id = session.read().session_id_numeric();
             let user_roles = session.read().roles();
+            let session_manager = Arc::new(RwLock::new(SessionManager::new(
+                Arc::clone(&info),
+                Arc::new(tokio::sync::Notify::new()),
+            )));
             let context = RequestContext::new_test(Arc::new(RequestContextInner {
                 session,
                 session_id,
@@ -1783,6 +1904,7 @@ mod tests {
             }));
             let server_context = ServerContext {
                 node_managers: handle.node_managers().as_weak(),
+                session_manager,
                 subscriptions: Arc::clone(&cache),
                 info: Arc::clone(&info),
                 authenticator: info.authenticator.clone(),

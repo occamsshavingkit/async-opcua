@@ -1149,3 +1149,70 @@ async fn write_emits_audit_event() {
         "an AuditWriteUpdateEventType must be delivered after a Write"
     );
 }
+
+#[tokio::test]
+async fn server_diagnostics_enabled_flag_write_requires_privilege() {
+    // Feature 053 US1 (P5-04) — OPC UA Part 5 §6.3.3: EnabledFlag toggles diagnostics
+    // collection. Fail closed (constitution §IV): a session without the diagnostics-write
+    // privilege gets Bad_UserAccessDenied; the ordinary read_diagnostics privilege is not
+    // sufficient to write.
+    use crate::utils::{client_user_token, default_server, Tester};
+    use opcua::types::VariableId;
+    use std::time::Duration;
+
+    let server = default_server().diagnostics_enabled(true);
+    let mut tester = Tester::new(server, false).await;
+
+    // Anonymous session: write denied.
+    let (session, lp) = tester.connect_default().await.unwrap();
+    lp.spawn();
+    tokio::time::timeout(Duration::from_secs(5), session.wait_for_connection())
+        .await
+        .unwrap();
+    let r = session
+        .write(&[write_value(
+            AttributeId::Value,
+            false,
+            VariableId::Server_ServerDiagnostics_EnabledFlag,
+        )])
+        .await
+        .unwrap();
+    assert_eq!(StatusCode::BadUserAccessDenied, r[0]);
+
+    // User with read_diagnostics (but no write privilege): write still denied.
+    let (session, lp) = tester
+        .connect(
+            opcua_crypto::SecurityPolicy::Aes128Sha256RsaOaep,
+            opcua_types::MessageSecurityMode::SignAndEncrypt,
+            client_user_token(),
+        )
+        .await
+        .unwrap();
+    lp.spawn();
+    tokio::time::timeout(Duration::from_secs(5), session.wait_for_connection())
+        .await
+        .unwrap();
+    let r = session
+        .write(&[write_value(
+            AttributeId::Value,
+            false,
+            VariableId::Server_ServerDiagnostics_EnabledFlag,
+        )])
+        .await
+        .unwrap();
+    assert_eq!(StatusCode::BadUserAccessDenied, r[0]);
+
+    // The flag must be unchanged after the rejected writes.
+    let read = session
+        .read(
+            &[read_value_id(
+                AttributeId::Value,
+                VariableId::Server_ServerDiagnostics_EnabledFlag,
+            )],
+            TimestampsToReturn::Both,
+            0.0,
+        )
+        .await
+        .unwrap();
+    assert_eq!(Some(Variant::Boolean(true)), read[0].value);
+}

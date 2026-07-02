@@ -128,6 +128,12 @@ pub struct ServerUserToken {
     #[serde(default)]
     /// Access to read diagnostics on the server.
     pub read_diagnostics: bool,
+    #[serde(default)]
+    /// Access to read security-sensitive session diagnostics on the server.
+    pub read_security_diagnostics: bool,
+    #[serde(default)]
+    /// Access to write diagnostics control values on the server.
+    pub write_diagnostics: bool,
     /// Role NodeIds granted to this configured user identity.
     #[serde(
         default,
@@ -151,6 +157,8 @@ impl ServerUserToken {
             x509: None,
             thumbprint: None,
             read_diagnostics: false,
+            read_security_diagnostics: false,
+            write_diagnostics: false,
             roles: Vec::new(),
         }
     }
@@ -166,6 +174,8 @@ impl ServerUserToken {
             x509: Some(cert_path.to_string_lossy().to_string()),
             thumbprint: None,
             read_diagnostics: false,
+            read_security_diagnostics: false,
+            write_diagnostics: false,
             roles: Vec::new(),
         }
     }
@@ -234,6 +244,18 @@ impl ServerUserToken {
     /// Set the ability for the user to read diagnostics on the server.
     pub fn read_diagnostics(mut self, read: bool) -> Self {
         self.read_diagnostics = read;
+        self
+    }
+
+    /// Set the ability for the user to read security-sensitive session diagnostics on the server.
+    pub fn read_security_diagnostics(mut self, read: bool) -> Self {
+        self.read_security_diagnostics = read;
+        self
+    }
+
+    /// Set the ability for the user to write diagnostics control values on the server.
+    pub fn write_diagnostics(mut self, write: bool) -> Self {
+        self.write_diagnostics = write;
         self
     }
 

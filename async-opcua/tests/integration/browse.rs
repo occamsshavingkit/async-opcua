@@ -877,3 +877,57 @@ async fn browse_attached_annotations_property() {
         ))))
     );
 }
+
+#[tokio::test]
+async fn server_diagnostics_mandatory_children_are_browsable() {
+    // Feature 053 US1 (P5-04) — OPC UA Part 5 §6.3.3 Table 11 (SC-002 lock-in): all
+    // mandatory ServerDiagnosticsType members are present under Server.ServerDiagnostics,
+    // and SessionsDiagnosticsSummary exposes both diagnostics arrays.
+    let (_tester, _nm, session) = setup().await;
+    let r = session
+        .browse(
+            &[
+                hierarchical_desc(ObjectId::Server_ServerDiagnostics.into()),
+                hierarchical_desc(
+                    ObjectId::Server_ServerDiagnostics_SessionsDiagnosticsSummary.into(),
+                ),
+            ],
+            1000,
+            None,
+        )
+        .await
+        .unwrap();
+
+    let names: Vec<String> = r[0]
+        .references
+        .clone()
+        .unwrap_or_default()
+        .iter()
+        .map(|rf| rf.browse_name.name.to_string())
+        .collect();
+    for expected in [
+        "ServerDiagnosticsSummary",
+        "SubscriptionDiagnosticsArray",
+        "SessionsDiagnosticsSummary",
+        "EnabledFlag",
+    ] {
+        assert!(
+            names.iter().any(|n| n == expected),
+            "mandatory ServerDiagnosticsType member {expected} missing; got {names:?}"
+        );
+    }
+
+    let names: Vec<String> = r[1]
+        .references
+        .clone()
+        .unwrap_or_default()
+        .iter()
+        .map(|rf| rf.browse_name.name.to_string())
+        .collect();
+    for expected in ["SessionDiagnosticsArray", "SessionSecurityDiagnosticsArray"] {
+        assert!(
+            names.iter().any(|n| n == expected),
+            "mandatory SessionsDiagnosticsSummary member {expected} missing; got {names:?}"
+        );
+    }
+}

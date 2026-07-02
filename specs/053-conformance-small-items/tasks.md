@@ -11,7 +11,7 @@ independently verifiable job per task (atomicity pass 2026-07-02).
 
 ## Phase 1: Setup
 
-- [ ] T001 Verify baseline on branch `053-conformance-small-items-sprint`: workspace builds; run
+- [X] T001 Verify baseline on branch `053-conformance-small-items-sprint`: workspace builds; run
   `cargo test -p async-opcua-server` and the integration suites touched by this sprint
   (`read.rs`, `write.rs`, `browse.rs`, `subscriptions.rs`) green, so red-first diffs are attributable.
 
@@ -28,37 +28,37 @@ independently verifiable job per task (atomicity pass 2026-07-02).
 **Independent test**: browse `Server → ServerDiagnostics`, read the five nodes with a live
 session+subscription, toggle `EnabledFlag`, verify gating (contracts/service-behavior.md §US1).
 
-- [ ] T002 [P] [US1] codex: add read-only session enumeration to `SessionManager`
+- [X] T002 [P] [US1] codex: add read-only session enumeration to `SessionManager`
   (`async-opcua-server/src/session/manager.rs:506` private map — new accessor with snapshot
   semantics). Pure accessor, no behavior change. Data source for the Part 5 §6.3.3 session arrays.
-- [ ] T003 [P] [US1] codex: add read-only diagnostics getters on `Subscription`
+- [X] T003 [P] [US1] codex: add read-only diagnostics getters on `Subscription`
   (`async-opcua-server/src/subscriptions/subscription.rs:194-204` private fields: publishing
   interval, lifetime/keep-alive counts, priority, item counts, publish/notification counters).
   Pure accessors, no behavior change. Data source for the Part 5 §6.3.3 subscription array.
-- [ ] T004 [P] [US1] Claude: red-first tests — extend `async-opcua/tests/integration/read.rs`
+- [X] T004 [P] [US1] Claude: red-first tests — extend `async-opcua/tests/integration/read.rs`
   (`test_diagnostics` :1285 area) + `browse.rs`: children present with standard NodeIds/type
   definitions (assert ALL Table-11 mandatory members incl. the already-served
   `ServerDiagnosticsSummary`, for SC-002); arrays return one entry per live subscription/session
   with plausible counters; `EnabledFlag` reads config state; unprivileged `EnabledFlag` write →
   `Bad_UserAccessDenied`; disabled → empty arrays; `SessionSecurityDiagnosticsArray` denied to
   non-admin. Part 5 §6.3.3.
-- [ ] T005 [US1] codex: serve `EnabledFlag` (read) — extend `is_mapped`/`get` in
+- [X] T005 [US1] codex: serve `EnabledFlag` (read) — extend `is_mapped`/`get` in
   `async-opcua-server/src/diagnostics/server.rs` (:137/:156) and the core read dispatch
   `node_manager/memory/core.rs:586-595` to return the runtime `enabled` flag. Part 5 §6.3.3.
-- [ ] T006 [US1] codex: serve `SubscriptionDiagnosticsArray` — built on read from
+- [X] T006 [US1] codex: serve `SubscriptionDiagnosticsArray` — built on read from
   `SubscriptionCache` (`subscriptions/mod.rs:388/:401` + T003 getters) as
   `SubscriptionDiagnosticsDataType[]`, one entry per live subscription; disabled → empty array.
   Part 5 §6.3.3. (Depends: T003.)
-- [ ] T007 [US1] codex: serve `SessionsDiagnosticsSummary` + `SessionDiagnosticsArray` +
+- [X] T007 [US1] codex: serve `SessionsDiagnosticsSummary` + `SessionDiagnosticsArray` +
   `SessionSecurityDiagnosticsArray` — built on read from the T002 iterator
   (`session/instance.rs` getters + `session_locale_ids`) as the generated DataType arrays;
   disabled → empty arrays. Part 5 §6.3.3, §6.3.5, §7.15. (Depends: T002.)
-- [ ] T008 [US1] codex: `EnabledFlag` write path — privileged sessions only, toggles the runtime
+- [X] T008 [US1] codex: `EnabledFlag` write path — privileged sessions only, toggles the runtime
   flag; unprivileged → `Bad_UserAccessDenied`. Fail closed (constitution §IV). Part 5 §6.3.3.
-- [ ] T009 [US1] codex: `SessionSecurityDiagnosticsArray` admin gating layered on the existing
+- [X] T009 [US1] codex: `SessionSecurityDiagnosticsArray` admin gating layered on the existing
   `read_diagnostics` permission gate (`core.rs:587-588`); non-admin read denied. Fail closed
   (constitution §IV). Part 5 §6.3.3, §6.3.5 (security-related note), §7.15. (Depends: T007.)
-- [ ] T010 [US1] Update `specs/conformance-audit/FINDINGS.md` P5-04 row (+ reconciliation banner)
+- [X] T010 [US1] Update `specs/conformance-audit/FINDINGS.md` P5-04 row (+ reconciliation banner)
   → FIXED with file/test evidence; commit story 1.
 
 ---

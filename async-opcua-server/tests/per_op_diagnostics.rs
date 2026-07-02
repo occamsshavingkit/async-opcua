@@ -20,15 +20,16 @@ use opcua_core::ResponseMessage;
 use opcua_crypto::SecurityPolicy;
 use opcua_server::{ServerBuilder, ServerEndpoint, ServerHandle, ANONYMOUS_USER_TOKEN_ID};
 use opcua_types::{
-    AttributeId, BrowseDescription, BrowseDirection, BrowseNextRequest, BrowseRequest,
+    AttributeId, BrowseDescription, BrowseDirection, BrowseNextRequest, BrowsePath, BrowseRequest,
     BrowseResultMask, ContentFilter, CreateMonitoredItemsRequest, CreateSubscriptionRequest,
     DateTime, DeleteMonitoredItemsRequest, DeleteRawModifiedDetails, DiagnosticBits,
     ExtensionObject, HistoryReadRequest, HistoryReadValueId, HistoryUpdateRequest,
     MessageSecurityMode, ModifyMonitoredItemsRequest, MonitoredItemCreateRequest,
     MonitoredItemModifyRequest, MonitoringMode, MonitoringParameters, NodeId, NodeTypeDescription,
     NumericRange, ObjectId, ObjectTypeId, QualifiedName, QueryDataDescription, QueryFirstRequest,
-    ReadRawModifiedDetails, ReadValueId, RelativePath, RequestHeader, SetMonitoringModeRequest,
-    SetTriggeringRequest, TimestampsToReturn, VariableId, ViewDescription,
+    ReadRawModifiedDetails, ReadValueId, ReferenceTypeId, RelativePath, RelativePathElement,
+    RequestHeader, SetMonitoringModeRequest, SetTriggeringRequest, TimestampsToReturn,
+    TranslateBrowsePathsToNodeIdsRequest, VariableId, ViewDescription,
 };
 use tokio::net::TcpListener;
 
@@ -819,4 +820,62 @@ async fn query_first_returns_aligned_diagnostic_infos_only_when_requested() {
         parsing_results[1].data_diagnostic_infos.is_none(),
         "nested data_diagnostic_infos must be absent when not requested"
     );
+}
+
+// ---------------------------------------------------------------------------
+// Feature 051 / US1: TranslateBrowsePathsToNodeIds
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn translate_browse_paths_returns_aligned_diagnostic_infos_only_when_requested() {
+    let server = TestServer::start("translate-browse-paths-per-op-diagnostics").await;
+
+    // Two paths with mixed outcomes: Objects -> "Server" resolves, the second
+    // path has no matching browse name.
+    let path_to = |name: &str| BrowsePath {
+        starting_node: ObjectId::ObjectsFolder.into(),
+        relative_path: RelativePath {
+            elements: Some(vec![RelativePathElement {
+                reference_type_id: ReferenceTypeId::HierarchicalReferences.into(),
+                is_inverse: false,
+                include_subtypes: true,
+                target_name: QualifiedName::new(0, name),
+            }]),
+        },
+    };
+    let browse_paths = || {
+        Some(vec![
+            path_to("Server"),
+            path_to("per-op-diagnostics-no-such-node"),
+        ])
+    };
+
+    // 1) REQUESTED -> aligned array present.
+    let request = TranslateBrowsePathsToNodeIdsRequest {
+        request_header: server.request_header(OP_BITS),
+        browse_paths: browse_paths(),
+    };
+    let ResponseMessage::TranslateBrowsePathsToNodeIds(response) = server.send(request).await
+    else {
+        panic!("TranslateBrowsePaths should return TranslateBrowsePathsToNodeIdsResponse");
+    };
+    let results = response.results.as_ref().expect("results");
+    assert_eq!(results.len(), 2);
+    let diags = response
+        .diagnostic_infos
+        .as_ref()
+        .expect("per-op diagnosticInfos must be present when requested");
+    assert_eq!(diags.len(), results.len());
+
+    // 2) NOT REQUESTED -> no array.
+    let request = TranslateBrowsePathsToNodeIdsRequest {
+        request_header: server.request_header(DiagnosticBits::empty()),
+        browse_paths: browse_paths(),
+    };
+    let ResponseMessage::TranslateBrowsePathsToNodeIds(response) = server.send(request).await
+    else {
+        panic!("TranslateBrowsePaths should return TranslateBrowsePathsToNodeIdsResponse");
+    };
+    assert_eq!(response.results.as_ref().map(Vec::len), Some(2));
+    assert!(response.diagnostic_infos.is_none());
 }

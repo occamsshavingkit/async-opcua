@@ -9,7 +9,7 @@ observable contract. Shared mechanism: `consume_results` + blanket `IntoResult` 
 
 ## Phase 1: Setup
 
-- [ ] T101 Re-verify the site inventory against current master (research.md R1 table): each listed
+- [X] T101 Re-verify the site inventory against current master (research.md R1 table): each listed
   file/line still matches; confirm no NEW hardcoded sites appeared since the 050 merge. Update the
   contract if drift found.
 
@@ -21,16 +21,16 @@ observable contract. Shared mechanism: `consume_results` + blanket `IntoResult` 
 
 ## Phase 3: US1 — TranslateBrowsePaths (P1) 🎯 MVP
 
-- [ ] T102 [US1] Slot on `BrowsePathItem` in `async-opcua-server/src/node_manager/view.rs`
+- [X] T102 [US1] Slot on `BrowsePathItem` in `async-opcua-server/src/node_manager/view.rs`
   (Part 4 §5.9.4, §5.2/§5.3): `diagnostic_bits` + `diagnostic_info` fields, bits param on `new_root(...)`
   AND `new(...)` (continuation items inherit the same request's bits), `diagnostic_bits()` getter +
   `set_diagnostic_info()` setter (ReadNode-style docs) + `pub(crate) take_diagnostic_info()`. NOTE:
   `#[derive(Clone)]`-compat; placeholder `DiagnosticBits::empty()` at call sites.
-- [ ] T103 [US1] Route `translate_browse_paths` in `async-opcua-server/src/session/services/view.rs`:
+- [X] T103 [US1] Route `translate_browse_paths` in `async-opcua-server/src/session/services/view.rs`:
   real header bits into both constructors; zip the per-path root items' (`items[..paths.len()]`)
   `take_diagnostic_info()` with the final `results` (AFTER the BadNoMatch post-processing loop) →
   `consume_results` → both response fields.
-- [ ] T104 [P] [US1] Independent red-first test in `tests/per_op_diagnostics.rs`: 2 paths (one
+- [X] T104 [P] [US1] Independent red-first test in `tests/per_op_diagnostics.rs`: 2 paths (one
   resolvable, one no-match) → requested: `Some`, len==2; empty bits: `None`.
 
 **Checkpoint**: US1 deliverable.

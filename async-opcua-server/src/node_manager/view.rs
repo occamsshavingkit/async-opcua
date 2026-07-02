@@ -625,6 +625,8 @@ pub struct BrowsePathItem<'a> {
     path: &'a [RelativePathElement],
     results: Vec<BrowsePathResultElement>,
     status: StatusCode,
+    diagnostic_bits: DiagnosticBits,
+    diagnostic_info: Option<DiagnosticInfo>,
     unmatched_browse_name: Option<QualifiedName>,
 }
 
@@ -635,6 +637,7 @@ impl<'a> BrowsePathItem<'a> {
         root: &BrowsePathItem<'a>,
         node_manager_index: usize,
         iteration_number: usize,
+        diagnostic_bits: DiagnosticBits,
     ) -> Self {
         Self {
             node: elem.node,
@@ -648,12 +651,18 @@ impl<'a> BrowsePathItem<'a> {
             },
             results: Vec::new(),
             status: StatusCode::Good,
+            diagnostic_bits,
+            diagnostic_info: None,
             iteration_number,
             unmatched_browse_name: elem.unmatched_browse_name,
         }
     }
 
-    pub(crate) fn new_root(path: &'a BrowsePath, input_index: usize) -> Self {
+    pub(crate) fn new_root(
+        path: &'a BrowsePath,
+        input_index: usize,
+        diagnostic_bits: DiagnosticBits,
+    ) -> Self {
         let mut status = StatusCode::Good;
         let elements = path.relative_path.elements.as_ref();
         match elements {
@@ -673,6 +682,8 @@ impl<'a> BrowsePathItem<'a> {
             path: path.relative_path.elements.as_deref().unwrap_or(&[]),
             results: Vec::new(),
             status,
+            diagnostic_bits,
+            diagnostic_info: None,
             iteration_number: 0,
             unmatched_browse_name: None,
         }
@@ -705,6 +716,22 @@ impl<'a> BrowsePathItem<'a> {
     /// Set the status code for this operation.
     pub fn set_status(&mut self, status: StatusCode) {
         self.status = status;
+    }
+
+    /// Header diagnostic bits for requesting operation-level diagnostics.
+    pub fn diagnostic_bits(&self) -> DiagnosticBits {
+        self.diagnostic_bits
+    }
+
+    /// Set diagnostic infos, you don't need to do this if
+    /// `diagnostic_bits` are not set.
+    pub fn set_diagnostic_info(&mut self, diagnostic_info: DiagnosticInfo) {
+        self.diagnostic_info = Some(diagnostic_info);
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn take_diagnostic_info(&mut self) -> Option<DiagnosticInfo> {
+        self.diagnostic_info.take()
     }
 
     pub(crate) fn results_mut(&mut self) -> &mut Vec<BrowsePathResultElement> {

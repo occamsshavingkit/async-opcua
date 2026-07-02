@@ -54,21 +54,21 @@ rejection) green; symbol-absence script green; workspace suite (default features
 
 ### Tests (red first)
 
-- [ ] T003 [P] [US1] Nano mandated-ops smoke test in
+- [X] T003 [P] [US1] Nano mandated-ops smoke test in
       `samples/foundation-profile-nano-server/tests/profile_smoke.rs`: None-policy
       connect, CreateSession/ActivateSession (anonymous AND username/password), Read,
       Browse + BrowseNext, RegisterNodes, TranslateBrowsePathsToNodeIds, GetEndpoints,
       FindServers-self. [Cite: Core 2017 Server Facet CUs — Session Base/Minimum 1,
       Attribute Read, View Basic/RegisterNodes/TranslateBrowsePath, Discovery Get
       Endpoints/Find Servers Self, Security User Name Password; OPC 10000-4 §5.5 Discovery, §5.7 Session, §5.9 View, §5.11 Attribute/Read]
-- [ ] T004 [P] [US1] Nano rejection test in
+- [X] T004 [P] [US1] Nano rejection test in
       `samples/foundation-profile-nano-server/tests/service_rejection.rs`:
       CreateSubscription, Publish, Call, HistoryRead, QueryFirst, AddNodes each answered
       `BadServiceUnsupported` via raw `UARequest` builders (error-mode convention, memory
       `errormode-selftest-campaign`), then a follow-up Read on the same session still
       succeeds (no corruption). RED today (these services currently succeed).
       [Cite: OPC 10000-4 §5.3 Service results, §7.34 ServiceFault; constitution IV]
-- [ ] T005 [P] [US1] Symbol/dependency absence script
+- [X] T005 [P] [US1] Symbol/dependency absence script
       `tools/check-profile-absence.sh <package> <deny-features> <deny-symbols>`:
       `cargo tree -e features` deny-list + `nm -C` sentinel check (SubscriptionCache,
       alarm, history sentinels for nano) against the BUILT binary (see test-graph
@@ -140,7 +140,12 @@ rejection) green; symbol-absence script green; workspace suite (default features
       [Cite: OPC 10000-4 §7.22.3 EventFilter]
 - [ ] T021 [US1] Switch `samples/foundation-profile-nano-server` to
       `features = ["nano"]` + Nano capacity config (≥1 session), minimal hand-rolled
-      address space satisfying Address Space Base / Base Info Core Structure; verify
+      NODE MANAGER + address space satisfying Address Space Base / Base Info Core
+      Structure. (T003 finding: the 041 sample binary never actually ran — base-server
+      with no node manager exits at startup with "No node managers defined"; the 041
+      benchmark only measured build size. The minimal node manager is a hard
+      requirement, and the R10 baseline sizes are lower bounds of a non-functional
+      server.) Verify
       T003–T005 green and record the measured size in `specs/054-profile-polish/research-assets/size-accounting.md`. [Cite: Nano profile URI; Core 2017
       CUs Address Space Base / Base Info Core Structure]
 

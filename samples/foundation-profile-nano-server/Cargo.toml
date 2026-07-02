@@ -12,3 +12,19 @@ tokio = { version = "^1", default-features = false, features = ["macros", "rt", 
 path = "../../async-opcua"
 features = ["base-server"]
 default-features = false
+
+# Dev-only: the in-tree client drives the profile smoke/rejection tests
+# (tests/profile_smoke.rs, tests/service_rejection.rs). Dev-deps do NOT affect the
+# built benchmark binary; binary absence is verified by tools/check-profile-absence.sh.
+[dev-dependencies]
+tokio = { version = "^1", default-features = false, features = [
+  "macros",
+  "rt",
+  "net",
+  "time",
+] }
+
+[dev-dependencies.async-opcua]
+path = "../../async-opcua"
+features = ["client"]
+default-features = false

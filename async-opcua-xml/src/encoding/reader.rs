@@ -4,7 +4,10 @@ use std::{
     str::FromStr,
 };
 
-use quick_xml::events::Event;
+use quick_xml::{
+    escape::{resolve_predefined_entity, EscapeError},
+    events::{BytesRef, Event},
+};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -31,6 +34,20 @@ pub enum XmlReadError {
 pub struct XmlStreamReader<T> {
     reader: quick_xml::Reader<BufReader<T>>,
     buffer: Vec<u8>,
+}
+
+fn decode_reference(reference: BytesRef<'_>) -> Result<String, quick_xml::Error> {
+    if let Some(codepoint) = reference.resolve_char_ref()? {
+        return Ok(codepoint.to_string());
+    }
+
+    let len = reference.len();
+    let reference = reference.decode().map_err(quick_xml::Error::from)?;
+    if let Some(value) = resolve_predefined_entity(reference.as_ref()) {
+        return Ok(value.to_owned());
+    }
+
+    Err(EscapeError::UnrecognizedEntity(0..len, reference.into_owned()).into())
 }
 
 impl<T: Read> XmlStreamReader<T> {
@@ -103,11 +120,22 @@ impl<T: Read> XmlStreamReader<T> {
                         continue;
                     }
                     if let Some(text) = text.as_mut() {
-                        text.push_str(&e.unescape()?);
+                        text.push_str(&e.decode().map_err(quick_xml::Error::from)?);
                     } else if e.inplace_trim_start() {
                         continue;
                     } else {
-                        text = Some(e.unescape()?.into_owned());
+                        text = Some(e.decode().map_err(quick_xml::Error::from)?.into_owned());
+                    }
+                }
+                Event::GeneralRef(e) => {
+                    if depth != 1 {
+                        continue;
+                    }
+                    let resolved = decode_reference(e)?;
+                    if let Some(text) = text.as_mut() {
+                        text.push_str(&resolved);
+                    } else {
+                        text = Some(resolved);
                     }
                 }
 
@@ -188,6 +216,11 @@ impl<T: Read> XmlStreamReader<T> {
                 Event::Text(s) => {
                     out.extend_from_slice(&s);
                 }
+                Event::GeneralRef(s) => {
+                    out.push(b'&');
+                    out.extend_from_slice(&s);
+                    out.push(b';');
+                }
                 Event::Eof => {
                     if depth == 1 {
                         return Ok(out);
@@ -250,14 +283,14 @@ mod test {
             <Bar>
             Hello
             </Bar>
-            Hello <!-- Comment -->there
+            Hello <!-- Comment -->there &lt; 6 &#x21;
         </Foo>"#;
 
         let mut cursor = Cursor::new(xml.as_bytes());
         let mut reader = super::XmlStreamReader::new(&mut cursor);
 
         assert!(matches!(reader.next_event().unwrap(), Event::Start(_)));
-        assert_eq!(reader.consume_as_text().unwrap(), "Hello there");
+        assert_eq!(reader.consume_as_text().unwrap(), "Hello there < 6 !");
     }
 
     #[test]
@@ -288,5 +321,16 @@ mod test {
         let raw = reader.consume_raw().unwrap();
         println!("{}", String::from_utf8_lossy(&raw));
         assert_eq!(&xml.as_bytes()[5..(xml.len() - 6)], &*raw);
+    }
+
+    #[test]
+    fn test_consume_raw_preserves_general_refs() {
+        let xml = r#"<Foo>1 &lt; 2 &#x21;</Foo>"#;
+        let mut cursor = Cursor::new(xml.as_bytes());
+        let mut reader = super::XmlStreamReader::new(&mut cursor);
+
+        assert!(matches!(reader.next_event().unwrap(), Event::Start(_)));
+        let raw = reader.consume_raw().unwrap();
+        assert_eq!(&b"1 &lt; 2 &#x21;"[..], &*raw);
     }
 }

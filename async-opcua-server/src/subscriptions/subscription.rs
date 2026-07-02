@@ -372,6 +372,12 @@ impl Subscription {
         }
     }
 
+    pub(super) fn notify_eu_range_changed(&mut self, id: &u32, low: f64, high: f64) {
+        if let Some(item) = self.monitored_items.get_mut(id) {
+            item.notify_eu_range_changed(low, high);
+        }
+    }
+
     /// Notify the given monitored item of a new event.
     pub fn notify_event(&mut self, id: &u32, event: &dyn Event, type_tree: &dyn TypeTree) {
         if let Some(item) = self.monitored_items.get_mut(id) {

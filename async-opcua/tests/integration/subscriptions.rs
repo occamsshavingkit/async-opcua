@@ -2420,3 +2420,330 @@ async fn modify_monitored_item_to_aggregate_filter() {
 
     session.delete_subscription(sub_id).await.unwrap();
 }
+
+// ---------------------------------------------------------------------------
+// Feature 053 US5 (P8-02): EURange dynamic refresh + SemanticsChanged.
+// OPC UA Part 8 §5.3.2.2: "The StatusCode SemanticsChanged bit shall be set if
+// any of the EURange (could change the behaviour of a Subscription if a
+// PercentDeadband filter is used) ... Properties are changed"; Part 8 §5.2.
+// OPC UA Part 4 §7.38.1 (info bits 14:14): the bit is set on one data change
+// notification per MonitoredItem.
+// ---------------------------------------------------------------------------
+
+/// Builds a Double variable with an EURange property and a percent-deadband
+/// monitored item on it. Returns (var id, EURange property id).
+async fn percent_deadband_item(
+    tester: &Tester,
+    nm: &TestNodeManager,
+    session: &opcua::client::Session,
+    sub_id: u32,
+    initial: f64,
+    low: f64,
+    high: f64,
+    deadband_percent: f64,
+    writable_range: bool,
+) -> (NodeId, NodeId) {
+    use opcua::types::Range;
+
+    let id = nm.inner().next_node_id();
+    nm.inner().add_node(
+        nm.address_space(),
+        tester.handle.type_tree(),
+        VariableBuilder::new(&id, "DeadbandVar", "DeadbandVar")
+            .value(initial)
+            .data_type(DataTypeId::Double)
+            .access_level(AccessLevel::CURRENT_READ)
+            .user_access_level(AccessLevel::CURRENT_READ)
+            .build()
+            .into(),
+        &ObjectId::ObjectsFolder.into(),
+        &ReferenceTypeId::Organizes.into(),
+        Some(&VariableTypeId::BaseDataVariableType.into()),
+        Vec::new(),
+    );
+    let prop_id = nm.inner().next_node_id();
+    let access = if writable_range {
+        AccessLevel::CURRENT_READ | AccessLevel::CURRENT_WRITE
+    } else {
+        AccessLevel::CURRENT_READ
+    };
+    nm.inner().add_node(
+        nm.address_space(),
+        tester.handle.type_tree(),
+        VariableBuilder::new(&prop_id, "EURange", "EURange")
+            .value(Range { low, high })
+            .data_type(DataTypeId::Range)
+            .access_level(access)
+            .user_access_level(access)
+            .build()
+            .into(),
+        &id,
+        &ReferenceTypeId::HasProperty.into(),
+        Some(&VariableTypeId::PropertyType.into()),
+        Vec::new(),
+    );
+
+    let res = session
+        .create_monitored_items(
+            sub_id,
+            TimestampsToReturn::Both,
+            vec![MonitoredItemCreateRequest {
+                item_to_monitor: ReadValueId {
+                    node_id: id.clone(),
+                    attribute_id: AttributeId::Value as u32,
+                    ..Default::default()
+                },
+                monitoring_mode: opcua::types::MonitoringMode::Reporting,
+                requested_parameters: MonitoringParameters {
+                    sampling_interval: 0.0,
+                    queue_size: 10,
+                    discard_oldest: true,
+                    filter: ExtensionObject::from_message(DataChangeFilter {
+                        trigger: DataChangeTrigger::StatusValue,
+                        deadband_type: DeadbandType::Percent as u32,
+                        deadband_value: deadband_percent,
+                    }),
+                    ..Default::default()
+                },
+            }],
+        )
+        .await
+        .unwrap();
+    assert_eq!(StatusCode::Good, res[0].result.status_code);
+    (id, prop_id)
+}
+
+fn has_semantics_changed(v: &DataValue) -> bool {
+    v.status.map(|s| s.semantics_changed()).unwrap_or(false)
+}
+
+#[tokio::test]
+async fn eurange_change_refreshes_percent_deadband_and_sets_semantics_changed_once() {
+    use opcua::types::Range;
+
+    let (tester, nm, session) = setup().await;
+    let (notifs, mut data, _) = ChannelNotifications::new();
+    let sub_id = session
+        .create_subscription(Duration::from_millis(100), 100, 20, 1000, 0, true, notifs)
+        .await
+        .unwrap();
+
+    // 10% deadband over EURange [0, 100] → threshold 10.
+    let (id, prop_id) =
+        percent_deadband_item(&tester, &nm, &session, sub_id, 0.0, 0.0, 100.0, 10.0, false).await;
+
+    // Initial notification (no semantics change).
+    let (_, v) = timeout(Duration::from_millis(500), data.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(!has_semantics_changed(&v));
+
+    // 50/100 = 50% change → delivered, no bit.
+    nm.set_value(
+        tester.handle.subscriptions(),
+        &id,
+        None,
+        DataValue::new_now(50.0),
+    )
+    .unwrap();
+    let (_, v) = timeout(Duration::from_millis(500), data.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(Some(Variant::Double(50.0)), v.value);
+    assert!(!has_semantics_changed(&v));
+
+    // Server-side EURange change [0,100] → [0,1000] (threshold now 100).
+    nm.set_value(
+        tester.handle.subscriptions(),
+        &prop_id,
+        None,
+        DataValue::new_now(Range {
+            low: 0.0,
+            high: 1000.0,
+        }),
+    )
+    .unwrap();
+
+    // |90-50| = 40: 40% of the OLD range (would notify) but 4% of the NEW range —
+    // must be suppressed if the filter re-resolved the range.
+    nm.set_value(
+        tester.handle.subscriptions(),
+        &id,
+        None,
+        DataValue::new_now(90.0),
+    )
+    .unwrap();
+    assert!(
+        timeout(Duration::from_millis(500), data.recv())
+            .await
+            .is_err(),
+        "40-unit change must be inside the refreshed 10%-of-1000 deadband"
+    );
+
+    // |250-50| = 200 = 20% of the new range → delivered, carrying SemanticsChanged.
+    nm.set_value(
+        tester.handle.subscriptions(),
+        &id,
+        None,
+        DataValue::new_now(250.0),
+    )
+    .unwrap();
+    let (_, v) = timeout(Duration::from_millis(500), data.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(Some(Variant::Double(250.0)), v.value);
+    assert!(
+        has_semantics_changed(&v),
+        "first notification after an EURange change must carry SemanticsChanged: {v:?}"
+    );
+
+    // Next notification: bit cleared (exactly once per change, Part 4 §7.38.1).
+    nm.set_value(
+        tester.handle.subscriptions(),
+        &id,
+        None,
+        DataValue::new_now(500.0),
+    )
+    .unwrap();
+    let (_, v) = timeout(Duration::from_millis(500), data.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(Some(Variant::Double(500.0)), v.value);
+    assert!(!has_semantics_changed(&v));
+}
+
+#[tokio::test]
+async fn eurange_client_write_also_triggers_semantics_changed() {
+    use opcua::types::Range;
+
+    let (tester, nm, session) = setup().await;
+    let (notifs, mut data, _) = ChannelNotifications::new();
+    let sub_id = session
+        .create_subscription(Duration::from_millis(100), 100, 20, 1000, 0, true, notifs)
+        .await
+        .unwrap();
+
+    let (id, prop_id) =
+        percent_deadband_item(&tester, &nm, &session, sub_id, 0.0, 0.0, 100.0, 10.0, true).await;
+    let (_, v) = timeout(Duration::from_millis(500), data.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(!has_semantics_changed(&v));
+
+    // Client Write to the EURange property.
+    let wv = opcua_types::WriteValue {
+        node_id: prop_id.clone(),
+        attribute_id: AttributeId::Value as u32,
+        index_range: opcua_types::NumericRange::None,
+        value: DataValue {
+            value: Some(
+                Range {
+                    low: 0.0,
+                    high: 1000.0,
+                }
+                .into(),
+            ),
+            status: Some(StatusCode::Good),
+            source_timestamp: Some(opcua::types::DateTime::now()),
+            ..Default::default()
+        },
+    };
+    let statuses = session.write(&[wv]).await.unwrap();
+    assert_eq!(vec![StatusCode::Good], statuses);
+
+    // Suppressed under the refreshed range (4%), then delivered with the bit.
+    nm.set_value(
+        tester.handle.subscriptions(),
+        &id,
+        None,
+        DataValue::new_now(40.0),
+    )
+    .unwrap();
+    assert!(timeout(Duration::from_millis(500), data.recv())
+        .await
+        .is_err());
+
+    nm.set_value(
+        tester.handle.subscriptions(),
+        &id,
+        None,
+        DataValue::new_now(200.0),
+    )
+    .unwrap();
+    let (_, v) = timeout(Duration::from_millis(500), data.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(has_semantics_changed(&v), "{v:?}");
+}
+
+#[tokio::test]
+async fn eurange_change_does_not_mark_unrelated_items() {
+    use opcua::types::Range;
+
+    let (tester, nm, session) = setup().await;
+    let (notifs, mut data, _) = ChannelNotifications::new();
+    let sub_id = session
+        .create_subscription(Duration::from_millis(100), 100, 20, 1000, 0, true, notifs)
+        .await
+        .unwrap();
+
+    let (id_a, prop_a) =
+        percent_deadband_item(&tester, &nm, &session, sub_id, 0.0, 0.0, 100.0, 10.0, false).await;
+    let (id_b, _prop_b) =
+        percent_deadband_item(&tester, &nm, &session, sub_id, 0.0, 0.0, 100.0, 10.0, false).await;
+    // Two initial notifications.
+    for _ in 0..2 {
+        timeout(Duration::from_millis(500), data.recv())
+            .await
+            .unwrap()
+            .unwrap();
+    }
+
+    // Change A's EURange only.
+    nm.set_value(
+        tester.handle.subscriptions(),
+        &prop_a,
+        None,
+        DataValue::new_now(Range {
+            low: 0.0,
+            high: 1000.0,
+        }),
+    )
+    .unwrap();
+
+    // B's next notification must NOT carry the bit.
+    nm.set_value(
+        tester.handle.subscriptions(),
+        &id_b,
+        None,
+        DataValue::new_now(50.0),
+    )
+    .unwrap();
+    let (r, v) = timeout(Duration::from_millis(500), data.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(r.node_id, id_b);
+    assert!(!has_semantics_changed(&v), "{v:?}");
+
+    // A's next delivered notification DOES carry it.
+    nm.set_value(
+        tester.handle.subscriptions(),
+        &id_a,
+        None,
+        DataValue::new_now(300.0),
+    )
+    .unwrap();
+    let (r, v) = timeout(Duration::from_millis(500), data.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(r.node_id, id_a);
+    assert!(has_semantics_changed(&v), "{v:?}");
+}

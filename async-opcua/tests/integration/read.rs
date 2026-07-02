@@ -2099,12 +2099,13 @@ async fn read_max_age_reaches_refreshable_sources() {
 
     let seen: Arc<Mutex<Vec<f64>>> = Arc::new(Mutex::new(Vec::new()));
     let seen_cb = seen.clone();
-    nm.inner().add_read_callback(id.clone(), move |_range, _ts, max_age| {
-        let mut seen = seen_cb.lock().unwrap();
-        seen.push(max_age);
-        // A fresh source read every invocation.
-        Ok(DataValue::new_now(seen.len() as i32))
-    });
+    nm.inner()
+        .add_read_callback(id.clone(), move |_range, _ts, max_age| {
+            let mut seen = seen_cb.lock().unwrap();
+            seen.push(max_age);
+            // A fresh source read every invocation.
+            Ok(DataValue::new_now(seen.len() as i32))
+        });
 
     // maxAge = 0: the server shall attempt a fresh source read → callback invoked.
     let r = session

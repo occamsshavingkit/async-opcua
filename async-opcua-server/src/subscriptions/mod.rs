@@ -10,7 +10,7 @@ mod subscription;
 
 use std::{cell::RefCell, hash::Hash, sync::Arc, time::Instant};
 
-use hashbrown::{Equivalent, HashMap};
+use hashbrown::{Equivalent, HashMap, HashSet};
 pub use monitored_item::{CreateMonitoredItem, MonitoredItem};
 use opcua_core::{trace_read_lock, trace_write_lock, RepublishResponseShared, ResponseMessage};
 use opcua_nodes::Event;
@@ -32,9 +32,9 @@ use opcua_types::{
     AttributeId, CreateSubscriptionRequest, CreateSubscriptionResponse, DataEncoding, DataValue,
     DateTime, DateTimeUtc, DiagnosticBits, MessageSecurityMode, ModifySubscriptionRequest,
     ModifySubscriptionResponse, MonitoredItemCreateResult, MonitoredItemModifyRequest,
-    MonitoringMode, NodeId, NotificationMessage, NumericRange, PublishRequest, RepublishRequest,
-    ResponseHeader, SetPublishingModeRequest, SetPublishingModeResponse, StatusCode,
-    SubscriptionDiagnosticsDataType, TimestampsToReturn, TransferResult,
+    MonitoringMode, NodeId, NotificationMessage, NumericRange, PublishRequest, Range,
+    RepublishRequest, ResponseHeader, SetPublishingModeRequest, SetPublishingModeResponse,
+    StatusCode, SubscriptionDiagnosticsDataType, TimestampsToReturn, TransferResult,
     TransferSubscriptionsRequest, TransferSubscriptionsResponse, Variant,
 };
 
@@ -144,6 +144,8 @@ struct SubscriptionCacheInner {
     subscription_to_session: HashMap<u32, u32>,
     /// Map from notifier node ID to monitored item handles.
     monitored_items: HashMap<MonitoredItemKey, HashMap<MonitoredItemHandle, MonitoredItemEntry>>,
+    /// Map from EURange property node ID to percent-deadband monitored item handles.
+    eu_range_monitored_items: HashMap<NodeId, HashSet<MonitoredItemHandle>>,
 }
 
 /// Structure storing all subscriptions and monitored items on the server.
@@ -164,6 +166,11 @@ pub struct SubscriptionCache {
 struct PendingDataNotifications {
     subscription_handle: SubscriptionActorHandle,
     items: Vec<(MonitoredItemHandle, DataValue)>,
+}
+
+struct PendingRangeNotifications {
+    subscription_handle: SubscriptionActorHandle,
+    items: Vec<(MonitoredItemHandle, f64, f64)>,
 }
 
 /// Handle for notifying the subscription cache of a batch of changes,
@@ -353,6 +360,25 @@ fn push_pending_data_notifications(by_subscription: HashMap<(u32, u32), PendingD
     }
 }
 
+fn push_pending_range_notifications(
+    by_subscription: HashMap<(u32, u32), PendingRangeNotifications>,
+) {
+    for (_, pending) in by_subscription {
+        for (handle, low, high) in pending.items {
+            let item = NotificationWorkItem::RangeChanged { handle, low, high };
+            pending.subscription_handle.push_notification(item);
+        }
+    }
+}
+
+fn eu_range_from_data_value(value: &DataValue) -> Option<(f64, f64)> {
+    let Some(Variant::ExtensionObject(value)) = value.value.as_ref() else {
+        return None;
+    };
+    let range = value.inner_as::<Range>()?;
+    (range.low <= range.high).then_some((range.low, range.high))
+}
+
 fn session_subscription_diagnostics(
     subscriptions: &mut SessionSubscriptions,
 ) -> Vec<SubscriptionDiagnosticsDataType> {
@@ -441,6 +467,7 @@ impl SubscriptionCache {
                 session_subscriptions: HashMap::new(),
                 subscription_to_session: HashMap::new(),
                 monitored_items: HashMap::new(),
+                eu_range_monitored_items: HashMap::new(),
             }),
             node_managers,
             limits,
@@ -738,12 +765,38 @@ impl SubscriptionCache {
         }
     }
 
+    fn replace_eu_range_registration(
+        inner: &mut SubscriptionCacheInner,
+        handle: MonitoredItemHandle,
+        eu_range_node_id: Option<NodeId>,
+    ) {
+        Self::remove_eu_range_registration(inner, handle);
+        if let Some(eu_range_node_id) = eu_range_node_id {
+            inner
+                .eu_range_monitored_items
+                .entry(eu_range_node_id)
+                .or_default()
+                .insert(handle);
+        }
+    }
+
+    fn remove_eu_range_registration(
+        inner: &mut SubscriptionCacheInner,
+        handle: MonitoredItemHandle,
+    ) {
+        inner.eu_range_monitored_items.retain(|_, handles| {
+            handles.remove(&handle);
+            !handles.is_empty()
+        });
+    }
+
     fn cleanup_monitored_item_refs(inner: &mut SubscriptionCacheInner, items: &[MonitoredItemRef]) {
         for item in items {
             let key = MonitoredItemKeyRef {
                 id: item.node_id().into(),
                 attribute_id: item.attribute(),
             };
+            Self::remove_eu_range_registration(inner, item.handle());
             let remove_key = if let Some(handles) = inner.monitored_items.get_mut(&key) {
                 handles.remove(&item.handle());
                 handles.is_empty()
@@ -963,6 +1016,31 @@ impl SubscriptionCache {
             .map(|entry| (session_id, entry.handle()))
     }
 
+    fn eu_range_route_snapshot(
+        &self,
+        eu_range_node_id: &NodeId,
+    ) -> Vec<(u32, u32, SubscriptionActorHandle, MonitoredItemHandle)> {
+        let lck = trace_read_lock!(self.inner);
+        let Some(handles) = lck.eu_range_monitored_items.get(eu_range_node_id) else {
+            return Vec::new();
+        };
+
+        let mut routes = Vec::with_capacity(handles.len());
+        for handle in handles {
+            let subscription_id = handle.subscription_id;
+            let Some(session_id) = lck.subscription_to_session.get(&subscription_id).copied()
+            else {
+                continue;
+            };
+            let Some(entry) = lck.session_subscriptions.get(&session_id) else {
+                continue;
+            };
+            routes.push((session_id, subscription_id, entry.handle(), *handle));
+        }
+
+        routes
+    }
+
     /// Return a notifier for notifying the server of a batch of events.
     ///
     /// Note: This contains a lock, and should _not_ be kept around for long periods of time,
@@ -991,6 +1069,8 @@ impl SubscriptionCache {
         items: impl Iterator<Item = (DataValue, &'a NodeId, AttributeId)>,
     ) {
         let mut by_subscription: HashMap<(u32, u32), PendingDataNotifications> = HashMap::new();
+        let mut by_range_subscription: HashMap<(u32, u32), PendingRangeNotifications> =
+            HashMap::new();
 
         for (dv, node_id, attribute_id) in items {
             for batch in self
@@ -1008,9 +1088,27 @@ impl SubscriptionCache {
                         .push((target.handle, dv.clone()));
                 }
             }
+
+            if attribute_id == AttributeId::Value {
+                if let Some((low, high)) = eu_range_from_data_value(&dv) {
+                    for (session_id, subscription_id, subscription_handle, handle) in
+                        self.eu_range_route_snapshot(node_id)
+                    {
+                        by_range_subscription
+                            .entry((session_id, subscription_id))
+                            .or_insert_with(|| PendingRangeNotifications {
+                                subscription_handle,
+                                items: Vec::new(),
+                            })
+                            .items
+                            .push((handle, low, high));
+                    }
+                }
+            }
         }
 
         push_pending_data_notifications(by_subscription);
+        push_pending_range_notifications(by_range_subscription);
     }
 
     /// Notify with a dynamic sampler, to avoid getting values for nodes that
@@ -1023,10 +1121,18 @@ impl SubscriptionCache {
         sample: impl Fn(&NodeId, AttributeId, &NumericRange, &DataEncoding) -> Option<DataValue>,
     ) {
         let mut by_subscription: HashMap<(u32, u32), PendingDataNotifications> = HashMap::new();
+        let mut by_range_subscription: HashMap<(u32, u32), PendingRangeNotifications> =
+            HashMap::new();
 
         for (id, attribute_id) in items {
             let route_batches = self.data_route_snapshot(id, attribute_id).into_batches();
-            if route_batches.is_empty() {
+            let range_routes = if attribute_id == AttributeId::Value {
+                self.eu_range_route_snapshot(id)
+            } else {
+                Vec::new()
+            };
+
+            if route_batches.is_empty() && range_routes.is_empty() {
                 continue;
             }
 
@@ -1053,9 +1159,35 @@ impl SubscriptionCache {
                         .push((target.handle, value));
                 }
             }
+
+            if !range_routes.is_empty() {
+                let Some(value) = sample(
+                    id,
+                    attribute_id,
+                    &NumericRange::default(),
+                    &DataEncoding::default(),
+                ) else {
+                    continue;
+                };
+                let Some((low, high)) = eu_range_from_data_value(&value) else {
+                    continue;
+                };
+
+                for (session_id, subscription_id, subscription_handle, handle) in range_routes {
+                    by_range_subscription
+                        .entry((session_id, subscription_id))
+                        .or_insert_with(|| PendingRangeNotifications {
+                            subscription_handle,
+                            items: Vec::new(),
+                        })
+                        .items
+                        .push((handle, low, high));
+                }
+            }
         }
 
         push_pending_data_notifications(by_subscription);
+        push_pending_range_notifications(by_range_subscription);
     }
 
     /// Notify listening clients to events. Without a custom node manager implementing
@@ -1141,6 +1273,12 @@ impl SubscriptionCache {
                             data_encoding: create.item_to_monitor().data_encoding.clone(),
                         },
                     );
+
+                    Self::replace_eu_range_registration(
+                        &mut lck,
+                        create.handle(),
+                        create.eu_range_node_id().cloned(),
+                    );
                 }
             }
         }
@@ -1157,6 +1295,7 @@ impl SubscriptionCache {
         timestamps_to_return: TimestampsToReturn,
         requests: Vec<MonitoredItemModifyRequest>,
         eu_ranges: HashMap<u32, (f64, f64)>,
+        eu_range_node_ids: HashMap<u32, NodeId>,
         diagnostic_bits: DiagnosticBits,
     ) -> Result<Vec<MonitoredItemUpdateRef>, StatusCode> {
         let Some(cache) = ({
@@ -1168,7 +1307,7 @@ impl SubscriptionCache {
             return Err(StatusCode::BadNoSubscription);
         };
 
-        cache
+        let result = cache
             .legacy(move |subs| {
                 let type_tree_for_user = subs.type_tree_for_user();
                 let type_tree = type_tree_for_user.get_type_tree();
@@ -1183,7 +1322,23 @@ impl SubscriptionCache {
                 )
             })
             .await
-            .map_err(|_| StatusCode::BadNoSubscription)?
+            .map_err(|_| StatusCode::BadNoSubscription)??;
+
+        {
+            let mut lck = trace_write_lock!(self.inner);
+            for update in &result {
+                if update.status_code().is_good() {
+                    let handle = update.handle();
+                    Self::replace_eu_range_registration(
+                        &mut lck,
+                        handle,
+                        eu_range_node_ids.get(&handle.monitored_item_id).cloned(),
+                    );
+                }
+            }
+        }
+
+        Ok(result)
     }
 
     pub(crate) async fn monitored_item_node_ids(
@@ -1310,13 +1465,7 @@ impl SubscriptionCache {
             let mut lck = trace_write_lock!(self.inner);
             for (status, rf) in res {
                 if status.is_good() {
-                    let key = MonitoredItemKeyRef {
-                        id: rf.node_id().into(),
-                        attribute_id: rf.attribute(),
-                    };
-                    if let Some(it) = lck.monitored_items.get_mut(&key) {
-                        it.remove(&rf.handle());
-                    }
+                    Self::cleanup_monitored_item_refs(&mut lck, std::slice::from_ref(rf));
                 }
             }
         }

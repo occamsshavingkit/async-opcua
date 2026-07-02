@@ -146,31 +146,31 @@ values documented always-current; parameter never silently dropped for callback 
 **Independent test**: percent-deadband item; write EURange; drive values across old/new deadband
 thresholds (contracts §US5).
 
-- [ ] T023 [P] [US5] Claude: red-first tests — unit in
+- [X] T023 [P] [US5] Claude: red-first tests — unit in
   `async-opcua-server/src/subscriptions/monitored_item.rs` (mod tests :1036, overflow-bit test
   pattern :1418-1480) + integration `subscriptions.rs` (templates: `test_data_change_filters`
   :780, `modify_…_with_eurange_succeeds` :1051): filter follows the new range; exactly one
   notification carries `SemanticsChanged`; unrelated items unaffected; EURange-removed fail-safe;
   overflow interaction — if the flagged notification is discarded by queue overflow, the next
   queued notification carries the bit (Part 4 §7.38.1). Part 8 §5.2, §5.3.2.2; Part 4 §7.38.1.
-- [ ] T024 [US5] codex: range-change notice — emit a signal at the address-space value-set layer
+- [X] T024 [US5] codex: range-change notice — emit a signal at the address-space value-set layer
   (so BOTH client Writes and server-side value updates fire it) when the changed node is an
   `EURange` property of a monitored Variable, routed to `SubscriptionCache` keyed by the owner
   Variable's NodeId. Verifiable standalone: notice observably fires; no consumer yet.
   Part 8 §5.2, §5.3.2.2.
-- [ ] T025 [US5] codex: monitored-item range re-resolution — on a range-change notice, affected
+- [X] T025 [US5] codex: monitored-item range re-resolution — on a range-change notice, affected
   `MonitoredItem`s re-resolve `eu_range` (reuse the `modify()` seam
   `monitored_item.rs:476-497` / `get_eu_range` machinery in
   `session/services/monitored_items.rs:35-98`) so percent-deadband filtering uses the new range.
   Never re-read per-sample (O(changes), not O(samples)). Part 8 §5.3.2.2. (Depends: T024.)
-- [ ] T026 [US5] codex: one-shot `SemanticsChanged` — arm a per-item flag on range change, OR it
+- [X] T026 [US5] codex: one-shot `SemanticsChanged` — arm a per-item flag on range change, OR it
   into the next queued notification via `StatusCode::set_semantics_changed` (injection pattern:
   overflow bit, `monitored_item.rs:861-879`), clear after one use — EXCEPT: per Part 4 §7.38.1
   (info bits 14:14), if the notification carrying the bit is discarded by queue overflow, the bit
   SHALL be set on the next data-change notification in the queue (re-arm on flagged-notification
   discard); remove the ponytail deferral comment (:398-400). Part 8 §5.2; Part 4 §7.38.1.
   (Depends: T025.)
-- [ ] T027 [US5] Update FINDINGS.md P8-02 row → FIXED with evidence; commit story 5.
+- [X] T027 [US5] Update FINDINGS.md P8-02 row → FIXED with evidence; commit story 5.
 
 ---
 

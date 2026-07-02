@@ -9,6 +9,11 @@ pub(crate) enum NotificationWorkItem {
         handle: MonitoredItemHandle,
         value: DataValue,
     },
+    RangeChanged {
+        handle: MonitoredItemHandle,
+        low: f64,
+        high: f64,
+    },
     Event {
         handle: MonitoredItemHandle,
         event: Box<dyn Event + Send>,

@@ -9,7 +9,7 @@ use std::{
     path::PathBuf,
     sync::{
         atomic::{AtomicI32, Ordering},
-        Arc,
+        Arc, OnceLock,
     },
 };
 
@@ -49,7 +49,8 @@ pub const PROFILE_SURFACE: &str = "Nano benchmark surface plus bounded subscript
 /// subscriptions (Monitor Value Change CU). Lives in the benchmark's demo
 /// namespace (ns=1).
 pub fn demo_counter_node_id() -> NodeId {
-    NodeId::new(1, "demo_counter")
+    let ns = *DEMO_NS_SERVER_INDEX.get().unwrap_or(&DEMO_NS_IN_NODESET);
+    NodeId::new(ns, "demo_counter")
 }
 
 /// Micro capacity: ≥2 parallel sessions ("Session Minimum 2 Parallel"),
@@ -76,6 +77,8 @@ pub fn profile_limits() -> Limits {
 
 const NAMESPACE_URI: &str = "http://opcfoundation.org/UA/";
 const DEMO_NAMESPACE_URI: &str = "urn:async-opcua:micro-demo";
+const DEMO_NS_IN_NODESET: u16 = 1;
+static DEMO_NS_SERVER_INDEX: OnceLock<u16> = OnceLock::new();
 
 struct MicroNamespace;
 
@@ -83,7 +86,7 @@ impl NodeSetImport for MicroNamespace {
     fn register_namespaces(&self, namespaces: &mut NodeSetNamespaceMapper) {
         // Register the demo namespace against its in-nodeset index (1) so the
         // mapper can resolve NodeIds emitted with ns=1 below.
-        namespaces.add_namespace(DEMO_NAMESPACE_URI, 1);
+        namespaces.add_namespace(DEMO_NAMESPACE_URI, DEMO_NS_IN_NODESET);
     }
 
     fn get_own_namespaces(&self) -> Vec<String> {
@@ -92,9 +95,17 @@ impl NodeSetImport for MicroNamespace {
 
     fn load<'a>(
         &'a self,
-        _namespaces: &'a NodeSetNamespaceMapper,
+        namespaces: &'a NodeSetNamespaceMapper,
     ) -> Box<dyn Iterator<Item = ImportedItem> + 'a> {
-        Box::new(micro_namespace_nodes().into_iter())
+        let server_ns = namespaces
+            .get_index(DEMO_NS_IN_NODESET)
+            .unwrap_or(DEMO_NS_IN_NODESET);
+        let _ = DEMO_NS_SERVER_INDEX.set(server_ns);
+        Box::new(
+            micro_namespace_nodes()
+                .into_iter()
+                .chain(std::iter::once(demo_counter_variable(server_ns))),
+        )
     }
 }
 
@@ -224,11 +235,6 @@ fn micro_namespace_nodes() -> Vec<ImportedItem> {
             VariableTypeId::PropertyType,
             VariableId::Server_ServerStatus.into(),
         ),
-        // Ticking counter in the demo namespace (ns=1) — drives data-change
-        // subscriptions (Monitor Value Change CU). Its value is produced by a
-        // read callback installed in build_server, so the stored value here is
-        // just the seed.
-        demo_counter_variable(),
     ]
 }
 
@@ -302,8 +308,8 @@ fn variable(
     }
 }
 
-fn demo_counter_variable() -> ImportedItem {
-    let node_id = demo_counter_node_id();
+fn demo_counter_variable(namespace: u16) -> ImportedItem {
+    let node_id = NodeId::new(namespace, "demo_counter");
     ImportedItem {
         node: VariableBuilder::new(&node_id, "demo_counter", "demo_counter")
             .data_type(DataTypeId::Int32)

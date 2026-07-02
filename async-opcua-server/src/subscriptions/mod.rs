@@ -509,7 +509,11 @@ impl SubscriptionCache {
 
     /// Get the `SessionSubscriptions` object for a single session by its numeric ID.
     #[cfg_attr(
-        not(all(feature = "method-call", feature = "subscriptions-standard")),
+        not(all(
+            feature = "generated-address-space",
+            feature = "method-call",
+            feature = "subscriptions-standard"
+        )),
         allow(dead_code)
     )]
     pub(crate) fn get_session_subscriptions(

@@ -91,6 +91,7 @@ pub(crate) async fn invoke_service_concurrently_mut<T, F>(
     futures::future::join_all(futures).await;
 }
 
+#[cfg(feature = "subscriptions")]
 trait ServiceCbRef<T> {
     fn call(
         &self,
@@ -100,6 +101,7 @@ trait ServiceCbRef<T> {
     ) -> impl Future<Output = ()> + Send;
 }
 
+#[cfg(feature = "subscriptions")]
 async fn invoke_service_concurrently<T, F>(
     context: RequestContext,
     items: &[T],

@@ -705,6 +705,7 @@ impl MessageHandler {
         }))
     }
 
+    #[cfg_attr(not(feature = "subscriptions"), allow(dead_code))]
     fn get_request<T>(&self, dt: RequestData, request: T) -> Request<T> {
         Request::new(
             Box::new(request),

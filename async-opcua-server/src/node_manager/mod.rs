@@ -732,6 +732,7 @@ pub trait NodeManager:
 {
 }
 
+/// Full node-manager interface composed from capability traits.
 #[cfg(not(feature = "subscriptions"))]
 pub trait NodeManager:
     NodeManagerCore

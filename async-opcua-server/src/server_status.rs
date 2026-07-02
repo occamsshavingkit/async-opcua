@@ -1,14 +1,18 @@
 use std::{
     sync::{Arc, OnceLock},
-    time::{Duration, Instant},
+    time::Instant,
 };
+#[cfg(feature = "subscriptions")]
+use std::time::Duration;
 
 use opcua_core::sync::Mutex;
 use opcua_types::{
-    AttributeId, BuildInfo, DataValue, DateTime, ExtensionObject, LocalizedText, MonitoringMode,
-    NodeId, ServerState, ServerStatusDataType, VariableId,
+    BuildInfo, DateTime, ExtensionObject, LocalizedText, ServerState, ServerStatusDataType,
 };
+#[cfg(feature = "subscriptions")]
+use opcua_types::{AttributeId, DataValue, MonitoringMode, NodeId, VariableId};
 
+#[cfg(feature = "subscriptions")]
 use crate::node_manager::SyncSampler;
 #[cfg(feature = "subscriptions")]
 use crate::SubscriptionCache;
@@ -20,6 +24,7 @@ pub struct ServerStatusWrapper {
     status: Arc<Mutex<ServerStatusDataType>>,
     #[cfg(feature = "subscriptions")]
     subscriptions: Arc<SubscriptionCache>,
+    #[cfg(feature = "subscriptions")]
     #[allow(unused)]
     sampler: SyncSampler,
     shutdown: Arc<OnceLock<ShutdownTarget>>,
@@ -38,6 +43,7 @@ impl ServerStatusWrapper {
         build_info: BuildInfo,
         #[cfg(feature = "subscriptions")] subscriptions: Arc<SubscriptionCache>,
     ) -> Self {
+        #[cfg(feature = "subscriptions")]
         let sampler = SyncSampler::new();
         #[cfg(feature = "subscriptions")]
         sampler.run(Duration::from_secs(1), subscriptions.clone());
@@ -53,11 +59,13 @@ impl ServerStatusWrapper {
             })),
             #[cfg(feature = "subscriptions")]
             subscriptions,
+            #[cfg(feature = "subscriptions")]
             sampler,
             shutdown: Arc::new(OnceLock::new()),
         }
     }
 
+    #[cfg(feature = "subscriptions")]
     pub(crate) fn get_managed_id(&self, id: &NodeId) -> Option<VariableId> {
         let Ok(var_id) = id.as_variable_id() else {
             return None;
@@ -75,6 +83,7 @@ impl ServerStatusWrapper {
         }
     }
 
+    #[cfg(feature = "subscriptions")]
     pub(crate) fn subscribe_to_component(
         &self,
         id: VariableId,
@@ -143,6 +152,7 @@ impl ServerStatusWrapper {
         }
     }
 
+    #[cfg(feature = "subscriptions")]
     pub(crate) fn sampler(&self) -> &SyncSampler {
         &self.sampler
     }

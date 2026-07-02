@@ -68,6 +68,7 @@ pub(crate) struct Response {
 }
 
 impl Response {
+    #[cfg_attr(not(feature = "subscriptions"), allow(dead_code))]
     pub(super) fn from_result(
         result: Result<impl Into<ResponseMessage>, StatusCode>,
         request_handle: u32,

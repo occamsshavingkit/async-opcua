@@ -20,6 +20,7 @@ use opcua_types::{
     HistoryUpdateResult, NodeId, ObjectId, ReadRequest, ReadResponse, ResponseHeader, StatusCode,
     TimestampsToReturn,
 };
+#[cfg_attr(not(feature = "subscriptions"), allow(dead_code))]
 pub(crate) async fn read(node_managers: NodeManagers, request: Request<ReadRequest>) -> Response {
     let context = request.context();
     let nodes_to_read = take_service_items!(

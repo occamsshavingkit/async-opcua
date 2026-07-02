@@ -105,11 +105,17 @@ impl EventField for ServerAlarmEvent<'_> {
 }
 
 /// Routes and dispatches an `AlarmEvent` to the active subscription buffers on the server.
-pub fn dispatch_alarm_event(server: &Server, alarm_event: &AlarmEvent) {
-    let wrapper = ServerAlarmEvent { event: alarm_event };
-    let subscriptions = server.subscriptions();
+pub fn dispatch_alarm_event(
+    #[cfg_attr(not(feature = "subscriptions"), allow(unused_variables))] server: &Server,
+    #[cfg_attr(not(feature = "subscriptions"), allow(unused_variables))] alarm_event: &AlarmEvent,
+) {
+    #[cfg(feature = "subscriptions")]
+    {
+        let wrapper = ServerAlarmEvent { event: alarm_event };
+        let subscriptions = server.subscriptions();
 
-    // Emitting on the source node (the device or monitored variable generating the alarm)
-    let items = std::iter::once((&wrapper as &dyn Event, &alarm_event.source_node));
-    subscriptions.notify_events(items);
+        // Emitting on the source node (the device or monitored variable generating the alarm)
+        let items = std::iter::once((&wrapper as &dyn Event, &alarm_event.source_node));
+        subscriptions.notify_events(items);
+    }
 }

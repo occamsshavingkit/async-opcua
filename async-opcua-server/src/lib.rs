@@ -57,6 +57,7 @@ pub mod services;
 pub mod session;
 #[cfg(not(any(test, feature = "test-utils")))]
 mod session;
+#[cfg(feature = "subscriptions")]
 mod subscriptions;
 mod transport;
 
@@ -79,12 +80,14 @@ pub use server::Server;
 pub use server_handle::ServerHandle;
 pub use server_status::ServerStatusWrapper;
 pub use session::continuation_points::ContinuationPoint;
+#[cfg(feature = "subscriptions")]
 pub use subscriptions::{
     CreateMonitoredItem, MonitoredItem, MonitoredItemHandle, SessionSubscriptions, Subscription,
     SubscriptionCache, SubscriptionState,
 };
 
 /// Notification allocation pooling utilities.
+#[cfg(feature = "subscriptions")]
 pub mod pool {
     pub use super::subscriptions::pool::NotificationBuffer;
 }
@@ -92,6 +95,7 @@ pub mod pool {
 /// Utilities for efficiently notifying subscriptions.
 ///
 /// See [SubscriptionCache::data_notifier] and [SubscriptionCache::event_notifier].
+#[cfg(feature = "subscriptions")]
 pub mod notify {
     pub use super::subscriptions::{
         MonitoredItemEntry, SubscriptionDataNotifier, SubscriptionDataNotifierBatch,

@@ -86,7 +86,7 @@ rejection) green; symbol-absence script green; workspace suite (default features
       `memory/core.rs:26`, `memory/memory_mgr_impl.rs:15`,
       `session/services/monitored_items.rs`. Additive-only trait change (full build
       unchanged). [Cite: OPC 10000-4 §5.13 MonitoredItem service set; research.md R5.3]
-- [ ] T008 [US1] Gate the `subscriptions/` module decl + public re-exports
+- [X] T008 [US1] Gate the `subscriptions/` module decl + public re-exports
       (`lib.rs:60`, `lib.rs:82-102`) and `session/services/mod.rs:31` re-export behind
       `subscriptions`; fix resulting cfg fallout so `--no-default-features
       --features base-server`-equivalent builds compile. [Cite: research.md R3]

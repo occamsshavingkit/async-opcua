@@ -20,6 +20,7 @@ use crate::{
     address_space::{
         compute_user_role_permissions, read_node_value, AddressSpace, CoreNamespace, NodeType,
     },
+    config::HistoryServerCapabilities,
     node_manager::{
         NamespaceMetadata, NodeManagersRef, ParsedReadValueId, ParsedWriteValue, RequestContext,
         ServerContext, WriteNode,
@@ -61,6 +62,27 @@ use opcua_types::{
 use opcua_types::{MethodId, VariantScalarTypeId, VariantTypeId};
 
 use super::{InMemoryNodeManager, InMemoryNodeManagerImpl, InMemoryNodeManagerImplBuilder};
+
+/// Zeroed-out history capabilities used when the `history` gate is off (FR-004).
+#[cfg(not(feature = "history"))]
+const HISTORY_OFF: HistoryServerCapabilities = HistoryServerCapabilities {
+    access_history_data: false,
+    access_history_events: false,
+    delete_at_time: false,
+    delete_event: false,
+    delete_raw: false,
+    insert_annotation: false,
+    insert_data: false,
+    insert_event: false,
+    max_return_data_values: 0,
+    max_return_event_values: 0,
+    replace_data: false,
+    replace_event: false,
+    server_timestamp_supported: false,
+    update_data: false,
+    update_event: false,
+    aggregates: Vec::new(),
+};
 
 #[cfg(feature = "method-call")]
 type MethodWithContextCB = Arc<
@@ -795,7 +817,12 @@ impl CoreNodeManagerImpl {
         let var_id = self.get_variable_id(&node.node_id)?;
 
         let limits = &context.info.config.limits;
+
+        // History capabilities: advertise false/0 when the history gate is off (FR-004).
+        #[cfg(feature = "history")]
         let hist_cap = &context.info.capabilities.history;
+        #[cfg(not(feature = "history"))]
+        let hist_cap: &HistoryServerCapabilities = &HISTORY_OFF;
 
         let v: Variant = match var_id {
             VariableId::Server_ServerCapabilities_MaxArrayLength => {
@@ -808,10 +835,16 @@ impl CoreNodeManagerImpl {
                 (limits.max_byte_string_length as u32).into()
             }
             VariableId::Server_ServerCapabilities_MaxHistoryContinuationPoints => {
-                (limits.max_history_continuation_points as u16).into()
+                #[cfg(feature = "history")]
+                { (limits.max_history_continuation_points as u16).into() }
+                #[cfg(not(feature = "history"))]
+                { 0u16.into() }
             }
             VariableId::Server_ServerCapabilities_MaxQueryContinuationPoints => {
-                (limits.max_query_continuation_points as u16).into()
+                #[cfg(feature = "query")]
+                { (limits.max_query_continuation_points as u16).into() }
+                #[cfg(not(feature = "query"))]
+                { 0u16.into() }
             }
             VariableId::Server_ServerCapabilities_MaxStringLength => {
                 (limits.max_string_length as u32).into()
@@ -828,22 +861,40 @@ impl CoreNodeManagerImpl {
                 (limits.operational.max_nodes_per_browse as u32).into()
             }
             VariableId::Server_ServerCapabilities_OperationLimits_MaxNodesPerHistoryReadData => {
-                (limits.operational.max_nodes_per_history_read_data as u32).into()
+                #[cfg(feature = "history")]
+                { (limits.operational.max_nodes_per_history_read_data as u32).into() }
+                #[cfg(not(feature = "history"))]
+                { 0u32.into() }
             }
             VariableId::Server_ServerCapabilities_OperationLimits_MaxNodesPerHistoryReadEvents => {
-                (limits.operational.max_nodes_per_history_read_events as u32).into()
+                #[cfg(feature = "history")]
+                { (limits.operational.max_nodes_per_history_read_events as u32).into() }
+                #[cfg(not(feature = "history"))]
+                { 0u32.into() }
             }
             VariableId::Server_ServerCapabilities_OperationLimits_MaxNodesPerHistoryUpdateData => {
-                (limits.operational.max_nodes_per_history_update as u32).into()
+                #[cfg(feature = "history")]
+                { (limits.operational.max_nodes_per_history_update as u32).into() }
+                #[cfg(not(feature = "history"))]
+                { 0u32.into() }
             }
             VariableId::Server_ServerCapabilities_OperationLimits_MaxNodesPerHistoryUpdateEvents => {
-                (limits.operational.max_nodes_per_history_update as u32).into()
+                #[cfg(feature = "history")]
+                { (limits.operational.max_nodes_per_history_update as u32).into() }
+                #[cfg(not(feature = "history"))]
+                { 0u32.into() }
             }
             VariableId::Server_ServerCapabilities_OperationLimits_MaxNodesPerMethodCall => {
-                (limits.operational.max_nodes_per_method_call as u32).into()
+                #[cfg(feature = "method-call")]
+                { (limits.operational.max_nodes_per_method_call as u32).into() }
+                #[cfg(not(feature = "method-call"))]
+                { 0u32.into() }
             }
             VariableId::Server_ServerCapabilities_OperationLimits_MaxNodesPerNodeManagement => {
-                (limits.operational.max_nodes_per_node_management as u32).into()
+                #[cfg(feature = "node-management")]
+                { (limits.operational.max_nodes_per_node_management as u32).into() }
+                #[cfg(not(feature = "node-management"))]
+                { 0u32.into() }
             }
             VariableId::Server_ServerCapabilities_OperationLimits_MaxNodesPerRead => {
                 (limits.operational.max_nodes_per_read as u32).into()

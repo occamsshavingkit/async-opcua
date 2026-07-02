@@ -214,16 +214,19 @@ GetMonitoredItems/ResendData work; advertised capabilities honest.
 
 ### Implementation
 
-- [ ] T028 [US3] Gate the builtin Server methods GetMonitoredItems/ResendData
-      (`node_manager/memory/core.rs:1030-1068`) under `method-call` +
+- [X] T028 [US3] Gate the builtin Server methods GetMonitoredItems/ResendData
+      (`node_manager/memory/core.rs:1130-1201`) under `method-call` +
       `subscriptions-standard`; when gated out they are absent (not faulting stubs).
+      **Verified already gated** — `call_builtin_method` is `#[cfg(feature =
+      "method-call")]`, and the GetMonitoredItems/ResendData arms are additionally
+      `#[cfg(feature = "subscriptions-standard")]`; absent methods fall through to
+      `BadNotSupported` (not faulting stubs).
       [Cite: OPC 10000-5 §9.1 GetMonitoredItems / §9.2 ResendData]
-- [ ] T029 [US3] Advertised-capability honesty (FR-004): cfg-adjust
-      `node_manager/memory/core.rs:712-806` capability/limit nodes,
-      `HistoryServerCapabilities` (`:798+`, `config/capabilities.rs`), and
-      `OperationalLimits` fields so gated-out services advertise false/absent; verify
-      against the full build (all-on ⇒ unchanged values). [Cite: OPC 10000-5 §6.3.2
-      ServerCapabilitiesType; spec FR-004]
+- [X] T029 [US3] Advertised-capability honesty (FR-004): cfg-adjust
+      `node_manager/memory/core.rs:800-940` capability/limit nodes and
+      `HistoryServerCapabilities` so gated-out services advertise false/absent;
+      verified against the full build (all-on ⇒ unchanged values).
+      [Cite: OPC 10000-5 §6.3.2 ServerCapabilitiesType; spec FR-004]
 - [ ] T030 [US3] Switch `samples/foundation-profile-embedded-server` to
       `features = ["embedded"]` + capacity config (≥2 subscriptions, ≥100 monitored
       items) + demo certificate provisioning for the smoke test; verify T027 + absence

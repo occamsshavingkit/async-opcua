@@ -212,10 +212,10 @@ lock-in regression test.
 
 ## Phase 9: Polish & cross-cutting
 
-- [ ] T033 Sweep `specs/conformance-audit/FINDINGS.md` reconciliation banner to final statuses;
+- [X] T033 Sweep `specs/conformance-audit/FINDINGS.md` reconciliation banner to final statuses;
   verify zero rows in sprint scope remain OPEN/PARTIAL/deferred (SC-001); note the §6.3.2→§6.3.3
   citation correction.
-- [ ] T034 Full gate: `cargo test` workspace (ALL server-crate test binaries — feature-030 lesson),
+- [X] T034 Full gate: `cargo test` workspace (ALL server-crate test binaries — feature-030 lesson),
   `cargo clippy --all-targets --all-features -- -D warnings` plus the no-default/json-off legs,
   `cargo fmt --check`; fix fallout (any BEHAVIORAL fix discovered at the gate must carry its own
   OPC UA Part/§ justification — tooling/lint fixes exempt); verify branch still

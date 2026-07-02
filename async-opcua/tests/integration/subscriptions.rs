@@ -2432,6 +2432,7 @@ async fn modify_monitored_item_to_aggregate_filter() {
 
 /// Builds a Double variable with an EURange property and a percent-deadband
 /// monitored item on it. Returns (var id, EURange property id).
+#[allow(clippy::too_many_arguments)] // test fixture: each knob is exercised by some eurange_* test
 async fn percent_deadband_item(
     tester: &Tester,
     nm: &TestNodeManager,

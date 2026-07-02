@@ -1,5 +1,13 @@
 # Conformance audit — consolidated findings register (the fix list)
 
+> ## Sprint 053 — 2026-07-02: register tail CLOSED
+> Feature 053 ("conformance small-items sprint") closed every row that remained open after the
+> 2026-07-01 reconciliation: P5-04 (US1), P4-ATTR-04 (US2), P4-ATTR-03 (US3), P4-ATTR-02 (US4,
+> verified already-conformant + locked in), P8-02 (US5), P3-09 (US6), and P5-03 (US7, not-a-bug).
+> **No rows in this register are OPEN, PARTIAL, or DEFERRED any more.** Citation corrections made
+> along the way: ServerDiagnosticsType is Part 5 **§6.3.3** (Table 11) — the register's earlier
+> §6.3.2/§6.3.7 cites were off; the SemanticsChanged bit mechanics live in Part 4 **§7.38.1**.
+
 > ## Reconciliation pass — 2026-07-01 (verify-before-fix, 6 parallel agents + spot-checks)
 > Every `open`/`deferred`/`conflict` row was re-verified against current code. **The register was
 > heavily stale** — a large remediation push (notably `da395291b` "Remediate OPC UA audit findings",

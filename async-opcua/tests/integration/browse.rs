@@ -973,7 +973,10 @@ async fn namespace_metadata_node_classes_match_part5() {
         .await
         .unwrap();
     let refs = r[0].references.clone().unwrap_or_default();
-    assert!(!refs.is_empty(), "namespace metadata must expose Properties");
+    assert!(
+        !refs.is_empty(),
+        "namespace metadata must expose Properties"
+    );
     let mut names: Vec<String> = Vec::new();
     for prop in &refs {
         assert_eq!(
@@ -984,7 +987,11 @@ async fn namespace_metadata_node_classes_match_part5() {
         );
         names.push(prop.browse_name.name.to_string());
     }
-    for expected in ["NamespaceUri", "NamespaceVersion", "NamespacePublicationDate"] {
+    for expected in [
+        "NamespaceUri",
+        "NamespaceVersion",
+        "NamespacePublicationDate",
+    ] {
         assert!(
             names.iter().any(|n| n == expected),
             "expected Property {expected}; got {names:?}"

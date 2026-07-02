@@ -15,10 +15,12 @@ use crate::{
     alarms::{AlarmSourceRegistry, LimitAlarm},
     history::read::modification_infos_or_none,
     node_manager::{
-        DefaultTypeTree, MethodCall, NodeManagerBuilder, NodeManagersRef, ParsedReadValueId,
-        RequestContext, ServerContext, WriteNode,
+        DefaultTypeTree, NodeManagerBuilder, NodeManagersRef, ParsedReadValueId, RequestContext,
+        ServerContext, WriteNode,
     },
 };
+#[cfg(feature = "method-call")]
+use crate::node_manager::MethodCall;
 #[cfg(feature = "subscriptions")]
 use crate::{
     alarms::ServerAlarmEvent,
@@ -28,8 +30,9 @@ use crate::{
 use opcua_core::sync::RwLock;
 use opcua_types::{
     AttributeId, DataValue, NodeClass, NodeId, NumericRange, StatusCode, TimestampsToReturn,
-    Variant,
 };
+#[cfg(feature = "method-call")]
+use opcua_types::Variant;
 #[cfg(feature = "subscriptions")]
 use opcua_types::MonitoringMode;
 
@@ -73,7 +76,9 @@ enum PreparedReadValue {
     },
 }
 
+#[cfg(feature = "method-call")]
 type MethodCB = Arc<dyn Fn(&[Variant]) -> Result<Vec<Variant>, StatusCode> + Send + Sync + 'static>;
+#[cfg(feature = "method-call")]
 type MethodWithContextCB = Arc<
     dyn Fn(&RequestContext, &[Variant]) -> Result<Vec<Variant>, StatusCode> + Send + Sync + 'static,
 >;
@@ -162,7 +167,9 @@ pub fn simple_node_manager_imports(
 pub struct SimpleNodeManagerImpl {
     write_cbs: RwLock<HashMap<NodeId, WriteCB>>,
     read_cbs: RwLock<HashMap<NodeId, ReadCB>>,
+    #[cfg(feature = "method-call")]
     method_cbs: RwLock<HashMap<NodeId, MethodCB>>,
+    #[cfg(feature = "method-call")]
     method_with_context_cbs: RwLock<HashMap<NodeId, MethodWithContextCB>>,
     namespaces: Vec<NamespaceMetadata>,
     #[allow(unused)]
@@ -413,6 +420,7 @@ impl InMemoryNodeManagerImpl for SimpleNodeManagerImpl {
         Ok(())
     }
 
+    #[cfg(feature = "method-call")]
     async fn call(
         &self,
         context: &RequestContext,
@@ -833,7 +841,9 @@ impl SimpleNodeManagerImpl {
         Self {
             write_cbs: Default::default(),
             read_cbs: Default::default(),
+            #[cfg(feature = "method-call")]
             method_cbs: Default::default(),
+            #[cfg(feature = "method-call")]
             method_with_context_cbs: Default::default(),
             namespaces,
             name: name.to_owned(),
@@ -1248,6 +1258,7 @@ impl SimpleNodeManagerImpl {
     }
 
     /// Add a callback for `Call` on the method given by `id`.
+    #[cfg(feature = "method-call")]
     pub fn add_method_callback(
         &self,
         id: NodeId,
@@ -1258,6 +1269,7 @@ impl SimpleNodeManagerImpl {
     }
 
     /// Add a callback for `Call` on the method given by `id` that has access to the RequestContext.
+    #[cfg(feature = "method-call")]
     pub fn add_method_callback_with_context(
         &self,
         id: NodeId,

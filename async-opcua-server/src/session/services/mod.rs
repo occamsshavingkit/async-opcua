@@ -14,6 +14,7 @@ macro_rules! take_service_items {
 }
 
 mod attribute;
+#[cfg(feature = "method-call")]
 mod method;
 #[cfg(feature = "subscriptions")]
 mod monitored_items;
@@ -26,6 +27,7 @@ mod view;
 use std::{future::Future, sync::Arc};
 
 pub(super) use attribute::*;
+#[cfg(feature = "method-call")]
 pub(super) use method::*;
 #[cfg(feature = "subscriptions")]
 pub(super) use monitored_items::*;

@@ -154,6 +154,7 @@ impl ServerAuditEvent {
         )
     }
 
+    #[cfg(feature = "method-call")]
     #[allow(clippy::too_many_arguments)]
     fn method_call(
         server_id: UAString,
@@ -785,6 +786,7 @@ pub(crate) fn dispatch_service_failure(
     dispatch_audit_event_if_enabled!(subscriptions, &event);
 }
 
+#[cfg(feature = "method-call")]
 pub(crate) fn dispatch_method_audit(
     #[cfg(feature = "subscriptions")]
     subscriptions: &Arc<SubscriptionCache>,

@@ -401,6 +401,7 @@ impl MessageHandler {
                 async_service_call!(services::query_next, self, request, data)
             }
 
+            #[cfg(feature = "method-call")]
             RequestMessage::Call(request) => {
                 async_service_call!(services::call, self, request, data)
             }

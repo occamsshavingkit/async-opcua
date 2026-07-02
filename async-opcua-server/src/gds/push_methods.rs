@@ -11,10 +11,9 @@ use std::{
 use opcua_core::sync::RwLock;
 use opcua_types::{ByteString, MessageSecurityMode, NodeId, StatusCode, Variant};
 
-use crate::{
-    node_manager::{memory::SimpleNodeManager, RequestContext},
-    rbac::WellKnownRole,
-};
+#[cfg(feature = "method-call")]
+use crate::node_manager::memory::SimpleNodeManager;
+use crate::{node_manager::RequestContext, rbac::WellKnownRole};
 
 use super::GDS_REGISTRY_CAPACITY;
 
@@ -211,6 +210,7 @@ pub fn create_signing_request_method_id() -> NodeId {
 }
 
 /// Registers GDS push method callbacks on a simple node manager.
+#[cfg(feature = "method-call")]
 pub fn register_gds_push_methods(
     node_manager: &SimpleNodeManager,
 ) -> Arc<GdsSigningRequestRegistry> {
@@ -220,6 +220,7 @@ pub fn register_gds_push_methods(
 }
 
 /// Registers GDS push method callbacks using the supplied registry.
+#[cfg(feature = "method-call")]
 pub fn register_gds_push_methods_with_registry(
     node_manager: &SimpleNodeManager,
     registry: Arc<GdsSigningRequestRegistry>,

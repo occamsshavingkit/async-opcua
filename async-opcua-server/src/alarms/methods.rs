@@ -17,7 +17,7 @@ use crate::MonitoredItemHandle;
 use opcua_core::events::AlarmEvent;
 use opcua_core::traits::ConditionMethodHandler;
 use opcua_nodes::{Event, EventField};
-#[cfg(feature = "generated-address-space")]
+#[cfg(all(feature = "generated-address-space", feature = "method-call"))]
 use opcua_types::MethodId;
 use opcua_types::{
     AttributeId, ByteString, DateTime, LocalizedText, NodeId, NumericRange, QualifiedName,
@@ -636,7 +636,7 @@ impl EventField for OwnedAlarmEvent {
 }
 
 /// Registers standard ConditionRefresh, ConditionRefresh2, AddComment, Acknowledge, and Confirm method callbacks.
-#[cfg(feature = "generated-address-space")]
+#[cfg(all(feature = "generated-address-space", feature = "method-call"))]
 pub fn register_condition_methods(
     core_node_manager: &crate::node_manager::memory::CoreNodeManager,
     registry: ConditionRegistry,
@@ -704,7 +704,7 @@ pub fn register_condition_methods(
 }
 
 /// Registers standard DialogConditionType Respond and Respond2 method callbacks.
-#[cfg(feature = "generated-address-space")]
+#[cfg(all(feature = "generated-address-space", feature = "method-call"))]
 pub fn register_dialog_condition_methods(
     core_node_manager: &crate::node_manager::memory::CoreNodeManager,
     registry: DialogRegistry,

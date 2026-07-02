@@ -14,11 +14,13 @@ use crate::{
     node_manager::{
         as_opaque_node_id, from_opaque_node_id, impl_translate_browse_paths_using_browse,
         AddReferenceResult, AttributeProvider, BrowseNode, BrowsePathItem, DynNodeManager,
-        ExternalReferenceRequest, HistoryProvider, MethodProvider, NodeManagerBuilder,
-        NodeManagerCore, NodeManagersRef, NodeMetadata, NodeMutator, QueryRequest, ReadNode,
-        RequestContext, ServerContext, ViewProvider,
+        ExternalReferenceRequest, HistoryProvider, NodeManagerBuilder, NodeManagerCore,
+        NodeManagersRef, NodeMetadata, NodeMutator, QueryRequest, ReadNode, RequestContext,
+        ServerContext, ViewProvider,
     },
 };
+#[cfg(feature = "method-call")]
+use crate::node_manager::MethodProvider;
 #[cfg(feature = "subscriptions")]
 use crate::node_manager::{MonitoredItemProvider, SyncSampler};
 use opcua_types::{
@@ -769,6 +771,7 @@ impl AttributeProvider for DiagnosticsNodeManager {
 
 impl HistoryProvider for DiagnosticsNodeManager {}
 
+#[cfg(feature = "method-call")]
 impl MethodProvider for DiagnosticsNodeManager {}
 
 #[cfg(feature = "subscriptions")]

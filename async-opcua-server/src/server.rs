@@ -467,7 +467,7 @@ impl Server {
         let node_managers = NodeManagers::new(final_node_managers);
         node_managers_ref.init_from_node_managers(node_managers.clone());
 
-        #[cfg(feature = "generated-address-space")]
+        #[cfg(all(feature = "generated-address-space", feature = "method-call"))]
         if let Some(core_node_manager) =
             node_managers.get_of_type::<crate::node_manager::memory::CoreNodeManager>()
         {

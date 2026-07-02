@@ -37,12 +37,17 @@ use crate::address_space::read_node_value;
 #[cfg(feature = "subscriptions")]
 use crate::{subscriptions::CreateMonitoredItem, SubscriptionCache};
 use opcua_core::sync::RwLock;
+#[cfg(feature = "method-call")]
+use opcua_types::argument::Argument;
+#[cfg(feature = "method-call")]
+use opcua_types::DataEncoding;
+#[cfg(any(feature = "subscriptions", feature = "method-call"))]
+use opcua_types::{NumericRange, Variant};
 use opcua_types::{
-    argument::Argument, AccessRestrictionType, AttributeId, BrowseDescriptionResultMask,
-    BrowseDirection, DataEncoding, ExpandedNodeId, NodeClass, NodeId, NumericRange,
-    PermissionType, ReadAnnotationDataDetails, ReadAtTimeDetails, ReadEventDetails,
-    ReadProcessedDetails, ReadRawModifiedDetails, ReferenceDescription, ReferenceTypeId,
-    RolePermissionType, StatusCode, TimestampsToReturn, Variant,
+    AccessRestrictionType, AttributeId, BrowseDescriptionResultMask, BrowseDirection,
+    ExpandedNodeId, NodeClass, NodeId, PermissionType, ReadAnnotationDataDetails,
+    ReadAtTimeDetails, ReadEventDetails, ReadProcessedDetails, ReadRawModifiedDetails,
+    ReferenceDescription, ReferenceTypeId, RolePermissionType, StatusCode, TimestampsToReturn,
 };
 #[cfg(feature = "subscriptions")]
 use opcua_types::{DataValue, DateTime, MonitoringMode};
@@ -52,10 +57,11 @@ use super::{
     view::{AddReferenceResult, ExternalReference, ExternalReferenceRequest, NodeMetadata},
     AddNodeItem, AddReferenceItem, AttributeProvider, BrowseNode, BrowsePathItem, DefaultTypeTree,
     DeleteNodeItem, DeleteReferenceItem, DynNodeManager, HistoryNode, HistoryProvider,
-    HistoryUpdateDetails, HistoryUpdateNode, MethodCall, MethodProvider, NodeManagerCore,
-    NodeMutator, QueryRequest, ReadNode, RegisterNodeItem, RequestContext, ServerContext,
-    ViewProvider, WriteNode,
+    HistoryUpdateDetails, HistoryUpdateNode, NodeManagerCore, NodeMutator, QueryRequest, ReadNode,
+    RegisterNodeItem, RequestContext, ServerContext, ViewProvider, WriteNode,
 };
+#[cfg(feature = "method-call")]
+use super::{MethodCall, MethodProvider};
 #[cfg(feature = "subscriptions")]
 use super::{MonitoredItemProvider, MonitoredItemRef, MonitoredItemUpdateRef};
 
@@ -129,6 +135,7 @@ impl<TImpl: InMemoryNodeManagerImpl> InMemoryNodeManager<TImpl> {
         &self.namespaces
     }
 
+    #[cfg(feature = "method-call")]
     fn resolve_method_node_id(
         &self,
         address_space: &AddressSpace,
@@ -613,6 +620,7 @@ impl<TImpl: InMemoryNodeManagerImpl> InMemoryNodeManager<TImpl> {
         valid
     }
 
+    #[cfg(feature = "method-call")]
     fn validate_method_calls<'a, 'b>(
         &self,
         context: &RequestContext,
@@ -1208,6 +1216,7 @@ impl<TImpl: InMemoryNodeManagerImpl> HistoryProvider for InMemoryNodeManager<TIm
 }
 
 #[async_trait]
+#[cfg(feature = "method-call")]
 impl<TImpl: InMemoryNodeManagerImpl> MethodProvider for InMemoryNodeManager<TImpl> {
     fn authorize_method_calls(
         &self,

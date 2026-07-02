@@ -90,7 +90,7 @@ rejection) green; symbol-absence script green; workspace suite (default features
       (`lib.rs:60`, `lib.rs:82-102`) and `session/services/mod.rs:31` re-export behind
       `subscriptions`; fix resulting cfg fallout so `--no-default-features
       --features base-server`-equivalent builds compile. [Cite: research.md R3]
-- [ ] T009 [US1] Gate Call service behind `method-call`: `session/services/method.rs`,
+- [X] T009 [US1] Gate Call service behind `method-call`: `session/services/method.rs`,
       dispatch arm `message_handler.rs:365`, method-registration surface (typed_method
       path stays compiled only with the feature). [Cite: OPC 10000-4 §5.12 Method service set]
 - [ ] T010 [US1] Gate history behind `history` and aggregates behind

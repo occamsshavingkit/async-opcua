@@ -8,10 +8,9 @@ use opcua_types::{
     Array, ByteString, MessageSecurityMode, NodeId, StatusCode, Variant, VariantScalarTypeId,
 };
 
-use crate::{
-    node_manager::{memory::SimpleNodeManager, RequestContext},
-    rbac::WellKnownRole,
-};
+#[cfg(feature = "method-call")]
+use crate::node_manager::memory::SimpleNodeManager;
+use crate::{node_manager::RequestContext, rbac::WellKnownRole};
 
 use super::GDS_REGISTRY_CAPACITY;
 
@@ -335,6 +334,7 @@ pub fn finish_signing_request_method_id() -> NodeId {
 }
 
 /// Registers GDS pull method callbacks on a simple node manager.
+#[cfg(feature = "method-call")]
 pub fn register_gds_pull_methods(node_manager: &SimpleNodeManager) -> GdsPullMethodRegistry {
     let registry = GdsPullMethodRegistry::default();
     register_gds_pull_methods_with_registry(node_manager, registry.clone());
@@ -342,6 +342,7 @@ pub fn register_gds_pull_methods(node_manager: &SimpleNodeManager) -> GdsPullMet
 }
 
 /// Registers GDS pull method callbacks using the supplied registry.
+#[cfg(feature = "method-call")]
 pub fn register_gds_pull_methods_with_registry(
     node_manager: &SimpleNodeManager,
     registry: GdsPullMethodRegistry,

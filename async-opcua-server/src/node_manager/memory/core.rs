@@ -17,8 +17,8 @@ use crate::{
     diagnostics::NamespaceMetadata,
     identity_token::IdentityToken,
     node_manager::{
-        MethodCall, NodeManagersRef, ParsedReadValueId, ParsedWriteValue, RequestContext,
-        ServerContext, WriteNode,
+        NodeManagersRef, ParsedReadValueId, ParsedWriteValue, RequestContext, ServerContext,
+        WriteNode,
     },
     session::{
         instance::Session,
@@ -26,25 +26,32 @@ use crate::{
     },
     ServerCapabilities, ServerStatusWrapper,
 };
-#[cfg(feature = "subscriptions")]
+#[cfg(all(feature = "method-call", feature = "subscriptions-standard"))]
 use crate::load_method_args;
+#[cfg(feature = "method-call")]
+use crate::node_manager::MethodCall;
 #[cfg(feature = "subscriptions")]
 use crate::{
     node_manager::{MonitoredItemRef, MonitoredItemUpdateRef, SyncSampler},
     subscriptions::{CreateMonitoredItem, SessionSubscriptionDiagnosticsSummary},
 };
-use opcua_core::{sync::RwLock, trace_read_lock, trace_write_lock};
+use opcua_core::{sync::RwLock, trace_read_lock};
+#[cfg(feature = "method-call")]
+use opcua_core::trace_write_lock;
 use opcua_types::{
     profiles, AttributeId, ByteString, DataValue, DateTime, ExtensionObject, IdType, Identifier,
     NodeId, NumericRange, ObjectId, ReferenceTypeId, RolePermissionType, SessionDiagnosticsDataType,
     SessionSecurityDiagnosticsDataType, StatusCode, TimeZoneDataType, TimestampsToReturn, UAString,
     VariableId, Variant,
 };
+#[cfg(all(feature = "method-call", feature = "subscriptions-standard"))]
+use opcua_types::{MethodId, VariantScalarTypeId, VariantTypeId};
 #[cfg(feature = "subscriptions")]
-use opcua_types::{MethodId, MonitoringMode, VariantScalarTypeId, VariantTypeId};
+use opcua_types::MonitoringMode;
 
 use super::{InMemoryNodeManager, InMemoryNodeManagerImpl, InMemoryNodeManagerImplBuilder};
 
+#[cfg(feature = "method-call")]
 type MethodWithContextCB = Arc<
     dyn Fn(&RequestContext, &NodeId, &[Variant]) -> Result<Vec<Variant>, StatusCode>
         + Send
@@ -74,6 +81,7 @@ pub struct CoreNodeManagerImpl {
     node_managers: NodeManagersRef,
     session_manager: Arc<RwLock<SessionManager>>,
     status: Arc<ServerStatusWrapper>,
+    #[cfg(feature = "method-call")]
     method_with_context_cbs: Arc<RwLock<std::collections::HashMap<NodeId, MethodWithContextCB>>>,
 }
 
@@ -161,6 +169,7 @@ impl InMemoryNodeManagerImpl for CoreNodeManagerImpl {
         "core"
     }
 
+    #[cfg(feature = "method-call")]
     fn accepts_method_without_object_component(&self, method_id: &NodeId) -> bool {
         trace_read_lock!(self.method_with_context_cbs).contains_key(method_id)
     }
@@ -261,6 +270,7 @@ impl InMemoryNodeManagerImpl for CoreNodeManagerImpl {
         }
     }
 
+    #[cfg(feature = "method-call")]
     async fn call(
         &self,
         context: &RequestContext,
@@ -338,6 +348,7 @@ impl CoreNodeManagerImpl {
             status,
             node_managers,
             session_manager,
+            #[cfg(feature = "method-call")]
             method_with_context_cbs: Default::default(),
         }
     }
@@ -1057,6 +1068,7 @@ impl CoreNodeManagerImpl {
     }
 
     /// Add a callback for `Call` on the method given by `id` that has access to the RequestContext.
+    #[cfg(feature = "method-call")]
     pub fn add_method_callback_with_context(
         &self,
         id: NodeId,
@@ -1069,57 +1081,58 @@ impl CoreNodeManagerImpl {
         cbs.insert(id, Arc::new(cb));
     }
 
+    #[cfg(feature = "method-call")]
     async fn call_builtin_method(
         &self,
         call: &mut MethodCall,
         context: &RequestContext,
     ) -> Result<(), StatusCode> {
-        let Ok(id) = call.method_id().as_method_id() else {
-            return Ok(());
-        };
-        #[cfg(not(feature = "subscriptions"))]
-        let _ = id;
+        #[cfg(feature = "subscriptions-standard")]
+        {
+            let Ok(id) = call.method_id().as_method_id() else {
+                return Ok(());
+            };
 
-        #[cfg(feature = "subscriptions")]
-        match id {
-            MethodId::Server_GetMonitoredItems => {
-                let id = load_method_args!(call, UInt32)?;
-                let subs = context
-                    .subscriptions
-                    .get_session_subscriptions(context.session_id)
-                    .ok_or(StatusCode::BadSessionIdInvalid)?;
-                let (ids, handles) = subs
-                    .legacy(move |subs| {
-                        let sub = subs.get(id).ok_or(StatusCode::BadSubscriptionIdInvalid)?;
-                        let (ids, handles): (Vec<_>, Vec<_>) =
-                            sub.items().map(|i| (i.id(), i.client_handle())).unzip();
-                        Ok::<_, StatusCode>((ids, handles))
+            match id {
+                MethodId::Server_GetMonitoredItems => {
+                    let id = load_method_args!(call, UInt32)?;
+                    let subs = context
+                        .subscriptions
+                        .get_session_subscriptions(context.session_id)
+                        .ok_or(StatusCode::BadSessionIdInvalid)?;
+                    let (ids, handles) = subs
+                        .legacy(move |subs| {
+                            let sub = subs.get(id).ok_or(StatusCode::BadSubscriptionIdInvalid)?;
+                            let (ids, handles): (Vec<_>, Vec<_>) =
+                                sub.items().map(|i| (i.id(), i.client_handle())).unzip();
+                            Ok::<_, StatusCode>((ids, handles))
+                        })
+                        .await
+                        .map_err(|_| StatusCode::BadSessionIdInvalid)??;
+                    call.set_outputs(vec![ids.into(), handles.into()]);
+                    call.set_status(StatusCode::Good);
+                    return Ok(());
+                }
+                MethodId::Server_ResendData => {
+                    let id = load_method_args!(call, UInt32)?;
+                    let subs = context
+                        .subscriptions
+                        .get_session_subscriptions(context.session_id)
+                        .ok_or(StatusCode::BadSessionIdInvalid)?;
+                    subs.legacy(move |subs| {
+                        let sub = subs
+                            .get_mut(id)
+                            .ok_or(StatusCode::BadSubscriptionIdInvalid)?;
+                        sub.set_resend_data();
+                        Ok::<_, StatusCode>(())
                     })
                     .await
                     .map_err(|_| StatusCode::BadSessionIdInvalid)??;
-                call.set_outputs(vec![ids.into(), handles.into()]);
-                call.set_status(StatusCode::Good);
-                return Ok(());
+                    call.set_status(StatusCode::Good);
+                    return Ok(());
+                }
+                _ => {}
             }
-            MethodId::Server_ResendData => {
-                let id = load_method_args!(call, UInt32)?;
-                let subs = context
-                    .subscriptions
-                    .get_session_subscriptions(context.session_id)
-                    .ok_or(StatusCode::BadSessionIdInvalid)?;
-                subs.legacy(move |subs| {
-                    let sub = subs
-                        .get_mut(id)
-                        .ok_or(StatusCode::BadSubscriptionIdInvalid)?;
-                    sub.set_resend_data();
-                    Ok::<_, StatusCode>(())
-                })
-                .await
-                .map_err(|_| StatusCode::BadSessionIdInvalid)??;
-                call.set_status(StatusCode::Good);
-                return Ok(());
-            }
-            _ => {}
         }
 
         let cb = {

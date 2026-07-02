@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+#[cfg(feature = "method-call")]
 use std::sync::Arc;
 
 use crate::{
@@ -6,12 +7,14 @@ use crate::{
     diagnostics::NamespaceMetadata,
     node_manager::{
         audit_events, AddNodeItem, AddReferenceItem, DeleteNodeItem, DeleteReferenceItem,
-        HistoryNode, HistoryUpdateNode, MethodCall, ParsedReadValueId, RegisterNodeItem,
-        RequestContext, ServerContext, WriteNode,
+        HistoryNode, HistoryUpdateNode, ParsedReadValueId, RegisterNodeItem, RequestContext,
+        ServerContext, WriteNode,
     },
     rbac,
     session::continuation_points::ContinuationPoint,
 };
+#[cfg(feature = "method-call")]
+use crate::node_manager::MethodCall;
 #[cfg(feature = "subscriptions")]
 use crate::{
     node_manager::{GeneralModelChangeEvent, MonitoredItemRef, MonitoredItemUpdateRef},
@@ -41,6 +44,7 @@ const MODEL_CHANGE_REFERENCE_ADDED: u8 = 4;
 const MODEL_CHANGE_REFERENCE_DELETED: u8 = 8;
 
 /// Callback used by the default in-memory method `Call` implementation.
+#[cfg(feature = "method-call")]
 pub type InMemoryMethodCallback = Arc<
     dyn Fn(&RequestContext, &[Variant]) -> Result<Vec<Variant>, StatusCode> + Send + Sync + 'static,
 >;
@@ -1253,6 +1257,7 @@ pub trait InMemoryNodeManagerImpl: Send + Sync + 'static {
     /// Return `true` when this implementation can handle `method_id` even if the call object does
     /// not expose that exact method node as a component (e.g. a cross-node-manager shared method that
     /// validates its own object). Default false.
+    #[cfg(feature = "method-call")]
     fn accepts_method_without_object_component(&self, _method_id: &NodeId) -> bool {
         false
     }
@@ -1496,6 +1501,7 @@ pub trait InMemoryNodeManagerImpl: Send + Sync + 'static {
     /// The methods have already had their arguments verified to have valid length
     /// and the method is verified to exist on the given object. This should try
     /// to execute the methods, and set the result.
+    #[cfg(feature = "method-call")]
     async fn call(
         &self,
         context: &RequestContext,
@@ -1521,6 +1527,7 @@ pub trait InMemoryNodeManagerImpl: Send + Sync + 'static {
     }
 
     /// Return a callback for executing a method, if this implementation has one registered.
+    #[cfg(feature = "method-call")]
     fn method_callback(&self, method_id: &NodeId) -> Option<InMemoryMethodCallback> {
         None
     }

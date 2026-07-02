@@ -9,5 +9,7 @@ pub mod methods;
 pub mod state;
 
 pub use engine::ProgramEngine;
-pub use methods::{register_program, ProgramMethodHandler};
+pub use methods::register_program;
+#[cfg(feature = "method-call")]
+pub use methods::ProgramMethodHandler;
 pub use state::{ProgramState, ProgramStateMachine};

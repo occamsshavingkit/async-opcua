@@ -1,9 +1,12 @@
 //! Global Discovery Server (GDS) support.
 
+#[cfg(feature = "method-call")]
 use std::sync::Arc;
 
+#[cfg(feature = "method-call")]
 use crate::node_manager::memory::SimpleNodeManager;
 
+#[cfg(feature = "method-call")]
 use self::{
     pull_methods::{register_gds_pull_methods, GdsPullMethodRegistry},
     push_methods::{register_gds_push_methods, GdsSigningRequestRegistry},
@@ -23,6 +26,7 @@ pub mod pull_methods;
 pub mod push_methods;
 
 /// Registries backing the standard GDS method callbacks.
+#[cfg(feature = "method-call")]
 pub struct GdsMethodRegistries {
     /// Signing request registry used by push-model callbacks.
     pub signing_requests: Arc<GdsSigningRequestRegistry>,
@@ -31,6 +35,7 @@ pub struct GdsMethodRegistries {
 }
 
 /// Registers the standard GDS certificate management callbacks.
+#[cfg(feature = "method-call")]
 pub fn register_gds_certificate_management_methods(
     node_manager: &SimpleNodeManager,
 ) -> GdsMethodRegistries {

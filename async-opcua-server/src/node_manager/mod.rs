@@ -27,7 +27,9 @@ mod build;
 mod context;
 mod history;
 pub mod memory;
+#[cfg(feature = "method-call")]
 mod method;
+#[cfg(feature = "method-call")]
 mod method_typed;
 mod model_change;
 #[cfg(feature = "subscriptions")]
@@ -57,11 +59,6 @@ pub use {
         TypeTreeReadContext,
     },
     history::{HistoryNode, HistoryResult, HistoryUpdateDetails, HistoryUpdateNode},
-    method::MethodCall,
-    method_typed::{
-        typed_method, typed_method_with_context, IntoMethodOutputs, MethodArg, MethodHandler,
-        MethodHandlerWithContext,
-    },
     model_change::GeneralModelChangeEvent,
     node_management::{AddNodeItem, AddReferenceItem, DeleteNodeItem, DeleteReferenceItem},
     query::{ParsedNodeTypeDescription, ParsedQueryDataDescription, QueryRequest},
@@ -69,6 +66,14 @@ pub use {
     view::{
         impl_translate_browse_paths_using_browse, AddReferenceResult, BrowseNode, BrowsePathItem,
         ExternalReference, ExternalReferenceRequest, NodeMetadata, RegisterNodeItem,
+    },
+};
+#[cfg(feature = "method-call")]
+pub use {
+    method::MethodCall,
+    method_typed::{
+        typed_method, typed_method_with_context, IntoMethodOutputs, MethodArg, MethodHandler,
+        MethodHandlerWithContext,
     },
 };
 #[cfg(feature = "subscriptions")]
@@ -604,6 +609,7 @@ pub trait MonitoredItemProvider {
 }
 
 /// Method-call capability for node managers.
+#[cfg(feature = "method-call")]
 #[async_trait]
 #[allow(unused_variables)]
 pub trait MethodProvider {
@@ -720,7 +726,7 @@ pub trait NodeMutator {
 }
 
 /// Full node-manager interface composed from capability traits.
-#[cfg(feature = "subscriptions")]
+#[cfg(all(feature = "subscriptions", feature = "method-call"))]
 pub trait NodeManager:
     NodeManagerCore
     + AttributeProvider
@@ -733,7 +739,19 @@ pub trait NodeManager:
 }
 
 /// Full node-manager interface composed from capability traits.
-#[cfg(not(feature = "subscriptions"))]
+#[cfg(all(feature = "subscriptions", not(feature = "method-call")))]
+pub trait NodeManager:
+    NodeManagerCore
+    + AttributeProvider
+    + ViewProvider
+    + NodeMutator
+    + HistoryProvider
+    + MonitoredItemProvider
+{
+}
+
+/// Full node-manager interface composed from capability traits.
+#[cfg(all(not(feature = "subscriptions"), feature = "method-call"))]
 pub trait NodeManager:
     NodeManagerCore
     + AttributeProvider
@@ -744,7 +762,14 @@ pub trait NodeManager:
 {
 }
 
-#[cfg(feature = "subscriptions")]
+/// Full node-manager interface composed from capability traits.
+#[cfg(all(not(feature = "subscriptions"), not(feature = "method-call")))]
+pub trait NodeManager:
+    NodeManagerCore + AttributeProvider + ViewProvider + NodeMutator + HistoryProvider
+{
+}
+
+#[cfg(all(feature = "subscriptions", feature = "method-call"))]
 impl<T> NodeManager for T where
     T: NodeManagerCore
         + AttributeProvider
@@ -757,7 +782,19 @@ impl<T> NodeManager for T where
 {
 }
 
-#[cfg(not(feature = "subscriptions"))]
+#[cfg(all(feature = "subscriptions", not(feature = "method-call")))]
+impl<T> NodeManager for T where
+    T: NodeManagerCore
+        + AttributeProvider
+        + ViewProvider
+        + NodeMutator
+        + HistoryProvider
+        + MonitoredItemProvider
+        + ?Sized
+{
+}
+
+#[cfg(all(not(feature = "subscriptions"), feature = "method-call"))]
 impl<T> NodeManager for T where
     T: NodeManagerCore
         + AttributeProvider
@@ -766,5 +803,11 @@ impl<T> NodeManager for T where
         + NodeMutator
         + HistoryProvider
         + ?Sized
+{
+}
+
+#[cfg(all(not(feature = "subscriptions"), not(feature = "method-call")))]
+impl<T> NodeManager for T where
+    T: NodeManagerCore + AttributeProvider + ViewProvider + NodeMutator + HistoryProvider + ?Sized
 {
 }

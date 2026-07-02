@@ -48,6 +48,10 @@ pub mod node_manager;
 pub mod nodeset_loader;
 /// Program execution (Part 10) support.
 pub mod programs;
+#[cfg(feature = "rbac")]
+pub(crate) mod rbac;
+#[cfg(not(feature = "rbac"))]
+#[path = "rbac_stub.rs"]
 pub(crate) mod rbac;
 mod reverse_connect;
 mod server;
@@ -71,6 +75,7 @@ pub use history::{attach_annotations_property, InMemoryDataHistory, InMemoryEven
 pub use identity_token::IdentityToken;
 pub use info::ServerInfo;
 pub use opcua_types::event_field::EventField;
+#[cfg(feature = "rbac")]
 pub use rbac::{
     anonymous_permissions, authenticated_user_permissions, configure_admin_permissions,
     engineer_permissions, observer_permissions, operator_permissions, rules::IdentityMappingRule,

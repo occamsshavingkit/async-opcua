@@ -342,11 +342,17 @@ impl Server {
             ..Default::default()
         });
 
-        let mut role_resolver =
-            crate::rbac::resolver::RoleResolver::from_user_tokens(&config.user_tokens);
-        for mapping in &config.identity_mapping_rules {
-            role_resolver.add_mapping(mapping.role_node_id.clone(), mapping.rule.clone());
-        }
+        #[cfg(feature = "rbac")]
+        let role_resolver = {
+            let mut role_resolver =
+                crate::rbac::resolver::RoleResolver::from_user_tokens(&config.user_tokens);
+            for mapping in &config.identity_mapping_rules {
+                role_resolver.add_mapping(mapping.role_node_id.clone(), mapping.rule.clone());
+            }
+            role_resolver
+        };
+        #[cfg(not(feature = "rbac"))]
+        let role_resolver = crate::rbac::resolver::RoleResolver;
         let namespace_defaults =
             crate::rbac::defaults::NamespaceDefaults::from_config(&config.namespace_defaults);
         let config = Arc::new(config);
@@ -469,7 +475,11 @@ impl Server {
         let node_managers = NodeManagers::new(final_node_managers);
         node_managers_ref.init_from_node_managers(node_managers.clone());
 
-        #[cfg(all(feature = "generated-address-space", feature = "method-call"))]
+        #[cfg(all(
+            feature = "generated-address-space",
+            feature = "method-call",
+            feature = "rbac"
+        ))]
         if let Some(core_node_manager) =
             node_managers.get_of_type::<crate::node_manager::memory::CoreNodeManager>()
         {

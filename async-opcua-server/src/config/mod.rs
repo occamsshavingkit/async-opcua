@@ -9,7 +9,6 @@ pub use limits::{Limits, OperationalLimits, SubscriptionLimits};
 #[cfg(feature = "wss")]
 pub use server::WssServerConfig;
 pub use server::{CertificateValidation, TcpConfig, TcpKeepaliveConfig};
-pub use server::{
-    IdentityMappingRuleConfig, NamespaceDefaultConfig, ServerConfig, ServerUserToken,
-    ANONYMOUS_USER_TOKEN_ID,
-};
+#[cfg(feature = "rbac")]
+pub use server::IdentityMappingRuleConfig;
+pub use server::{NamespaceDefaultConfig, ServerConfig, ServerUserToken, ANONYMOUS_USER_TOKEN_ID};

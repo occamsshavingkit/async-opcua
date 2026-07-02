@@ -113,7 +113,7 @@ rejection) green; symbol-absence script green; workspace suite (default features
       block), `diagnostics/` module, `ServerDiagnostics` wiring `server.rs:31`,
       `info.rs:221`. [Cite: OPC 10000-5 §6.3 — Base Info Diagnostics is OPTIONAL at every
       2017 rung]
-- [ ] T014 [US1] Gate RBAC behind `rbac` with the R6 stub: `rbac/` module,
+- [X] T014 [US1] Gate RBAC behind `rbac` with the R6 stub: `rbac/` module,
       `builder.rs:10,418`, `server.rs:340,466`, `RoleResolver` on `info.rs:188` replaced
       under `cfg(not)` by an always-empty-roles unit resolver;
       `enforce_role_based_access` config rejected at validation when feature off.

@@ -19,7 +19,9 @@ use argon2::{
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use tracing::{trace, warn};
 
-use crate::{constants, rbac::rules::IdentityMappingRule};
+use crate::constants;
+#[cfg(feature = "rbac")]
+use crate::rbac::rules::IdentityMappingRule;
 use opcua_core::{comms::url::url_matches_except_host, config::Config};
 use opcua_crypto::{CertificateStore, SecurityPolicy, Thumbprint};
 use opcua_types::{
@@ -283,6 +285,7 @@ pub struct NamespaceDefaultConfig {
 }
 
 /// Configured identity-to-role mapping applied to the server role resolver at startup.
+#[cfg(feature = "rbac")]
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Clone)]
 pub struct IdentityMappingRuleConfig {
     /// Role NodeId granted when `rule` matches an activated session identity.
@@ -295,6 +298,7 @@ pub struct IdentityMappingRuleConfig {
     pub rule: IdentityMappingRule,
 }
 
+#[cfg(feature = "rbac")]
 impl IdentityMappingRuleConfig {
     /// Creates a configured identity-to-role mapping.
     pub fn new(role_node_id: NodeId, rule: IdentityMappingRule) -> Self {
@@ -313,6 +317,7 @@ fn is_argon2id_password_hash(password_hash: &str) -> bool {
     password_hash.starts_with("$argon2id$") && PasswordHash::new(password_hash).is_ok()
 }
 
+#[cfg(feature = "rbac")]
 fn serialize_node_id<S>(node_id: &NodeId, serializer: S) -> Result<S::Ok, S::Error>
 where
     S: Serializer,
@@ -320,6 +325,7 @@ where
     node_id.to_string().serialize(serializer)
 }
 
+#[cfg(feature = "rbac")]
 fn deserialize_node_id<'de, D>(deserializer: D) -> Result<NodeId, D::Error>
 where
     D: Deserializer<'de>,
@@ -538,6 +544,7 @@ pub struct ServerConfig {
     /// User tokens
     pub user_tokens: BTreeMap<String, ServerUserToken>,
     /// Additional identity-to-role mappings applied at startup.
+    #[cfg(feature = "rbac")]
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub identity_mapping_rules: Vec<IdentityMappingRuleConfig>,
     /// discovery endpoint url which may or may not be the same as the service endpoints below.
@@ -693,6 +700,13 @@ impl Config for ServerConfig {
                 ))
             }
         }
+        #[cfg(not(feature = "rbac"))]
+        if self.limits.enforce_role_based_access {
+            errors.push(
+                "Server configuration is invalid. enforce_role_based_access requires the rbac feature"
+                    .to_owned(),
+            );
+        }
         if self.limits.max_array_length == 0 {
             errors.push("Server configuration is invalid. Max array length is invalid".to_owned());
         }
@@ -786,6 +800,7 @@ impl Default for ServerConfig {
             max_connections_per_ip: defaults::max_connections_per_ip(),
             limits: Limits::default(),
             user_tokens: BTreeMap::new(),
+            #[cfg(feature = "rbac")]
             identity_mapping_rules: Vec::new(),
             locale_ids: vec!["en".to_string()],
             discovery_urls: Vec::new(),

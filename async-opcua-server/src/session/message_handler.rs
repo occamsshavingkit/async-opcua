@@ -242,6 +242,7 @@ impl MessageHandler {
 
     /// The subscription cache used to dispatch server events (e.g. audit events).
     #[cfg(feature = "subscriptions")]
+    #[cfg_attr(not(feature = "events"), allow(dead_code))]
     pub(crate) fn subscriptions(&self) -> &Arc<SubscriptionCache> {
         &self.subscriptions
     }
@@ -436,7 +437,7 @@ impl MessageHandler {
                 // there is nothing outstanding to cancel; respond Good with cancelCount = 0.
                 let session_id = Some(data.session.read().session_id().clone());
                 audit::dispatch_cancel(
-                    #[cfg(feature = "subscriptions")]
+                    #[cfg(feature = "events")]
                     &self.subscriptions,
                     &self.info,
                     &request.request_header,
@@ -828,14 +829,14 @@ impl MessageHandler {
 
     fn write(&self, request: Box<WriteRequest>, data: RequestData) -> HandleMessageResult {
         let info = self.info.clone();
-        #[cfg(feature = "subscriptions")]
+        #[cfg(feature = "events")]
         let subscriptions = self.subscriptions.clone();
         HandleMessageResult::AsyncMessage(tokio::task::spawn(async move {
             Self::write_via_actor(
                 request,
                 data,
                 info,
-                #[cfg(feature = "subscriptions")]
+                #[cfg(feature = "events")]
                 subscriptions,
             )
             .await
@@ -847,7 +848,7 @@ impl MessageHandler {
         request: Box<WriteRequest>,
         data: RequestData,
         info: Arc<ServerInfo>,
-        #[cfg(feature = "subscriptions")]
+        #[cfg(feature = "events")]
         subscriptions: Arc<SubscriptionCache>,
     ) -> Response {
         let request = *request;
@@ -907,7 +908,7 @@ impl MessageHandler {
         };
         for (target, status) in write_targets.iter().zip(&results) {
             audit::dispatch_write_audit(
-                #[cfg(feature = "subscriptions")]
+                #[cfg(feature = "events")]
                 &subscriptions,
                 &info,
                 &audit_context,

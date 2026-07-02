@@ -132,7 +132,7 @@ pub(crate) mod decision {
 
     /// Returns whether a session may receive Events from an event source.
     #[must_use]
-    #[cfg_attr(not(feature = "subscriptions"), allow(dead_code))]
+    #[cfg_attr(not(feature = "events"), allow(dead_code))]
     pub(crate) fn event_receive_allowed_with_enforcement(
         _user_roles: &[NodeId],
         _source_role_permissions: Option<&[RolePermissionType]>,

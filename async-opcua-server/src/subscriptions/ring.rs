@@ -1,3 +1,4 @@
+#[cfg(feature = "events")]
 use opcua_nodes::Event;
 use opcua_types::DataValue;
 
@@ -14,10 +15,12 @@ pub(crate) enum NotificationWorkItem {
         low: f64,
         high: f64,
     },
+    #[cfg(feature = "events")]
     Event {
         handle: MonitoredItemHandle,
         event: Box<dyn Event + Send>,
     },
+    #[cfg(feature = "events")]
     Refresh {
         subscription_id: u32,
         monitored_item: Option<MonitoredItemHandle>,

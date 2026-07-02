@@ -35,7 +35,7 @@ use crate::{
     address_space::{user_access_level, AccessLevel},
     session::continuation_points::ContinuationPoint,
 };
-#[cfg(any(feature = "history", feature = "subscriptions"))]
+#[cfg(any(feature = "history", feature = "events"))]
 use crate::address_space::EventNotifier;
 #[cfg(feature = "subscriptions")]
 use crate::address_space::read_node_value;
@@ -1010,6 +1010,7 @@ impl<TImpl: InMemoryNodeManagerImpl> MonitoredItemProvider for InMemoryNodeManag
         items: &mut [&mut CreateMonitoredItem],
     ) -> Result<(), StatusCode> {
         let mut value_items = Vec::new();
+        #[cfg(feature = "events")]
         let mut event_items = Vec::new();
 
         {
@@ -1045,6 +1046,7 @@ impl<TImpl: InMemoryNodeManagerImpl> MonitoredItemProvider for InMemoryNodeManag
 
                 // Event monitored items are global, so all we need to do is to validate that the
                 // node allows subscribing to events.
+                #[cfg(feature = "events")]
                 if node.item_to_monitor().attribute_id == AttributeId::EventNotifier {
                     let Some(Variant::Byte(notifier)) = &read_result.value else {
                         node.set_status(StatusCode::BadAttributeIdInvalid);
@@ -1059,6 +1061,12 @@ impl<TImpl: InMemoryNodeManagerImpl> MonitoredItemProvider for InMemoryNodeManag
                     // No further action beyond just validation.
                     node.set_status(StatusCode::Good);
                     event_items.push(node);
+                    continue;
+                }
+
+                #[cfg(not(feature = "events"))]
+                if node.item_to_monitor().attribute_id == AttributeId::EventNotifier {
+                    node.set_status(StatusCode::BadMonitoredItemFilterUnsupported);
                     continue;
                 }
 
@@ -1078,6 +1086,7 @@ impl<TImpl: InMemoryNodeManagerImpl> MonitoredItemProvider for InMemoryNodeManag
                 .await;
         }
 
+        #[cfg(feature = "events")]
         if !event_items.is_empty() {
             self.inner
                 .create_event_monitored_items(context, &self.address_space, &mut event_items)
@@ -1095,10 +1104,9 @@ impl<TImpl: InMemoryNodeManagerImpl> MonitoredItemProvider for InMemoryNodeManag
         let items: Vec<_> = items
             .iter()
             .filter(|it| {
-                matches!(
-                    it.attribute(),
-                    AttributeId::Value | AttributeId::EventNotifier
-                )
+                it.attribute() == AttributeId::Value
+                    || (cfg!(feature = "events")
+                        && it.attribute() == AttributeId::EventNotifier)
             })
             .copied()
             .collect();
@@ -1114,10 +1122,9 @@ impl<TImpl: InMemoryNodeManagerImpl> MonitoredItemProvider for InMemoryNodeManag
         let items: Vec<_> = items
             .iter()
             .filter(|it| {
-                matches!(
-                    it.attribute(),
-                    AttributeId::Value | AttributeId::EventNotifier
-                )
+                it.attribute() == AttributeId::Value
+                    || (cfg!(feature = "events")
+                        && it.attribute() == AttributeId::EventNotifier)
             })
             .copied()
             .collect();
@@ -1128,10 +1135,9 @@ impl<TImpl: InMemoryNodeManagerImpl> MonitoredItemProvider for InMemoryNodeManag
         let items: Vec<_> = items
             .iter()
             .filter(|it| {
-                matches!(
-                    it.attribute(),
-                    AttributeId::Value | AttributeId::EventNotifier
-                )
+                it.attribute() == AttributeId::Value
+                    || (cfg!(feature = "events")
+                        && it.attribute() == AttributeId::EventNotifier)
             })
             .copied()
             .collect();

@@ -17,28 +17,31 @@ use super::{
 };
 use crossbeam_queue::ArrayQueue;
 use hashbrown::HashMap;
-use opcua_nodes::{Event, TypeTree};
+#[cfg(feature = "events")]
+use opcua_nodes::Event;
+use opcua_nodes::TypeTree;
 
 use crate::{
     info::ServerInfo,
     node_manager::{
-        consume_results, MonitoredItemRef, MonitoredItemUpdateRef, NodeManagersRef,
-        TypeTreeForUserStatic,
+        consume_results, MonitoredItemRef, MonitoredItemUpdateRef, TypeTreeForUserStatic,
     },
-    rbac,
     session::instance::Session,
     SubscriptionLimits,
 };
+#[cfg(feature = "events")]
+use crate::{node_manager::NodeManagersRef, rbac};
 use opcua_core::{sync::RwLock, PublishResponseShared, RepublishResponseShared};
 use opcua_types::{
     AttributeId, CreateSubscriptionRequest, CreateSubscriptionResponse, DataValue, DateTime,
     DateTimeUtc, DiagnosticBits, DiagnosticInfo, ExtensionObject, ModifySubscriptionRequest,
     ModifySubscriptionResponse, MonitoredItemCreateResult, MonitoredItemModifyRequest,
-    MonitoredItemModifyResult, MonitoringMode, NodeId, NotificationMessage, ObjectTypeId,
-    PublishRequest, QualifiedName, RepublishRequest, ResponseHeader, RolePermissionType,
-    ServiceFault, SetPublishingModeRequest, SetPublishingModeResponse, StatusCode,
-    TimestampsToReturn, Variant,
+    MonitoredItemModifyResult, MonitoringMode, NodeId, NotificationMessage, PublishRequest,
+    RepublishRequest, ResponseHeader, ServiceFault, SetPublishingModeRequest,
+    SetPublishingModeResponse, StatusCode, TimestampsToReturn,
 };
+#[cfg(feature = "events")]
+use opcua_types::{ObjectTypeId, QualifiedName, RolePermissionType, Variant};
 
 pub(super) struct RemovedSubscription {
     pub(super) id: u32,
@@ -62,6 +65,7 @@ fn publish_ack_diagnostics(
     consume_results(pairs, bits)
 }
 
+#[cfg(feature = "events")]
 pub(super) struct PendingRefreshDrain {
     subscription_id: u32,
     monitored_item: Option<MonitoredItemHandle>,
@@ -69,6 +73,7 @@ pub(super) struct PendingRefreshDrain {
     next_event: usize,
 }
 
+#[cfg(feature = "events")]
 impl PendingRefreshDrain {
     fn new(
         subscription_id: u32,
@@ -120,8 +125,10 @@ pub struct SessionSubscriptions {
     /// Static reference to the type-tree for the user owning this.
     type_tree_for_user: Arc<dyn TypeTreeForUserStatic>,
     /// Weak reference to server node managers, used for delivery-time event-source metadata lookup.
+    #[cfg(feature = "events")]
     node_managers: NodeManagersRef,
     /// Whether unconfigured RolePermissions fail closed for this session's event delivery.
+    #[cfg(feature = "events")]
     enforce_role_based_access: bool,
 }
 
@@ -131,7 +138,9 @@ impl SessionSubscriptions {
         user_token: PersistentSessionKey,
         session: Arc<RwLock<Session>>,
         type_tree_for_user: Arc<dyn TypeTreeForUserStatic>,
+        #[cfg(feature = "events")]
         node_managers: NodeManagersRef,
+        #[cfg(feature = "events")]
         enforce_role_based_access: bool,
     ) -> Self {
         Self {
@@ -145,7 +154,9 @@ impl SessionSubscriptions {
             limits,
             session,
             type_tree_for_user,
+            #[cfg(feature = "events")]
             node_managers,
+            #[cfg(feature = "events")]
             enforce_role_based_access,
         }
     }
@@ -1150,6 +1161,7 @@ impl SessionSubscriptions {
             .available_sequence_numbers(subscription_id)
     }
 
+    #[cfg(feature = "events")]
     pub(super) fn drain_ring_chunk(
         &mut self,
         ring: &ArrayQueue<NotificationWorkItem>,
@@ -1221,6 +1233,30 @@ impl SessionSubscriptions {
         processed
     }
 
+    #[cfg(not(feature = "events"))]
+    pub(super) fn drain_ring_chunk(&mut self, ring: &ArrayQueue<NotificationWorkItem>) -> usize {
+        let mut processed = 0;
+        let now = DateTime::now();
+        while let Some(item) = ring.pop() {
+            match item {
+                NotificationWorkItem::Data { handle, value } => {
+                    if let Some(sub) = self.subscriptions.get_mut(&handle.subscription_id) {
+                        sub.notify_data_value(&handle.monitored_item_id, value, &now);
+                    }
+                }
+                NotificationWorkItem::RangeChanged { handle, low, high } => {
+                    if let Some(sub) = self.subscriptions.get_mut(&handle.subscription_id) {
+                        sub.notify_eu_range_changed(&handle.monitored_item_id, low, high);
+                    }
+                }
+            }
+            processed += 1;
+        }
+
+        processed
+    }
+
+    #[cfg(feature = "events")]
     fn drain_pending_refresh(
         &mut self,
         type_tree: &dyn TypeTree,
@@ -1255,6 +1291,7 @@ impl SessionSubscriptions {
         deliver_count
     }
 
+    #[cfg(feature = "events")]
     fn event_receive_allowed(&self, event: &dyn Event) -> bool {
         let Some(source_node_id) = event_source_node(event) else {
             return true;
@@ -1270,6 +1307,7 @@ impl SessionSubscriptions {
         )
     }
 
+    #[cfg(feature = "events")]
     fn source_role_permissions(&self, source_node_id: &NodeId) -> Option<Vec<RolePermissionType>> {
         self.node_managers
             .iter()
@@ -1295,6 +1333,7 @@ impl SessionSubscriptions {
     }
 }
 
+#[cfg(feature = "events")]
 fn event_source_node(event: &dyn Event) -> Option<NodeId> {
     let source = event.get_field(
         &NodeId::from(ObjectTypeId::BaseEventType),

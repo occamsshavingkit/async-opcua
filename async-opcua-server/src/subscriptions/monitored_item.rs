@@ -1,31 +1,37 @@
 use std::collections::{BTreeSet, VecDeque};
 
 use chrono::TimeDelta;
+#[cfg(feature = "events")]
 use opcua_crypto::random;
-use opcua_nodes::{BaseEventType, Event, TypeTree};
+#[cfg(feature = "events")]
+use opcua_nodes::{BaseEventType, Event};
+use opcua_nodes::TypeTree;
 use tracing::{error, trace, warn};
 
 use super::MonitoredItemHandle;
-use crate::{
-    info::ServerInfo,
-    node_manager::ParsedReadValueId,
-    services::subscription::filter::ParsedEventFilter,
-};
+use crate::{info::ServerInfo, node_manager::ParsedReadValueId};
+#[cfg(feature = "events")]
+use crate::services::subscription::filter::ParsedEventFilter;
 #[cfg(feature = "history-aggregates")]
 use crate::aggregates::{dispatch_aggregate, supported_aggregates, AggregateInput};
 #[cfg(feature = "history-aggregates")]
 use opcua_types::AggregateConfiguration;
 use opcua_types::{
     match_extension_object_owned, AggregateFilter, AggregateFilterResult, DataChangeFilter,
-    DataValue, DateTime, DiagnosticBits, DiagnosticInfo, EventFieldList, EventFilter,
+    DataValue, DateTime, DiagnosticBits, DiagnosticInfo, EventFilter,
     ExtensionObject, MonitoredItemCreateRequest, MonitoredItemModifyRequest,
-    MonitoredItemNotification, MonitoringMode, NodeId, NumericRange, ObjectTypeId,
-    ParsedDataChangeFilter, StatusCode, TimestampsToReturn, Variant,
+    MonitoredItemNotification, MonitoringMode, NodeId, NumericRange, ParsedDataChangeFilter,
+    StatusCode, TimestampsToReturn, Variant,
 };
+#[cfg(feature = "events")]
+use opcua_types::{EventFieldList, ObjectTypeId};
+#[cfg(not(feature = "events"))]
+use opcua_types::EventFilterResult;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum Notification {
     MonitoredItemNotification(MonitoredItemNotification),
+    #[cfg(feature = "events")]
     Event(EventFieldList),
 }
 
@@ -35,6 +41,7 @@ impl From<MonitoredItemNotification> for Notification {
     }
 }
 
+#[cfg(feature = "events")]
 impl From<EventFieldList> for Notification {
     fn from(v: EventFieldList) -> Self {
         Notification::Event(v)
@@ -65,6 +72,7 @@ fn parse_sampling_interval(int: f64) -> SamplingInterval {
 pub enum FilterType {
     None,
     DataChangeFilter(ParsedDataChangeFilter),
+    #[cfg(feature = "events")]
     EventFilter(ParsedEventFilter),
     #[cfg(feature = "history-aggregates")]
     AggregateFilter(ParsedAggregateFilter),
@@ -128,6 +136,8 @@ impl FilterType {
                 (None, res.map(FilterType::DataChangeFilter))
             },
             v: EventFilter => {
+                #[cfg(feature = "events")]
+                {
                 let (mut res, filter_res) = ParsedEventFilter::parse(v, type_tree);
                 if !diagnostic_bits.is_empty() {
                     if let Some(select_clause_results) = &res.select_clause_results {
@@ -139,6 +149,22 @@ impl FilterType {
                     Some(ExtensionObject::from_message(res)),
                     filter_res.map(FilterType::EventFilter),
                 )
+                }
+                #[cfg(not(feature = "events"))]
+                {
+                    let _ = type_tree;
+                    let mut res = unsupported_event_filter_result(v);
+                    if !diagnostic_bits.is_empty() {
+                        if let Some(select_clause_results) = &res.select_clause_results {
+                            res.select_clause_diagnostic_infos =
+                                Some(vec![DiagnosticInfo::default(); select_clause_results.len()]);
+                        }
+                    }
+                    (
+                        Some(ExtensionObject::from_message(res)),
+                        Err(StatusCode::BadMonitoredItemFilterUnsupported),
+                    )
+                }
             },
             v: AggregateFilter => {
                 #[cfg(feature = "history-aggregates")]
@@ -174,6 +200,20 @@ impl FilterType {
                 (None, Err(StatusCode::BadFilterNotAllowed))
             }
         )
+    }
+}
+
+#[cfg(not(feature = "events"))]
+fn unsupported_event_filter_result(filter: EventFilter) -> EventFilterResult {
+    EventFilterResult {
+        select_clause_results: filter.select_clauses.map(|clauses| {
+            clauses
+                .into_iter()
+                .map(|_| StatusCode::BadMonitoredItemFilterUnsupported)
+                .collect()
+        }),
+        select_clause_diagnostic_infos: None,
+        where_clause_result: Default::default(),
     }
 }
 
@@ -419,6 +459,7 @@ pub struct MonitoredItem {
     /// Pending EventQueueOverflowEventType indicator (Part 4 §5.13.2): set when the
     /// first event is discarded due to a full queue. Kept outside `notification_queue`
     /// (it is an extra entry, never itself discarded) and delivered by `pop_notification`.
+    #[cfg(feature = "events")]
     overflow_event: Option<EventFieldList>,
     timestamps_to_return: TimestampsToReturn,
     last_data_value: Option<DataValue>,
@@ -475,6 +516,7 @@ impl MonitoredItem {
             sample_skipped_before_semantics_changed: false,
             queue_size: request.queue_size,
             notification_queue: VecDeque::new(),
+            #[cfg(feature = "events")]
             overflow_event: None,
             any_new_notification: false,
             eu_range: request.eu_range,
@@ -519,6 +561,7 @@ impl MonitoredItem {
     }
 
     #[allow(dead_code)]
+    #[cfg(feature = "events")]
     pub(crate) fn is_event_item(&self) -> bool {
         matches!(self.filter, FilterType::EventFilter(_))
     }
@@ -844,6 +887,7 @@ impl MonitoredItem {
                     self.filter_by_sampling_interval(last_dv, &value, from_subscription_tick),
                 ),
                 (None, _) => (true, true),
+                #[cfg(any(feature = "events", feature = "history-aggregates"))]
                 _ => (false, false),
             };
 
@@ -910,7 +954,10 @@ impl MonitoredItem {
         if let FilterType::DataChangeFilter(filter) = &mut self.filter {
             filter.update_eu_range(low, high);
         }
+        #[cfg(feature = "events")]
         let event_or_aggregate = matches!(self.filter, FilterType::EventFilter(_));
+        #[cfg(not(feature = "events"))]
+        let event_or_aggregate = false;
         #[cfg(feature = "history-aggregates")]
         let event_or_aggregate =
             event_or_aggregate || matches!(self.filter, FilterType::AggregateFilter(_));
@@ -928,6 +975,7 @@ impl MonitoredItem {
         );
     }
 
+    #[cfg(feature = "events")]
     pub(super) fn notify_event(&mut self, event: &dyn Event, type_tree: &dyn TypeTree) -> bool {
         if self.monitoring_mode == MonitoringMode::Disabled {
             return false;
@@ -1001,7 +1049,13 @@ impl MonitoredItem {
                 .is_some_and(|n| Self::notification_semantics_changed(&n));
             let mut notification = notification;
             if set_bit {
+                #[cfg(feature = "events")]
                 if let Notification::MonitoredItemNotification(n) = &mut notification {
+                    n.value.status = Some(n.value.status().set_overflow(true));
+                }
+                #[cfg(not(feature = "events"))]
+                {
+                    let Notification::MonitoredItemNotification(n) = &mut notification;
                     n.value.status = Some(n.value.status().set_overflow(true));
                 }
             }
@@ -1017,6 +1071,7 @@ impl MonitoredItem {
     fn notification_semantics_changed(notification: &Notification) -> bool {
         match notification {
             Notification::MonitoredItemNotification(n) => n.value.status().semantics_changed(),
+            #[cfg(feature = "events")]
             Notification::Event(_) => false,
         }
     }
@@ -1027,6 +1082,7 @@ impl MonitoredItem {
                 n.value.status = Some(n.value.status().set_semantics_changed(true));
                 true
             }
+            #[cfg(feature = "events")]
             Notification::Event(_) => false,
         }
     }
@@ -1078,13 +1134,21 @@ impl MonitoredItem {
     pub(super) fn pop_notification(&mut self) -> Option<Notification> {
         // The overflow indicator (Part 4 §5.13.2) sits at the front of the queue when
         // discardOldest is TRUE, otherwise at the end.
+        #[cfg(feature = "events")]
         if self.overflow_event.is_some() && self.discard_oldest {
             return self.overflow_event.take().map(Notification::Event);
         }
         if let Some(notif) = self.notification_queue.pop_front() {
             return Some(notif);
         }
-        self.overflow_event.take().map(Notification::Event)
+        #[cfg(feature = "events")]
+        {
+            self.overflow_event.take().map(Notification::Event)
+        }
+        #[cfg(not(feature = "events"))]
+        {
+            None
+        }
     }
 
     /// Adds or removes other monitored items which will be triggered when this monitored item changes
@@ -1122,7 +1186,17 @@ impl MonitoredItem {
 
     /// Whether this monitored item has enqueued notifications.
     pub fn has_notifications(&self) -> bool {
-        !self.notification_queue.is_empty() || self.overflow_event.is_some()
+        !self.notification_queue.is_empty()
+            || {
+                #[cfg(feature = "events")]
+                {
+                    self.overflow_event.is_some()
+                }
+                #[cfg(not(feature = "events"))]
+                {
+                    false
+                }
+            }
     }
 
     /// Monitored item ID.
@@ -1247,6 +1321,7 @@ pub(super) mod tests {
             discard_oldest,
             queue_size: 10,
             notification_queue: Default::default(),
+            #[cfg(feature = "events")]
             overflow_event: None,
             timestamps_to_return: opcua_types::TimestampsToReturn::Both,
             last_data_value: None,

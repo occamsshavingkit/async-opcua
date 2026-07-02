@@ -36,6 +36,7 @@ pub mod memory;
 mod method;
 #[cfg(feature = "method-call")]
 mod method_typed;
+#[cfg(feature = "events")]
 mod model_change;
 mod namespace_metadata;
 #[cfg(feature = "subscriptions")]
@@ -64,7 +65,6 @@ pub use {
         RequestContext, RequestContextInner, TypeTreeForUser, TypeTreeForUserStatic,
         TypeTreeReadContext,
     },
-    model_change::GeneralModelChangeEvent,
     namespace_metadata::NamespaceMetadata,
     utils::*,
     view::{
@@ -72,6 +72,8 @@ pub use {
         ExternalReference, ExternalReferenceRequest, NodeMetadata, RegisterNodeItem,
     },
 };
+#[cfg(feature = "events")]
+pub use model_change::GeneralModelChangeEvent;
 #[cfg(feature = "history")]
 pub use history::{HistoryNode, HistoryResult, HistoryUpdateDetails, HistoryUpdateNode};
 #[cfg(feature = "method-call")]

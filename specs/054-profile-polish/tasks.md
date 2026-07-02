@@ -133,7 +133,7 @@ rejection) green; symbol-absence script green; workspace suite (default features
 - [X] T019 [US1] Gate alarms behind `alarms`: `alarms/` module decl, refs in
       `namespace/init.rs:5` and `node_manager/memory/simple.rs:13`, event dispatch
       touchpoints `alarms/dispatch.rs:110-114`, `alarms/methods.rs`. [Cite: OPC 10000-9]
-- [ ] T020 [US1] Gate the event engine behind `events`:
+- [X] T020 [US1] Gate the event engine behind `events`:
       `session/services/subscription/{filter,where_clause,select}.rs`,
       `subscriptions/mod.rs:1205,1213` notify paths, `subscriptions/notify.rs`; event
       monitored items rejected `BadMonitoredItemFilterUnsupported` when off.

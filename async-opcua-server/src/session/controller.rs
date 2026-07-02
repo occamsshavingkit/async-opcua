@@ -435,7 +435,7 @@ impl<T: ConnectionTransport> SessionController<T> {
         }
 
         dispatch_suppressed_certificate_audit_success(
-            #[cfg(feature = "subscriptions")]
+            #[cfg(feature = "events")]
             &self.subscriptions,
             &self.info,
             &request.request_header,
@@ -500,7 +500,7 @@ impl<T: ConnectionTransport> SessionController<T> {
                     _ => opcua_types::ByteString::null(),
                 };
                 dispatch_open_secure_channel(
-                    #[cfg(feature = "subscriptions")]
+                    #[cfg(feature = "events")]
                     &self.subscriptions,
                     &self.info,
                     &r.request_header,
@@ -581,7 +581,7 @@ impl<T: ConnectionTransport> SessionController<T> {
                     Err(status) => (None, None, *status),
                 };
                 dispatch_create_session(
-                    #[cfg(feature = "subscriptions")]
+                    #[cfg(feature = "events")]
                     &self.subscriptions,
                     &self.info,
                     &request,
@@ -594,7 +594,7 @@ impl<T: ConnectionTransport> SessionController<T> {
                 // AuditCertificateEventType subtype (no-op for non-certificate failures).
                 if status.is_bad() {
                     dispatch_certificate_audit(
-                        #[cfg(feature = "subscriptions")]
+                        #[cfg(feature = "events")]
                         &self.subscriptions,
                         &self.info,
                         &request.request_header,
@@ -631,7 +631,7 @@ impl<T: ConnectionTransport> SessionController<T> {
                 let session_id =
                     self.session_id_for_token(&request.request_header.authentication_token);
                 dispatch_activate_session(
-                    #[cfg(feature = "subscriptions")]
+                    #[cfg(feature = "events")]
                     &self.subscriptions,
                     &self.info,
                     &request,
@@ -888,7 +888,7 @@ impl<T: ConnectionTransport> SessionController<T> {
                         self.info.diagnostics.inc_security_rejected_requests();
                         }
                         dispatch_service_failure(
-                            #[cfg(feature = "subscriptions")]
+                            #[cfg(feature = "events")]
                             &self.subscriptions,
                             &self.info,
                             &unauthenticated_audit_context,
@@ -934,7 +934,7 @@ impl<T: ConnectionTransport> SessionController<T> {
                     super::message_handler::HandleMessageResult::AsyncMessage(mut handle) => {
                         let audit_context = audit_context.clone();
                         let info = self.info.clone();
-                        #[cfg(feature = "subscriptions")]
+                        #[cfg(feature = "events")]
                         let subscriptions = self.subscriptions.clone();
                         self.pending_messages
                             .push(Box::pin(async move {
@@ -966,7 +966,7 @@ impl<T: ConnectionTransport> SessionController<T> {
                                 if let Ok(response) = &mut response {
                                     response.message.apply_return_diagnostics(return_diagnostics);
                                     dispatch_response_failure(
-                                        #[cfg(feature = "subscriptions")]
+                                        #[cfg(feature = "events")]
                                         &subscriptions,
                                         &info,
                                         &audit_context,
@@ -985,7 +985,7 @@ impl<T: ConnectionTransport> SessionController<T> {
                         );
                         self.response_metrics(&s);
                         dispatch_response_failure(
-                            #[cfg(feature = "subscriptions")]
+                            #[cfg(feature = "events")]
                             &self.subscriptions,
                             &self.info,
                             &audit_context,
@@ -1210,7 +1210,7 @@ impl<T: ConnectionTransport> SessionController<T> {
                     let validation_status = e.status();
                     error!("OpenSecureChannel rejected: client certificate failed validation: {e}");
                     dispatch_open_secure_channel_certificate_audit(
-                        #[cfg(feature = "subscriptions")]
+                        #[cfg(feature = "events")]
                         &self.subscriptions,
                         &self.info,
                         &request.request_header,

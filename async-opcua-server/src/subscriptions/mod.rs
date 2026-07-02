@@ -13,6 +13,7 @@ use std::{cell::RefCell, hash::Hash, sync::Arc, time::Instant};
 use hashbrown::{Equivalent, HashMap, HashSet};
 pub use monitored_item::{CreateMonitoredItem, MonitoredItem};
 use opcua_core::{trace_read_lock, trace_write_lock, RepublishResponseShared, ResponseMessage};
+#[cfg(feature = "events")]
 use opcua_nodes::Event;
 use ring::NotificationWorkItem;
 use session_subscriptions::RemovedSubscription;
@@ -23,6 +24,7 @@ use tracing::error;
 
 use actor::SubscriptionActorHandle;
 use notify::{NotificationRouteBatch, NotificationRouteSnapshot};
+#[cfg(feature = "events")]
 pub use notify::{SubscriptionEventNotifier, SubscriptionEventNotifierBatch};
 
 use opcua_core::sync::{Mutex, RwLock};
@@ -83,6 +85,7 @@ impl<T: IdentifierRef> Equivalent<MonitoredItemKey> for MonitoredItemKeyRef<T> {
 }
 
 const NOTIFICATION_RING_CAPACITY: usize = 8192;
+#[cfg(feature = "events")]
 const RING_DRAIN_EVENT_CHUNK: usize = 128;
 const RING_DRAIN_BUDGET: usize = 4096;
 
@@ -100,7 +103,9 @@ impl SessionEntry {
         key: PersistentSessionKey,
         session: Arc<RwLock<Session>>,
         type_tree: Arc<dyn TypeTreeForUserStatic>,
+        #[cfg(feature = "events")]
         node_managers: NodeManagersRef,
+        #[cfg(feature = "events")]
         enforce_role_based_access: bool,
         cleanup_tx: mpsc::UnboundedSender<SubscriptionCleanup>,
     ) -> Self {
@@ -109,7 +114,9 @@ impl SessionEntry {
             key,
             session,
             Arc::clone(&type_tree),
+            #[cfg(feature = "events")]
             node_managers,
+            #[cfg(feature = "events")]
             enforce_role_based_access,
         );
         Self {
@@ -159,6 +166,7 @@ struct SubscriptionCacheInner {
 /// manipulating subscriptions.
 pub struct SubscriptionCache {
     inner: RwLock<SubscriptionCacheInner>,
+    #[cfg(feature = "events")]
     node_managers: NodeManagersRef,
     /// Configured limits on subscriptions.
     limits: SubscriptionLimits,
@@ -467,6 +475,7 @@ impl SubscriptionCache {
 
     pub(crate) fn new_with_node_managers(
         limits: SubscriptionLimits,
+        #[cfg_attr(not(feature = "events"), allow(unused_variables))]
         node_managers: NodeManagersRef,
     ) -> Self {
         let (cleanup_tx, cleanup_rx) = mpsc::unbounded_channel();
@@ -477,6 +486,7 @@ impl SubscriptionCache {
                 monitored_items: HashMap::new(),
                 eu_range_monitored_items: HashMap::new(),
             }),
+            #[cfg(feature = "events")]
             node_managers,
             limits,
             cleanup_tx,
@@ -859,7 +869,9 @@ impl SubscriptionCache {
                         Self::get_key(&context.session),
                         context.session.clone(),
                         context.info.type_tree_getter.get_type_tree_static(context),
+                        #[cfg(feature = "events")]
                         self.node_managers.clone(),
+                        #[cfg(feature = "events")]
                         context.enforce_role_based_access(),
                         cleanup_tx,
                     )
@@ -903,7 +915,9 @@ impl SubscriptionCache {
                     key,
                     context.session.clone(),
                     context.info.type_tree_getter.get_type_tree_static(context),
+                    #[cfg(feature = "events")]
                     self.node_managers.clone(),
+                    #[cfg(feature = "events")]
                     context.enforce_role_based_access(),
                     cleanup_tx,
                 )
@@ -1073,6 +1087,7 @@ impl SubscriptionCache {
     ///     notifier.notify(emitter_id, evt);
     /// }
     /// ```
+    #[cfg(feature = "events")]
     pub fn event_notifier<'b>(&self) -> SubscriptionEventNotifier<'_, 'b> {
         SubscriptionEventNotifier::new(trace_read_lock!(self.inner))
     }
@@ -1209,6 +1224,7 @@ impl SubscriptionCache {
 
     /// Notify listening clients to events. Without a custom node manager implementing
     /// event history, this is the only way to report events in the server.
+    #[cfg(feature = "events")]
     pub fn notify_events<'a>(&self, items: impl Iterator<Item = (&'a dyn Event, &'a NodeId)>) {
         let mut notif = self.event_notifier();
         for (evt, id) in items {
@@ -1217,6 +1233,7 @@ impl SubscriptionCache {
     }
 
     #[allow(dead_code)]
+    #[cfg(feature = "events")]
     pub(crate) fn refresh_subscription_events(
         &self,
         session_id: u32,

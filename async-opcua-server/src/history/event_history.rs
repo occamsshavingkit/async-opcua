@@ -4,17 +4,18 @@ use std::collections::{hash_map::Entry, HashMap, VecDeque};
 
 use async_trait::async_trait;
 use opcua_core::{events::AlarmEvent, sync::RwLock};
+#[cfg(feature = "events")]
 use opcua_nodes::{DefaultTypeTree, Event, EventField};
 use opcua_types::{
-    AttributeId, ByteString, DataValue, DateTime, EventFilter, HistoryEventFieldList, NodeId,
-    NumericRange, ObjectTypeId, PerformUpdateType, QualifiedName, SimpleAttributeOperand,
-    StatusCode, UAString, Variant,
+    ByteString, DataValue, DateTime, EventFilter, HistoryEventFieldList, NodeId, ObjectTypeId,
+    PerformUpdateType, QualifiedName, SimpleAttributeOperand, StatusCode, Variant,
 };
+#[cfg(feature = "events")]
+use opcua_types::{AttributeId, NumericRange, UAString};
 
-use crate::{
-    history::{HistoryRawModifiedResult, HistoryStorageBackend},
-    services::subscription::filter::ParsedEventFilter,
-};
+use crate::history::{HistoryRawModifiedResult, HistoryStorageBackend};
+#[cfg(feature = "events")]
+use crate::services::subscription::filter::ParsedEventFilter;
 
 const DEFAULT_MAX_EVENTS_PER_NODE: usize = 1000;
 const EVENT_ID_FIELD_NAME: &str = "EventId";
@@ -73,6 +74,20 @@ impl HistoryStorageBackend for InMemoryEventHistory {
         filter: &EventFilter,
         _continuation_point: Option<Vec<u8>>,
     ) -> Result<(Vec<HistoryEventFieldList>, Option<Vec<u8>>), StatusCode> {
+        #[cfg(not(feature = "events"))]
+        {
+            let _ = (
+                node_id,
+                start_time,
+                end_time,
+                num_values_per_node,
+                filter,
+            );
+            return Err(StatusCode::BadHistoryOperationUnsupported);
+        }
+
+        #[cfg(feature = "events")]
+        {
         let type_tree = DefaultTypeTree::new();
         let (_, parsed) = ParsedEventFilter::parse(filter.clone(), &type_tree);
         let parsed = parsed?;
@@ -125,6 +140,7 @@ impl HistoryStorageBackend for InMemoryEventHistory {
         }
 
         Ok((field_lists, None))
+        }
     }
 
     async fn read_raw_modified(
@@ -240,10 +256,12 @@ impl HistoryStorageBackend for InMemoryEventHistory {
     }
 }
 
+#[cfg(feature = "events")]
 struct HistoryAlarmEvent<'a> {
     event: &'a AlarmEvent,
 }
 
+#[cfg(feature = "events")]
 impl Event for HistoryAlarmEvent<'_> {
     fn clone_box(&self) -> Box<dyn Event + Send> {
         Box::new(OwnedHistoryAlarmEvent {
@@ -270,6 +288,7 @@ impl Event for HistoryAlarmEvent<'_> {
     }
 }
 
+#[cfg(feature = "events")]
 impl EventField for HistoryAlarmEvent<'_> {
     fn get_value(
         &self,
@@ -281,10 +300,12 @@ impl EventField for HistoryAlarmEvent<'_> {
     }
 }
 
+#[cfg(feature = "events")]
 struct OwnedHistoryAlarmEvent {
     event: AlarmEvent,
 }
 
+#[cfg(feature = "events")]
 impl Event for OwnedHistoryAlarmEvent {
     fn clone_box(&self) -> Box<dyn Event + Send> {
         Box::new(Self {
@@ -311,6 +332,7 @@ impl Event for OwnedHistoryAlarmEvent {
     }
 }
 
+#[cfg(feature = "events")]
 impl EventField for OwnedHistoryAlarmEvent {
     fn get_value(
         &self,
@@ -322,6 +344,7 @@ impl EventField for OwnedHistoryAlarmEvent {
     }
 }
 
+#[cfg(feature = "events")]
 fn alarm_event_field(
     event: &AlarmEvent,
     attribute_id: AttributeId,
@@ -404,6 +427,7 @@ fn event_id_from_field_list(
     }
 }
 
+#[cfg(feature = "events")]
 fn has_event_read_capacity(limit: Option<usize>, len: usize) -> bool {
     match limit {
         Some(limit) => len < limit,
@@ -411,6 +435,7 @@ fn has_event_read_capacity(limit: Option<usize>, len: usize) -> bool {
     }
 }
 
+#[cfg(feature = "events")]
 fn event_time_in_range(event_time: DateTime, start_time: DateTime, end_time: DateTime) -> bool {
     let start_tick = start_time.ticks();
     let end_tick = end_time.ticks();
@@ -424,10 +449,12 @@ fn event_time_in_range(event_time: DateTime, start_time: DateTime, end_time: Dat
     event_time.ticks() >= end_tick && event_time.ticks() <= start_tick
 }
 
+#[cfg(feature = "events")]
 fn is_unbounded_start(ticks: i64) -> bool {
     ticks <= DateTime::null().ticks()
 }
 
+#[cfg(feature = "events")]
 fn is_unbounded_end(ticks: i64) -> bool {
     ticks == DateTime::null().ticks() || ticks == i64::MAX
 }

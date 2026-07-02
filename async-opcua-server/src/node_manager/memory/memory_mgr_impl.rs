@@ -24,7 +24,7 @@ use crate::{
 };
 #[cfg(feature = "method-call")]
 use crate::node_manager::MethodCall;
-#[cfg(all(feature = "node-management", feature = "subscriptions"))]
+#[cfg(all(feature = "node-management", feature = "events"))]
 use crate::node_manager::GeneralModelChangeEvent;
 #[cfg(feature = "subscriptions")]
 use crate::{
@@ -37,7 +37,7 @@ use opcua_nodes::{
     DataType, Method, NodeBase, Object, ObjectType, ReferenceType, TypeTree, Variable, VariableType,
     View,
 };
-#[cfg(all(feature = "node-management", feature = "subscriptions"))]
+#[cfg(all(feature = "node-management", feature = "events"))]
 use opcua_nodes::Event;
 #[cfg(feature = "node-management")]
 use opcua_types::{
@@ -50,7 +50,7 @@ use opcua_types::{
     ReadAnnotationDataDetails, ReadAtTimeDetails, ReadEventDetails, ReadProcessedDetails,
     ReadRawModifiedDetails,
 };
-#[cfg(all(feature = "node-management", feature = "subscriptions"))]
+#[cfg(all(feature = "node-management", feature = "events"))]
 use opcua_types::ObjectId;
 #[cfg(feature = "subscriptions")]
 use opcua_types::MonitoringMode;
@@ -123,7 +123,7 @@ fn model_change(affected: NodeId, verb: u8) -> ModelChangeStructureDataType {
     }
 }
 
-#[cfg(all(feature = "node-management", feature = "subscriptions"))]
+#[cfg(all(feature = "node-management", feature = "events"))]
 fn notify_model_changes(context: &RequestContext, changes: Vec<ModelChangeStructureDataType>) {
     if changes.is_empty() {
         return;
@@ -135,7 +135,7 @@ fn notify_model_changes(context: &RequestContext, changes: Vec<ModelChangeStruct
     context.subscriptions.notify_events(items);
 }
 
-#[cfg(all(feature = "node-management", not(feature = "subscriptions")))]
+#[cfg(all(feature = "node-management", not(feature = "events")))]
 fn notify_model_changes(_context: &RequestContext, _changes: Vec<ModelChangeStructureDataType>) {}
 
 #[cfg(feature = "node-management")]
@@ -1400,7 +1400,7 @@ pub trait InMemoryNodeManagerImpl: Send + Sync + 'static {
     /// Create monitored items for events.
     ///
     /// This does not need to do anything.
-    #[cfg(feature = "subscriptions")]
+    #[cfg(feature = "events")]
     async fn create_event_monitored_items(
         &self,
         context: &RequestContext,

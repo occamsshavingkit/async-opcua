@@ -1076,7 +1076,7 @@ pub(crate) async fn activate_session(
                     Some(session.session_id().clone())
                 };
                 audit::dispatch_user_certificate_audit(
-                    #[cfg(feature = "subscriptions")]
+                    #[cfg(feature = "events")]
                     handler.subscriptions(),
                     &info,
                     &request.request_header,
@@ -1096,7 +1096,7 @@ pub(crate) async fn activate_session(
             };
             for finding in &validation.suppressed_findings {
                 audit::dispatch_user_certificate_audit(
-                    #[cfg(feature = "subscriptions")]
+                    #[cfg(feature = "events")]
                     handler.subscriptions(),
                     &info,
                     &request.request_header,
@@ -1148,7 +1148,7 @@ pub(crate) async fn activate_session(
                 .map(|cert| cert.as_byte_string())
                 .unwrap_or_else(ByteString::null);
             audit::dispatch_certificate_mismatch(
-                #[cfg(feature = "subscriptions")]
+                #[cfg(feature = "events")]
                 handler.subscriptions(),
                 &info,
                 &request.request_header,

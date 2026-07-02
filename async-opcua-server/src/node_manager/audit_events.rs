@@ -6,7 +6,7 @@ use opcua_types::{
     ExpandedNodeId, ExtensionObject,
 };
 
-#[cfg(all(feature = "generated-address-space", feature = "subscriptions"))]
+#[cfg(all(feature = "generated-address-space", feature = "events"))]
 mod generated {
     use super::*;
     use crate::{identity_token::IdentityToken, ANONYMOUS_USER_TOKEN_ID};
@@ -202,29 +202,29 @@ fn add_node_attributes(attributes: &AddNodeAttributes) -> ExtensionObject {
     }
 }
 
-#[cfg(all(feature = "generated-address-space", feature = "subscriptions"))]
+#[cfg(all(feature = "generated-address-space", feature = "events"))]
 pub(crate) use generated::{
     notify_add_nodes, notify_add_references, notify_delete_nodes, notify_delete_references,
 };
 
-#[cfg(not(all(feature = "generated-address-space", feature = "subscriptions")))]
+#[cfg(not(all(feature = "generated-address-space", feature = "events")))]
 pub(crate) fn notify_add_nodes(_context: &RequestContext, _nodes_to_add: Vec<AddNodesItem>) {}
 
-#[cfg(not(all(feature = "generated-address-space", feature = "subscriptions")))]
+#[cfg(not(all(feature = "generated-address-space", feature = "events")))]
 pub(crate) fn notify_delete_nodes(
     _context: &RequestContext,
     _nodes_to_delete: Vec<DeleteNodesItem>,
 ) {
 }
 
-#[cfg(not(all(feature = "generated-address-space", feature = "subscriptions")))]
+#[cfg(not(all(feature = "generated-address-space", feature = "events")))]
 pub(crate) fn notify_add_references(
     _context: &RequestContext,
     _references_to_add: Vec<AddReferencesItem>,
 ) {
 }
 
-#[cfg(not(all(feature = "generated-address-space", feature = "subscriptions")))]
+#[cfg(not(all(feature = "generated-address-space", feature = "events")))]
 pub(crate) fn notify_delete_references(
     _context: &RequestContext,
     _references_to_delete: Vec<DeleteReferencesItem>,

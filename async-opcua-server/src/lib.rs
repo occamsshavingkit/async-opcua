@@ -112,8 +112,9 @@ pub mod pool {
 pub mod notify {
     pub use super::subscriptions::{
         MonitoredItemEntry, SubscriptionDataNotifier, SubscriptionDataNotifierBatch,
-        SubscriptionEventNotifier, SubscriptionEventNotifierBatch,
     };
+    #[cfg(feature = "events")]
+    pub use super::subscriptions::{SubscriptionEventNotifier, SubscriptionEventNotifierBatch};
 }
 
 /// Contains constaints for default configuration values.

@@ -85,12 +85,12 @@ observable contract. Shared mechanism: `consume_results` + blanket `IntoResult` 
 
 ## Phase 6: US4 — RegisterServer2 + ActivateSession closure (P3)
 
-- [ ] T114 [US4] RegisterServer2 (§5.5.6): in `async-opcua-server/src/session/controller.rs`, when
+- [X] T114 [US4] RegisterServer2 (§5.5.6): in `async-opcua-server/src/session/controller.rs`, when
   `configuration_results` is `Some(v)` → pairs → `consume_results` with the request header bits
   (service-level `apply_return_diagnostics` already handled — keep it).
-- [ ] T115 [P] [US4] Independent red-first test via the secured-channel discovery harness:
+- [X] T115 [P] [US4] Independent red-first test via the secured-channel discovery harness:
   RegisterServer2 w/ 1 discovery configuration → requested: `Some(len 1)`; empty bits: `None`.
-- [ ] T116 [US4] ActivateSession documented closure: no code change; covered in the P4-GEN-04
+- [X] T116 [US4] ActivateSession documented closure: no code change; covered in the P4-GEN-04
   FINDINGS row update (T117).
 
 **Checkpoint**: US4 deliverable.

@@ -20,18 +20,20 @@ use opcua_core::ResponseMessage;
 use opcua_crypto::SecurityPolicy;
 use opcua_server::{ServerBuilder, ServerEndpoint, ServerHandle, ANONYMOUS_USER_TOKEN_ID};
 use opcua_types::{
-    AttributeId, BrowseDescription, BrowseDirection, BrowseNextRequest, BrowsePath, BrowseRequest,
-    BrowseResultMask, ContentFilter, CreateMonitoredItemsRequest, CreateSubscriptionRequest,
-    DateTime, DeleteMonitoredItemsRequest, DeleteRawModifiedDetails, DeleteSubscriptionsRequest,
-    DiagnosticBits, EventFilter, EventFilterResult, ExtensionObject, HistoryReadRequest,
-    HistoryReadValueId, HistoryUpdateRequest, MessageSecurityMode, ModifyMonitoredItemsRequest,
+    ApplicationType, AttributeId, BrowseDescription, BrowseDirection, BrowseNextRequest,
+    BrowsePath, BrowseRequest, BrowseResultMask, ContentFilter, CreateMonitoredItemsRequest,
+    CreateSubscriptionRequest, DateTime, DeleteMonitoredItemsRequest, DeleteRawModifiedDetails,
+    DeleteSubscriptionsRequest, DiagnosticBits, EventFilter, EventFilterResult, ExtensionObject,
+    HistoryReadRequest, HistoryReadValueId, HistoryUpdateRequest, LocalizedText,
+    MdnsDiscoveryConfiguration, MessageSecurityMode, ModifyMonitoredItemsRequest,
     MonitoredItemCreateRequest, MonitoredItemModifyRequest, MonitoringMode, MonitoringParameters,
     NodeId, NodeTypeDescription, NumericRange, ObjectId, ObjectTypeId, PublishRequest,
     QualifiedName, QueryDataDescription, QueryFirstRequest, ReadRawModifiedDetails, ReadValueId,
-    ReferenceTypeId, RelativePath, RelativePathElement, RequestHeader, SetMonitoringModeRequest,
-    SetPublishingModeRequest, SetTriggeringRequest, SimpleAttributeOperand,
-    SubscriptionAcknowledgement, TimestampsToReturn, TransferSubscriptionsRequest,
-    TranslateBrowsePathsToNodeIdsRequest, VariableId, ViewDescription,
+    ReferenceTypeId, RegisterServer2Request, RegisteredServer, RelativePath, RelativePathElement,
+    RequestHeader, SetMonitoringModeRequest, SetPublishingModeRequest, SetTriggeringRequest,
+    SimpleAttributeOperand, SubscriptionAcknowledgement, TimestampsToReturn,
+    TransferSubscriptionsRequest, TranslateBrowsePathsToNodeIdsRequest, UAString, VariableId,
+    ViewDescription,
 };
 use tokio::net::TcpListener;
 
@@ -1206,4 +1208,64 @@ async fn event_filter_select_clause_diagnostic_infos_gated_on_request_bits() {
     };
     let results = response.results.as_ref().expect("results");
     assert_select_clause_diags(&results[0].filter_result, false, "modify/not-requested");
+}
+
+// ---------------------------------------------------------------------------
+// Feature 051 / US4: RegisterServer2
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn register_server2_returns_aligned_diagnostic_infos_only_when_requested() {
+    let server = TestServer::start("register-server2-per-op-diagnostics").await;
+
+    // The registration itself is rejected (unsecured channel / URI not bound to
+    // a caller certificate, Part 12 §7.5), but configuration_results is built
+    // whenever discovery_configuration is present — the per-op diagnosticInfos
+    // must align with it regardless of the service status.
+    let request_for = |bits: DiagnosticBits| RegisterServer2Request {
+        request_header: server.request_header(bits),
+        server: RegisteredServer {
+            server_uri: "urn:per-op-diagnostics-registered".into(),
+            product_uri: "urn:per-op-diagnostics-product".into(),
+            server_names: Some(vec![LocalizedText::new("en", "PerOpDiag Server")]),
+            server_type: ApplicationType::Server,
+            gateway_server_uri: UAString::null(),
+            discovery_urls: Some(vec!["opc.tcp://per-op-diag:4840/".into()]),
+            semaphore_file_path: UAString::null(),
+            is_online: true,
+        },
+        discovery_configuration: Some(vec![ExtensionObject::from_message(
+            MdnsDiscoveryConfiguration {
+                mdns_server_name: "per-op-diag".into(),
+                server_capabilities: None,
+            },
+        )]),
+    };
+
+    // 1) REQUESTED -> aligned array present.
+    let ResponseMessage::RegisterServer2(response) = server.send(request_for(OP_BITS)).await else {
+        panic!("RegisterServer2 should return RegisterServer2Response");
+    };
+    let results = response
+        .configuration_results
+        .as_ref()
+        .expect("configuration results");
+    assert_eq!(results.len(), 1);
+    let diags = response
+        .diagnostic_infos
+        .as_ref()
+        .expect("per-op diagnosticInfos must be present when requested");
+    assert_eq!(diags.len(), results.len());
+
+    // 2) NOT REQUESTED -> no array.
+    let ResponseMessage::RegisterServer2(response) =
+        server.send(request_for(DiagnosticBits::empty())).await
+    else {
+        panic!("RegisterServer2 should return RegisterServer2Response");
+    };
+    assert_eq!(
+        response.configuration_results.as_ref().map(Vec::len),
+        Some(1)
+    );
+    assert!(response.diagnostic_infos.is_none());
 }

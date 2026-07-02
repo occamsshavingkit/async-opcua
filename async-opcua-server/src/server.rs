@@ -432,6 +432,7 @@ impl Server {
             #[cfg(feature = "diagnostics")]
             diagnostics: ServerDiagnostics::new(config.diagnostics),
             metrics: Arc::new(crate::metrics::ServerMetrics::new()),
+            #[cfg(feature = "fota")]
             fota_cleanup: Default::default(),
             localized_text_variants: Default::default(),
             next_session_id: std::sync::atomic::AtomicU32::new(1),

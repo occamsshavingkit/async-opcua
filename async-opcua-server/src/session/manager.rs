@@ -15,12 +15,13 @@ use tracing::{error, info};
 use crate::{
     authenticator::UserToken,
     config::ANONYMOUS_USER_TOKEN_ID,
-    fota::cleanup::cleanup_session,
     identity_token::IdentityToken,
     info::ServerInfo,
     node_manager::{NodeManagers, RequestContext, RequestContextInner},
     rbac::resolver::ResolvedIdentity,
 };
+#[cfg(feature = "fota")]
+use crate::fota::cleanup::cleanup_session;
 #[cfg(feature = "subscriptions")]
 use crate::subscriptions::SubscriptionCache;
 use opcua_types::{
@@ -668,6 +669,7 @@ impl SessionManager {
                 actor_senders.remove(&terminated.authentication_token);
                 closed_auth_tokens.insert(terminated.authentication_token.clone(), Instant::now());
                 clear_session_locale_ids_for_node_id(&info, &terminated.session_id);
+                #[cfg(feature = "fota")]
                 cleanup_session(&info, &terminated.session_id);
             });
 
@@ -818,9 +820,11 @@ impl SessionManager {
         let mut session = trace_write_lock!(session);
         session.close();
         drop(session);
+        #[cfg(feature = "fota")]
         cleanup_session(&self.info, id);
     }
 
+    #[cfg(feature = "fota")]
     pub(crate) fn cleanup_fota_for_secure_channel(&self, secure_channel_id: u32) {
         let session_ids = self
             .sessions

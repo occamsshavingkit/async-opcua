@@ -121,7 +121,7 @@ rejection) green; symbol-absence script green; workspace suite (default features
 - [X] T015 [US1] Gate GDS methods behind `gds`: `gds/mod.rs:34` registrations
       (cert-management, push, pull). Self-contained module — decl + registration gating
       only. [Cite: OPC 10000-12 §7]
-- [ ] T016 [US1] Gate FOTA behind `fota`: `fota/` module decl, `info.rs:226`
+- [X] T016 [US1] Gate FOTA behind `fota`: `fota/` module decl, `info.rs:226`
       `fota_cleanup` cfg-field (mdns-field pattern), `server.rs:422` init.
       [Cite: OPC 10000-21]
 - [ ] T017 [US1] Gate programs behind `programs`: `programs/mod.rs:12`

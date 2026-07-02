@@ -229,6 +229,7 @@ pub struct ServerInfo {
     pub metrics: Arc<crate::metrics::ServerMetrics>,
     /// Per-server FOTA session-file cleanup registry. Instance-owned (feature 049)
     /// so independent servers do not collide on session `NodeId`s.
+    #[cfg(feature = "fota")]
     pub(crate) fota_cleanup: crate::fota::cleanup::FotaCleanupRegistry,
     /// Per-server written-LocalizedText variant side-table for locale negotiation
     /// on Read, keyed by `(NodeId, AttributeId)`. Instance-owned (feature 049).

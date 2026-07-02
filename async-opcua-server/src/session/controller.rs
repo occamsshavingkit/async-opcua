@@ -374,6 +374,7 @@ impl<T: ConnectionTransport> SessionController<T> {
                 }
             }
         }
+        #[cfg(feature = "fota")]
         trace_read_lock!(self.session_manager)
             .cleanup_fota_for_secure_channel(self.channel.secure_channel_id());
     }

@@ -32,6 +32,7 @@ mod discovery;
 #[path = "discovery/mdns.rs"]
 mod discovery_mdns;
 /// Firmware-over-the-air file transfer helpers.
+#[cfg(feature = "fota")]
 pub mod fota;
 /// Global Discovery Server (GDS) support.
 #[cfg(feature = "gds")]

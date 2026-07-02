@@ -62,19 +62,19 @@ observable contract. Shared mechanism: `consume_results` + blanket `IntoResult` 
 
 ## Phase 5: US3 — Nested arrays (P2)
 
-- [ ] T110 [US3] Call nested (§5.12.2.2): in `async-opcua-server/src/node_manager/method.rs`
+- [X] T110 [US3] Call nested (§5.12.2.2): in `async-opcua-server/src/node_manager/method.rs`
   `MethodCall::into_result`, when `!self.diagnostic_bits.is_empty()` and `argument_results` non-empty →
   `input_argument_diagnostic_infos: Some(vec![DiagnosticInfo::default(); len])`, else `None`.
-- [ ] T111 [US3] HistoryUpdate nested (§5.10.5): in `async-opcua-server/src/node_manager/history.rs`
+- [X] T111 [US3] HistoryUpdate nested (§5.10.5): in `async-opcua-server/src/node_manager/history.rs`
   `HistoryUpdateNode::into_result`, same rule against `operation_results`.
-- [ ] T112 [US3] EventFilter nested (§7.22.3): add `DiagnosticBits` param to `FilterType::from_filter`
+- [X] T112 [US3] EventFilter nested (§7.22.3): add `DiagnosticBits` param to `FilterType::from_filter`
   (`async-opcua-server/src/subscriptions/monitored_item.rs`); post-process the returned
   `EventFilterResult` (bits non-empty && `select_clause_results` `Some(v)` →
   `select_clause_diagnostic_infos: Some(vec![default; v.len()])`). Thread bits from
   `CreateMonitoredItem::new` (has them) AND the modify path (`MonitoredItem::modify` ←
   `session_subscriptions::modify_monitored_items` ← handler — add a bits param through the chain;
   the handler has the header). Do NOT change public `ParsedEventFilter::parse`.
-- [ ] T113 [P] [US3] Independent red-first tests: Call (GetMonitoredItems w/ bad-typed arg →
+- [X] T113 [P] [US3] Independent red-first tests: Call (GetMonitoredItems w/ bad-typed arg →
   input_argument_results populated → nested gated/aligned); EventFilter (create + modify w/ one bad
   select clause → decode filter_result → nested gated/aligned); HistoryUpdate (history-backend server
   so UpdateData yields operation_results; if disproportionate, axis-absent assertion + doc note).

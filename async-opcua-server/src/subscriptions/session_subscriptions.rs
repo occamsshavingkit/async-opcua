@@ -438,6 +438,7 @@ impl SessionSubscriptions {
         Ok(results)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn modify_monitored_items(
         &mut self,
         subscription_id: u32,
@@ -446,6 +447,7 @@ impl SessionSubscriptions {
         requests: Vec<MonitoredItemModifyRequest>,
         eu_ranges: HashMap<u32, (f64, f64)>,
         type_tree: &dyn TypeTree,
+        diagnostic_bits: DiagnosticBits,
     ) -> Result<Vec<MonitoredItemUpdateRef>, StatusCode> {
         let Some(sub) = self.subscriptions.get_mut(&subscription_id) else {
             return Err(StatusCode::BadSubscriptionIdInvalid);
@@ -454,8 +456,14 @@ impl SessionSubscriptions {
         for request in requests {
             if let Some(item) = sub.get_mut(&request.monitored_item_id) {
                 let eu_range = eu_ranges.get(&request.monitored_item_id).copied();
-                let (filter_result, status) =
-                    item.modify(info, timestamps_to_return, &request, eu_range, type_tree);
+                let (filter_result, status) = item.modify(
+                    info,
+                    timestamps_to_return,
+                    &request,
+                    eu_range,
+                    type_tree,
+                    diagnostic_bits,
+                );
                 let filter_result = filter_result.unwrap_or_else(ExtensionObject::null);
 
                 results.push(MonitoredItemUpdateRef::new(

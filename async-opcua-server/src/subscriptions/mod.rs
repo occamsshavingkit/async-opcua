@@ -30,7 +30,7 @@ use opcua_core::sync::{Mutex, RwLock};
 use opcua_types::{
     node_id::{IdentifierRef, IntoNodeIdRef, NodeIdRef},
     AttributeId, CreateSubscriptionRequest, CreateSubscriptionResponse, DataEncoding, DataValue,
-    DateTime, DateTimeUtc, MessageSecurityMode, ModifySubscriptionRequest,
+    DateTime, DateTimeUtc, DiagnosticBits, MessageSecurityMode, ModifySubscriptionRequest,
     ModifySubscriptionResponse, MonitoredItemCreateResult, MonitoredItemModifyRequest,
     MonitoringMode, NodeId, NotificationMessage, NumericRange, PublishRequest, RepublishRequest,
     ResponseHeader, SetPublishingModeRequest, SetPublishingModeResponse, StatusCode,
@@ -1031,6 +1031,7 @@ impl SubscriptionCache {
         result
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn modify_monitored_items(
         &self,
         session_id: u32,
@@ -1039,6 +1040,7 @@ impl SubscriptionCache {
         timestamps_to_return: TimestampsToReturn,
         requests: Vec<MonitoredItemModifyRequest>,
         eu_ranges: HashMap<u32, (f64, f64)>,
+        diagnostic_bits: DiagnosticBits,
     ) -> Result<Vec<MonitoredItemUpdateRef>, StatusCode> {
         let Some(cache) = ({
             let lck = trace_read_lock!(self.inner);
@@ -1060,6 +1062,7 @@ impl SubscriptionCache {
                     requests,
                     eu_ranges,
                     type_tree.get(),
+                    diagnostic_bits,
                 )
             })
             .await

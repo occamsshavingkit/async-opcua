@@ -23,15 +23,15 @@ use opcua_types::{
     AttributeId, BrowseDescription, BrowseDirection, BrowseNextRequest, BrowsePath, BrowseRequest,
     BrowseResultMask, ContentFilter, CreateMonitoredItemsRequest, CreateSubscriptionRequest,
     DateTime, DeleteMonitoredItemsRequest, DeleteRawModifiedDetails, DeleteSubscriptionsRequest,
-    DiagnosticBits, ExtensionObject, HistoryReadRequest, HistoryReadValueId, HistoryUpdateRequest,
-    MessageSecurityMode, ModifyMonitoredItemsRequest, MonitoredItemCreateRequest,
-    MonitoredItemModifyRequest, MonitoringMode, MonitoringParameters, NodeId, NodeTypeDescription,
-    NumericRange, ObjectId, ObjectTypeId, PublishRequest, QualifiedName, QueryDataDescription,
-    QueryFirstRequest, ReadRawModifiedDetails, ReadValueId, ReferenceTypeId, RelativePath,
-    RelativePathElement, RequestHeader, SetMonitoringModeRequest, SetPublishingModeRequest,
-    SetTriggeringRequest, SubscriptionAcknowledgement, TimestampsToReturn,
-    TransferSubscriptionsRequest, TranslateBrowsePathsToNodeIdsRequest, VariableId,
-    ViewDescription,
+    DiagnosticBits, EventFilter, EventFilterResult, ExtensionObject, HistoryReadRequest,
+    HistoryReadValueId, HistoryUpdateRequest, MessageSecurityMode, ModifyMonitoredItemsRequest,
+    MonitoredItemCreateRequest, MonitoredItemModifyRequest, MonitoringMode, MonitoringParameters,
+    NodeId, NodeTypeDescription, NumericRange, ObjectId, ObjectTypeId, PublishRequest,
+    QualifiedName, QueryDataDescription, QueryFirstRequest, ReadRawModifiedDetails, ReadValueId,
+    ReferenceTypeId, RelativePath, RelativePathElement, RequestHeader, SetMonitoringModeRequest,
+    SetPublishingModeRequest, SetTriggeringRequest, SimpleAttributeOperand,
+    SubscriptionAcknowledgement, TimestampsToReturn, TransferSubscriptionsRequest,
+    TranslateBrowsePathsToNodeIdsRequest, VariableId, ViewDescription,
 };
 use tokio::net::TcpListener;
 
@@ -1047,4 +1047,163 @@ async fn publish_returns_aligned_diagnostic_infos_only_when_requested() {
     };
     assert_eq!(response.results.as_ref().map(Vec::len), Some(1));
     assert!(response.diagnostic_infos.is_none());
+}
+
+// ---------------------------------------------------------------------------
+// Feature 051 / US3: nested EventFilterResult.select_clause_diagnostic_infos
+// (Call inputArgument / HistoryUpdateResult nesting is covered by in-src unit
+// tests: the axes are node-manager extension points with no built-in writers.)
+// ---------------------------------------------------------------------------
+
+fn event_filter_with_bad_clause() -> ExtensionObject {
+    let clause = |field: &str| SimpleAttributeOperand {
+        type_definition_id: ObjectTypeId::BaseEventType.into(),
+        browse_path: Some(vec![QualifiedName::new(0, field)]),
+        attribute_id: AttributeId::Value as u32,
+        index_range: NumericRange::None,
+    };
+    ExtensionObject::from_message(EventFilter {
+        // "Message" resolves on BaseEventType; the second field does not.
+        select_clauses: Some(vec![clause("Message"), clause("PerOpDiagNoSuchField")]),
+        where_clause: ContentFilter { elements: None },
+    })
+}
+
+fn event_item_to_create(client_handle: u32, filter: ExtensionObject) -> MonitoredItemCreateRequest {
+    MonitoredItemCreateRequest {
+        item_to_monitor: ReadValueId::new(ObjectId::Server.into(), AttributeId::EventNotifier),
+        monitoring_mode: MonitoringMode::Reporting,
+        requested_parameters: MonitoringParameters {
+            client_handle,
+            sampling_interval: 100.0,
+            filter,
+            queue_size: 10,
+            discard_oldest: true,
+        },
+    }
+}
+
+fn assert_select_clause_diags(filter_result: &ExtensionObject, requested: bool, label: &str) {
+    let result = filter_result
+        .inner_as::<EventFilterResult>()
+        .unwrap_or_else(|| panic!("{label}: filter_result should decode to EventFilterResult"));
+    let clause_results = result
+        .select_clause_results
+        .as_ref()
+        .unwrap_or_else(|| panic!("{label}: select_clause_results populated"));
+    assert_eq!(clause_results.len(), 2, "{label}");
+    if requested {
+        let diags = result
+            .select_clause_diagnostic_infos
+            .as_ref()
+            .unwrap_or_else(|| {
+                panic!("{label}: nested selectClauseDiagnosticInfos must be present when requested")
+            });
+        assert_eq!(diags.len(), clause_results.len(), "{label}");
+    } else {
+        assert!(
+            result.select_clause_diagnostic_infos.is_none(),
+            "{label}: nested selectClauseDiagnosticInfos must be absent when not requested"
+        );
+    }
+}
+
+#[tokio::test]
+async fn event_filter_select_clause_diagnostic_infos_gated_on_request_bits() {
+    let server = TestServer::start("event-filter-nested-diagnostics").await;
+    let subscription_id = create_subscription(&server).await;
+
+    // CREATE path, requested -> nested array aligned with select_clause_results.
+    let request = CreateMonitoredItemsRequest {
+        request_header: server.request_header(OP_BITS),
+        subscription_id,
+        timestamps_to_return: TimestampsToReturn::Both,
+        items_to_create: Some(vec![event_item_to_create(
+            1,
+            event_filter_with_bad_clause(),
+        )]),
+    };
+    let ResponseMessage::CreateMonitoredItems(response) = server.send(request).await else {
+        panic!("CreateMonitoredItems should return CreateMonitoredItemsResponse");
+    };
+    let results = response.results.as_ref().expect("results");
+    assert_select_clause_diags(&results[0].filter_result, true, "create/requested");
+
+    // CREATE path, not requested -> nested array absent.
+    let request = CreateMonitoredItemsRequest {
+        request_header: server.request_header(DiagnosticBits::empty()),
+        subscription_id,
+        timestamps_to_return: TimestampsToReturn::Both,
+        items_to_create: Some(vec![event_item_to_create(
+            2,
+            event_filter_with_bad_clause(),
+        )]),
+    };
+    let ResponseMessage::CreateMonitoredItems(response) = server.send(request).await else {
+        panic!("CreateMonitoredItems should return CreateMonitoredItemsResponse");
+    };
+    let results = response.results.as_ref().expect("results");
+    assert_select_clause_diags(&results[0].filter_result, false, "create/not-requested");
+
+    // MODIFY path: create a valid event item, then modify with the bad filter.
+    let request = CreateMonitoredItemsRequest {
+        request_header: server.request_header(DiagnosticBits::empty()),
+        subscription_id,
+        timestamps_to_return: TimestampsToReturn::Both,
+        items_to_create: Some(vec![event_item_to_create(
+            3,
+            ExtensionObject::from_message(EventFilter {
+                select_clauses: Some(vec![SimpleAttributeOperand {
+                    type_definition_id: ObjectTypeId::BaseEventType.into(),
+                    browse_path: Some(vec![QualifiedName::new(0, "Message")]),
+                    attribute_id: AttributeId::Value as u32,
+                    index_range: NumericRange::None,
+                }]),
+                where_clause: ContentFilter { elements: None },
+            }),
+        )]),
+    };
+    let ResponseMessage::CreateMonitoredItems(response) = server.send(request).await else {
+        panic!("CreateMonitoredItems should return CreateMonitoredItemsResponse");
+    };
+    let created = &response.results.as_ref().expect("results")[0];
+    assert!(
+        created.status_code.is_good(),
+        "event item should be created"
+    );
+    let item_id = created.monitored_item_id;
+
+    let modify = |bits: DiagnosticBits, server: &TestServer| ModifyMonitoredItemsRequest {
+        request_header: server.request_header(bits),
+        subscription_id,
+        timestamps_to_return: TimestampsToReturn::Both,
+        items_to_modify: Some(vec![MonitoredItemModifyRequest {
+            monitored_item_id: item_id,
+            requested_parameters: MonitoringParameters {
+                client_handle: 3,
+                sampling_interval: 100.0,
+                filter: event_filter_with_bad_clause(),
+                queue_size: 10,
+                discard_oldest: true,
+            },
+        }]),
+    };
+
+    // MODIFY, requested.
+    let ResponseMessage::ModifyMonitoredItems(response) =
+        server.send(modify(OP_BITS, &server)).await
+    else {
+        panic!("ModifyMonitoredItems should return ModifyMonitoredItemsResponse");
+    };
+    let results = response.results.as_ref().expect("results");
+    assert_select_clause_diags(&results[0].filter_result, true, "modify/requested");
+
+    // MODIFY, not requested.
+    let ResponseMessage::ModifyMonitoredItems(response) =
+        server.send(modify(DiagnosticBits::empty(), &server)).await
+    else {
+        panic!("ModifyMonitoredItems should return ModifyMonitoredItemsResponse");
+    };
+    let results = response.results.as_ref().expect("results");
+    assert_select_clause_diags(&results[0].filter_result, false, "modify/not-requested");
 }

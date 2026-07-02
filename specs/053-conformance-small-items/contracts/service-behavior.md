@@ -57,6 +57,7 @@ Value attribute: single-locale scalar semantics (documented server-specific per 
 |---|---|
 | EURange property written on a monitored Variable | percent-deadband filter uses the NEW range for subsequent evaluations |
 | 〃 | next notification per affected item carries StatusCode `SemanticsChanged` bit, exactly once |
+| flagged notification discarded by queue overflow | next queued notification carries the bit (Part 4 §7.38.1) |
 | EURange change on unrelated node | no bit, no filter change on other items |
 | EURange removed/invalid after create | item keeps functioning with last-known range (fail-safe) |
 

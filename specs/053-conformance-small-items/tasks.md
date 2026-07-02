@@ -52,12 +52,12 @@ session+subscription, toggle `EnabledFlag`, verify gating (contracts/service-beh
 - [ ] T007 [US1] codex: serve `SessionsDiagnosticsSummary` + `SessionDiagnosticsArray` +
   `SessionSecurityDiagnosticsArray` — built on read from the T002 iterator
   (`session/instance.rs` getters + `session_locale_ids`) as the generated DataType arrays;
-  disabled → empty arrays. Part 5 §6.3.3. (Depends: T002.)
+  disabled → empty arrays. Part 5 §6.3.3, §6.3.5, §7.15. (Depends: T002.)
 - [ ] T008 [US1] codex: `EnabledFlag` write path — privileged sessions only, toggles the runtime
   flag; unprivileged → `Bad_UserAccessDenied`. Fail closed (constitution §IV). Part 5 §6.3.3.
 - [ ] T009 [US1] codex: `SessionSecurityDiagnosticsArray` admin gating layered on the existing
   `read_diagnostics` permission gate (`core.rs:587-588`); non-admin read denied. Fail closed
-  (constitution §IV). Part 5 §6.3.3. (Depends: T007.)
+  (constitution §IV). Part 5 §6.3.3, §6.3.5 (security-related note), §7.15. (Depends: T007.)
 - [ ] T010 [US1] Update `specs/conformance-audit/FINDINGS.md` P5-04 row (+ reconciliation banner)
   → FIXED with file/test evidence; commit story 1.
 
@@ -84,7 +84,7 @@ value unchanged; unconstrained Variables unaffected.
 - [ ] T013 [US2] codex: enumeration write validation in the same Value arm: resolve the DataType
   node's `DataTypeDefinition::Enum` fields (`async-opcua-nodes/src/data_type.rs:47`); values
   (scalar and array elements) not in the defined set → `BadOutOfRange`; no enum definition → no
-  check. Part 8 §5.3.3.3/.4. (Depends: T012 — same call-site, land sequentially.)
+  check. Part 4 §5.11.4; Part 8 §5.3.3.3/.4. (Depends: T012 — same call-site, land sequentially.)
 - [ ] T014 [US2] Update FINDINGS.md P4-ATTR-04 row → FIXED with evidence; commit story 2.
 
 ---
@@ -150,8 +150,9 @@ thresholds (contracts §US5).
   `async-opcua-server/src/subscriptions/monitored_item.rs` (mod tests :1036, overflow-bit test
   pattern :1418-1480) + integration `subscriptions.rs` (templates: `test_data_change_filters`
   :780, `modify_…_with_eurange_succeeds` :1051): filter follows the new range; exactly one
-  notification carries `SemanticsChanged`; unrelated items unaffected; EURange-removed fail-safe.
-  Part 8 §5.2, §5.3.2.2.
+  notification carries `SemanticsChanged`; unrelated items unaffected; EURange-removed fail-safe;
+  overflow interaction — if the flagged notification is discarded by queue overflow, the next
+  queued notification carries the bit (Part 4 §7.38.1). Part 8 §5.2, §5.3.2.2; Part 4 §7.38.1.
 - [ ] T024 [US5] codex: range-change notice — emit a signal at the address-space value-set layer
   (so BOTH client Writes and server-side value updates fire it) when the changed node is an
   `EURange` property of a monitored Variable, routed to `SubscriptionCache` keyed by the owner
@@ -164,8 +165,11 @@ thresholds (contracts §US5).
   Never re-read per-sample (O(changes), not O(samples)). Part 8 §5.3.2.2. (Depends: T024.)
 - [ ] T026 [US5] codex: one-shot `SemanticsChanged` — arm a per-item flag on range change, OR it
   into the next queued notification via `StatusCode::set_semantics_changed` (injection pattern:
-  overflow bit, `monitored_item.rs:861-879`), clear after one use; remove the ponytail deferral
-  comment (:398-400). Part 8 §5.2. (Depends: T025.)
+  overflow bit, `monitored_item.rs:861-879`), clear after one use — EXCEPT: per Part 4 §7.38.1
+  (info bits 14:14), if the notification carrying the bit is discarded by queue overflow, the bit
+  SHALL be set on the next data-change notification in the queue (re-arm on flagged-notification
+  discard); remove the ponytail deferral comment (:398-400). Part 8 §5.2; Part 4 §7.38.1.
+  (Depends: T025.)
 - [ ] T027 [US5] Update FINDINGS.md P8-02 row → FIXED with evidence; commit story 5.
 
 ---
@@ -213,8 +217,9 @@ lock-in regression test.
   citation correction.
 - [ ] T034 Full gate: `cargo test` workspace (ALL server-crate test binaries — feature-030 lesson),
   `cargo clippy --all-targets --all-features -- -D warnings` plus the no-default/json-off legs,
-  `cargo fmt --check`; fix fallout; verify branch still `053-conformance-small-items-sprint`
-  (codex worktree hazard).
+  `cargo fmt --check`; fix fallout (any BEHAVIORAL fix discovered at the gate must carry its own
+  OPC UA Part/§ justification — tooling/lint fixes exempt); verify branch still
+  `053-conformance-small-items-sprint` (codex worktree hazard).
 
 ## Dependencies
 

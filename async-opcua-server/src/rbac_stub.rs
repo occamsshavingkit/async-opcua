@@ -180,6 +180,7 @@ pub(crate) enum WellKnownRole {
 
 impl WellKnownRole {
     /// Returns the standard namespace 0 NodeId for this well-known role.
+    #[cfg_attr(not(feature = "gds"), allow(dead_code))]
     pub(crate) fn node_id(self) -> NodeId {
         match self {
             Self::Anonymous => ObjectId::WellKnownRole_Anonymous.into(),

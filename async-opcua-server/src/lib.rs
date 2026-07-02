@@ -34,6 +34,7 @@ mod discovery_mdns;
 /// Firmware-over-the-air file transfer helpers.
 pub mod fota;
 /// Global Discovery Server (GDS) support.
+#[cfg(feature = "gds")]
 pub mod gds;
 /// Historical data access (HDA) support.
 #[cfg(feature = "history")]

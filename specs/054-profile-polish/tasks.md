@@ -118,7 +118,7 @@ rejection) green; symbol-absence script green; workspace suite (default features
       under `cfg(not)` by an always-empty-roles unit resolver;
       `enforce_role_based_access` config rejected at validation when feature off.
       [Cite: OPC 10000-18; Core 2017 "Security Role Server Authorization" is OPTIONAL]
-- [ ] T015 [US1] Gate GDS methods behind `gds`: `gds/mod.rs:34` registrations
+- [X] T015 [US1] Gate GDS methods behind `gds`: `gds/mod.rs:34` registrations
       (cert-management, push, pull). Self-contained module — decl + registration gating
       only. [Cite: OPC 10000-12 §7]
 - [ ] T016 [US1] Gate FOTA behind `fota`: `fota/` module decl, `info.rs:226`

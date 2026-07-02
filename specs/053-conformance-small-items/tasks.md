@@ -202,10 +202,10 @@ lock-in regression test.
 
 **Independent test**: browse `Server → Namespaces → <ns>` asserting NodeClasses (contracts §US7).
 
-- [ ] T031 [P] [US7] Claude: lock-in test in `async-opcua/tests/integration/browse.rs` (near
+- [X] T031 [P] [US7] Claude: lock-in test in `async-opcua/tests/integration/browse.rs` (near
   `browse_multiple` :115): namespace child is an Object of `NamespaceMetadataType`; its property
   children are Variables with PropertyType. Part 5 §6.3.13/§6.3.14.
-- [ ] T032 [US7] Update FINDINGS.md P5-03 row (+ banner) → not-a-bug with spec citation + test
+- [X] T032 [US7] Update FINDINGS.md P5-03 row (+ banner) → not-a-bug with spec citation + test
   name; commit story 7.
 
 ---

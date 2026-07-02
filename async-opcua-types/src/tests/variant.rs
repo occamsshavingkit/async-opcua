@@ -2001,7 +2001,7 @@ fn range_of_multidim_single_index_fewer_dims_is_nodata() {
 fn range_of_multidim_11d_block() {
     // 11-D array of extent 2×1×…×1 (product 2), values [10, 20].
     let dims: Vec<u32> = std::iter::once(2)
-        .chain(std::iter::repeat(1).take(10))
+        .chain(std::iter::repeat_n(1, 10))
         .collect();
     let v = multidim_i32(&[10, 20], &dims);
     // Select element (1,0,…,0).
@@ -2017,7 +2017,7 @@ fn range_of_multidim_11d_block() {
 #[test]
 fn set_range_of_multidim_11d() {
     let dims: Vec<u32> = std::iter::once(2)
-        .chain(std::iter::repeat(1).take(10))
+        .chain(std::iter::repeat_n(1, 10))
         .collect();
     let mut v = multidim_i32(&[10, 20], &dims);
     let other = multidim_i32(&[99], &[1; 11]);

@@ -33,7 +33,11 @@ use opcua::types::{
 
 /// Monitor Basic / Monitor Value Change / Subscription Basic / Publish flow:
 /// a data-change subscription on the ticking demo counter delivers notifications.
-#[tokio::test]
+///
+/// Uses multi_thread tokio: the test receives notifications via a blocking
+/// std::sync::mpsc channel, which requires the sampler and client event loop
+/// to run on separate worker threads.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn data_change_subscription_delivers_notifications() {
     let tester = spawn_micro().await;
     let session = connect(&tester).await;

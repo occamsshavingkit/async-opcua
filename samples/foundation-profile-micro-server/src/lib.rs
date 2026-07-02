@@ -5,13 +5,35 @@
 //! Subscription Server Facet) and at least two parallel sessions.
 //! This is a footprint benchmark surface, NOT an OPC Foundation conformance claim.
 
-use std::path::PathBuf;
+use std::{
+    path::PathBuf,
+    sync::{
+        atomic::{AtomicI32, Ordering},
+        Arc,
+    },
+};
 
 use opcua::crypto::SecurityPolicy;
+use opcua::nodes::{
+    ImportedItem, ImportedReference, NodeSetImport, NodeSetNamespaceMapper, ObjectBuilder,
+    ReferenceTypeBuilder, VariableBuilder,
+};
 use opcua::server::{
+    address_space::AddressSpace,
+    node_manager::{
+        memory::{
+            InMemoryNodeManagerBuilder, InMemoryNodeManagerImplBuilder, SimpleNodeManagerBuilder,
+            SimpleNodeManagerImpl,
+        },
+        ServerContext,
+    },
     Limits, OperationalLimits, ServerBuilder, SubscriptionLimits, ANONYMOUS_USER_TOKEN_ID,
 };
-use opcua::types::{MessageSecurityMode, NodeId};
+use opcua::types::{
+    BuildInfo, DataTypeId, DataValue, DateTime, ExtensionObject, LocalizedText, MessageSecurityMode,
+    NodeId, ObjectId, ObjectTypeId, ReferenceTypeId, ServerState, ServerStatusDataType, UAString,
+    VariableId, VariableTypeId,
+};
 
 /// Short profile key used for PKI directories and application URIs.
 pub const PROFILE_KEY: &str = "micro";
@@ -24,8 +46,8 @@ pub const PROFILE_TARGET_URI: &str =
 pub const PROFILE_SURFACE: &str = "Nano benchmark surface plus bounded subscription capacity";
 
 /// NodeId of the demo counter variable the sample ticks for data-change
-/// subscriptions (Monitor Value Change CU). Served from the sample's demo
-/// namespace; wired up in the profile rework (T026).
+/// subscriptions (Monitor Value Change CU). Lives in the benchmark's demo
+/// namespace (ns=1).
 pub fn demo_counter_node_id() -> NodeId {
     NodeId::new(1, "demo_counter")
 }
@@ -52,10 +74,37 @@ pub fn profile_limits() -> Limits {
     }
 }
 
+const NAMESPACE_URI: &str = "http://opcfoundation.org/UA/";
+const DEMO_NAMESPACE_URI: &str = "urn:async-opcua:micro-demo";
+
+struct MicroNamespace;
+
+impl NodeSetImport for MicroNamespace {
+    fn register_namespaces(&self, namespaces: &mut NodeSetNamespaceMapper) {
+        // Register the demo namespace against its in-nodeset index (1) so the
+        // mapper can resolve NodeIds emitted with ns=1 below.
+        namespaces.add_namespace(DEMO_NAMESPACE_URI, 1);
+    }
+
+    fn get_own_namespaces(&self) -> Vec<String> {
+        vec![NAMESPACE_URI.to_owned(), DEMO_NAMESPACE_URI.to_owned()]
+    }
+
+    fn load<'a>(
+        &'a self,
+        _namespaces: &'a NodeSetNamespaceMapper,
+    ) -> Box<dyn Iterator<Item = ImportedItem> + 'a> {
+        Box::new(micro_namespace_nodes().into_iter())
+    }
+}
+
 /// Build the Micro benchmark server: policy-None endpoint, anonymous identity,
-/// profile-shaped limits.
+/// profile-shaped limits, minimal ns0 address space, and a ticking demo counter
+/// variable that drives data-change subscriptions.
 pub fn build_server(pki_dir: impl Into<PathBuf>) -> ServerBuilder {
     let user_token_ids = [ANONYMOUS_USER_TOKEN_ID];
+    let counter_node = demo_counter_node_id();
+    let counter = Arc::new(AtomicI32::new(0));
 
     ServerBuilder::new()
         .application_name(format!("async-opcua {PROFILE_DISPLAY_NAME}"))
@@ -75,6 +124,214 @@ pub fn build_server(pki_dir: impl Into<PathBuf>) -> ServerBuilder {
             ),
         )
         .discovery_urls(vec!["/".to_owned()])
+        .with_node_manager(InMemoryNodeManagerBuilder::new(
+            move |context: ServerContext, address_space: &mut AddressSpace| -> SimpleNodeManagerImpl {
+                let builder = SimpleNodeManagerBuilder::new_imports(
+                    vec![Box::new(MicroNamespace)],
+                    "micro-ns0",
+                );
+                let inner = builder.build(context, address_space);
+                let c = counter.clone();
+                inner.add_read_callback(counter_node.clone(), move |_, _, _| {
+                    Ok(DataValue::new_now(c.fetch_add(1, Ordering::Relaxed)))
+                });
+                inner
+            },
+        ))
+}
+
+fn micro_namespace_nodes() -> Vec<ImportedItem> {
+    let start_time = DateTime::now();
+    let server_status = ServerStatusDataType {
+        start_time,
+        current_time: DateTime::now(),
+        state: ServerState::Running,
+        build_info: BuildInfo {
+            product_uri: UAString::from("https://github.com/freeopcua/async-opcua"),
+            product_name: UAString::from(PROFILE_DISPLAY_NAME),
+            ..Default::default()
+        },
+        seconds_till_shutdown: 0,
+        shutdown_reason: LocalizedText::null(),
+    };
+
+    vec![
+        reference_type(
+            ReferenceTypeId::HierarchicalReferences,
+            "HierarchicalReferences",
+            ReferenceTypeId::References,
+            true,
+        ),
+        reference_type(
+            ReferenceTypeId::Organizes,
+            "Organizes",
+            ReferenceTypeId::HierarchicalReferences,
+            false,
+        ),
+        folder(ObjectId::RootFolder, "Root", None),
+        folder(
+            ObjectId::ObjectsFolder,
+            "Objects",
+            Some(ObjectId::RootFolder.into()),
+        ),
+        folder(
+            ObjectId::TypesFolder,
+            "Types",
+            Some(ObjectId::RootFolder.into()),
+        ),
+        folder(
+            ObjectId::ViewsFolder,
+            "Views",
+            Some(ObjectId::RootFolder.into()),
+        ),
+        folder(
+            ObjectId::ObjectTypesFolder,
+            "ObjectTypes",
+            Some(ObjectId::TypesFolder.into()),
+        ),
+        object(ObjectId::Server, "Server", ObjectId::ObjectsFolder),
+        variable(
+            VariableId::Server_ServerStatus,
+            "ServerStatus",
+            DataTypeId::ServerStatusDataType,
+            ExtensionObject::from_message(server_status),
+            VariableTypeId::BaseDataVariableType,
+            ObjectId::Server.into(),
+        ),
+        variable(
+            VariableId::Server_ServerStatus_StartTime,
+            "StartTime",
+            DataTypeId::UtcTime,
+            start_time,
+            VariableTypeId::PropertyType,
+            VariableId::Server_ServerStatus.into(),
+        ),
+        variable(
+            VariableId::Server_ServerStatus_CurrentTime,
+            "CurrentTime",
+            DataTypeId::UtcTime,
+            DateTime::now(),
+            VariableTypeId::PropertyType,
+            VariableId::Server_ServerStatus.into(),
+        ),
+        variable(
+            VariableId::Server_ServerStatus_State,
+            "State",
+            DataTypeId::ServerState,
+            ServerState::Running as i32,
+            VariableTypeId::PropertyType,
+            VariableId::Server_ServerStatus.into(),
+        ),
+        // Ticking counter in the demo namespace (ns=1) — drives data-change
+        // subscriptions (Monitor Value Change CU). Its value is produced by a
+        // read callback installed in build_server, so the stored value here is
+        // just the seed.
+        demo_counter_variable(),
+    ]
+}
+
+fn reference_type(
+    node_id: ReferenceTypeId,
+    browse_name: &str,
+    super_type: ReferenceTypeId,
+    is_abstract: bool,
+) -> ImportedItem {
+    ImportedItem {
+        node: ReferenceTypeBuilder::new(&node_id.into(), browse_name, browse_name)
+            .is_abstract(is_abstract)
+            .build()
+            .into(),
+        references: vec![inverse_reference(
+            super_type.into(),
+            ReferenceTypeId::HasSubtype,
+        )],
+    }
+}
+
+fn folder(node_id: ObjectId, browse_name: &str, parent: Option<NodeId>) -> ImportedItem {
+    let mut references = vec![forward_reference(
+        ObjectTypeId::FolderType.into(),
+        ReferenceTypeId::HasTypeDefinition,
+    )];
+    if let Some(parent) = parent {
+        references.push(inverse_reference(parent, ReferenceTypeId::Organizes));
+    }
+    ImportedItem {
+        node: ObjectBuilder::new(&node_id.into(), browse_name, browse_name)
+            .build()
+            .into(),
+        references,
+    }
+}
+
+fn object(node_id: ObjectId, browse_name: &str, parent: ObjectId) -> ImportedItem {
+    ImportedItem {
+        node: ObjectBuilder::new(&node_id.into(), browse_name, browse_name)
+            .build()
+            .into(),
+        references: vec![
+            forward_reference(
+                ObjectTypeId::ServerType.into(),
+                ReferenceTypeId::HasTypeDefinition,
+            ),
+            inverse_reference(parent.into(), ReferenceTypeId::Organizes),
+        ],
+    }
+}
+
+fn variable(
+    node_id: VariableId,
+    browse_name: &str,
+    data_type: DataTypeId,
+    value: impl Into<opcua::types::Variant>,
+    type_definition: VariableTypeId,
+    parent: NodeId,
+) -> ImportedItem {
+    ImportedItem {
+        node: VariableBuilder::new(&node_id.into(), browse_name, browse_name)
+            .data_type(data_type)
+            .value(value)
+            .build()
+            .into(),
+        references: vec![
+            forward_reference(type_definition.into(), ReferenceTypeId::HasTypeDefinition),
+            inverse_reference(parent, ReferenceTypeId::HasComponent),
+        ],
+    }
+}
+
+fn demo_counter_variable() -> ImportedItem {
+    let node_id = demo_counter_node_id();
+    ImportedItem {
+        node: VariableBuilder::new(&node_id, "demo_counter", "demo_counter")
+            .data_type(DataTypeId::Int32)
+            .value(0i32)
+            .build()
+            .into(),
+        references: vec![
+            forward_reference(
+                VariableTypeId::BaseDataVariableType.into(),
+                ReferenceTypeId::HasTypeDefinition,
+            ),
+            inverse_reference(ObjectId::ObjectsFolder.into(), ReferenceTypeId::HasComponent),
+        ],
+    }
+}
+
+fn forward_reference(target_id: NodeId, type_id: ReferenceTypeId) -> ImportedReference {
+    ImportedReference {
+        target_id,
+        type_id: type_id.into(),
+        is_forward: true,
+    }
+}
+
+fn inverse_reference(target_id: NodeId, type_id: ReferenceTypeId) -> ImportedReference {
+    ImportedReference {
+        target_id,
+        type_id: type_id.into(),
+        is_forward: false,
+    }
 }
 
 #[cfg(test)]

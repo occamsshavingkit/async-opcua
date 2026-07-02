@@ -11,7 +11,7 @@ functional servers.
 | Build | Pre-054 baseline | Post-054 | Delta | Date |
 |-------|------------------|----------|-------|------|
 | nano (US1, T021) | 7,636,648 B (non-functional) | **6,765,888 B** (functional Nano 2017 surface) | −870,760 B (−11.4%) | 2026-07-02 |
-| micro (US2) | 7,636,664 B (non-functional) | TBD | | |
+| micro (US2, T026) | 7,636,664 B (non-functional) | **7,213,200 B** (functional Micro 2017 surface) | −423,464 B (−5.5%) | 2026-07-02 |
 | embedded (US3) | 9,906,256 B (non-functional) | TBD | | |
 | standard (US4) | n/a (new) | TBD | | |
 | minimal-server (contrast) | 7,631,864 B | unchanged surface (base-server, all gates) | | |

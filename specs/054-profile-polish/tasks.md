@@ -188,7 +188,7 @@ basic data-change monitoring works; deadband/triggering/events/methods compiled 
       orchestration gates (`session_subscriptions.rs:571`, `subscriptions/mod.rs:1425`,
       SetTriggering dispatch arm) behind `subscriptions-standard`.
       [Cite: OPC 10000-4 §5.13.5 SetTriggering]
-- [ ] T026 [US2] Switch `samples/foundation-profile-micro-server` to
+- [X] T026 [US2] Switch `samples/foundation-profile-micro-server` to
       `features = ["micro"]` + capacity config (≥2 sessions, ≥1 subscription, ≥2
       monitored items); verify T022/T023 + absence script (no deadband/trigger/event
       sentinels) green; record measured size in research-assets/size-accounting.md (must

@@ -29,6 +29,11 @@ use tracing_futures::Instrument;
 
 use super::{read, translate_browse_paths};
 
+struct EuRangeResolution {
+    property_node_id: NodeId,
+    range: (f64, f64),
+}
+
 // OPC-UA is sometimes very painful. In order to actually implement percent-deadband, we need to
 // fetch the EURange property from the node hierarchy. This method does that by calling TranslateBrowsePaths
 // and then Read.
@@ -36,7 +41,7 @@ async fn get_eu_range(
     items: &[&NodeId],
     context: &RequestContext,
     node_managers: &NodeManagers,
-) -> HashMap<NodeId, (f64, f64)> {
+) -> HashMap<NodeId, EuRangeResolution> {
     let mut res = HashMap::with_capacity(items.len());
     if items.is_empty() {
         return res;
@@ -128,9 +133,8 @@ async fn get_eu_range(
         return res;
     }
 
-    for (id, dv) in to_read
+    for ((id, property_node_id), dv) in to_read
         .into_iter()
-        .map(|r| r.0)
         .zip(read.results.into_iter().flat_map(|r| r.into_iter()))
     {
         if dv.status.is_some_and(|s| !s.is_good()) {
@@ -142,7 +146,13 @@ async fn get_eu_range(
         let Some(range) = o.inner_as::<Range>() else {
             continue;
         };
-        res.insert(id.clone(), (range.low, range.high));
+        res.insert(
+            id.clone(),
+            EuRangeResolution {
+                property_node_id,
+                range: (range.low, range.high),
+            },
+        );
     }
 
     res
@@ -207,8 +217,11 @@ pub(crate) async fn create_monitored_items(
         items_to_create
             .into_iter()
             .map(|r| {
-                let range = ranges.get(&r.item_to_monitor.node_id).copied();
-                CreateMonitoredItem::new(
+                let eu_range = ranges.get(&r.item_to_monitor.node_id);
+                let range = eu_range.map(|resolution| resolution.range);
+                let eu_range_node_id =
+                    eu_range.map(|resolution| resolution.property_node_id.clone());
+                let mut item = CreateMonitoredItem::new(
                     r,
                     request.info.monitored_item_id_handle.next(),
                     request.request.subscription_id,
@@ -217,7 +230,9 @@ pub(crate) async fn create_monitored_items(
                     return_diagnostics,
                     type_tree.get(),
                     range,
-                )
+                );
+                item.set_eu_range_node_id(eu_range_node_id);
+                item
             })
             .collect()
     };
@@ -352,8 +367,8 @@ pub(crate) async fn modify_monitored_items(
         }
     }
 
-    let eu_ranges = if percent_deadband_item_ids.is_empty() {
-        HashMap::new()
+    let (eu_ranges, eu_range_node_ids) = if percent_deadband_item_ids.is_empty() {
+        (HashMap::new(), HashMap::new())
     } else {
         let item_node_ids = match request
             .subscriptions
@@ -369,15 +384,15 @@ pub(crate) async fn modify_monitored_items(
         };
         let nodes_to_lookup: Vec<&NodeId> = item_node_ids.values().collect();
         let ranges_by_node = get_eu_range(&nodes_to_lookup, &context, &node_managers).await;
-        item_node_ids
-            .into_iter()
-            .filter_map(|(item_id, node_id)| {
-                ranges_by_node
-                    .get(&node_id)
-                    .copied()
-                    .map(|range| (item_id, range))
-            })
-            .collect()
+        let mut eu_ranges = HashMap::with_capacity(ranges_by_node.len());
+        let mut eu_range_node_ids = HashMap::with_capacity(ranges_by_node.len());
+        for (item_id, node_id) in item_node_ids {
+            if let Some(resolution) = ranges_by_node.get(&node_id) {
+                eu_ranges.insert(item_id, resolution.range);
+                eu_range_node_ids.insert(item_id, resolution.property_node_id.clone());
+            }
+        }
+        (eu_ranges, eu_range_node_ids)
     };
 
     let return_diagnostics = request.request.request_header.return_diagnostics;
@@ -393,6 +408,7 @@ pub(crate) async fn modify_monitored_items(
                 request.request.timestamps_to_return,
                 items_to_modify,
                 eu_ranges.into_iter().collect(),
+                eu_range_node_ids.into_iter().collect(),
                 return_diagnostics,
             )
             .await

@@ -5,15 +5,18 @@ use crate::{
     session::manager::{is_special_write_locale_id, locale_id_matches, normalized_locale_id},
 };
 use dashmap::DashMap;
-use opcua_nodes::TypeTree;
 use opcua_types::{
-    AttributeId, DataEncoding, DataTypeId, DataValue, DateTime, LocalizedText, NodeId,
-    NumericRange, PermissionType, RolePermissionType, StatusCode, TimestampsToReturn, Variant,
-    VariantScalarTypeId, VariantTypeId, WriteMask,
+    AttributeId, DataEncoding, DataValue, DateTime, LocalizedText, NodeId, NumericRange,
+    PermissionType, RolePermissionType, StatusCode, TimestampsToReturn, Variant, WriteMask,
 };
 use tracing::debug;
 
-use super::{AccessLevel, AddressSpace, HasNodeId, NodeType, Variable};
+use super::{
+    write_validation::validate_attribute_value_to_write, AccessLevel, AddressSpace, HasNodeId,
+    NodeType,
+};
+#[cfg(test)]
+use super::{write_validation::validate_node_write, Variable};
 
 pub(crate) type LocalizedTextAttributeKey = (NodeId, AttributeId);
 /// Per-server side-table of written LocalizedText variants, keyed by
@@ -195,218 +198,6 @@ pub fn validate_node_read(
     Ok(())
 }
 
-/// Validate `value`, verifying that it can be written as the value of
-/// `variable`.
-pub fn validate_value_to_write(
-    variable: &Variable,
-    value: &Variant,
-    type_tree: &dyn TypeTree,
-    has_index_range: bool,
-) -> Result<(), StatusCode> {
-    let node_data_type = variable.data_type();
-
-    validate_value_data_type_to_write(
-        &node_data_type,
-        variable.value_rank(),
-        value,
-        type_tree,
-        has_index_range,
-    )
-}
-
-// Part 4 §5.11.4 / Part 3 §5.6: the written value's array-ness must match the node's ValueRank.
-// Skipped when an index range is present, since that writes a sub-section (e.g. a scalar element
-// of an array) rather than replacing the whole value.
-fn validate_value_rank_to_write(
-    value_rank: i32,
-    is_array: bool,
-    has_index_range: bool,
-) -> Result<(), StatusCode> {
-    if has_index_range {
-        return Ok(());
-    }
-    let ok = match value_rank {
-        // ScalarOrOneDimension / Any: either a scalar or an array is acceptable.
-        -3 | -2 => true,
-        // Scalar: the value must not be an array.
-        -1 => !is_array,
-        // 0 (OneOrMoreDimensions), 1, 2, ...: an array is required.
-        _ => is_array,
-    };
-    if ok {
-        Ok(())
-    } else {
-        Err(StatusCode::BadTypeMismatch)
-    }
-}
-
-fn validate_value_data_type_to_write(
-    node_data_type: &NodeId,
-    value_rank: i32,
-    value: &Variant,
-    type_tree: &dyn TypeTree,
-    has_index_range: bool,
-) -> Result<(), StatusCode> {
-    if matches!(value, Variant::Empty) {
-        return Ok(());
-    }
-
-    if let Some(value_data_type) = value.data_type() {
-        let Some(data_type) = value_data_type.try_resolve(type_tree.namespaces()) else {
-            return Err(StatusCode::BadTypeMismatch);
-        };
-        // Value is scalar, check if the data type matches
-        let data_type_matches = type_tree.is_subtype_of(&data_type, node_data_type);
-
-        if !data_type_matches {
-            if value.is_array() {
-                return Err(StatusCode::BadTypeMismatch);
-            }
-            // Check if the value to write is a byte string and the receiving node type a byte array.
-            // This code is a mess just for some weird edge case in the spec that a write from
-            // a byte string to a byte array should succeed
-            match value {
-                Variant::ByteString(_) => {
-                    if node_data_type
-                        .as_data_type_id()
-                        .is_ok_and(|data_type| data_type == DataTypeId::Byte)
-                    {
-                        match value_rank {
-                            -2 | -3 | 1 => Ok(()),
-                            _ => Err(StatusCode::BadTypeMismatch),
-                        }
-                    } else {
-                        Err(StatusCode::BadTypeMismatch)
-                    }
-                }
-                // Part 4 §5.11.4: a scalar value whose data type is neither the node's
-                // data type nor a subtype of it is a type mismatch.
-                _ => Err(StatusCode::BadTypeMismatch),
-            }
-        } else {
-            // Data type matches; the value's array-ness must also match the node's ValueRank.
-            validate_value_rank_to_write(value_rank, value.is_array(), has_index_range)
-        }
-    } else {
-        Err(StatusCode::BadTypeMismatch)
-    }
-}
-
-fn validate_attribute_value_to_write(
-    attribute_id: AttributeId,
-    value: &Variant,
-) -> Result<(), StatusCode> {
-    let valid = match attribute_id {
-        AttributeId::Value => true,
-        AttributeId::NodeId | AttributeId::DataType => {
-            is_scalar_attribute_value(value, VariantScalarTypeId::NodeId)
-        }
-        AttributeId::NodeClass | AttributeId::ValueRank => {
-            is_scalar_attribute_value(value, VariantScalarTypeId::Int32)
-        }
-        AttributeId::BrowseName => {
-            is_scalar_attribute_value(value, VariantScalarTypeId::QualifiedName)
-        }
-        AttributeId::DisplayName | AttributeId::Description | AttributeId::InverseName => {
-            is_scalar_attribute_value(value, VariantScalarTypeId::LocalizedText)
-        }
-        AttributeId::WriteMask | AttributeId::UserWriteMask | AttributeId::AccessLevelEx => {
-            is_scalar_attribute_value(value, VariantScalarTypeId::UInt32)
-        }
-        AttributeId::IsAbstract
-        | AttributeId::Symmetric
-        | AttributeId::ContainsNoLoops
-        | AttributeId::Historizing
-        | AttributeId::Executable
-        | AttributeId::UserExecutable => {
-            is_scalar_attribute_value(value, VariantScalarTypeId::Boolean)
-        }
-        AttributeId::EventNotifier | AttributeId::AccessLevel | AttributeId::UserAccessLevel => {
-            is_scalar_attribute_value(value, VariantScalarTypeId::Byte)
-        }
-        AttributeId::ArrayDimensions => {
-            is_array_attribute_value(value, VariantScalarTypeId::UInt32)
-        }
-        AttributeId::MinimumSamplingInterval => {
-            is_scalar_attribute_value(value, VariantScalarTypeId::Double)
-        }
-        AttributeId::DataTypeDefinition => {
-            value.is_empty()
-                || is_scalar_attribute_value(value, VariantScalarTypeId::ExtensionObject)
-        }
-        AttributeId::RolePermissions | AttributeId::UserRolePermissions => {
-            is_array_attribute_value(value, VariantScalarTypeId::ExtensionObject)
-        }
-        AttributeId::AccessRestrictions => {
-            is_scalar_attribute_value(value, VariantScalarTypeId::UInt16)
-        }
-    };
-
-    if valid {
-        Ok(())
-    } else {
-        Err(StatusCode::BadTypeMismatch)
-    }
-}
-
-fn is_scalar_attribute_value(value: &Variant, expected: VariantScalarTypeId) -> bool {
-    value.type_id() == VariantTypeId::Scalar(expected)
-}
-
-fn is_array_attribute_value(value: &Variant, expected: VariantScalarTypeId) -> bool {
-    matches!(value.type_id(), VariantTypeId::Array(actual, _) if actual == expected)
-}
-
-/// Validate that the user given by `context` can write to the attribute given
-/// by `node_to_write` on `node`.
-pub fn validate_node_write(
-    node: &NodeType,
-    context: &RequestContext,
-    node_to_write: &ParsedWriteValue,
-    type_tree: &dyn TypeTree,
-) -> Result<(), StatusCode> {
-    is_writable(context, node, node_to_write.attribute_id)?;
-
-    if node_to_write.attribute_id != AttributeId::Value && node_to_write.index_range.has_range() {
-        return Err(StatusCode::BadWriteNotSupported);
-    }
-
-    let Some(value) = node_to_write.value.value.as_ref() else {
-        return Err(StatusCode::BadTypeMismatch);
-    };
-
-    validate_attribute_value_to_write(node_to_write.attribute_id, value)?;
-    validate_localized_text_attribute_write_locale(context, node_to_write.attribute_id, value)?;
-
-    if node_to_write.attribute_id == AttributeId::Value {
-        match node {
-            NodeType::Variable(var) => validate_value_to_write(
-                var,
-                value,
-                type_tree,
-                node_to_write.index_range.has_range(),
-            )?,
-            NodeType::VariableType(var_type) => validate_value_data_type_to_write(
-                var_type.data_type(),
-                var_type.value_rank(),
-                value,
-                type_tree,
-                node_to_write.index_range.has_range(),
-            )?,
-            _ => {}
-        }
-    }
-
-    remember_localized_text_attribute_value(
-        &context.info,
-        node.node_id(),
-        node_to_write.attribute_id,
-        value,
-    );
-
-    Ok(())
-}
-
 /// Return `true` if we support the given data encoding.
 ///
 pub fn is_supported_data_encoding(data_encoding: &DataEncoding) -> bool {
@@ -450,7 +241,12 @@ fn is_localized_text_attribute(attribute_id: AttributeId) -> bool {
     )
 }
 
-fn remember_localized_text_attribute_value(
+/// Remembers per-locale writes only for LocalizedText attributes with negotiated
+/// locale reads. Value-attribute LocalizedText writes deliberately keep
+/// whole-value single-locale semantics, a server-specific choice permitted by
+/// OPC UA Part 4 §5.11.4.1; only DisplayName, Description, and InverseName use
+/// this per-locale storage.
+pub(super) fn remember_localized_text_attribute_value(
     info: &ServerInfo,
     node_id: &NodeId,
     attribute_id: AttributeId,
@@ -467,12 +263,27 @@ fn remember_localized_text_attribute_value(
     let key = (node_id.clone(), attribute_id);
     let values = &info.localized_text_variants;
     if text.locale.is_empty() {
-        values.remove(&key);
+        if text.text.is_empty() {
+            values.remove(&key);
+        }
         return;
     }
 
     let text = text.as_ref().clone();
     let locale = normalized_locale_id(text.locale.as_ref());
+    if text.text.is_empty() {
+        let remove_key = if let Some(mut variants) = values.get_mut(&key) {
+            variants.retain(|existing| normalized_locale_id(existing.locale.as_ref()) != locale);
+            variants.is_empty()
+        } else {
+            false
+        };
+        if remove_key {
+            values.remove(&key);
+        }
+        return;
+    }
+
     let mut variants = values.entry(key).or_default();
     if let Some(existing) = variants
         .iter_mut()
@@ -484,7 +295,7 @@ fn remember_localized_text_attribute_value(
     }
 }
 
-fn validate_localized_text_attribute_write_locale(
+pub(super) fn validate_localized_text_attribute_write_locale(
     context: &RequestContext,
     attribute_id: AttributeId,
     value: &Variant,
@@ -533,7 +344,7 @@ fn localized_text_for_session(
     let Some(variants) = context.info.localized_text_variants.get(&key) else {
         return fallback.clone();
     };
-    if fallback.locale.is_empty() || !variants.iter().any(|text| text == fallback) {
+    if variants.is_empty() {
         return fallback.clone();
     }
 

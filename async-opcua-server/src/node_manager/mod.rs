@@ -35,7 +35,8 @@ mod utils;
 mod view;
 
 use crate::{
-    diagnostics::NamespaceMetadata, session::continuation_points::ContinuationPoint,
+    diagnostics::NamespaceMetadata,
+    session::{continuation_points::ContinuationPoint, manager::SessionManager},
     ServerStatusWrapper,
 };
 
@@ -251,6 +252,8 @@ impl NodeManagersRef {
 pub struct ServerContext {
     /// Weak reference to the node manager collection.
     pub node_managers: NodeManagersRef,
+    /// Manager containing the server's live sessions.
+    pub session_manager: Arc<RwLock<SessionManager>>,
     /// Cache containing the subscriptions managed by the server.
     pub subscriptions: Arc<SubscriptionCache>,
     /// General server state and configuration.

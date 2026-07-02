@@ -417,10 +417,7 @@ impl Server {
             mdns,
             #[cfg(feature = "discovery-mdns")]
             registered_mdns,
-            diagnostics: ServerDiagnostics {
-                enabled: config.diagnostics,
-                ..Default::default()
-            },
+            diagnostics: ServerDiagnostics::new(config.diagnostics),
             metrics: Arc::new(crate::metrics::ServerMetrics::new()),
             fota_cleanup: Default::default(),
             localized_text_variants: Default::default(),
@@ -438,8 +435,14 @@ impl Server {
             builder.build_info,
             subscriptions.clone(),
         ));
+        let session_notify = Arc::new(Notify::new());
+        let session_manager = Arc::new(RwLock::new(SessionManager::new(
+            info.clone(),
+            session_notify.clone(),
+        )));
         let context = ServerContext {
             node_managers: node_managers_ref.clone(),
+            session_manager: session_manager.clone(),
             subscriptions: subscriptions.clone(),
             info: info.clone(),
             authenticator: info.authenticator.clone(),
@@ -466,12 +469,6 @@ impl Server {
                 Arc::clone(core_node_manager.address_space()),
             );
         }
-
-        let session_notify = Arc::new(Notify::new());
-        let session_manager = Arc::new(RwLock::new(SessionManager::new(
-            info.clone(),
-            session_notify.clone(),
-        )));
 
         let (reverse_connect_manager, reverse_connect_handle) =
             reverse_connect::ReverseConnectionManager::new(Duration::from_millis(
@@ -561,6 +558,7 @@ impl Server {
     fn server_context(&self) -> ServerContext {
         ServerContext {
             node_managers: self.node_managers.as_weak(),
+            session_manager: self.session_manager.clone(),
             subscriptions: self.subscriptions.clone(),
             info: self.info.clone(),
             authenticator: self.info.authenticator.clone(),

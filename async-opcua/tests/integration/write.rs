@@ -1149,3 +1149,350 @@ async fn write_emits_audit_event() {
         "an AuditWriteUpdateEventType must be delivered after a Write"
     );
 }
+
+#[tokio::test]
+async fn server_diagnostics_enabled_flag_write_requires_privilege() {
+    // Feature 053 US1 (P5-04) — OPC UA Part 5 §6.3.3: EnabledFlag toggles diagnostics
+    // collection. Fail closed (constitution §IV): a session without the diagnostics-write
+    // privilege gets Bad_UserAccessDenied; the ordinary read_diagnostics privilege is not
+    // sufficient to write.
+    use crate::utils::{client_user_token, default_server, Tester};
+    use opcua::types::VariableId;
+    use std::time::Duration;
+
+    let server = default_server().diagnostics_enabled(true);
+    let mut tester = Tester::new(server, false).await;
+
+    // Anonymous session: write denied.
+    let (session, lp) = tester.connect_default().await.unwrap();
+    lp.spawn();
+    tokio::time::timeout(Duration::from_secs(5), session.wait_for_connection())
+        .await
+        .unwrap();
+    let r = session
+        .write(&[write_value(
+            AttributeId::Value,
+            false,
+            VariableId::Server_ServerDiagnostics_EnabledFlag,
+        )])
+        .await
+        .unwrap();
+    assert_eq!(StatusCode::BadUserAccessDenied, r[0]);
+
+    // User with read_diagnostics (but no write privilege): write still denied.
+    let (session, lp) = tester
+        .connect(
+            opcua_crypto::SecurityPolicy::Aes128Sha256RsaOaep,
+            opcua_types::MessageSecurityMode::SignAndEncrypt,
+            client_user_token(),
+        )
+        .await
+        .unwrap();
+    lp.spawn();
+    tokio::time::timeout(Duration::from_secs(5), session.wait_for_connection())
+        .await
+        .unwrap();
+    let r = session
+        .write(&[write_value(
+            AttributeId::Value,
+            false,
+            VariableId::Server_ServerDiagnostics_EnabledFlag,
+        )])
+        .await
+        .unwrap();
+    assert_eq!(StatusCode::BadUserAccessDenied, r[0]);
+
+    // The flag must be unchanged after the rejected writes.
+    let read = session
+        .read(
+            &[read_value_id(
+                AttributeId::Value,
+                VariableId::Server_ServerDiagnostics_EnabledFlag,
+            )],
+            TimestampsToReturn::Both,
+            0.0,
+        )
+        .await
+        .unwrap();
+    assert_eq!(Some(Variant::Boolean(true)), read[0].value);
+}
+
+// ---------------------------------------------------------------------------
+// Feature 053 US2 (P4-ATTR-04): write range/enumeration validation.
+// OPC UA Part 4 §5.11.4 (Bad_OutOfRange write result); Part 8 §5.3.2.2 (EURange)
+// and §5.3.3.3/§5.3.3.4 (writes of values outside a discrete item's enumeration
+// should be answered with Bad_OutOfRange).
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn write_outside_eurange_is_rejected() {
+    use opcua::types::Range;
+
+    let (tester, nm, session) = setup().await;
+
+    // Analog scalar with EURange [0, 100].
+    let var_id = nm.inner().next_node_id();
+    nm.inner().add_node(
+        nm.address_space(),
+        tester.handle.type_tree(),
+        VariableBuilder::new(&var_id, "AnalogVar", "AnalogVar")
+            .value(10.0f64)
+            .data_type(DataTypeId::Double)
+            .access_level(AccessLevel::CURRENT_READ | AccessLevel::CURRENT_WRITE)
+            .user_access_level(AccessLevel::CURRENT_READ | AccessLevel::CURRENT_WRITE)
+            .build()
+            .into(),
+        &ObjectId::ObjectsFolder.into(),
+        &ReferenceTypeId::Organizes.into(),
+        Some(&VariableTypeId::BaseDataVariableType.into()),
+        Vec::new(),
+    );
+    let prop_id = nm.inner().next_node_id();
+    nm.inner().add_node(
+        nm.address_space(),
+        tester.handle.type_tree(),
+        VariableBuilder::new(&prop_id, "EURange", "EURange")
+            .value(Range {
+                low: 0.0,
+                high: 100.0,
+            })
+            .data_type(DataTypeId::Range)
+            .access_level(AccessLevel::CURRENT_READ)
+            .user_access_level(AccessLevel::CURRENT_READ)
+            .build()
+            .into(),
+        &var_id,
+        &ReferenceTypeId::HasProperty.into(),
+        Some(&VariableTypeId::PropertyType.into()),
+        Vec::new(),
+    );
+
+    // Out of range → Bad_OutOfRange, stored value unchanged.
+    let r = session
+        .write(&[write_value(AttributeId::Value, 150.0f64, &var_id)])
+        .await
+        .unwrap();
+    assert_eq!(StatusCode::BadOutOfRange, r[0]);
+    let read = session
+        .read(
+            &[read_value_id(AttributeId::Value, &var_id)],
+            TimestampsToReturn::Both,
+            0.0,
+        )
+        .await
+        .unwrap();
+    assert_eq!(Some(Variant::Double(10.0)), read[0].value);
+
+    // Below the range low bound is out of range too.
+    let r = session
+        .write(&[write_value(AttributeId::Value, -0.5f64, &var_id)])
+        .await
+        .unwrap();
+    assert_eq!(StatusCode::BadOutOfRange, r[0]);
+
+    // In range → Good.
+    let r = session
+        .write(&[write_value(AttributeId::Value, 99.5f64, &var_id)])
+        .await
+        .unwrap();
+    assert_eq!(StatusCode::Good, r[0]);
+}
+
+#[tokio::test]
+async fn write_array_element_outside_eurange_is_rejected() {
+    use opcua::types::Range;
+
+    let (tester, nm, session) = setup().await;
+
+    let var_id = nm.inner().next_node_id();
+    nm.inner().add_node(
+        nm.address_space(),
+        tester.handle.type_tree(),
+        VariableBuilder::new(&var_id, "AnalogArray", "AnalogArray")
+            .value(vec![1.0f64, 2.0])
+            .value_rank(1)
+            .data_type(DataTypeId::Double)
+            .access_level(AccessLevel::CURRENT_READ | AccessLevel::CURRENT_WRITE)
+            .user_access_level(AccessLevel::CURRENT_READ | AccessLevel::CURRENT_WRITE)
+            .build()
+            .into(),
+        &ObjectId::ObjectsFolder.into(),
+        &ReferenceTypeId::Organizes.into(),
+        Some(&VariableTypeId::BaseDataVariableType.into()),
+        Vec::new(),
+    );
+    let prop_id = nm.inner().next_node_id();
+    nm.inner().add_node(
+        nm.address_space(),
+        tester.handle.type_tree(),
+        VariableBuilder::new(&prop_id, "EURange", "EURange")
+            .value(Range {
+                low: 0.0,
+                high: 100.0,
+            })
+            .data_type(DataTypeId::Range)
+            .access_level(AccessLevel::CURRENT_READ)
+            .user_access_level(AccessLevel::CURRENT_READ)
+            .build()
+            .into(),
+        &var_id,
+        &ReferenceTypeId::HasProperty.into(),
+        Some(&VariableTypeId::PropertyType.into()),
+        Vec::new(),
+    );
+
+    // Whole-array write with one element out of range → Bad_OutOfRange.
+    let r = session
+        .write(&[write_value(
+            AttributeId::Value,
+            vec![50.0f64, 500.0],
+            &var_id,
+        )])
+        .await
+        .unwrap();
+    assert_eq!(StatusCode::BadOutOfRange, r[0]);
+
+    // Index-ranged write of an out-of-range element → Bad_OutOfRange.
+    let mut wv = write_value(AttributeId::Value, vec![500.0f64], &var_id);
+    wv.index_range = NumericRange::Index(1);
+    let r = session.write(&[wv]).await.unwrap();
+    assert_eq!(StatusCode::BadOutOfRange, r[0]);
+
+    // Index-ranged write of an in-range element → Good.
+    let mut wv = write_value(AttributeId::Value, vec![50.0f64], &var_id);
+    wv.index_range = NumericRange::Index(1);
+    let r = session.write(&[wv]).await.unwrap();
+    assert_eq!(StatusCode::Good, r[0]);
+}
+
+#[tokio::test]
+async fn write_undefined_enum_value_is_rejected() {
+    use opcua::server::address_space::DataTypeBuilder;
+    use opcua::types::{DataTypeDefinition, EnumDefinition, EnumField};
+
+    let (tester, nm, session) = setup().await;
+
+    // Custom enumeration DataType with values {0, 1, 2}.
+    let enum_type_id = nm.inner().next_node_id();
+    nm.inner().add_node(
+        nm.address_space(),
+        tester.handle.type_tree(),
+        DataTypeBuilder::new(&enum_type_id, "TestEnum", "TestEnum")
+            .data_type_definition(DataTypeDefinition::Enum(EnumDefinition {
+                fields: Some(
+                    [("A", 0i64), ("B", 1), ("C", 2)]
+                        .iter()
+                        .map(|(name, value)| EnumField {
+                            value: *value,
+                            display_name: (*name).into(),
+                            description: Default::default(),
+                            name: (*name).into(),
+                        })
+                        .collect(),
+                ),
+            }))
+            .build()
+            .into(),
+        &DataTypeId::Enumeration.into(),
+        &ReferenceTypeId::HasSubtype.into(),
+        None,
+        Vec::new(),
+    );
+
+    let var_id = nm.inner().next_node_id();
+    nm.inner().add_node(
+        nm.address_space(),
+        tester.handle.type_tree(),
+        VariableBuilder::new(&var_id, "EnumVar", "EnumVar")
+            .value(1i32)
+            .data_type(&enum_type_id)
+            .access_level(AccessLevel::CURRENT_READ | AccessLevel::CURRENT_WRITE)
+            .user_access_level(AccessLevel::CURRENT_READ | AccessLevel::CURRENT_WRITE)
+            .build()
+            .into(),
+        &ObjectId::ObjectsFolder.into(),
+        &ReferenceTypeId::Organizes.into(),
+        Some(&VariableTypeId::BaseDataVariableType.into()),
+        Vec::new(),
+    );
+
+    // Undefined enumeration value → Bad_OutOfRange, stored value unchanged.
+    let r = session
+        .write(&[write_value(AttributeId::Value, 7i32, &var_id)])
+        .await
+        .unwrap();
+    assert_eq!(StatusCode::BadOutOfRange, r[0]);
+    let read = session
+        .read(
+            &[read_value_id(AttributeId::Value, &var_id)],
+            TimestampsToReturn::Both,
+            0.0,
+        )
+        .await
+        .unwrap();
+    assert_eq!(Some(Variant::Int32(1)), read[0].value);
+
+    // Defined value → Good.
+    let r = session
+        .write(&[write_value(AttributeId::Value, 2i32, &var_id)])
+        .await
+        .unwrap();
+    assert_eq!(StatusCode::Good, r[0]);
+
+    // Array of enum values: any undefined element → Bad_OutOfRange.
+    let arr_id = nm.inner().next_node_id();
+    nm.inner().add_node(
+        nm.address_space(),
+        tester.handle.type_tree(),
+        VariableBuilder::new(&arr_id, "EnumArr", "EnumArr")
+            .value(vec![0i32, 1])
+            .value_rank(1)
+            .data_type(&enum_type_id)
+            .access_level(AccessLevel::CURRENT_READ | AccessLevel::CURRENT_WRITE)
+            .user_access_level(AccessLevel::CURRENT_READ | AccessLevel::CURRENT_WRITE)
+            .build()
+            .into(),
+        &ObjectId::ObjectsFolder.into(),
+        &ReferenceTypeId::Organizes.into(),
+        Some(&VariableTypeId::BaseDataVariableType.into()),
+        Vec::new(),
+    );
+    let r = session
+        .write(&[write_value(AttributeId::Value, vec![1i32, 7], &arr_id)])
+        .await
+        .unwrap();
+    assert_eq!(StatusCode::BadOutOfRange, r[0]);
+    let r = session
+        .write(&[write_value(AttributeId::Value, vec![1i32, 2], &arr_id)])
+        .await
+        .unwrap();
+    assert_eq!(StatusCode::Good, r[0]);
+}
+
+#[tokio::test]
+async fn write_unconstrained_integer_is_unaffected_by_range_validation() {
+    // Regression guard: a Variable with a plain integer DataType (no enumeration
+    // definition, no EURange property) accepts any type-compatible value.
+    let (tester, nm, session) = setup().await;
+    let var_id = nm.inner().next_node_id();
+    nm.inner().add_node(
+        nm.address_space(),
+        tester.handle.type_tree(),
+        VariableBuilder::new(&var_id, "PlainInt", "PlainInt")
+            .value(1i32)
+            .data_type(DataTypeId::Int32)
+            .access_level(AccessLevel::CURRENT_READ | AccessLevel::CURRENT_WRITE)
+            .user_access_level(AccessLevel::CURRENT_READ | AccessLevel::CURRENT_WRITE)
+            .build()
+            .into(),
+        &ObjectId::ObjectsFolder.into(),
+        &ReferenceTypeId::Organizes.into(),
+        Some(&VariableTypeId::BaseDataVariableType.into()),
+        Vec::new(),
+    );
+    let r = session
+        .write(&[write_value(AttributeId::Value, 123456i32, &var_id)])
+        .await
+        .unwrap();
+    assert_eq!(StatusCode::Good, r[0]);
+}

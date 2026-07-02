@@ -13,8 +13,8 @@ use opcua_types::JsonBody;
 #[cfg(feature = "xml")]
 use opcua_types::XmlBody;
 use opcua_types::{
-    AttributeId, AttributesMask, DataEncoding, DataTypeId, DataValue, DateTime, NumericRange,
-    StatusCode, TimestampsToReturn, TryFromVariant, VariableAttributes, Variant,
+    AccessLevelExType, AttributeId, AttributesMask, DataEncoding, DataTypeId, DataValue, DateTime,
+    NumericRange, StatusCode, TimestampsToReturn, TryFromVariant, VariableAttributes, Variant,
 };
 #[cfg(any(feature = "xml", feature = "json"))]
 use opcua_types::{ExtensionObject, VariantScalarTypeId};
@@ -53,6 +53,14 @@ impl VariableBuilder {
     /// Sets the access level for the variable.
     pub fn access_level(mut self, access_level: AccessLevel) -> Self {
         self.node.set_access_level(access_level);
+        self
+    }
+
+    /// Sets the extended access level bits for the variable.
+    ///
+    /// The low byte is ignored here and continues to come from `access_level`.
+    pub fn access_level_ex(mut self, access_level_ex: AccessLevelExType) -> Self {
+        self.node.set_access_level_ex(access_level_ex);
         self
     }
 
@@ -150,6 +158,8 @@ pub struct Variable {
     pub(super) value_rank: i32,
     pub(super) value: DataValue,
     pub(super) access_level: u8,
+    /// AccessLevelEx bits 8..31, stored shifted down by 8. The low byte is derived from access_level.
+    pub(super) access_level_ex_extended: u32,
     pub(super) user_access_level: u8,
     pub(super) array_dimensions: Option<Vec<u32>>,
     pub(super) minimum_sampling_interval: Option<f64>,
@@ -164,6 +174,7 @@ impl Default for Variable {
             value_rank: -1,
             value: Variant::Empty.into(),
             access_level: AccessLevel::CURRENT_READ.bits(),
+            access_level_ex_extended: 0,
             user_access_level: AccessLevel::CURRENT_READ.bits(),
             array_dimensions: None,
             minimum_sampling_interval: None,
@@ -194,6 +205,7 @@ impl Node for Variable {
             AttributeId::Historizing => Some(self.historizing().into()),
             AttributeId::ValueRank => Some(self.value_rank().into()),
             AttributeId::AccessLevel => Some(self.access_level().bits().into()),
+            AttributeId::AccessLevelEx => Some(self.access_level_ex().into()),
             AttributeId::UserAccessLevel => Some(self.user_access_level().bits().into()),
             // Optional attributes
             AttributeId::ArrayDimensions => {
@@ -257,6 +269,14 @@ impl Node for Variable {
             AttributeId::AccessLevel => {
                 if let Variant::Byte(v) = value {
                     self.set_access_level(AccessLevel::from_bits_truncate(v));
+                    Ok(())
+                } else {
+                    Err(StatusCode::BadTypeMismatch)
+                }
+            }
+            AttributeId::AccessLevelEx => {
+                if let Variant::UInt32(v) = value {
+                    self.set_access_level_ex_attribute(v);
                     Ok(())
                 } else {
                     Err(StatusCode::BadTypeMismatch)
@@ -479,6 +499,7 @@ impl Variable {
             value_rank,
             value,
             access_level,
+            access_level_ex_extended: 0,
             user_access_level,
             array_dimensions,
             minimum_sampling_interval,
@@ -610,6 +631,11 @@ impl Variable {
     }
 
     /// Read the value of the variable.
+    ///
+    /// `max_age` is intentionally ignored for an in-memory variable: the stored
+    /// value is the data source at this layer, so any cached value satisfies OPC
+    /// UA Part 4 section 5.11.2.2 Table 47. There is no fresher source for
+    /// `Variable` itself to consult.
     pub fn value(
         &self,
         timestamps_to_return: TimestampsToReturn,
@@ -797,6 +823,20 @@ impl Variable {
         self.access_level = access_level.bits();
     }
 
+    /// Returns the AccessLevelEx attribute value derived from the extended bits and AccessLevel.
+    pub fn access_level_ex(&self) -> u32 {
+        (self.access_level_ex_extended << 8) | u32::from(self.access_level)
+    }
+
+    fn set_access_level_ex(&mut self, access_level_ex: AccessLevelExType) {
+        self.access_level_ex_extended = ((access_level_ex.bits() as u32) & !0xff) >> 8;
+    }
+
+    fn set_access_level_ex_attribute(&mut self, access_level_ex: u32) {
+        self.access_level_ex_extended = access_level_ex >> 8;
+        self.access_level = access_level_ex as u8;
+    }
+
     /// Test if the variable is user readable.
     pub fn is_user_readable(&self) -> bool {
         self.user_access_level().contains(AccessLevel::CURRENT_READ)
@@ -890,6 +930,101 @@ fn value_array_dimension_count(value: &DataValue) -> Option<usize> {
     match value.value.as_ref()? {
         Variant::Array(array) => Some(array.dimensions.as_ref().map_or(1, Vec::len)),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod access_level_ex_tests {
+    use opcua_types::AccessLevelExType;
+
+    use super::*;
+
+    fn variable() -> Variable {
+        Variable::new_data_value(
+            &NodeId::new(1, "access-level-ex-variable"),
+            "AccessLevelExVariable",
+            "AccessLevelExVariable",
+            DataTypeId::UInt32,
+            None,
+            None,
+            42u32,
+        )
+    }
+
+    fn read_access_level_ex(variable: &Variable) -> u32 {
+        let value = variable
+            .get_attribute_max_age(
+                TimestampsToReturn::Neither,
+                AttributeId::AccessLevelEx,
+                &NumericRange::None,
+                &DataEncoding::Binary,
+                0.0,
+            )
+            .expect("AccessLevelEx should be readable for Variables");
+
+        match value.value {
+            Some(Variant::UInt32(value)) => value,
+            other => panic!("expected UInt32 AccessLevelEx value, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn access_level_ex_default_low_byte_mirrors_access_level() {
+        let mut variable = variable();
+        variable.set_access_level(AccessLevel::CURRENT_READ | AccessLevel::CURRENT_WRITE);
+
+        assert_eq!(variable.access_level_ex(), 0x03);
+        assert_eq!(read_access_level_ex(&variable), 0x03);
+    }
+
+    #[test]
+    fn access_level_ex_builder_masks_low_byte_from_typed_value() {
+        let variable = VariableBuilder::new(
+            &NodeId::new(1, "access-level-ex-builder"),
+            "AccessLevelExBuilder",
+            "AccessLevelExBuilder",
+        )
+        .data_type(DataTypeId::UInt32)
+        .value(42u32)
+        .access_level(AccessLevel::CURRENT_READ)
+        .access_level_ex(AccessLevelExType::CurrentWrite | AccessLevelExType::NonatomicRead)
+        .build();
+
+        assert_eq!(
+            variable.access_level().bits(),
+            AccessLevel::CURRENT_READ.bits()
+        );
+        assert_eq!(variable.access_level_ex(), 0x101);
+    }
+
+    #[test]
+    fn access_level_ex_write_updates_extended_bits_and_access_level() {
+        let mut variable = variable();
+
+        assert_eq!(
+            variable.set_attribute(
+                AttributeId::AccessLevelEx,
+                Variant::UInt32(AccessLevelExType::NonatomicWrite.bits() as u32 | 0x02),
+            ),
+            Ok(())
+        );
+
+        assert_eq!(
+            variable.access_level().bits(),
+            AccessLevel::CURRENT_WRITE.bits()
+        );
+        assert_eq!(variable.access_level_ex(), 0x202);
+        assert_eq!(read_access_level_ex(&variable), 0x202);
+    }
+
+    #[test]
+    fn access_level_ex_write_rejects_non_uint32() {
+        let mut variable = variable();
+
+        assert_eq!(
+            variable.set_attribute(AttributeId::AccessLevelEx, Variant::Byte(0x01)),
+            Err(StatusCode::BadTypeMismatch)
+        );
     }
 }
 

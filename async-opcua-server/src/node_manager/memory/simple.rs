@@ -1189,6 +1189,13 @@ impl SimpleNodeManagerImpl {
     }
 
     /// Add a callback for `Read` on the node given by `id`.
+    ///
+    /// The third callback argument is the client's Read `maxAge`, in
+    /// milliseconds, as defined by OPC UA Part 4 section 5.11.2.2 Table 47. The
+    /// callback is invoked on every Read, so returning a freshly read value is
+    /// always conformant. A callback backed by a slow device may return its own
+    /// cache when `max_age` permits; non-finite values such as NaN or infinity
+    /// may arrive and mean any cache is acceptable.
     pub fn add_read_callback(
         &self,
         id: NodeId,

@@ -877,3 +877,124 @@ async fn browse_attached_annotations_property() {
         ))))
     );
 }
+
+#[tokio::test]
+async fn server_diagnostics_mandatory_children_are_browsable() {
+    // Feature 053 US1 (P5-04) — OPC UA Part 5 §6.3.3 Table 11 (SC-002 lock-in): all
+    // mandatory ServerDiagnosticsType members are present under Server.ServerDiagnostics,
+    // and SessionsDiagnosticsSummary exposes both diagnostics arrays.
+    let (_tester, _nm, session) = setup().await;
+    let r = session
+        .browse(
+            &[
+                hierarchical_desc(ObjectId::Server_ServerDiagnostics.into()),
+                hierarchical_desc(
+                    ObjectId::Server_ServerDiagnostics_SessionsDiagnosticsSummary.into(),
+                ),
+            ],
+            1000,
+            None,
+        )
+        .await
+        .unwrap();
+
+    let names: Vec<String> = r[0]
+        .references
+        .clone()
+        .unwrap_or_default()
+        .iter()
+        .map(|rf| rf.browse_name.name.to_string())
+        .collect();
+    for expected in [
+        "ServerDiagnosticsSummary",
+        "SubscriptionDiagnosticsArray",
+        "SessionsDiagnosticsSummary",
+        "EnabledFlag",
+    ] {
+        assert!(
+            names.iter().any(|n| n == expected),
+            "mandatory ServerDiagnosticsType member {expected} missing; got {names:?}"
+        );
+    }
+
+    let names: Vec<String> = r[1]
+        .references
+        .clone()
+        .unwrap_or_default()
+        .iter()
+        .map(|rf| rf.browse_name.name.to_string())
+        .collect();
+    for expected in ["SessionDiagnosticsArray", "SessionSecurityDiagnosticsArray"] {
+        assert!(
+            names.iter().any(|n| n == expected),
+            "mandatory SessionsDiagnosticsSummary member {expected} missing; got {names:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn namespace_metadata_node_classes_match_part5() {
+    // Feature 053 US7 (P5-03) — verify-and-close lock-in. OPC UA Part 5 §6.3.13
+    // (Table 22) / §6.3.14: each Server.Namespaces child is an Object of
+    // NamespaceMetadataType, and its members (NamespaceUri, NamespaceVersion, …) are
+    // Properties, i.e. Variables. The audit finding claiming inverted NodeClasses was
+    // ruled not-a-bug; this test pins the correct structure.
+    let (_tester, _nm, session) = setup().await;
+
+    let r = session
+        .browse(
+            &[hierarchical_desc(ObjectId::Server_Namespaces.into())],
+            1000,
+            None,
+        )
+        .await
+        .unwrap();
+    let refs = r[0].references.clone().unwrap_or_default();
+    assert!(!refs.is_empty(), "Server.Namespaces must have children");
+    for namespace in &refs {
+        assert_eq!(
+            NodeClass::Object,
+            namespace.node_class,
+            "NamespaceMetadataType instance {} must be an Object",
+            namespace.browse_name.name
+        );
+        assert_eq!(
+            NodeId::from(ObjectTypeId::NamespaceMetadataType),
+            namespace.type_definition.node_id,
+            "type definition of {}",
+            namespace.browse_name.name
+        );
+    }
+
+    // Browse one metadata object's Properties.
+    let ns_node = refs[0].node_id.node_id.clone();
+    let r = session
+        .browse(&[hierarchical_desc(ns_node)], 1000, None)
+        .await
+        .unwrap();
+    let refs = r[0].references.clone().unwrap_or_default();
+    assert!(
+        !refs.is_empty(),
+        "namespace metadata must expose Properties"
+    );
+    let mut names: Vec<String> = Vec::new();
+    for prop in &refs {
+        assert_eq!(
+            NodeClass::Variable,
+            prop.node_class,
+            "Property {} of NamespaceMetadataType must be a Variable",
+            prop.browse_name.name
+        );
+        names.push(prop.browse_name.name.to_string());
+    }
+    for expected in [
+        "NamespaceUri",
+        "NamespaceVersion",
+        "NamespacePublicationDate",
+    ] {
+        assert!(
+            names.iter().any(|n| n == expected),
+            "expected Property {expected}; got {names:?}"
+        );
+    }
+}

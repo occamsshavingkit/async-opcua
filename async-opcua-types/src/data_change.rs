@@ -13,6 +13,15 @@ pub struct PercentDeadband {
     trigger: f64,
 }
 
+impl PercentDeadband {
+    /// Recompute the EURange parameters used by this percent deadband.
+    pub fn update_eu_range(&mut self, low: f64, high: f64) {
+        debug_assert!(low < high);
+        self.low = low;
+        self.range = high - low;
+    }
+}
+
 #[derive(Debug, Clone)]
 /// Deadband type, used in data change filters.
 pub enum Deadband {
@@ -25,6 +34,13 @@ pub enum Deadband {
 }
 
 impl Deadband {
+    /// Recompute EURange parameters if this is a percent deadband.
+    pub fn update_eu_range(&mut self, low: f64, high: f64) {
+        if let Deadband::Percent(percent_deadband) = self {
+            percent_deadband.update_eu_range(low, high);
+        }
+    }
+
     fn is_changed_option(&self, v1: Option<&Variant>, v2: Option<&Variant>) -> bool {
         match (v1, v2) {
             (Some(_), None) | (None, Some(_)) => true,
@@ -87,6 +103,11 @@ pub struct ParsedDataChangeFilter {
 }
 
 impl ParsedDataChangeFilter {
+    /// Recompute percent-deadband EURange parameters, if this filter uses one.
+    pub fn update_eu_range(&mut self, low: f64, high: f64) {
+        self.deadband.update_eu_range(low, high);
+    }
+
     /// Check if this data change filter considers `v1` different from `v2`.
     pub fn is_changed(&self, v1: &DataValue, v2: &DataValue) -> bool {
         match self.trigger {

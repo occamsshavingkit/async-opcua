@@ -10,7 +10,7 @@ mod subscription;
 
 use std::{cell::RefCell, hash::Hash, sync::Arc, time::Instant};
 
-use hashbrown::{Equivalent, HashMap};
+use hashbrown::{Equivalent, HashMap, HashSet};
 pub use monitored_item::{CreateMonitoredItem, MonitoredItem};
 use opcua_core::{trace_read_lock, trace_write_lock, RepublishResponseShared, ResponseMessage};
 use opcua_nodes::Event;
@@ -32,11 +32,14 @@ use opcua_types::{
     AttributeId, CreateSubscriptionRequest, CreateSubscriptionResponse, DataEncoding, DataValue,
     DateTime, DateTimeUtc, DiagnosticBits, MessageSecurityMode, ModifySubscriptionRequest,
     ModifySubscriptionResponse, MonitoredItemCreateResult, MonitoredItemModifyRequest,
-    MonitoringMode, NodeId, NotificationMessage, NumericRange, PublishRequest, RepublishRequest,
-    ResponseHeader, SetPublishingModeRequest, SetPublishingModeResponse, StatusCode,
-    TimestampsToReturn, TransferResult, TransferSubscriptionsRequest,
+    MonitoringMode, NodeId, NotificationMessage, NumericRange, PublishRequest, Range,
+    RepublishRequest, ResponseHeader, SetPublishingModeRequest, SetPublishingModeResponse,
+    StatusCode, TimestampsToReturn, TransferResult, TransferSubscriptionsRequest,
     TransferSubscriptionsResponse, Variant,
 };
+
+#[cfg(feature = "generated-address-space")]
+use opcua_types::SubscriptionDiagnosticsDataType;
 
 use crate::node_manager::{consume_results, RequestContextInner};
 
@@ -144,6 +147,8 @@ struct SubscriptionCacheInner {
     subscription_to_session: HashMap<u32, u32>,
     /// Map from notifier node ID to monitored item handles.
     monitored_items: HashMap<MonitoredItemKey, HashMap<MonitoredItemHandle, MonitoredItemEntry>>,
+    /// Map from EURange property node ID to percent-deadband monitored item handles.
+    eu_range_monitored_items: HashMap<NodeId, HashSet<MonitoredItemHandle>>,
 }
 
 /// Structure storing all subscriptions and monitored items on the server.
@@ -164,6 +169,11 @@ pub struct SubscriptionCache {
 struct PendingDataNotifications {
     subscription_handle: SubscriptionActorHandle,
     items: Vec<(MonitoredItemHandle, DataValue)>,
+}
+
+struct PendingRangeNotifications {
+    subscription_handle: SubscriptionActorHandle,
+    items: Vec<(MonitoredItemHandle, f64, f64)>,
 }
 
 /// Handle for notifying the subscription cache of a batch of changes,
@@ -353,6 +363,102 @@ fn push_pending_data_notifications(by_subscription: HashMap<(u32, u32), PendingD
     }
 }
 
+fn push_pending_range_notifications(
+    by_subscription: HashMap<(u32, u32), PendingRangeNotifications>,
+) {
+    for (_, pending) in by_subscription {
+        for (handle, low, high) in pending.items {
+            let item = NotificationWorkItem::RangeChanged { handle, low, high };
+            pending.subscription_handle.push_notification(item);
+        }
+    }
+}
+
+fn eu_range_from_data_value(value: &DataValue) -> Option<(f64, f64)> {
+    let Some(Variant::ExtensionObject(value)) = value.value.as_ref() else {
+        return None;
+    };
+    let range = value.inner_as::<Range>()?;
+    (range.low <= range.high).then_some((range.low, range.high))
+}
+
+#[cfg(feature = "generated-address-space")] // consumed only by the core node manager
+fn session_subscription_diagnostics(
+    subscriptions: &mut SessionSubscriptions,
+) -> Vec<SubscriptionDiagnosticsDataType> {
+    let session_id = trace_read_lock!(subscriptions.session())
+        .session_id()
+        .clone();
+    let subscription_ids = subscriptions.subscription_ids();
+    let mut diagnostics = Vec::with_capacity(subscription_ids.len());
+
+    for subscription_id in subscription_ids {
+        if let Some(subscription) = subscriptions.get(subscription_id) {
+            diagnostics.push(subscription_diagnostics_row(&session_id, subscription));
+        }
+    }
+
+    diagnostics
+}
+
+#[cfg(feature = "generated-address-space")] // consumed only by the core node manager
+fn subscription_diagnostics_row(
+    session_id: &NodeId,
+    subscription: &Subscription,
+) -> SubscriptionDiagnosticsDataType {
+    SubscriptionDiagnosticsDataType {
+        session_id: session_id.clone(),
+        subscription_id: subscription.id(),
+        priority: subscription.priority(),
+        publishing_interval: subscription.publishing_interval().as_secs_f64() * 1000.0,
+        max_keep_alive_count: subscription.max_keep_alive_counter(),
+        max_lifetime_count: subscription.max_lifetime_counter(),
+        max_notifications_per_publish: usize_to_u32_saturating(
+            subscription.max_notifications_per_publish(),
+        ),
+        publishing_enabled: subscription.publishing_enabled(),
+        current_keep_alive_count: subscription.current_keep_alive_counter(),
+        current_lifetime_count: subscription.current_lifetime_counter(),
+        discarded_message_count: subscription.discarded_message_count(),
+        monitored_item_count: usize_to_u32_saturating(subscription.monitored_item_count()),
+        next_sequence_number: subscription.next_sequence_number(),
+        ..Default::default()
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+#[cfg(feature = "generated-address-space")] // consumed only by the core node manager
+pub(crate) struct SessionSubscriptionDiagnosticsSummary {
+    pub subscription_count: u32,
+    pub monitored_item_count: u32,
+}
+
+#[cfg(feature = "generated-address-space")] // consumed only by the core node manager
+fn session_subscription_diagnostics_summary(
+    subscriptions: &mut SessionSubscriptions,
+) -> SessionSubscriptionDiagnosticsSummary {
+    let subscription_ids = subscriptions.subscription_ids();
+    let mut summary = SessionSubscriptionDiagnosticsSummary {
+        subscription_count: usize_to_u32_saturating(subscription_ids.len()),
+        ..Default::default()
+    };
+
+    for subscription_id in subscription_ids {
+        if let Some(subscription) = subscriptions.get(subscription_id) {
+            summary.monitored_item_count = summary
+                .monitored_item_count
+                .saturating_add(usize_to_u32_saturating(subscription.monitored_item_count()));
+        }
+    }
+
+    summary
+}
+
+#[cfg(feature = "generated-address-space")] // consumed only by the core node manager
+fn usize_to_u32_saturating(value: usize) -> u32 {
+    value.min(u32::MAX as usize) as u32
+}
+
 impl SubscriptionCache {
     #[allow(dead_code)]
     pub(crate) fn new(limits: SubscriptionLimits) -> Self {
@@ -369,6 +475,7 @@ impl SubscriptionCache {
                 session_subscriptions: HashMap::new(),
                 subscription_to_session: HashMap::new(),
                 monitored_items: HashMap::new(),
+                eu_range_monitored_items: HashMap::new(),
             }),
             node_managers,
             limits,
@@ -412,6 +519,53 @@ impl SubscriptionCache {
         }?;
 
         cache.legacy(move |subs| f(subs)).await.ok()
+    }
+
+    #[cfg(feature = "generated-address-space")] // consumed only by the core node manager
+    pub(crate) async fn subscription_diagnostics(&self) -> Vec<SubscriptionDiagnosticsDataType> {
+        let handles = {
+            let inner = trace_read_lock!(self.inner);
+            inner
+                .session_subscriptions
+                .values()
+                .map(SessionEntry::handle)
+                .collect::<Vec<_>>()
+        };
+
+        let mut diagnostics = Vec::new();
+        for handle in handles {
+            if let Ok(mut session_diagnostics) =
+                handle.legacy(session_subscription_diagnostics).await
+            {
+                diagnostics.append(&mut session_diagnostics);
+            }
+        }
+        diagnostics
+    }
+
+    #[cfg(feature = "generated-address-space")] // consumed only by the core node manager
+    pub(crate) async fn session_diagnostics_summaries(
+        &self,
+    ) -> HashMap<u32, SessionSubscriptionDiagnosticsSummary> {
+        let handles = {
+            let inner = trace_read_lock!(self.inner);
+            inner
+                .session_subscriptions
+                .iter()
+                .map(|(&session_id, entry)| (session_id, entry.handle()))
+                .collect::<Vec<_>>()
+        };
+
+        let mut summaries = HashMap::with_capacity(handles.len());
+        for (session_id, handle) in handles {
+            if let Ok(summary) = handle
+                .legacy(session_subscription_diagnostics_summary)
+                .await
+            {
+                summaries.insert(session_id, summary);
+            }
+        }
+        summaries
     }
 
     #[allow(dead_code)]
@@ -621,12 +775,38 @@ impl SubscriptionCache {
         }
     }
 
+    fn replace_eu_range_registration(
+        inner: &mut SubscriptionCacheInner,
+        handle: MonitoredItemHandle,
+        eu_range_node_id: Option<NodeId>,
+    ) {
+        Self::remove_eu_range_registration(inner, handle);
+        if let Some(eu_range_node_id) = eu_range_node_id {
+            inner
+                .eu_range_monitored_items
+                .entry(eu_range_node_id)
+                .or_default()
+                .insert(handle);
+        }
+    }
+
+    fn remove_eu_range_registration(
+        inner: &mut SubscriptionCacheInner,
+        handle: MonitoredItemHandle,
+    ) {
+        inner.eu_range_monitored_items.retain(|_, handles| {
+            handles.remove(&handle);
+            !handles.is_empty()
+        });
+    }
+
     fn cleanup_monitored_item_refs(inner: &mut SubscriptionCacheInner, items: &[MonitoredItemRef]) {
         for item in items {
             let key = MonitoredItemKeyRef {
                 id: item.node_id().into(),
                 attribute_id: item.attribute(),
             };
+            Self::remove_eu_range_registration(inner, item.handle());
             let remove_key = if let Some(handles) = inner.monitored_items.get_mut(&key) {
                 handles.remove(&item.handle());
                 handles.is_empty()
@@ -846,6 +1026,31 @@ impl SubscriptionCache {
             .map(|entry| (session_id, entry.handle()))
     }
 
+    fn eu_range_route_snapshot(
+        &self,
+        eu_range_node_id: &NodeId,
+    ) -> Vec<(u32, u32, SubscriptionActorHandle, MonitoredItemHandle)> {
+        let lck = trace_read_lock!(self.inner);
+        let Some(handles) = lck.eu_range_monitored_items.get(eu_range_node_id) else {
+            return Vec::new();
+        };
+
+        let mut routes = Vec::with_capacity(handles.len());
+        for handle in handles {
+            let subscription_id = handle.subscription_id;
+            let Some(session_id) = lck.subscription_to_session.get(&subscription_id).copied()
+            else {
+                continue;
+            };
+            let Some(entry) = lck.session_subscriptions.get(&session_id) else {
+                continue;
+            };
+            routes.push((session_id, subscription_id, entry.handle(), *handle));
+        }
+
+        routes
+    }
+
     /// Return a notifier for notifying the server of a batch of events.
     ///
     /// Note: This contains a lock, and should _not_ be kept around for long periods of time,
@@ -874,6 +1079,8 @@ impl SubscriptionCache {
         items: impl Iterator<Item = (DataValue, &'a NodeId, AttributeId)>,
     ) {
         let mut by_subscription: HashMap<(u32, u32), PendingDataNotifications> = HashMap::new();
+        let mut by_range_subscription: HashMap<(u32, u32), PendingRangeNotifications> =
+            HashMap::new();
 
         for (dv, node_id, attribute_id) in items {
             for batch in self
@@ -891,9 +1098,27 @@ impl SubscriptionCache {
                         .push((target.handle, dv.clone()));
                 }
             }
+
+            if attribute_id == AttributeId::Value {
+                if let Some((low, high)) = eu_range_from_data_value(&dv) {
+                    for (session_id, subscription_id, subscription_handle, handle) in
+                        self.eu_range_route_snapshot(node_id)
+                    {
+                        by_range_subscription
+                            .entry((session_id, subscription_id))
+                            .or_insert_with(|| PendingRangeNotifications {
+                                subscription_handle,
+                                items: Vec::new(),
+                            })
+                            .items
+                            .push((handle, low, high));
+                    }
+                }
+            }
         }
 
         push_pending_data_notifications(by_subscription);
+        push_pending_range_notifications(by_range_subscription);
     }
 
     /// Notify with a dynamic sampler, to avoid getting values for nodes that
@@ -906,10 +1131,18 @@ impl SubscriptionCache {
         sample: impl Fn(&NodeId, AttributeId, &NumericRange, &DataEncoding) -> Option<DataValue>,
     ) {
         let mut by_subscription: HashMap<(u32, u32), PendingDataNotifications> = HashMap::new();
+        let mut by_range_subscription: HashMap<(u32, u32), PendingRangeNotifications> =
+            HashMap::new();
 
         for (id, attribute_id) in items {
             let route_batches = self.data_route_snapshot(id, attribute_id).into_batches();
-            if route_batches.is_empty() {
+            let range_routes = if attribute_id == AttributeId::Value {
+                self.eu_range_route_snapshot(id)
+            } else {
+                Vec::new()
+            };
+
+            if route_batches.is_empty() && range_routes.is_empty() {
                 continue;
             }
 
@@ -936,9 +1169,35 @@ impl SubscriptionCache {
                         .push((target.handle, value));
                 }
             }
+
+            if !range_routes.is_empty() {
+                let Some(value) = sample(
+                    id,
+                    attribute_id,
+                    &NumericRange::default(),
+                    &DataEncoding::default(),
+                ) else {
+                    continue;
+                };
+                let Some((low, high)) = eu_range_from_data_value(&value) else {
+                    continue;
+                };
+
+                for (session_id, subscription_id, subscription_handle, handle) in range_routes {
+                    by_range_subscription
+                        .entry((session_id, subscription_id))
+                        .or_insert_with(|| PendingRangeNotifications {
+                            subscription_handle,
+                            items: Vec::new(),
+                        })
+                        .items
+                        .push((handle, low, high));
+                }
+            }
         }
 
         push_pending_data_notifications(by_subscription);
+        push_pending_range_notifications(by_range_subscription);
     }
 
     /// Notify listening clients to events. Without a custom node manager implementing
@@ -1024,6 +1283,12 @@ impl SubscriptionCache {
                             data_encoding: create.item_to_monitor().data_encoding.clone(),
                         },
                     );
+
+                    Self::replace_eu_range_registration(
+                        &mut lck,
+                        create.handle(),
+                        create.eu_range_node_id().cloned(),
+                    );
                 }
             }
         }
@@ -1040,6 +1305,7 @@ impl SubscriptionCache {
         timestamps_to_return: TimestampsToReturn,
         requests: Vec<MonitoredItemModifyRequest>,
         eu_ranges: HashMap<u32, (f64, f64)>,
+        eu_range_node_ids: HashMap<u32, NodeId>,
         diagnostic_bits: DiagnosticBits,
     ) -> Result<Vec<MonitoredItemUpdateRef>, StatusCode> {
         let Some(cache) = ({
@@ -1051,7 +1317,7 @@ impl SubscriptionCache {
             return Err(StatusCode::BadNoSubscription);
         };
 
-        cache
+        let result = cache
             .legacy(move |subs| {
                 let type_tree_for_user = subs.type_tree_for_user();
                 let type_tree = type_tree_for_user.get_type_tree();
@@ -1066,7 +1332,23 @@ impl SubscriptionCache {
                 )
             })
             .await
-            .map_err(|_| StatusCode::BadNoSubscription)?
+            .map_err(|_| StatusCode::BadNoSubscription)??;
+
+        {
+            let mut lck = trace_write_lock!(self.inner);
+            for update in &result {
+                if update.status_code().is_good() {
+                    let handle = update.handle();
+                    Self::replace_eu_range_registration(
+                        &mut lck,
+                        handle,
+                        eu_range_node_ids.get(&handle.monitored_item_id).cloned(),
+                    );
+                }
+            }
+        }
+
+        Ok(result)
     }
 
     pub(crate) async fn monitored_item_node_ids(
@@ -1193,13 +1475,7 @@ impl SubscriptionCache {
             let mut lck = trace_write_lock!(self.inner);
             for (status, rf) in res {
                 if status.is_good() {
-                    let key = MonitoredItemKeyRef {
-                        id: rf.node_id().into(),
-                        attribute_id: rf.attribute(),
-                    };
-                    if let Some(it) = lck.monitored_items.get_mut(&key) {
-                        it.remove(&rf.handle());
-                    }
+                    Self::cleanup_monitored_item_refs(&mut lck, std::slice::from_ref(rf));
                 }
             }
         }
@@ -1523,7 +1799,7 @@ mod tests {
         authenticator::UserToken,
         identity_token::{IdentityToken, POLICY_ID_ANONYMOUS},
         node_manager::{RequestContext, RequestContextInner, ServerContext},
-        session::instance::Session,
+        session::{instance::Session, manager::SessionManager},
         ServerBuilder, ServerStatusWrapper, SubscriptionCache,
     };
 
@@ -1770,6 +2046,10 @@ mod tests {
             );
             let session_id = session.read().session_id_numeric();
             let user_roles = session.read().roles();
+            let session_manager = Arc::new(RwLock::new(SessionManager::new(
+                Arc::clone(&info),
+                Arc::new(tokio::sync::Notify::new()),
+            )));
             let context = RequestContext::new_test(Arc::new(RequestContextInner {
                 session,
                 session_id,
@@ -1783,6 +2063,7 @@ mod tests {
             }));
             let server_context = ServerContext {
                 node_managers: handle.node_managers().as_weak(),
+                session_manager,
                 subscriptions: Arc::clone(&cache),
                 info: Arc::clone(&info),
                 authenticator: info.authenticator.clone(),

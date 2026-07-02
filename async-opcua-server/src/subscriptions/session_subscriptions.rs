@@ -1178,6 +1178,13 @@ impl SessionSubscriptions {
                     };
                     sub.notify_data_value(&handle.monitored_item_id, value, &now);
                 }
+                NotificationWorkItem::RangeChanged { handle, low, high } => {
+                    let Some(sub) = self.subscriptions.get_mut(&handle.subscription_id) else {
+                        processed += 1;
+                        continue;
+                    };
+                    sub.notify_eu_range_changed(&handle.monitored_item_id, low, high);
+                }
                 NotificationWorkItem::Event { handle, event } => {
                     if !self.event_receive_allowed(&*event) {
                         processed += 1;

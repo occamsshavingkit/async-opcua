@@ -4,7 +4,7 @@ use std::{
     str::FromStr,
 };
 
-use quick_xml::events::Event;
+use quick_xml::{encoding::EncodingError, events::Event};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -13,6 +13,12 @@ pub enum XmlReadError {
     #[error("{0}")]
     /// Failed to parse XML.
     Xml(#[from] quick_xml::Error),
+    #[error("{0}")]
+    /// Failed to decode XML content.
+    Encoding(#[from] EncodingError),
+    #[error("Unknown XML entity reference: &{0};")]
+    /// Unknown XML entity reference.
+    UnknownEntityReference(String),
     #[error("Unexpected EOF")]
     /// Unexpected EOF.
     UnexpectedEof,
@@ -103,12 +109,19 @@ impl<T: Read> XmlStreamReader<T> {
                         continue;
                     }
                     if let Some(text) = text.as_mut() {
-                        text.push_str(&e.unescape()?);
+                        text.push_str(&e.xml10_content()?);
                     } else if e.inplace_trim_start() {
                         continue;
                     } else {
-                        text = Some(e.unescape()?.into_owned());
+                        text = Some(e.xml10_content()?.into_owned());
                     }
+                }
+                Event::GeneralRef(r) => {
+                    if depth != 1 {
+                        continue;
+                    }
+                    let reference = resolve_general_ref(&r)?;
+                    text.get_or_insert_with(String::new).push(reference);
                 }
 
                 Event::Eof => {
@@ -188,6 +201,11 @@ impl<T: Read> XmlStreamReader<T> {
                 Event::Text(s) => {
                     out.extend_from_slice(&s);
                 }
+                Event::GeneralRef(r) => {
+                    out.push(b'&');
+                    out.extend_from_slice(&r);
+                    out.push(b';');
+                }
                 Event::Eof => {
                     if depth == 1 {
                         return Ok(out);
@@ -206,6 +224,21 @@ impl<T: Read> XmlStreamReader<T> {
     {
         let text = self.consume_as_text()?;
         Ok(text.parse()?)
+    }
+}
+
+fn resolve_general_ref(reference: &quick_xml::events::BytesRef<'_>) -> Result<char, XmlReadError> {
+    if let Some(ch) = reference.resolve_char_ref()? {
+        return Ok(ch);
+    }
+
+    match reference.decode()?.as_ref() {
+        "amp" => Ok('&'),
+        "lt" => Ok('<'),
+        "gt" => Ok('>'),
+        "quot" => Ok('"'),
+        "apos" => Ok('\''),
+        name => Err(XmlReadError::UnknownEntityReference(name.to_owned())),
     }
 }
 
@@ -261,6 +294,31 @@ mod test {
     }
 
     #[test]
+    fn test_consume_as_text_resolves_general_refs() {
+        let xml = r#"<Foo>&amp;&lt;&gt;&quot;&apos;&#49;&#x30; value</Foo>"#;
+
+        let mut cursor = Cursor::new(xml.as_bytes());
+        let mut reader = super::XmlStreamReader::new(&mut cursor);
+
+        assert!(matches!(reader.next_event().unwrap(), Event::Start(_)));
+        assert_eq!(reader.consume_as_text().unwrap(), "&<>\"'10 value");
+    }
+
+    #[test]
+    fn test_consume_as_text_rejects_unknown_general_refs() {
+        let xml = r#"<Foo>&custom;</Foo>"#;
+
+        let mut cursor = Cursor::new(xml.as_bytes());
+        let mut reader = super::XmlStreamReader::new(&mut cursor);
+
+        assert!(matches!(reader.next_event().unwrap(), Event::Start(_)));
+        assert!(matches!(
+            reader.consume_as_text(),
+            Err(super::XmlReadError::UnknownEntityReference(name)) if name == "custom"
+        ));
+    }
+
+    #[test]
     fn test_consume_content() {
         let xml = r#"<Foo>
             12345
@@ -288,5 +346,19 @@ mod test {
         let raw = reader.consume_raw().unwrap();
         println!("{}", String::from_utf8_lossy(&raw));
         assert_eq!(&xml.as_bytes()[5..(xml.len() - 6)], &*raw);
+    }
+
+    #[test]
+    fn test_consume_raw_preserves_general_refs() {
+        let xml = r#"<Foo>a &amp; b &#49;</Foo>"#;
+
+        let mut cursor = Cursor::new(xml.as_bytes());
+        let mut reader = super::XmlStreamReader::new(&mut cursor);
+
+        assert!(matches!(reader.next_event().unwrap(), Event::Start(_)));
+        assert_eq!(
+            std::str::from_utf8(&reader.consume_raw().unwrap()).unwrap(),
+            "a &amp; b &#49;"
+        );
     }
 }

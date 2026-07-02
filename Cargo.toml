@@ -47,7 +47,7 @@ num-bigint-dig = "^0.8.6"
 parking_lot = { version = "^0.12", features = ["send_guard"] }
 postcard = { version = "^1", features = ["use-std"] }
 proc-macro2 = "^1"
-quick-xml = "0.37.2"
+quick-xml = "0.41.0"
 quote = "^1"
 regex = "^1"
 roxmltree = "^0.20"

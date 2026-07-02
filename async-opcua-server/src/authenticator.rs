@@ -82,6 +82,10 @@ impl UserToken {
 pub struct CoreServerPermissions {
     /// Whether the user can read the server diagnostics.
     pub read_diagnostics: bool,
+    /// Whether the user can read security-sensitive session diagnostics.
+    pub read_security_diagnostics: bool,
+    /// Whether the user can write server diagnostics control values.
+    pub write_diagnostics: bool,
 }
 
 #[allow(unused)]
@@ -366,6 +370,8 @@ impl AuthManager for DefaultAuthenticator {
             .get(token.0.as_str())
             .map(|r| CoreServerPermissions {
                 read_diagnostics: r.read_diagnostics,
+                read_security_diagnostics: r.read_security_diagnostics,
+                write_diagnostics: r.write_diagnostics,
             })
             .unwrap_or_default()
     }

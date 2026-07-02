@@ -3,7 +3,7 @@ use std::collections::{BTreeSet, VecDeque};
 use chrono::TimeDelta;
 use opcua_crypto::random;
 use opcua_nodes::{BaseEventType, Event, TypeTree};
-use tracing::{error, warn};
+use tracing::{error, trace, warn};
 
 use super::MonitoredItemHandle;
 use crate::{
@@ -175,6 +175,7 @@ pub struct CreateMonitoredItem {
     filter_res: Option<ExtensionObject>,
     timestamps_to_return: TimestampsToReturn,
     eu_range: Option<(f64, f64)>,
+    eu_range_node_id: Option<NodeId>,
 }
 
 /// Takes the requested sampling interval value supplied by client and ensures it is within
@@ -270,6 +271,7 @@ impl CreateMonitoredItem {
             timestamps_to_return,
             filter_res,
             eu_range,
+            eu_range_node_id: None,
         }
     }
 
@@ -279,6 +281,14 @@ impl CreateMonitoredItem {
             monitored_item_id: self.id,
             subscription_id: self.subscription_id,
         }
+    }
+
+    pub(crate) fn set_eu_range_node_id(&mut self, eu_range_node_id: Option<NodeId>) {
+        self.eu_range_node_id = eu_range_node_id;
+    }
+
+    pub(crate) fn eu_range_node_id(&self) -> Option<&NodeId> {
+        self.eu_range_node_id.as_ref()
     }
 
     /// Set the initial value of the monitored item.
@@ -394,11 +404,15 @@ pub struct MonitoredItem {
     /// Value skipped due to sampling interval, we keep these
     /// so that we can generate a new notification later.
     sample_skipped_data_value: Option<DataValue>,
+    /// The skipped value was sampled before the currently pending SemanticsChanged bit was armed.
+    sample_skipped_before_semantics_changed: bool,
     any_new_notification: bool,
-    // ponytail: EURange for PercentDeadband is read once at create-time and cached here; rewriting the
-    // variable's EURange node mid-life is NOT picked up. Deliberate (avoids a node read per sample). If
-    // live EURange tracking is ever needed, re-resolve in `modify()`/on sample. (cross-check A1)
+    /// Cached EURange used to parameterize PercentDeadband at create/modify time and refreshed by
+    /// EURange property-change notices.
     eu_range: Option<(f64, f64)>,
+    /// One-shot Part 4 §7.38.1 status-info bit for the next queued data-change notification after
+    /// this item's EURange semantics change.
+    semantics_changed: bool,
     /// For an AggregateFilter item: sampled values buffered for the current/next processing interval
     /// (assumed time-ordered, as samples arrive with monotonic source timestamps).
     aggregate_buffer: Vec<DataValue>,
@@ -434,11 +448,13 @@ impl MonitoredItem {
             timestamps_to_return: request.timestamps_to_return,
             last_data_value: None,
             sample_skipped_data_value: None,
+            sample_skipped_before_semantics_changed: false,
             queue_size: request.queue_size,
             notification_queue: VecDeque::new(),
             overflow_event: None,
             any_new_notification: false,
             eu_range: request.eu_range,
+            semantics_changed: false,
             aggregate_buffer: Vec::new(),
             aggregate_next_deadline: None,
         };
@@ -586,14 +602,24 @@ impl MonitoredItem {
     ///
     /// Users that want to avoid this should just set the sampling interval to 0.
     pub(super) fn maybe_enqueue_skipped_value(&mut self, now: &DateTime) -> bool {
+        let skipped_before_semantics_changed = self.sample_skipped_before_semantics_changed;
+        self.sample_skipped_before_semantics_changed = false;
         match self.sample_skipped_data_value.take() {
             Some(value) if value.source_timestamp.is_some_and(|v| v <= *now) => {
-                self.notify_data_value(value, now, true);
+                if skipped_before_semantics_changed {
+                    let semantics_changed = self.semantics_changed;
+                    self.semantics_changed = false;
+                    self.notify_data_value(value, now, true);
+                    self.semantics_changed |= semantics_changed;
+                } else {
+                    self.notify_data_value(value, now, true);
+                }
                 true
             }
             Some(value) => {
                 // If there is no new sample, we can keep the last skipped value.
                 self.sample_skipped_data_value = Some(value);
+                self.sample_skipped_before_semantics_changed = skipped_before_semantics_changed;
                 false
             }
             None => false,
@@ -720,6 +746,8 @@ impl MonitoredItem {
 
         let mut extra_enqueued = false;
         if let Some(skipped_value) = self.sample_skipped_data_value.take() {
+            let skipped_before_semantics_changed = self.sample_skipped_before_semantics_changed;
+            self.sample_skipped_before_semantics_changed = false;
             // We may use the skipped value if it is in the past,
             // and if it is earlier than the value we are currently reporting.
             if skipped_value
@@ -728,7 +756,14 @@ impl MonitoredItem {
             {
                 // We still pass it through regular filtering, so it's not guaranteed to be enqueued,
                 // for example if the sampling interval is `Subscription`.
-                extra_enqueued = self.notify_data_value(skipped_value, now, false);
+                if skipped_before_semantics_changed {
+                    let semantics_changed = self.semantics_changed;
+                    self.semantics_changed = false;
+                    extra_enqueued = self.notify_data_value(skipped_value, now, false);
+                    self.semantics_changed |= semantics_changed;
+                } else {
+                    extra_enqueued = self.notify_data_value(skipped_value, now, false);
+                }
             }
         }
 
@@ -782,6 +817,7 @@ impl MonitoredItem {
                 .map(|v| v.into());
 
             self.sample_skipped_data_value = Some(value);
+            self.sample_skipped_before_semantics_changed = false;
             // We need to return true here, so that the subscription knows it needs to tick this
             // monitored item later.
             return true;
@@ -810,12 +846,38 @@ impl MonitoredItem {
         }
 
         let client_handle = self.client_handle;
+        if self.semantics_changed {
+            value.status = Some(value.status().set_semantics_changed(true));
+            self.semantics_changed = false;
+        }
         self.enqueue_notification(MonitoredItemNotification {
             client_handle,
             value,
         });
 
         true
+    }
+
+    pub(super) fn notify_eu_range_changed(&mut self, low: f64, high: f64) {
+        self.eu_range = Some((low, high));
+        if let FilterType::DataChangeFilter(filter) = &mut self.filter {
+            filter.update_eu_range(low, high);
+        }
+        if !matches!(
+            self.filter,
+            FilterType::EventFilter(_) | FilterType::AggregateFilter(_)
+        ) {
+            if self.sample_skipped_data_value.is_some() {
+                self.sample_skipped_before_semantics_changed = true;
+            }
+            self.semantics_changed = true;
+        }
+        trace!(
+            monitored_item_id = self.id,
+            low,
+            high,
+            "EURange change routed to monitored item"
+        );
     }
 
     pub(super) fn notify_event(&mut self, event: &dyn Event, type_tree: &dyn TypeTree) -> bool {
@@ -869,7 +931,10 @@ impl MonitoredItem {
 
         let set_bit = self.queue_size > 1;
         if self.discard_oldest {
-            self.notification_queue.pop_front();
+            let discarded_semantics_changed = self
+                .notification_queue
+                .pop_front()
+                .is_some_and(|n| Self::notification_semantics_changed(&n));
             self.notification_queue.push_back(notification);
             if set_bit {
                 if let Some(Notification::MonitoredItemNotification(n)) =
@@ -878,16 +943,53 @@ impl MonitoredItem {
                     n.value.status = Some(n.value.status().set_overflow(true));
                 }
             }
+            if discarded_semantics_changed {
+                self.carry_semantics_changed_to_next_queued_data_change();
+            }
         } else {
-            self.notification_queue.pop_back();
+            let discarded_semantics_changed = self
+                .notification_queue
+                .pop_back()
+                .is_some_and(|n| Self::notification_semantics_changed(&n));
             let mut notification = notification;
             if set_bit {
                 if let Notification::MonitoredItemNotification(n) = &mut notification {
                     n.value.status = Some(n.value.status().set_overflow(true));
                 }
             }
+            if discarded_semantics_changed
+                && !Self::set_notification_semantics_changed(&mut notification)
+            {
+                self.semantics_changed = true;
+            }
             self.notification_queue.push_back(notification);
         }
+    }
+
+    fn notification_semantics_changed(notification: &Notification) -> bool {
+        match notification {
+            Notification::MonitoredItemNotification(n) => n.value.status().semantics_changed(),
+            Notification::Event(_) => false,
+        }
+    }
+
+    fn set_notification_semantics_changed(notification: &mut Notification) -> bool {
+        match notification {
+            Notification::MonitoredItemNotification(n) => {
+                n.value.status = Some(n.value.status().set_semantics_changed(true));
+                true
+            }
+            Notification::Event(_) => false,
+        }
+    }
+
+    fn carry_semantics_changed_to_next_queued_data_change(&mut self) {
+        for notification in &mut self.notification_queue {
+            if Self::set_notification_semantics_changed(notification) {
+                return;
+            }
+        }
+        self.semantics_changed = true;
     }
 
     pub(super) fn add_current_value_to_queue(&mut self) {
@@ -1098,8 +1200,10 @@ pub(super) mod tests {
             timestamps_to_return: opcua_types::TimestampsToReturn::Both,
             last_data_value: None,
             sample_skipped_data_value: None,
+            sample_skipped_before_semantics_changed: false,
             any_new_notification: false,
             eu_range: None,
+            semantics_changed: false,
             aggregate_buffer: Vec::new(),
             aggregate_next_deadline: None,
         };
@@ -1227,6 +1331,61 @@ pub(super) mod tests {
         // Adjust by equal deadband plus a little bit
         v2.value = Some(Variant::Double(11.00001f64));
         assert!(filter.is_changed(&v1, &v2));
+    }
+
+    #[test]
+    fn percent_deadband_uses_refreshed_eu_range() {
+        let start = Utc::now();
+        let filter = DataChangeFilter {
+            trigger: DataChangeTrigger::StatusValue,
+            deadband_type: DeadbandType::Percent as u32,
+            deadband_value: 10f64,
+        };
+        let filter = ParsedDataChangeFilter::parse(filter, Some((0.0, 100.0))).unwrap();
+        let mut item = new_monitored_item(
+            1,
+            ReadValueId {
+                node_id: NodeId::null(),
+                attribute_id: AttributeId::Value as u32,
+                ..Default::default()
+            },
+            MonitoringMode::Reporting,
+            FilterType::DataChangeFilter(filter),
+            SamplingInterval::Zero,
+            true,
+            Some(DataValue::new_at(0.0, start.into())),
+        );
+        item.eu_range = Some((0.0, 100.0));
+        item.notification_queue.clear();
+
+        let t = start + Duration::try_milliseconds(100).unwrap();
+        assert!(!item.notify_data_value(DataValue::new_at(9.0, t.into()), &t.into(), false));
+        assert_eq!(item.notification_queue.len(), 0);
+
+        item.notify_eu_range_changed(0.0, 1000.0);
+        assert_eq!(item.eu_range, Some((0.0, 1000.0)));
+
+        let t = start + Duration::try_milliseconds(200).unwrap();
+        assert!(!item.notify_data_value(DataValue::new_at(50.0, t.into()), &t.into(), false));
+        assert_eq!(item.notification_queue.len(), 0);
+
+        let t = start + Duration::try_milliseconds(300).unwrap();
+        assert!(item.notify_data_value(DataValue::new_at(101.0, t.into()), &t.into(), false));
+        assert_eq!(item.notification_queue.len(), 1);
+        let Some(Notification::MonitoredItemNotification(n)) = item.notification_queue.back()
+        else {
+            panic!("Wrong notification type");
+        };
+        assert!(n.value.status().semantics_changed());
+
+        let t = start + Duration::try_milliseconds(400).unwrap();
+        assert!(item.notify_data_value(DataValue::new_at(202.0, t.into()), &t.into(), false));
+        assert_eq!(item.notification_queue.len(), 2);
+        let Some(Notification::MonitoredItemNotification(n)) = item.notification_queue.back()
+        else {
+            panic!("Wrong notification type");
+        };
+        assert!(!n.value.status().semantics_changed());
     }
 
     #[test]
@@ -1397,6 +1556,12 @@ pub(super) mod tests {
         }
     }
 
+    fn semantics_changed_notif(v: i32) -> opcua_types::MonitoredItemNotification {
+        let mut notif = ov_notif(v);
+        notif.value.status = Some(notif.value.status().set_semantics_changed(true));
+        notif
+    }
+
     // (value, overflow-bit) per queued notification, in queue order.
     fn ov_drained(item: &mut MonitoredItem) -> Vec<(i32, bool)> {
         item.notification_queue
@@ -1409,6 +1574,28 @@ pub(super) mod tests {
                     panic!("Wrong value type");
                 };
                 (*v, n.value.status.unwrap_or(StatusCode::Good).overflow())
+            })
+            .collect()
+    }
+
+    // (value, semantics-changed-bit) per queued notification, in queue order.
+    fn semantics_changed_drained(item: &mut MonitoredItem) -> Vec<(i32, bool)> {
+        item.notification_queue
+            .drain(..)
+            .map(|notif| {
+                let Notification::MonitoredItemNotification(n) = notif else {
+                    panic!("Wrong notification type");
+                };
+                let Some(Variant::Int32(v)) = &n.value.value else {
+                    panic!("Wrong value type");
+                };
+                (
+                    *v,
+                    n.value
+                        .status
+                        .unwrap_or(StatusCode::Good)
+                        .semantics_changed(),
+                )
             })
             .collect()
     }
@@ -1475,6 +1662,49 @@ pub(super) mod tests {
         item.enqueue_notification(ov_notif(0));
         item.enqueue_notification(ov_notif(1)); // overflow at size 1
         assert_eq!(ov_drained(&mut item), vec![(1, false)]);
+    }
+
+    // §7.38.1: if a notification carrying SemanticsChanged is deleted by queue overflow, the bit
+    // is moved to the next data-change notification in the queue.
+    #[test]
+    fn part4_semantics_changed_discarded_by_overflow_flags_next_queued_value() {
+        let mut item = cleared_item(true, 2);
+        item.enqueue_notification(semantics_changed_notif(0));
+        item.enqueue_notification(ov_notif(1));
+
+        // [0(SemanticsChanged),1]; overflow with 2 -> drop 0 -> [1,2]; carry the bit to 1.
+        item.enqueue_notification(ov_notif(2));
+        assert_eq!(
+            semantics_changed_drained(&mut item),
+            vec![(1, true), (2, false)]
+        );
+    }
+
+    #[test]
+    fn semantics_changed_rearms_when_flagged_notification_is_discarded_newest() {
+        // Independent check of OPC UA Part 4 §7.38.1 (discard_oldest = FALSE variant),
+        // armed via the real notify_eu_range_changed path rather than a hand-built
+        // flagged notification: when the newest queued notification (which carries the
+        // SemanticsChanged bit) is replaced on overflow, the bit shall be set on the
+        // next data change notification in the queue (here: its replacement).
+        let start = Utc::now();
+        let mut item = cleared_item(false, 2);
+        let t1 = start;
+        let t2 = start + TimeDelta::milliseconds(200);
+        let t3 = start + TimeDelta::milliseconds(400);
+        assert!(item.notify_data_value(DataValue::new_at(1, t1.into()), &t1.into(), false));
+        item.notify_eu_range_changed(0.0, 1000.0);
+        assert!(item.notify_data_value(DataValue::new_at(2, t2.into()), &t2.into(), false));
+        // Queue is [1, 2(SemanticsChanged)]; discard_oldest = false replaces the newest.
+        assert!(item.notify_data_value(DataValue::new_at(3, t3.into()), &t3.into(), false));
+        assert_eq!(
+            vec![(1, false), (3, true)],
+            semantics_changed_drained(&mut item)
+        );
+        // The one-shot flag must not linger after the bit has been delivered.
+        let t4 = start + TimeDelta::milliseconds(600);
+        assert!(item.notify_data_value(DataValue::new_at(4, t4.into()), &t4.into(), false));
+        assert_eq!(vec![(4, false)], semantics_changed_drained(&mut item));
     }
 
     #[test]

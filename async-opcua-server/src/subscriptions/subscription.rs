@@ -372,6 +372,12 @@ impl Subscription {
         }
     }
 
+    pub(super) fn notify_eu_range_changed(&mut self, id: &u32, low: f64, high: f64) {
+        if let Some(item) = self.monitored_items.get_mut(id) {
+            item.notify_eu_range_changed(low, high);
+        }
+    }
+
     /// Notify the given monitored item of a new event.
     pub fn notify_event(&mut self, id: &u32, event: &dyn Event, type_tree: &dyn TypeTree) {
         if let Some(item) = self.monitored_items.get_mut(id) {
@@ -978,6 +984,16 @@ impl Subscription {
         self.priority
     }
 
+    /// The maximum lifetime counter for this subscription.
+    pub fn max_lifetime_counter(&self) -> u32 {
+        self.max_lifetime_counter
+    }
+
+    /// The maximum keep-alive counter for this subscription.
+    pub fn max_keep_alive_counter(&self) -> u32 {
+        self.max_keep_alive_counter
+    }
+
     pub(super) fn set_publishing_interval(&mut self, publishing_interval: Duration) {
         self.publishing_interval = publishing_interval;
         self.reset_lifetime_counter();
@@ -1017,6 +1033,21 @@ impl Subscription {
         self.publishing_enabled
     }
 
+    /// The current lifetime counter for this subscription.
+    pub fn current_lifetime_counter(&self) -> u32 {
+        self.lifetime_counter
+    }
+
+    /// The current keep-alive counter for this subscription.
+    pub fn current_keep_alive_counter(&self) -> u32 {
+        self.keep_alive_counter
+    }
+
+    /// Get the number of monitored items in this subscription.
+    pub fn monitored_item_count(&self) -> usize {
+        self.monitored_items.len()
+    }
+
     /// The maximum number of notification messages queued for this subscription.
     pub fn max_queued_notifications(&self) -> usize {
         self.max_queued_notifications
@@ -1031,6 +1062,11 @@ impl Subscription {
     /// The number of notification messages discarded because the queue limit was reached.
     pub fn discarded_message_count(&self) -> u32 {
         self.discarded_message_count
+    }
+
+    /// The sequence number that would be assigned to the next notification message.
+    pub fn next_sequence_number(&self) -> u32 {
+        self.sequence_number.peek_next()
     }
 
     /// The current state of the subscription.

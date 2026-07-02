@@ -154,13 +154,17 @@ pub trait NodeBase {
 /// from the Attributes service set. Internal callers could call the setter / getter on the node
 /// if they have access to them.
 pub trait Node: NodeBase {
-    /// Finds the attribute and value. The param `max_age` is a hint in milliseconds:
+    /// Finds the attribute and value. The param `max_age` is a hint in milliseconds.
     ///
-    /// * value 0, server shall attempt to read a new value from the data source
-    /// * value >= i32::max(), sever shall attempt to get a cached value
+    /// OPC UA Part 4 section 5.11.2.2 Table 47 defines the Read `maxAge`
+    /// contract: `0` means the server shall attempt a fresh data source read,
+    /// values greater than or equal to max Int32 allow a cached value, and
+    /// negative values are invalid and rejected by the service layer.
     ///
-    /// If there is a getter registered with the node, then the getter will interpret
-    /// `max_age` how it sees fit.
+    /// If there is a getter registered with the node, then the getter will
+    /// interpret `max_age` how it sees fit. Node managers with external or
+    /// refreshable data sources must consult it; `SimpleNodeManager` read
+    /// callbacks receive the client value verbatim on every Read.
     fn get_attribute_max_age(
         &self,
         timestamps_to_return: TimestampsToReturn,

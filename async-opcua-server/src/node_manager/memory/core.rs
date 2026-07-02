@@ -1,27 +1,37 @@
-use std::{sync::Arc, time::Duration};
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use async_trait::async_trait;
-use chrono::Offset;
+use chrono::{Duration as ChronoDuration, Offset};
 use hashbrown::HashMap;
 
 use crate::{
     address_space::{
         compute_user_role_permissions, read_node_value, AddressSpace, CoreNamespace, NodeType,
     },
+    config::ANONYMOUS_USER_TOKEN_ID,
     diagnostics::NamespaceMetadata,
+    identity_token::IdentityToken,
     load_method_args,
     node_manager::{
         MethodCall, MonitoredItemRef, MonitoredItemUpdateRef, NodeManagersRef, ParsedReadValueId,
-        RequestContext, ServerContext, SyncSampler,
+        ParsedWriteValue, RequestContext, ServerContext, SyncSampler, WriteNode,
     },
-    subscriptions::CreateMonitoredItem,
+    session::{
+        instance::Session,
+        manager::{locale_ids_for_session, SessionManager},
+    },
+    subscriptions::{CreateMonitoredItem, SessionSubscriptionDiagnosticsSummary},
     ServerCapabilities, ServerStatusWrapper,
 };
 use opcua_core::{sync::RwLock, trace_read_lock, trace_write_lock};
 use opcua_types::{
-    DataValue, DateTime, ExtensionObject, IdType, Identifier, MethodId, MonitoringMode, NodeId,
-    NumericRange, ObjectId, ReferenceTypeId, RolePermissionType, StatusCode, TimeZoneDataType,
-    TimestampsToReturn, VariableId, Variant, VariantScalarTypeId, VariantTypeId,
+    profiles, AttributeId, ByteString, DataValue, DateTime, ExtensionObject, IdType, Identifier,
+    MethodId, MonitoringMode, NodeId, NumericRange, ObjectId, ReferenceTypeId, RolePermissionType,
+    SessionDiagnosticsDataType, SessionSecurityDiagnosticsDataType, StatusCode, TimeZoneDataType,
+    TimestampsToReturn, UAString, VariableId, Variant, VariantScalarTypeId, VariantTypeId,
 };
 
 use super::{InMemoryNodeManager, InMemoryNodeManagerImpl, InMemoryNodeManagerImplBuilder};
@@ -33,10 +43,26 @@ type MethodWithContextCB = Arc<
         + 'static,
 >;
 
+enum PreparedCoreReadValue {
+    Value(DataValue),
+    DiagnosticsArray {
+        kind: DiagnosticsArrayKind,
+        index_range: NumericRange,
+    },
+}
+
+#[derive(Clone, Copy)]
+enum DiagnosticsArrayKind {
+    Subscription,
+    Session,
+    SessionSecurity,
+}
+
 /// Node manager impl for the core namespace.
 pub struct CoreNodeManagerImpl {
     sampler: SyncSampler,
     node_managers: NodeManagersRef,
+    session_manager: Arc<RwLock<SessionManager>>,
     status: Arc<ServerStatusWrapper>,
     method_with_context_cbs: Arc<RwLock<std::collections::HashMap<NodeId, MethodWithContextCB>>>,
 }
@@ -57,7 +83,11 @@ impl InMemoryNodeManagerImplBuilder for CoreNodeManagerBuilder {
             context.info.publish_type_tree_snapshot(&type_tree);
         }
 
-        CoreNodeManagerImpl::new(context.node_managers.clone(), context.status.clone())
+        CoreNodeManagerImpl::new(
+            context.node_managers.clone(),
+            context.session_manager.clone(),
+            context.status.clone(),
+        )
     }
 }
 
@@ -120,27 +150,48 @@ impl InMemoryNodeManagerImpl for CoreNodeManagerImpl {
         max_age: f64,
         timestamps_to_return: TimestampsToReturn,
     ) -> Vec<DataValue> {
-        let address_space = address_space.read();
+        let reads: Vec<_> = {
+            let address_space = address_space.read();
 
-        nodes
-            .iter()
-            .map(|n| {
-                self.read_node_value(context, &address_space, n, max_age, timestamps_to_return)
-            })
-            .collect()
+            nodes
+                .iter()
+                .map(|n| {
+                    self.prepare_read_node_value(
+                        context,
+                        &address_space,
+                        n,
+                        max_age,
+                        timestamps_to_return,
+                    )
+                })
+                .collect()
+        };
+
+        let mut values = Vec::with_capacity(reads.len());
+        for read in reads {
+            values.push(match read {
+                PreparedCoreReadValue::Value(value) => value,
+                PreparedCoreReadValue::DiagnosticsArray { kind, index_range } => {
+                    self.read_diagnostics_array(context, kind, &index_range)
+                        .await
+                }
+            });
+        }
+
+        values
     }
 
-    async fn call(
+    async fn write(
         &self,
         context: &RequestContext,
-        _address_space: &RwLock<AddressSpace>,
-        methods_to_call: &mut [&mut &mut MethodCall],
+        address_space: &RwLock<AddressSpace>,
+        nodes_to_write: &mut [&mut WriteNode],
     ) -> Result<(), StatusCode> {
-        for method in methods_to_call {
-            if let Err(e) = self.call_builtin_method(method, context).await {
-                method.set_status(e);
-            }
+        for write in nodes_to_write {
+            let status = self.write_server_value(context, address_space, write.value());
+            write.set_status(status);
         }
+
         Ok(())
     }
 
@@ -150,15 +201,18 @@ impl InMemoryNodeManagerImpl for CoreNodeManagerImpl {
         address_space: &RwLock<AddressSpace>,
         items: &mut [&mut &mut CreateMonitoredItem],
     ) {
-        let address_space = address_space.read();
-        for node in items {
-            let value = self.read_node_value(
+        let to_read: Vec<_> = items.iter().map(|r| r.item_to_monitor()).collect();
+        let values = self
+            .read_values(
                 context,
-                &address_space,
-                node.item_to_monitor(),
+                address_space,
+                &to_read,
                 0.0,
-                node.timestamps_to_return(),
-            );
+                TimestampsToReturn::Both,
+            )
+            .await;
+
+        for (value, node) in values.into_iter().zip(items.iter_mut()) {
             if value.status() == StatusCode::BadUserAccessDenied {
                 node.set_status(StatusCode::BadUserAccessDenied);
                 continue;
@@ -181,6 +235,20 @@ impl InMemoryNodeManagerImpl for CoreNodeManagerImpl {
                 }
             }
         }
+    }
+
+    async fn call(
+        &self,
+        context: &RequestContext,
+        _address_space: &RwLock<AddressSpace>,
+        methods_to_call: &mut [&mut &mut MethodCall],
+    ) -> Result<(), StatusCode> {
+        for method in methods_to_call {
+            if let Err(e) = self.call_builtin_method(method, context).await {
+                method.set_status(e);
+            }
+        }
+        Ok(())
     }
 
     async fn set_monitoring_mode(
@@ -232,11 +300,16 @@ impl InMemoryNodeManagerImpl for CoreNodeManagerImpl {
 }
 
 impl CoreNodeManagerImpl {
-    pub(super) fn new(node_managers: NodeManagersRef, status: Arc<ServerStatusWrapper>) -> Self {
+    pub(super) fn new(
+        node_managers: NodeManagersRef,
+        session_manager: Arc<RwLock<SessionManager>>,
+        status: Arc<ServerStatusWrapper>,
+    ) -> Self {
         Self {
             sampler: SyncSampler::new(),
             status,
             node_managers,
+            session_manager,
             method_with_context_cbs: Default::default(),
         }
     }
@@ -287,34 +360,44 @@ impl CoreNodeManagerImpl {
         }
     }
 
-    fn read_node_value(
+    fn prepare_read_node_value(
         &self,
         context: &RequestContext,
         address_space: &AddressSpace,
         node_to_read: &ParsedReadValueId,
         max_age: f64,
         timestamps_to_return: TimestampsToReturn,
-    ) -> DataValue {
+    ) -> PreparedCoreReadValue {
         let mut result_value = DataValue::null();
         // Check that the read is permitted.
         let node = match address_space.validate_node_read(context, node_to_read) {
             Ok(n) => n,
             Err(e) => {
                 result_value.status = Some(e);
-                return result_value;
+                return PreparedCoreReadValue::Value(result_value);
             }
         };
+
+        if let Some(kind) = self.diagnostics_array_kind(&node_to_read.node_id) {
+            return PreparedCoreReadValue::DiagnosticsArray {
+                kind,
+                index_range: node_to_read.index_range.clone(),
+            };
+        }
+
         // Try to read a special value, that is obtained from somewhere else.
         // A custom node manager might read this from some device, or get them
         // in some other way.
 
         // In this case, the values are largely read from configuration.
-        if let Some(v) = self.read_server_value(context, node_to_read) {
-            v
-        } else {
-            // If it can't be found, read it from the node hierarchy.
-            read_node_value(&node, context, node_to_read, max_age, timestamps_to_return)
-        }
+        PreparedCoreReadValue::Value(
+            if let Some(v) = self.read_server_value(context, node_to_read) {
+                v
+            } else {
+                // If it can't be found, read it from the node hierarchy.
+                read_node_value(&node, context, node_to_read, max_age, timestamps_to_return)
+            },
+        )
     }
 
     fn get_variable_id(&self, node: &NodeId) -> Option<VariableId> {
@@ -325,6 +408,261 @@ impl CoreNodeManagerImpl {
             return None;
         };
         VariableId::try_from(identifier).ok()
+    }
+
+    fn diagnostics_array_kind(&self, node: &NodeId) -> Option<DiagnosticsArrayKind> {
+        match self.get_variable_id(node)? {
+            VariableId::Server_ServerDiagnostics_SubscriptionDiagnosticsArray => {
+                Some(DiagnosticsArrayKind::Subscription)
+            }
+            VariableId::Server_ServerDiagnostics_SessionsDiagnosticsSummary_SessionDiagnosticsArray => {
+                Some(DiagnosticsArrayKind::Session)
+            }
+            VariableId::Server_ServerDiagnostics_SessionsDiagnosticsSummary_SessionSecurityDiagnosticsArray => {
+                Some(DiagnosticsArrayKind::SessionSecurity)
+            }
+            _ => None,
+        }
+    }
+
+    async fn read_diagnostics_array(
+        &self,
+        context: &RequestContext,
+        kind: DiagnosticsArrayKind,
+        index_range: &NumericRange,
+    ) -> DataValue {
+        match kind {
+            DiagnosticsArrayKind::Subscription => {
+                self.read_subscription_diagnostics_array(context, index_range)
+                    .await
+            }
+            DiagnosticsArrayKind::Session => {
+                self.read_session_diagnostics_array(context, index_range)
+                    .await
+            }
+            DiagnosticsArrayKind::SessionSecurity => {
+                self.read_session_security_diagnostics_array(context, index_range)
+                    .await
+            }
+        }
+    }
+
+    async fn read_subscription_diagnostics_array(
+        &self,
+        context: &RequestContext,
+        index_range: &NumericRange,
+    ) -> DataValue {
+        let perms = context.info.authenticator.core_permissions(&context.token);
+        if !perms.read_diagnostics {
+            return DataValue::new_now_status(Variant::Empty, StatusCode::BadUserAccessDenied);
+        }
+
+        let rows = if context.info.diagnostics.enabled() {
+            context
+                .subscriptions
+                .subscription_diagnostics()
+                .await
+                .into_iter()
+                .map(ExtensionObject::from_message)
+                .collect()
+        } else {
+            Vec::new()
+        };
+
+        Self::extension_object_array_data_value(rows, index_range)
+    }
+
+    async fn read_session_diagnostics_array(
+        &self,
+        context: &RequestContext,
+        index_range: &NumericRange,
+    ) -> DataValue {
+        let perms = context.info.authenticator.core_permissions(&context.token);
+        if !perms.read_diagnostics {
+            return DataValue::new_now_status(Variant::Empty, StatusCode::BadUserAccessDenied);
+        }
+
+        let rows = if context.info.diagnostics.enabled() {
+            self.session_diagnostics_rows(context)
+                .await
+                .into_iter()
+                .map(ExtensionObject::from_message)
+                .collect()
+        } else {
+            Vec::new()
+        };
+
+        Self::extension_object_array_data_value(rows, index_range)
+    }
+
+    async fn read_session_security_diagnostics_array(
+        &self,
+        context: &RequestContext,
+        index_range: &NumericRange,
+    ) -> DataValue {
+        let perms = context.info.authenticator.core_permissions(&context.token);
+        if !perms.read_diagnostics || !perms.read_security_diagnostics {
+            return DataValue::new_now_status(Variant::Empty, StatusCode::BadUserAccessDenied);
+        }
+
+        let rows = if context.info.diagnostics.enabled() {
+            self.session_security_diagnostics_rows()
+                .into_iter()
+                .map(ExtensionObject::from_message)
+                .collect()
+        } else {
+            Vec::new()
+        };
+
+        Self::extension_object_array_data_value(rows, index_range)
+    }
+
+    fn extension_object_array_data_value(
+        rows: Vec<ExtensionObject>,
+        index_range: &NumericRange,
+    ) -> DataValue {
+        let mut value: Variant = rows.into();
+        if !matches!(index_range, NumericRange::None) {
+            match value.range_of(index_range) {
+                Ok(ranged_value) => value = ranged_value,
+                Err(e) => {
+                    return DataValue {
+                        value: None,
+                        status: Some(e),
+                        ..Default::default()
+                    };
+                }
+            }
+        }
+
+        DataValue::new_now(value)
+    }
+
+    async fn session_diagnostics_rows(
+        &self,
+        context: &RequestContext,
+    ) -> Vec<SessionDiagnosticsDataType> {
+        let subscription_summaries = context.subscriptions.session_diagnostics_summaries().await;
+        let sessions = self.snapshot_sessions();
+        let mut rows = Vec::with_capacity(sessions.len());
+
+        for session in sessions {
+            let session = trace_read_lock!(session);
+            let subscription_summary = subscription_summaries
+                .get(&session.session_id_numeric())
+                .copied()
+                .unwrap_or_default();
+            rows.push(Self::session_diagnostics_row(
+                context,
+                &session,
+                subscription_summary,
+            ));
+        }
+
+        rows
+    }
+
+    fn session_security_diagnostics_rows(&self) -> Vec<SessionSecurityDiagnosticsDataType> {
+        let sessions = self.snapshot_sessions();
+        let mut rows = Vec::with_capacity(sessions.len());
+
+        for session in sessions {
+            let session = trace_read_lock!(session);
+            rows.push(Self::session_security_diagnostics_row(&session));
+        }
+
+        rows
+    }
+
+    fn snapshot_sessions(&self) -> Vec<Arc<RwLock<Session>>> {
+        let session_manager = trace_read_lock!(self.session_manager);
+        session_manager.snapshot_sessions()
+    }
+
+    fn session_diagnostics_row(
+        context: &RequestContext,
+        session: &Session,
+        subscription_summary: SessionSubscriptionDiagnosticsSummary,
+    ) -> SessionDiagnosticsDataType {
+        SessionDiagnosticsDataType {
+            session_id: session.session_id().clone(),
+            session_name: UAString::from(session.session_name()),
+            client_description: session.application_description().clone(),
+            server_uri: context.info.application_uri.clone(),
+            endpoint_url: session.endpoint_url().clone(),
+            locale_ids: locale_ids_for_session(&context.info, session.session_id_numeric()),
+            actual_session_timeout: Self::actual_session_timeout_ms(session),
+            max_response_message_size: session.max_response_message_size(),
+            client_connection_time: Self::instant_to_date_time(session.created_at()),
+            client_last_contact_time: DateTime::now(),
+            current_subscriptions_count: subscription_summary.subscription_count,
+            current_monitored_items_count: subscription_summary.monitored_item_count,
+            ..Default::default()
+        }
+    }
+
+    fn session_security_diagnostics_row(session: &Session) -> SessionSecurityDiagnosticsDataType {
+        let (client_user_id_of_session, authentication_mechanism) =
+            Self::session_user_and_authentication_mechanism(session);
+
+        SessionSecurityDiagnosticsDataType {
+            session_id: session.session_id().clone(),
+            client_user_id_of_session,
+            authentication_mechanism,
+            encoding: UAString::from("UA Binary"),
+            transport_protocol: UAString::from(profiles::TRANSPORT_PROFILE_URI_BINARY),
+            security_mode: session.message_security_mode(),
+            security_policy_uri: UAString::from(session.security_policy_uri()),
+            client_certificate: session
+                .client_certificate()
+                .and_then(|certificate| certificate.to_der().ok())
+                .map(ByteString::from)
+                .unwrap_or_else(ByteString::null),
+            ..Default::default()
+        }
+    }
+
+    fn session_user_and_authentication_mechanism(session: &Session) -> (UAString, UAString) {
+        match session.user_identity() {
+            IdentityToken::None => (UAString::null(), UAString::null()),
+            IdentityToken::Anonymous(identity) => (
+                UAString::from(ANONYMOUS_USER_TOKEN_ID),
+                identity.policy_id.clone(),
+            ),
+            IdentityToken::UserName(identity) => {
+                (identity.user_name.clone(), identity.policy_id.clone())
+            }
+            IdentityToken::X509(identity) => (UAString::from("x509"), identity.policy_id.clone()),
+            IdentityToken::IssuedToken(identity) => {
+                (UAString::from("issued"), identity.policy_id.clone())
+            }
+            IdentityToken::Invalid(_) => (UAString::null(), UAString::from("Invalid")),
+        }
+    }
+
+    fn actual_session_timeout_ms(session: &Session) -> f64 {
+        session
+            .deadline()
+            .saturating_duration_since(Instant::now())
+            .as_secs_f64()
+            * 1000.0
+    }
+
+    fn instant_to_date_time(instant: Instant) -> DateTime {
+        let now_instant = Instant::now();
+        let now = chrono::Utc::now();
+
+        if instant <= now_instant {
+            let Ok(offset) = ChronoDuration::from_std(now_instant.duration_since(instant)) else {
+                return DateTime::now();
+            };
+            DateTime::from(now - offset)
+        } else {
+            let Ok(offset) = ChronoDuration::from_std(instant.duration_since(now_instant)) else {
+                return DateTime::now();
+            };
+            DateTime::from(now + offset)
+        }
     }
 
     fn is_internal_sampled(&self, node: &NodeId, context: &RequestContext) -> bool {
@@ -618,6 +956,52 @@ impl CoreNodeManagerImpl {
             server_timestamp: Some(**context.info.start_time.load()),
             ..Default::default()
         })
+    }
+
+    fn write_server_value(
+        &self,
+        context: &RequestContext,
+        address_space: &RwLock<AddressSpace>,
+        node: &ParsedWriteValue,
+    ) -> StatusCode {
+        let Some(var_id) = self.get_variable_id(&node.node_id) else {
+            return StatusCode::BadServiceUnsupported;
+        };
+
+        if var_id != VariableId::Server_ServerDiagnostics_EnabledFlag
+            || node.attribute_id != AttributeId::Value
+        {
+            return StatusCode::BadServiceUnsupported;
+        }
+
+        if trace_read_lock!(address_space)
+            .find(&node.node_id)
+            .is_none()
+        {
+            return StatusCode::BadNodeIdUnknown;
+        }
+
+        let perms = context.info.authenticator.core_permissions(&context.token);
+        if !perms.write_diagnostics {
+            return StatusCode::BadUserAccessDenied;
+        }
+
+        let Some(Variant::Boolean(enabled)) = node.value.value.as_ref() else {
+            return StatusCode::BadTypeMismatch;
+        };
+
+        if node.index_range.has_range() {
+            return StatusCode::BadWriteNotSupported;
+        }
+
+        context.info.diagnostics.set_enabled(*enabled);
+        if let Some(value) = context.info.diagnostics.get(var_id) {
+            context
+                .subscriptions
+                .notify_data_change([(value, &node.node_id, node.attribute_id)].into_iter());
+        }
+
+        StatusCode::Good
     }
 
     fn add_aggregates(&self, address_space: &mut AddressSpace, capabilities: &ServerCapabilities) {

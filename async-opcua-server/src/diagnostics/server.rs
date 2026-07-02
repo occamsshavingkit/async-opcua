@@ -1,4 +1,6 @@
-use opcua_types::{DataValue, ServerDiagnosticsSummaryDataType, VariableId};
+use std::sync::atomic::{AtomicBool, Ordering};
+
+use opcua_types::{DataValue, ServerDiagnosticsSummaryDataType, VariableId, Variant};
 
 use super::LocalValue;
 
@@ -9,94 +11,119 @@ pub struct ServerDiagnostics {
     /// Server diagnostics summary.
     pub summary: ServerDiagnosticsSummary,
     /// Whether diagnostics are enabled or not.
-    /// Set on server startup.
-    pub enabled: bool,
+    pub enabled: AtomicBool,
 }
 
 impl ServerDiagnostics {
+    /// Create server diagnostics state with the runtime-enabled flag initialized.
+    pub fn new(enabled: bool) -> Self {
+        Self {
+            enabled: AtomicBool::new(enabled),
+            ..Default::default()
+        }
+    }
+
+    /// Return whether diagnostics collection is enabled.
+    pub fn enabled(&self) -> bool {
+        self.enabled.load(Ordering::Relaxed)
+    }
+
+    /// Enable or disable diagnostics collection at runtime.
+    pub fn set_enabled(&self, enabled: bool) {
+        self.enabled.store(enabled, Ordering::Relaxed);
+    }
+
     /// Check if the given variable ID is managed by this object.
     pub fn is_mapped(&self, variable_id: VariableId) -> bool {
-        self.enabled && self.summary.is_mapped(variable_id)
+        matches!(
+            variable_id,
+            VariableId::Server_ServerDiagnostics_EnabledFlag
+        ) || (self.enabled() && self.summary.is_mapped(variable_id))
     }
 
     /// Get the value of a diagnostics element by its ID.
     pub fn get(&self, variable_id: VariableId) -> Option<DataValue> {
-        self.summary.get(variable_id)
+        match variable_id {
+            VariableId::Server_ServerDiagnostics_EnabledFlag => {
+                Some(DataValue::new_now(Variant::Boolean(self.enabled())))
+            }
+            _ => self.summary.get(variable_id),
+        }
     }
 
     /// Set the current session count.
     pub fn set_current_session_count(&self, count: u32) {
-        if self.enabled {
+        if self.enabled() {
             self.summary.current_session_count.set(count);
         }
     }
 
     /// Set the current subscription count.
     pub fn set_current_subscription_count(&self, count: u32) {
-        if self.enabled {
+        if self.enabled() {
             self.summary.current_subscription_count.set(count);
         }
     }
 
     /// Increment the cumulated session count.
     pub fn inc_session_count(&self) {
-        if self.enabled {
+        if self.enabled() {
             self.summary.cumulated_session_count.increment();
         }
     }
 
     /// Increment the cumulated subscription count.
     pub fn inc_subscription_count(&self) {
-        if self.enabled {
+        if self.enabled() {
             self.summary.cumulated_subscription_count.increment();
         }
     }
 
     /// Increment the rejected requests count.
     pub fn inc_rejected_requests(&self) {
-        if self.enabled {
+        if self.enabled() {
             self.summary.rejected_requests_count.increment();
         }
     }
 
     /// Increment the security rejected requests count.
     pub fn inc_security_rejected_requests(&self) {
-        if self.enabled {
+        if self.enabled() {
             self.summary.security_rejected_requests_count.increment();
         }
     }
 
     /// Increment the security rejected session count.
     pub fn inc_security_rejected_session_count(&self) {
-        if self.enabled {
+        if self.enabled() {
             self.summary.security_rejected_session_count.increment();
         }
     }
 
     /// Set the number of server-created views.
     pub fn set_server_view_count(&self, count: u32) {
-        if self.enabled {
+        if self.enabled() {
             self.summary.server_view_count.set(count);
         }
     }
 
     /// Increment the session abort count.
     pub fn inc_session_abort_count(&self) {
-        if self.enabled {
+        if self.enabled() {
             self.summary.session_abort_count.increment();
         }
     }
 
     /// Increment the session timeout count.
     pub fn inc_session_timeout_count(&self) {
-        if self.enabled {
+        if self.enabled() {
             self.summary.session_timeout_count.increment();
         }
     }
 
     /// Set the number of publishing intervals supported by the server.
     pub fn set_publishing_interval_count(&self, count: u32) {
-        if self.enabled {
+        if self.enabled() {
             self.summary.publishing_interval_count.set(count);
         }
     }

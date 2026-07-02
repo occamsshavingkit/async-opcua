@@ -636,6 +636,11 @@ fn is_localized_text_attribute(attribute_id: AttributeId) -> bool {
     )
 }
 
+/// Remembers per-locale writes only for LocalizedText attributes with negotiated
+/// locale reads. Value-attribute LocalizedText writes deliberately keep
+/// whole-value single-locale semantics, a server-specific choice permitted by
+/// OPC UA Part 4 §5.11.4.1; only DisplayName, Description, and InverseName use
+/// this per-locale storage.
 fn remember_localized_text_attribute_value(
     info: &ServerInfo,
     node_id: &NodeId,
@@ -653,12 +658,27 @@ fn remember_localized_text_attribute_value(
     let key = (node_id.clone(), attribute_id);
     let values = &info.localized_text_variants;
     if text.locale.is_empty() {
-        values.remove(&key);
+        if text.text.is_empty() {
+            values.remove(&key);
+        }
         return;
     }
 
     let text = text.as_ref().clone();
     let locale = normalized_locale_id(text.locale.as_ref());
+    if text.text.is_empty() {
+        let remove_key = if let Some(mut variants) = values.get_mut(&key) {
+            variants.retain(|existing| normalized_locale_id(existing.locale.as_ref()) != locale);
+            variants.is_empty()
+        } else {
+            false
+        };
+        if remove_key {
+            values.remove(&key);
+        }
+        return;
+    }
+
     let mut variants = values.entry(key).or_default();
     if let Some(existing) = variants
         .iter_mut()
@@ -719,7 +739,7 @@ fn localized_text_for_session(
     let Some(variants) = context.info.localized_text_variants.get(&key) else {
         return fallback.clone();
     };
-    if fallback.locale.is_empty() || !variants.iter().any(|text| text == fallback) {
+    if variants.is_empty() {
         return fallback.clone();
     }
 

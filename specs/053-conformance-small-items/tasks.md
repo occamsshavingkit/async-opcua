@@ -98,17 +98,17 @@ locked in (server-specific per spec).
 
 **Independent test**: locale write matrix on DisplayName/Description (contracts §US3).
 
-- [ ] T015 [P] [US3] Claude: red-first tests — `read.rs`/`write.rs` integration + `utils.rs` unit:
+- [X] T015 [P] [US3] Claude: red-first tests — `read.rs`/`write.rs` integration + `utils.rs` unit:
   add locale keeps others; overwrite same locale; null text + locale deletes that entry only;
   null locale updates default text; unsupported locale → `Bad_LocaleNotSupported` with store
   unchanged; Value-attribute single-locale behavior lock-in. Part 4 §5.11.4.1.
-- [ ] T016 [US3] codex: null-text-deletes-locale rule in the side table
+- [X] T016 [US3] codex: null-text-deletes-locale rule in the side table
   (`address_space/utils.rs remember_localized_text_attribute_value` :453): a write carrying a
   locale with null/empty text removes exactly that locale's entry. Part 4 §5.11.4.1.
-- [ ] T017 [US3] codex: null-locale default-text rule (`utils.rs` :487-514/:520 area): a write
+- [X] T017 [US3] codex: null-locale default-text rule (`utils.rs` :487-514/:520 area): a write
   with null locale updates the default/invariant text instead of being rejected; doc-comment the
   Value-attribute single-locale server-specific choice. Part 4 §5.11.4.1.
-- [ ] T018 [US3] Update FINDINGS.md P4-ATTR-03 row → FIXED with evidence; commit story 3.
+- [X] T018 [US3] Update FINDINGS.md P4-ATTR-03 row → FIXED with evidence; commit story 3.
 
 ---
 

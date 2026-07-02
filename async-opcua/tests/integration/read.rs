@@ -1834,3 +1834,219 @@ async fn server_diagnostics_privileged_toggle_and_security_array() {
         .unwrap();
     assert_eq!(Some(Variant::Boolean(true)), r[0].value);
 }
+
+// ---------------------------------------------------------------------------
+// Feature 053 US3 (P4-ATTR-03): LocalizedText attribute write locale rules.
+// OPC UA Part 4 §5.11.4.1: null text + locale deletes that locale's entry;
+// null locale + text sets the invariant (default) text WITHOUT discarding the
+// stored locale entries; null + null deletes the entries for all locales;
+// unsupported locale → Bad_LocaleNotSupported.
+// ---------------------------------------------------------------------------
+
+async fn locale_test_setup() -> (
+    Tester,
+    Arc<crate::utils::TestNodeManager>,
+    Arc<Session>,
+    NodeId,
+) {
+    let server = default_server()
+        .locale_ids(vec!["en-US".to_string(), "de-DE".to_string()])
+        .with_node_manager(test_node_manager());
+    let client =
+        default_client(0, false).preferred_locales(vec!["de-DE".to_string(), "en-US".to_string()]);
+    let mut tester = Tester::new_custom_client(server, client).await;
+    let nm = tester
+        .handle
+        .node_managers()
+        .get_of_type::<crate::utils::TestNodeManager>()
+        .unwrap();
+    let (session, lp) = tester.connect_default().await.unwrap();
+    lp.spawn();
+    tokio::time::timeout(Duration::from_secs(2), session.wait_for_connection())
+        .await
+        .unwrap();
+
+    let id = nm.inner().next_node_id();
+    nm.inner().add_node(
+        nm.address_space(),
+        tester.handle.type_tree(),
+        VariableBuilder::new(&id, "LocaleRules", "Initial")
+            .write_mask(WriteMask::DISPLAY_NAME)
+            .data_type(DataTypeId::String)
+            .value("value")
+            .access_level(AccessLevel::CURRENT_READ)
+            .user_access_level(AccessLevel::CURRENT_READ)
+            .build()
+            .into(),
+        &ObjectId::ObjectsFolder.into(),
+        &ReferenceTypeId::Organizes.into(),
+        Some(&VariableTypeId::BaseDataVariableType.into()),
+        Vec::new(),
+    );
+
+    // Seed two locales.
+    let writes = [
+        localized_text_write_value(&id, LocalizedText::new("de-DE", "Deutsch")),
+        localized_text_write_value(&id, LocalizedText::new("en-US", "English")),
+    ];
+    let statuses = session.write(&writes).await.unwrap();
+    assert_eq!(statuses, vec![StatusCode::Good, StatusCode::Good]);
+
+    (tester, nm, session, id)
+}
+
+async fn read_display_name(session: &Session, id: &NodeId) -> LocalizedText {
+    let values = session
+        .read(
+            &[read_value_id(AttributeId::DisplayName, id)],
+            TimestampsToReturn::Both,
+            0.0,
+        )
+        .await
+        .unwrap();
+    match &values[0].value {
+        Some(Variant::LocalizedText(t)) => t.as_ref().clone(),
+        other => panic!("expected LocalizedText, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn localized_text_null_text_deletes_locale() {
+    // §5.11.4.1: "Writing a null String for the text for a locale shall delete the
+    // String for that locale." Other locales must be retained.
+    let (_tester, _nm, session, id) = locale_test_setup().await;
+
+    // The de-DE-preferring session currently reads German.
+    assert_eq!(
+        LocalizedText::new("de-DE", "Deutsch"),
+        read_display_name(&session, &id).await
+    );
+
+    // Delete the de-DE entry (null text + locale).
+    let statuses = session
+        .write(&[localized_text_write_value(
+            &id,
+            LocalizedText::new("de-DE", ""),
+        )])
+        .await
+        .unwrap();
+    assert_eq!(statuses, vec![StatusCode::Good]);
+
+    // de-DE is gone; the session's next preference (en-US) is served, proving the
+    // en-US entry survived the deletion.
+    assert_eq!(
+        LocalizedText::new("en-US", "English"),
+        read_display_name(&session, &id).await
+    );
+}
+
+#[tokio::test]
+async fn localized_text_invariant_write_keeps_locales() {
+    // §5.11.4.1: "Writing a null String for the locale and a non-null String for the
+    // text is setting the text for an invariant locale" — the per-locale entries are
+    // NOT discarded by this.
+    let (_tester, _nm, session, id) = locale_test_setup().await;
+
+    let statuses = session
+        .write(&[localized_text_write_value(
+            &id,
+            LocalizedText::new("", "Invariant"),
+        )])
+        .await
+        .unwrap();
+    assert_eq!(statuses, vec![StatusCode::Good]);
+
+    // The de-DE-preferring session still reads its locale — entries survived.
+    assert_eq!(
+        LocalizedText::new("de-DE", "Deutsch"),
+        read_display_name(&session, &id).await
+    );
+
+    // §5.11.4.1: null text + null locale deletes the entries for ALL locales; the
+    // invariant text remains the served fallback.
+    let statuses = session
+        .write(&[localized_text_write_value(&id, LocalizedText::new("", ""))])
+        .await
+        .unwrap();
+    assert_eq!(statuses, vec![StatusCode::Good]);
+
+    let after = read_display_name(&session, &id).await;
+    assert_ne!("Deutsch", after.text.as_ref());
+    assert_ne!("English", after.text.as_ref());
+}
+
+#[tokio::test]
+async fn localized_text_unsupported_locale_rejected_and_store_unchanged() {
+    // §5.11.4.1: a syntactically valid but unsupported locale → Bad_LocaleNotSupported,
+    // and the stored texts are unchanged.
+    let (_tester, _nm, session, id) = locale_test_setup().await;
+
+    let statuses = session
+        .write(&[localized_text_write_value(
+            &id,
+            LocalizedText::new("xx-XX", "Mystery"),
+        )])
+        .await
+        .unwrap();
+    assert_eq!(statuses, vec![StatusCode::BadLocaleNotSupported]);
+
+    assert_eq!(
+        LocalizedText::new("de-DE", "Deutsch"),
+        read_display_name(&session, &id).await
+    );
+}
+
+#[tokio::test]
+async fn localized_text_value_attribute_keeps_single_locale_semantics() {
+    // §5.11.4.1 leaves Value-attribute LocalizedText behavior server specific; this
+    // server keeps whole-value single-locale semantics (last write wins) — lock-in.
+    let (tester, nm, session) = setup().await;
+    let id = nm.inner().next_node_id();
+    nm.inner().add_node(
+        nm.address_space(),
+        tester.handle.type_tree(),
+        VariableBuilder::new(&id, "LtValue", "LtValue")
+            .data_type(DataTypeId::LocalizedText)
+            .value(LocalizedText::new("en-US", "English"))
+            .access_level(AccessLevel::CURRENT_READ | AccessLevel::CURRENT_WRITE)
+            .user_access_level(AccessLevel::CURRENT_READ | AccessLevel::CURRENT_WRITE)
+            .build()
+            .into(),
+        &ObjectId::ObjectsFolder.into(),
+        &ReferenceTypeId::Organizes.into(),
+        Some(&VariableTypeId::BaseDataVariableType.into()),
+        Vec::new(),
+    );
+
+    let wv = WriteValue {
+        value: DataValue {
+            value: Some(Variant::LocalizedText(Box::new(LocalizedText::new(
+                "de-DE", "Deutsch",
+            )))),
+            status: Some(StatusCode::Good),
+            source_timestamp: Some(DateTime::now()),
+            ..Default::default()
+        },
+        node_id: id.clone(),
+        attribute_id: AttributeId::Value as u32,
+        index_range: NumericRange::None,
+    };
+    let statuses = session.write(&[wv]).await.unwrap();
+    assert_eq!(statuses, vec![StatusCode::Good]);
+
+    let values = session
+        .read(
+            &[read_value_id(AttributeId::Value, &id)],
+            TimestampsToReturn::Both,
+            0.0,
+        )
+        .await
+        .unwrap();
+    // The whole value is the last write — no per-locale merge on Value attributes.
+    assert_eq!(
+        Some(Variant::LocalizedText(Box::new(LocalizedText::new(
+            "de-DE", "Deutsch"
+        )))),
+        values[0].value
+    );
+}

@@ -124,7 +124,7 @@ rejection) green; symbol-absence script green; workspace suite (default features
 - [X] T016 [US1] Gate FOTA behind `fota`: `fota/` module decl, `info.rs:226`
       `fota_cleanup` cfg-field (mdns-field pattern), `server.rs:422` init.
       [Cite: OPC 10000-21]
-- [ ] T017 [US1] Gate programs behind `programs`: `programs/mod.rs:12`
+- [X] T017 [US1] Gate programs behind `programs`: `programs/mod.rs:12`
       (`register_program`, `ProgramMethodHandler`). Self-contained.
       [Cite: OPC 10000-10]
 - [ ] T018 [US1] Gate the LDS receive-side behind `lds`: `controller.rs:715,743`

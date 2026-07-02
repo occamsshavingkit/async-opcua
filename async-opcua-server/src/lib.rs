@@ -49,6 +49,7 @@ pub mod node_manager;
 /// Runtime NodeSet2 loader support.
 pub mod nodeset_loader;
 /// Program execution (Part 10) support.
+#[cfg(feature = "programs")]
 pub mod programs;
 #[cfg(feature = "rbac")]
 pub(crate) mod rbac;

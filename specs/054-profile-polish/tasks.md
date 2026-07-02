@@ -28,14 +28,14 @@ implementation tasks.
 
 ## Phase 1: Setup (blocking all stories)
 
-- [ ] T001 Declare the 15 subsystem features in `async-opcua-server/Cargo.toml` per the
+- [X] T001 Declare the 15 subsystem features in `async-opcua-server/Cargo.toml` per the
       research.md R3 table — all in `default`, with requires-relations
       (`subscriptions-standard = ["subscriptions"]`, `events = ["subscriptions"]`,
       `alarms = ["events", "method-call"]`, `history-aggregates = ["history"]`,
       `gds = ["method-call"]`, `fota = ["method-call"]`, `programs = ["method-call"]`).
       Declarations only — no cfg in code yet; full build must be feature-identical.
       [Cite: OPC 10000-7 §4.3/§4.5; data-model.md gate table]
-- [ ] T002 Widen `base-server`/`server` in `async-opcua/Cargo.toml` to forward ALL new
+- [X] T002 Widen `base-server`/`server` in `async-opcua/Cargo.toml` to forward ALL new
       server-crate gates (meaning unchanged) and add the four profile aliases per
       research.md R4: `nano`, `micro`, `embedded`, `standard`. [Cite: profile URIs
       `http://opcfoundation.org/UA-Profile/Server/{NanoEmbeddedDevice2017,

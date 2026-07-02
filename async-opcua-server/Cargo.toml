@@ -20,7 +20,66 @@ workspace = true
 name = "opcua_server"
 
 [features]
-default = ["aws-lc-rs", "ecc", "generated-address-space"]
+default = [
+  "aws-lc-rs",
+  "ecc",
+  "generated-address-space",
+  # Feature 054: per-subsystem gates, all ON by default so direct dependents keep
+  # today's full surface. Profile builds (OPC UA 2017 Nano/Micro/Embedded/Standard)
+  # select subsets via the async-opcua facade aliases. See
+  # specs/054-profile-polish/data-model.md for the gate table.
+  "subscriptions",
+  "subscriptions-standard",
+  "events",
+  "alarms",
+  "method-call",
+  "history",
+  "history-aggregates",
+  "query",
+  "node-management",
+  "diagnostics",
+  "rbac",
+  "gds",
+  "fota",
+  "programs",
+  "lds",
+]
+# --- Feature 054 subsystem gates (OPC UA 2017 profile minimal builds) ---
+# Basic data-change subscriptions/monitored items + publish machinery
+# (OPC 10000-4 §5.13/§5.14; Micro 2017 rung).
+subscriptions = []
+# Standard data-change tier: deadband filters, triggering (OPC 10000-4 §7.22.2,
+# §5.13.5; OPC 10000-8 §7.2; Embedded 2017 rung).
+subscriptions-standard = ["subscriptions"]
+# Event monitored items + event-filter engine (OPC 10000-4 §7.22.3).
+events = ["subscriptions"]
+# Part 9 alarms & conditions (requires eventing and condition methods).
+alarms = ["events", "method-call"]
+# Method service set: Call (OPC 10000-4 §5.12).
+method-call = []
+# Part 11 historical access: HistoryRead/HistoryUpdate + storage backends.
+history = []
+# Part 13 aggregate engine over history (OPC 10000-13 §5).
+history-aggregates = ["history"]
+# Query service set (OPC 10000-4 Annex B).
+query = []
+# NodeManagement service set: AddNodes/AddReferences/DeleteNodes/DeleteReferences
+# (OPC 10000-4 §5.8).
+node-management = []
+# Part 5 §6.3 server diagnostics objects/variables (optional CU at every 2017 rung).
+diagnostics = []
+# Part 3/18 role-based access control: role resolver + role management methods.
+rbac = []
+# Part 12 §7 GDS certificate management/push/pull methods.
+gds = ["method-call"]
+# Part 21-adjacent firmware update (FOTA) model.
+fota = ["method-call"]
+# Part 10 programs.
+programs = ["method-call"]
+# Acting AS an LDS: receiving RegisterServer/RegisterServer2 (OPC 10000-12 §5.1).
+# Distinct from discovery-server-registration (registering OURSELVES with an LDS).
+lds = []
+# --- end feature 054 gates ---
 aws-lc-rs = [
   "async-opcua-client?/aws-lc-rs",
   "async-opcua-core/aws-lc-rs",

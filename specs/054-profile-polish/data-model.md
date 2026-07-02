@@ -32,7 +32,7 @@ Invariant: every gate is additive; any combination compiles; full set == today's
 
 | Alias | = | New compiled surface vs previous rung |
 |-------|---|----------------------------------------|
-| `nano` | `base-server` w/ no subsystem gates | (floor) |
+| `nano` | server dep enabled raw (`dep:` syntax), no subsystem gates | (floor) |
 | `micro` | `nano` + `subscriptions` | basic data-change subscriptions |
 | `embedded` | `micro` + `subscriptions-standard`, `method-call`, `generated-address-space`, `aws-lc-rs` | deadband/triggering, Call (GetMonitoredItems/ResendData), type system, real security |
 | `standard` | `embedded` + `discovery-server-registration` | LDS self-registration (X509 tokens + Cancel already in core) |

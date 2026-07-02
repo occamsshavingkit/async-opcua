@@ -47,8 +47,55 @@ ecc = [
 wss = ["async-opcua-client?/wss", "async-opcua-server?/wss"]
 # Server default settings
 server = ["base-server", "generated-address-space"]
-# Base server, without the core address space.
-base-server = ["async-opcua-server", "async-opcua-nodes"]
+# Base server, without the core address space. Forwards ALL subsystem gates (feature
+# 054) so its meaning — "the full server surface, minus the core nodeset" — is
+# unchanged. For profile-minimal surfaces use the nano/micro/embedded/standard
+# aliases below.
+base-server = [
+  "dep:async-opcua-server",
+  "dep:async-opcua-nodes",
+  "async-opcua-server/subscriptions",
+  "async-opcua-server/subscriptions-standard",
+  "async-opcua-server/events",
+  "async-opcua-server/alarms",
+  "async-opcua-server/method-call",
+  "async-opcua-server/history",
+  "async-opcua-server/history-aggregates",
+  "async-opcua-server/query",
+  "async-opcua-server/node-management",
+  "async-opcua-server/diagnostics",
+  "async-opcua-server/rbac",
+  "async-opcua-server/gds",
+  "async-opcua-server/fota",
+  "async-opcua-server/programs",
+  "async-opcua-server/lds",
+]
+# --- OPC UA 2017 profile aliases (feature 054) ---
+# Use with default-features = false. Compositions are grounded in the OPC Foundation
+# profile database (specs/054-profile-polish/research-assets/PROFILES-2017.md).
+# These are benchmark/build surfaces, NOT OPC Foundation certification claims.
+#
+# Nano Embedded Device 2017 Server: core server surface only (sessions, read, browse,
+# discovery-self, username/password tokens, policy-None channels). No subscriptions,
+# methods, events, history, or security policies with certificates.
+nano = ["dep:async-opcua-server", "dep:async-opcua-nodes"]
+# Micro Embedded Device 2017 Server: Nano + basic data-change subscriptions
+# (+ ≥2 parallel sessions, which is runtime configuration).
+micro = ["nano", "async-opcua-server/subscriptions"]
+# Embedded 2017 UA Server: Micro + standard data-change tier (deadband, triggering),
+# GetMonitoredItems/ResendData (method call), served type system, real security.
+embedded = [
+  "micro",
+  "async-opcua-server/subscriptions-standard",
+  "async-opcua-server/method-call",
+  "generated-address-space",
+  "aws-lc-rs",
+]
+# Standard 2017 UA Server: Embedded + self-registration with an LDS. X509 user
+# tokens and session Cancel are always-compiled core. Capacity CUs (≥50 sessions,
+# ≥500 monitored items) are runtime configuration.
+standard = ["embedded", "discovery-server-registration"]
+# --- end profile aliases ---
 # Client default settings
 client = ["async-opcua-client"]
 # Console logging just installs a logger that writes out to

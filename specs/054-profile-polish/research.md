@@ -75,7 +75,9 @@ impossible); `cfg`-by-profile-name — rejected (profiles are compositions, not 
 **Decision** (`async-opcua/Cargo.toml`):
 
 ```toml
-nano     = ["base-server"]                       # server crate with NO subsystem features
+# NOTE (implementation finding): base-server forwards ALL gates, so nano cannot be
+# built on it — nano enables the dependency raw via dep: syntax instead.
+nano     = ["dep:async-opcua-server", "dep:async-opcua-nodes"]  # NO subsystem gates
 micro    = ["nano", "async-opcua-server/subscriptions"]
 embedded = ["micro", "async-opcua-server/subscriptions-standard",
             "async-opcua-server/method-call", "generated-address-space", "aws-lc-rs"]

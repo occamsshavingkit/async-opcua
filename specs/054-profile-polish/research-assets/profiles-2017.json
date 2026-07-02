@@ -1,0 +1,1488 @@
+{
+ "Nano Embedded Device 2017 Server Profile": {
+  "id": 1657,
+  "conformanceUnits": [
+   {
+    "name": "Base Info Custom Type System",
+    "optional": true,
+    "group": "540eb91d-281a-495b-a7f5-63fd4455781c"
+   },
+   {
+    "name": "Base Info Diagnostics",
+    "optional": true,
+    "group": "540eb91d-281a-495b-a7f5-63fd4455781c"
+   }
+  ],
+  "includedProfiles": [
+   {
+    "name": "Core 2017 Server Facet",
+    "uri": "http://opcfoundation.org/UA-Profile/Server/Core2017Facet",
+    "optional": false,
+    "id": 1673,
+    "resolved": {
+     "id": 1673,
+     "conformanceUnits": [
+      {
+       "name": "Address Space AddIn DefaultInstanceBrowsename",
+       "optional": true,
+       "group": "71dbe508-8265-42fb-a7ac-f771cb6b85d8"
+      },
+      {
+       "name": "Address Space AddIn Reference",
+       "optional": true,
+       "group": "71dbe508-8265-42fb-a7ac-f771cb6b85d8"
+      },
+      {
+       "name": "Address Space Atomicity",
+       "optional": false,
+       "group": "71dbe508-8265-42fb-a7ac-f771cb6b85d8"
+      },
+      {
+       "name": "Address Space Base",
+       "optional": false,
+       "group": "71dbe508-8265-42fb-a7ac-f771cb6b85d8"
+      },
+      {
+       "name": "Address Space Dictionary Entries",
+       "optional": true,
+       "group": "71dbe508-8265-42fb-a7ac-f771cb6b85d8"
+      },
+      {
+       "name": "Address Space Full Array Only",
+       "optional": false,
+       "group": "71dbe508-8265-42fb-a7ac-f771cb6b85d8"
+      },
+      {
+       "name": "Address Space Interfaces",
+       "optional": true,
+       "group": "71dbe508-8265-42fb-a7ac-f771cb6b85d8"
+      },
+      {
+       "name": "Attribute Read",
+       "optional": false,
+       "group": "fb20bea0-528d-4d4e-b084-fac11235d703"
+      },
+      {
+       "name": "Attribute Write Index",
+       "optional": true,
+       "group": "fb20bea0-528d-4d4e-b084-fac11235d703"
+      },
+      {
+       "name": "Attribute Write Values",
+       "optional": true,
+       "group": "fb20bea0-528d-4d4e-b084-fac11235d703"
+      },
+      {
+       "name": "Base Info Core Structure",
+       "optional": false,
+       "group": "540eb91d-281a-495b-a7f5-63fd4455781c"
+      },
+      {
+       "name": "Base Info Currency",
+       "optional": true,
+       "group": "540eb91d-281a-495b-a7f5-63fd4455781c"
+      },
+      {
+       "name": "Base Info Estimated Return Time",
+       "optional": true,
+       "group": "540eb91d-281a-495b-a7f5-63fd4455781c"
+      },
+      {
+       "name": "Base Info OptionSet",
+       "optional": true,
+       "group": "540eb91d-281a-495b-a7f5-63fd4455781c"
+      },
+      {
+       "name": "Base Info Placeholder Modelling Rules",
+       "optional": true,
+       "group": "540eb91d-281a-495b-a7f5-63fd4455781c"
+      },
+      {
+       "name": "Base Info Selection List",
+       "optional": true,
+       "group": "540eb91d-281a-495b-a7f5-63fd4455781c"
+      },
+      {
+       "name": "Base Info Server Capabilities",
+       "optional": true,
+       "group": "540eb91d-281a-495b-a7f5-63fd4455781c"
+      },
+      {
+       "name": "Base Info ValueAsText",
+       "optional": true,
+       "group": "540eb91d-281a-495b-a7f5-63fd4455781c"
+      },
+      {
+       "name": "Base Services Diagnostics",
+       "optional": true,
+       "group": "1d139d45-6cfa-4bfc-b798-a332e9984497"
+      },
+      {
+       "name": "Discovery Find Servers Self",
+       "optional": false,
+       "group": "6e970252-d1e2-4188-adec-10445a392fb4"
+      },
+      {
+       "name": "Discovery Get Endpoints",
+       "optional": false,
+       "group": "6e970252-d1e2-4188-adec-10445a392fb4"
+      },
+      {
+       "name": "Security Administration",
+       "optional": true,
+       "group": "00967b2c-7cb6-4112-bc75-c35668a3b378"
+      },
+      {
+       "name": "Security Role Server Authorization",
+       "optional": true,
+       "group": "00967b2c-7cb6-4112-bc75-c35668a3b378"
+      },
+      {
+       "name": "SecurityPolicy Support",
+       "optional": false,
+       "group": "00967b2c-7cb6-4112-bc75-c35668a3b378"
+      },
+      {
+       "name": "Session Base",
+       "optional": false,
+       "group": "371ad9b1-5fe1-4b42-a2d7-e9e647e96680"
+      },
+      {
+       "name": "Session Change User",
+       "optional": true,
+       "group": "371ad9b1-5fe1-4b42-a2d7-e9e647e96680"
+      },
+      {
+       "name": "Session General Service Behaviour",
+       "optional": false,
+       "group": "1d139d45-6cfa-4bfc-b798-a332e9984497"
+      },
+      {
+       "name": "Session Minimum 1",
+       "optional": false,
+       "group": "371ad9b1-5fe1-4b42-a2d7-e9e647e96680"
+      },
+      {
+       "name": "View Basic",
+       "optional": false,
+       "group": "50fd0054-89de-44ff-9337-c76f4ee50681"
+      },
+      {
+       "name": "View Minimum Continuation Point 01",
+       "optional": false,
+       "group": "50fd0054-89de-44ff-9337-c76f4ee50681"
+      },
+      {
+       "name": "View RegisterNodes",
+       "optional": false,
+       "group": "50fd0054-89de-44ff-9337-c76f4ee50681"
+      },
+      {
+       "name": "View TranslateBrowsePath",
+       "optional": false,
+       "group": "50fd0054-89de-44ff-9337-c76f4ee50681"
+      }
+     ],
+     "includedProfiles": [
+      {
+       "name": "User Token \u2013 User Name Password Server Facet",
+       "uri": "http://opcfoundation.org/UA-Profile/Security/UserToken/Server/UserNamePassword",
+       "optional": false,
+       "id": 1096,
+       "resolved": {
+        "id": 1096,
+        "conformanceUnits": [
+         {
+          "name": "Security Invalid user token",
+          "optional": false,
+          "group": "f2c8d0ff-6a43-4f67-bb28-d5771f3eade3"
+         },
+         {
+          "name": "Security User Name Password",
+          "optional": false,
+          "group": "f2c8d0ff-6a43-4f67-bb28-d5771f3eade3"
+         }
+        ],
+        "includedProfiles": []
+       }
+      }
+     ]
+    }
+   },
+   {
+    "name": "UA-TCP UA-SC UA-Binary",
+    "uri": "http://opcfoundation.org/UA-Profile/Transport/uatcp-uasc-uabinary",
+    "optional": false,
+    "id": 219,
+    "resolved": {
+     "id": 219,
+     "conformanceUnits": [
+      {
+       "name": "Protocol UA TCP",
+       "optional": false,
+       "group": "6c96bf31-9205-4bfd-8fe1-dd376bad6ce1"
+      },
+      {
+       "name": "UA Binary Encoding",
+       "optional": false,
+       "group": "6c96bf31-9205-4bfd-8fe1-dd376bad6ce1"
+      },
+      {
+       "name": "UA Secure Conversation",
+       "optional": false,
+       "group": "6c96bf31-9205-4bfd-8fe1-dd376bad6ce1"
+      }
+     ],
+     "includedProfiles": []
+    }
+   }
+  ],
+  "name": "Nano Embedded Device 2017 Server Profile",
+  "uri": "http://opcfoundation.org/UA-Profile/Server/NanoEmbeddedDevice2017",
+  "description": "This Profile is a FullFeatured Profile intended for chip level devices with limited resources. This Profile is functionally equivalent to the Core Server Facet and defines the OPC UA TCP binary protocol as the required transport profile.The support of Diagnostic Objects and Variables is optional for this Profile despite it being defined as \u201cmandatory\u201d in UA Part 5. Support of Diagnostic Objects and Variables is mandatory in some higher level Profiles. Exposing types in the AddressSpace is optional for this Profile except if custom types (i.e. types that are derived from well-known ObjectTypes, VariableTypes, ReferenceType or DataTypes) are used. Exposing all supported types in the AddressSpace is mandatory in some higher level Profiles.<br>\nThis Profile supersedes the <a href=\"http://opcfoundation.org/UA-Profile/Server/NanoEmbeddedDevice\">Nano Embedded Device Server Profile</a>."
+ },
+ "Micro Embedded Device 2017 Server Profile": {
+  "id": 1659,
+  "conformanceUnits": [
+   {
+    "name": "Session Minimum 2 Parallel",
+    "optional": false,
+    "group": "371ad9b1-5fe1-4b42-a2d7-e9e647e96680"
+   }
+  ],
+  "includedProfiles": [
+   {
+    "name": "Embedded DataChange Subscription Server Facet",
+    "uri": "http://opcfoundation.org/UA-Profile/Server/EmbeddedDataChangeSubscription",
+    "optional": false,
+    "id": 141,
+    "resolved": {
+     "id": 141,
+     "conformanceUnits": [
+      {
+       "name": "Monitor Basic",
+       "optional": false,
+       "group": "95e488d0-37c2-4848-85a3-9b82f88129ad"
+      },
+      {
+       "name": "Monitor Items 2",
+       "optional": false,
+       "group": "95e488d0-37c2-4848-85a3-9b82f88129ad"
+      },
+      {
+       "name": "Monitor QueueSize_1",
+       "optional": false,
+       "group": "95e488d0-37c2-4848-85a3-9b82f88129ad"
+      },
+      {
+       "name": "Monitor Value Change",
+       "optional": false,
+       "group": "95e488d0-37c2-4848-85a3-9b82f88129ad"
+      },
+      {
+       "name": "Subscription Basic",
+       "optional": false,
+       "group": "aa6816d9-c7d1-423a-bc55-10fb50a96c1a"
+      },
+      {
+       "name": "Subscription Minimum 1",
+       "optional": false,
+       "group": "aa6816d9-c7d1-423a-bc55-10fb50a96c1a"
+      },
+      {
+       "name": "Subscription Publish Min 02",
+       "optional": false,
+       "group": "aa6816d9-c7d1-423a-bc55-10fb50a96c1a"
+      },
+      {
+       "name": "Subscription PublishRequest Queue Overflow",
+       "optional": false,
+       "group": "aa6816d9-c7d1-423a-bc55-10fb50a96c1a"
+      }
+     ],
+     "includedProfiles": []
+    }
+   },
+   {
+    "name": "Nano Embedded Device 2017 Server Profile",
+    "uri": "http://opcfoundation.org/UA-Profile/Server/NanoEmbeddedDevice2017",
+    "optional": false,
+    "id": 1657,
+    "resolved": {
+     "id": 1657,
+     "conformanceUnits": [
+      {
+       "name": "Base Info Custom Type System",
+       "optional": true,
+       "group": "540eb91d-281a-495b-a7f5-63fd4455781c"
+      },
+      {
+       "name": "Base Info Diagnostics",
+       "optional": true,
+       "group": "540eb91d-281a-495b-a7f5-63fd4455781c"
+      }
+     ],
+     "includedProfiles": [
+      {
+       "name": "Core 2017 Server Facet",
+       "uri": "http://opcfoundation.org/UA-Profile/Server/Core2017Facet",
+       "optional": false,
+       "id": 1673,
+       "resolved": {
+        "id": 1673,
+        "conformanceUnits": [
+         {
+          "name": "Address Space AddIn DefaultInstanceBrowsename",
+          "optional": true,
+          "group": "71dbe508-8265-42fb-a7ac-f771cb6b85d8"
+         },
+         {
+          "name": "Address Space AddIn Reference",
+          "optional": true,
+          "group": "71dbe508-8265-42fb-a7ac-f771cb6b85d8"
+         },
+         {
+          "name": "Address Space Atomicity",
+          "optional": false,
+          "group": "71dbe508-8265-42fb-a7ac-f771cb6b85d8"
+         },
+         {
+          "name": "Address Space Base",
+          "optional": false,
+          "group": "71dbe508-8265-42fb-a7ac-f771cb6b85d8"
+         },
+         {
+          "name": "Address Space Dictionary Entries",
+          "optional": true,
+          "group": "71dbe508-8265-42fb-a7ac-f771cb6b85d8"
+         },
+         {
+          "name": "Address Space Full Array Only",
+          "optional": false,
+          "group": "71dbe508-8265-42fb-a7ac-f771cb6b85d8"
+         },
+         {
+          "name": "Address Space Interfaces",
+          "optional": true,
+          "group": "71dbe508-8265-42fb-a7ac-f771cb6b85d8"
+         },
+         {
+          "name": "Attribute Read",
+          "optional": false,
+          "group": "fb20bea0-528d-4d4e-b084-fac11235d703"
+         },
+         {
+          "name": "Attribute Write Index",
+          "optional": true,
+          "group": "fb20bea0-528d-4d4e-b084-fac11235d703"
+         },
+         {
+          "name": "Attribute Write Values",
+          "optional": true,
+          "group": "fb20bea0-528d-4d4e-b084-fac11235d703"
+         },
+         {
+          "name": "Base Info Core Structure",
+          "optional": false,
+          "group": "540eb91d-281a-495b-a7f5-63fd4455781c"
+         },
+         {
+          "name": "Base Info Currency",
+          "optional": true,
+          "group": "540eb91d-281a-495b-a7f5-63fd4455781c"
+         },
+         {
+          "name": "Base Info Estimated Return Time",
+          "optional": true,
+          "group": "540eb91d-281a-495b-a7f5-63fd4455781c"
+         },
+         {
+          "name": "Base Info OptionSet",
+          "optional": true,
+          "group": "540eb91d-281a-495b-a7f5-63fd4455781c"
+         },
+         {
+          "name": "Base Info Placeholder Modelling Rules",
+          "optional": true,
+          "group": "540eb91d-281a-495b-a7f5-63fd4455781c"
+         },
+         {
+          "name": "Base Info Selection List",
+          "optional": true,
+          "group": "540eb91d-281a-495b-a7f5-63fd4455781c"
+         },
+         {
+          "name": "Base Info Server Capabilities",
+          "optional": true,
+          "group": "540eb91d-281a-495b-a7f5-63fd4455781c"
+         },
+         {
+          "name": "Base Info ValueAsText",
+          "optional": true,
+          "group": "540eb91d-281a-495b-a7f5-63fd4455781c"
+         },
+         {
+          "name": "Base Services Diagnostics",
+          "optional": true,
+          "group": "1d139d45-6cfa-4bfc-b798-a332e9984497"
+         },
+         {
+          "name": "Discovery Find Servers Self",
+          "optional": false,
+          "group": "6e970252-d1e2-4188-adec-10445a392fb4"
+         },
+         {
+          "name": "Discovery Get Endpoints",
+          "optional": false,
+          "group": "6e970252-d1e2-4188-adec-10445a392fb4"
+         },
+         {
+          "name": "Security Administration",
+          "optional": true,
+          "group": "00967b2c-7cb6-4112-bc75-c35668a3b378"
+         },
+         {
+          "name": "Security Role Server Authorization",
+          "optional": true,
+          "group": "00967b2c-7cb6-4112-bc75-c35668a3b378"
+         },
+         {
+          "name": "SecurityPolicy Support",
+          "optional": false,
+          "group": "00967b2c-7cb6-4112-bc75-c35668a3b378"
+         },
+         {
+          "name": "Session Base",
+          "optional": false,
+          "group": "371ad9b1-5fe1-4b42-a2d7-e9e647e96680"
+         },
+         {
+          "name": "Session Change User",
+          "optional": true,
+          "group": "371ad9b1-5fe1-4b42-a2d7-e9e647e96680"
+         },
+         {
+          "name": "Session General Service Behaviour",
+          "optional": false,
+          "group": "1d139d45-6cfa-4bfc-b798-a332e9984497"
+         },
+         {
+          "name": "Session Minimum 1",
+          "optional": false,
+          "group": "371ad9b1-5fe1-4b42-a2d7-e9e647e96680"
+         },
+         {
+          "name": "View Basic",
+          "optional": false,
+          "group": "50fd0054-89de-44ff-9337-c76f4ee50681"
+         },
+         {
+          "name": "View Minimum Continuation Point 01",
+          "optional": false,
+          "group": "50fd0054-89de-44ff-9337-c76f4ee50681"
+         },
+         {
+          "name": "View RegisterNodes",
+          "optional": false,
+          "group": "50fd0054-89de-44ff-9337-c76f4ee50681"
+         },
+         {
+          "name": "View TranslateBrowsePath",
+          "optional": false,
+          "group": "50fd0054-89de-44ff-9337-c76f4ee50681"
+         }
+        ],
+        "includedProfiles": [
+         {
+          "name": "User Token \u2013 User Name Password Server Facet",
+          "uri": "http://opcfoundation.org/UA-Profile/Security/UserToken/Server/UserNamePassword",
+          "optional": false,
+          "id": 1096,
+          "resolved": {
+           "id": 1096,
+           "conformanceUnits": [
+            {
+             "name": "Security Invalid user token",
+             "optional": false,
+             "group": "f2c8d0ff-6a43-4f67-bb28-d5771f3eade3"
+            },
+            {
+             "name": "Security User Name Password",
+             "optional": false,
+             "group": "f2c8d0ff-6a43-4f67-bb28-d5771f3eade3"
+            }
+           ],
+           "includedProfiles": []
+          }
+         }
+        ]
+       }
+      },
+      {
+       "name": "UA-TCP UA-SC UA-Binary",
+       "uri": "http://opcfoundation.org/UA-Profile/Transport/uatcp-uasc-uabinary",
+       "optional": false,
+       "id": 219,
+       "resolved": {
+        "id": 219,
+        "conformanceUnits": [
+         {
+          "name": "Protocol UA TCP",
+          "optional": false,
+          "group": "6c96bf31-9205-4bfd-8fe1-dd376bad6ce1"
+         },
+         {
+          "name": "UA Binary Encoding",
+          "optional": false,
+          "group": "6c96bf31-9205-4bfd-8fe1-dd376bad6ce1"
+         },
+         {
+          "name": "UA Secure Conversation",
+          "optional": false,
+          "group": "6c96bf31-9205-4bfd-8fe1-dd376bad6ce1"
+         }
+        ],
+        "includedProfiles": []
+       }
+      }
+     ]
+    }
+   }
+  ],
+  "name": "Micro Embedded Device 2017 Server Profile",
+  "uri": "http://opcfoundation.org/UA-Profile/Server/MicroEmbeddedDevice2017",
+  "description": "This Profile is a FullFeatured Profile intended for small devices with limited resources. This Profile builds upon the Nano Embedded Device Server Profile. The most important additions are: support for subscriptions via the Embedded Data Change Subscription Server Facet and support for at least two sessions. A complete Type System is not required; however, if the Server implements any non-UA types then these types and their super-types must be exposed.<br>\nThis Profile supersedes the <a href=\"http://opcfoundation.org/UA-Profile/Server/MicroEmbeddedDevice\">Micro Embedded Device Server Profile</a>."
+ },
+ "Embedded 2017 UA Server Profile": {
+  "id": 1661,
+  "conformanceUnits": [
+   {
+    "name": "Base Info Engineering Units",
+    "optional": true,
+    "group": "540eb91d-281a-495b-a7f5-63fd4455781c"
+   },
+   {
+    "name": "Base Info Type System",
+    "optional": false,
+    "group": "540eb91d-281a-495b-a7f5-63fd4455781c"
+   },
+   {
+    "name": "Security \u2013 No Application Authentication",
+    "optional": true,
+    "group": "00967b2c-7cb6-4112-bc75-c35668a3b378"
+   },
+   {
+    "name": "Security Default ApplicationInstance Certificate",
+    "optional": false,
+    "group": "00967b2c-7cb6-4112-bc75-c35668a3b378"
+   },
+   {
+    "name": "Security Policy Required",
+    "optional": false,
+    "group": "00967b2c-7cb6-4112-bc75-c35668a3b378"
+   }
+  ],
+  "includedProfiles": [
+   {
+    "name": "Micro Embedded Device 2017 Server Profile",
+    "uri": "http://opcfoundation.org/UA-Profile/Server/MicroEmbeddedDevice2017",
+    "optional": false,
+    "id": 1659,
+    "resolved": {
+     "id": 1659,
+     "conformanceUnits": [
+      {
+       "name": "Session Minimum 2 Parallel",
+       "optional": false,
+       "group": "371ad9b1-5fe1-4b42-a2d7-e9e647e96680"
+      }
+     ],
+     "includedProfiles": [
+      {
+       "name": "Embedded DataChange Subscription Server Facet",
+       "uri": "http://opcfoundation.org/UA-Profile/Server/EmbeddedDataChangeSubscription",
+       "optional": false,
+       "id": 141,
+       "resolved": {
+        "id": 141,
+        "conformanceUnits": [
+         {
+          "name": "Monitor Basic",
+          "optional": false,
+          "group": "95e488d0-37c2-4848-85a3-9b82f88129ad"
+         },
+         {
+          "name": "Monitor Items 2",
+          "optional": false,
+          "group": "95e488d0-37c2-4848-85a3-9b82f88129ad"
+         },
+         {
+          "name": "Monitor QueueSize_1",
+          "optional": false,
+          "group": "95e488d0-37c2-4848-85a3-9b82f88129ad"
+         },
+         {
+          "name": "Monitor Value Change",
+          "optional": false,
+          "group": "95e488d0-37c2-4848-85a3-9b82f88129ad"
+         },
+         {
+          "name": "Subscription Basic",
+          "optional": false,
+          "group": "aa6816d9-c7d1-423a-bc55-10fb50a96c1a"
+         },
+         {
+          "name": "Subscription Minimum 1",
+          "optional": false,
+          "group": "aa6816d9-c7d1-423a-bc55-10fb50a96c1a"
+         },
+         {
+          "name": "Subscription Publish Min 02",
+          "optional": false,
+          "group": "aa6816d9-c7d1-423a-bc55-10fb50a96c1a"
+         },
+         {
+          "name": "Subscription PublishRequest Queue Overflow",
+          "optional": false,
+          "group": "aa6816d9-c7d1-423a-bc55-10fb50a96c1a"
+         }
+        ],
+        "includedProfiles": []
+       }
+      },
+      {
+       "name": "Nano Embedded Device 2017 Server Profile",
+       "uri": "http://opcfoundation.org/UA-Profile/Server/NanoEmbeddedDevice2017",
+       "optional": false,
+       "id": 1657,
+       "resolved": {
+        "id": 1657,
+        "conformanceUnits": [
+         {
+          "name": "Base Info Custom Type System",
+          "optional": true,
+          "group": "540eb91d-281a-495b-a7f5-63fd4455781c"
+         },
+         {
+          "name": "Base Info Diagnostics",
+          "optional": true,
+          "group": "540eb91d-281a-495b-a7f5-63fd4455781c"
+         }
+        ],
+        "includedProfiles": [
+         {
+          "name": "Core 2017 Server Facet",
+          "uri": "http://opcfoundation.org/UA-Profile/Server/Core2017Facet",
+          "optional": false,
+          "id": 1673,
+          "resolved": {
+           "id": 1673,
+           "conformanceUnits": [
+            {
+             "name": "Address Space AddIn DefaultInstanceBrowsename",
+             "optional": true,
+             "group": "71dbe508-8265-42fb-a7ac-f771cb6b85d8"
+            },
+            {
+             "name": "Address Space AddIn Reference",
+             "optional": true,
+             "group": "71dbe508-8265-42fb-a7ac-f771cb6b85d8"
+            },
+            {
+             "name": "Address Space Atomicity",
+             "optional": false,
+             "group": "71dbe508-8265-42fb-a7ac-f771cb6b85d8"
+            },
+            {
+             "name": "Address Space Base",
+             "optional": false,
+             "group": "71dbe508-8265-42fb-a7ac-f771cb6b85d8"
+            },
+            {
+             "name": "Address Space Dictionary Entries",
+             "optional": true,
+             "group": "71dbe508-8265-42fb-a7ac-f771cb6b85d8"
+            },
+            {
+             "name": "Address Space Full Array Only",
+             "optional": false,
+             "group": "71dbe508-8265-42fb-a7ac-f771cb6b85d8"
+            },
+            {
+             "name": "Address Space Interfaces",
+             "optional": true,
+             "group": "71dbe508-8265-42fb-a7ac-f771cb6b85d8"
+            },
+            {
+             "name": "Attribute Read",
+             "optional": false,
+             "group": "fb20bea0-528d-4d4e-b084-fac11235d703"
+            },
+            {
+             "name": "Attribute Write Index",
+             "optional": true,
+             "group": "fb20bea0-528d-4d4e-b084-fac11235d703"
+            },
+            {
+             "name": "Attribute Write Values",
+             "optional": true,
+             "group": "fb20bea0-528d-4d4e-b084-fac11235d703"
+            },
+            {
+             "name": "Base Info Core Structure",
+             "optional": false,
+             "group": "540eb91d-281a-495b-a7f5-63fd4455781c"
+            },
+            {
+             "name": "Base Info Currency",
+             "optional": true,
+             "group": "540eb91d-281a-495b-a7f5-63fd4455781c"
+            },
+            {
+             "name": "Base Info Estimated Return Time",
+             "optional": true,
+             "group": "540eb91d-281a-495b-a7f5-63fd4455781c"
+            },
+            {
+             "name": "Base Info OptionSet",
+             "optional": true,
+             "group": "540eb91d-281a-495b-a7f5-63fd4455781c"
+            },
+            {
+             "name": "Base Info Placeholder Modelling Rules",
+             "optional": true,
+             "group": "540eb91d-281a-495b-a7f5-63fd4455781c"
+            },
+            {
+             "name": "Base Info Selection List",
+             "optional": true,
+             "group": "540eb91d-281a-495b-a7f5-63fd4455781c"
+            },
+            {
+             "name": "Base Info Server Capabilities",
+             "optional": true,
+             "group": "540eb91d-281a-495b-a7f5-63fd4455781c"
+            },
+            {
+             "name": "Base Info ValueAsText",
+             "optional": true,
+             "group": "540eb91d-281a-495b-a7f5-63fd4455781c"
+            },
+            {
+             "name": "Base Services Diagnostics",
+             "optional": true,
+             "group": "1d139d45-6cfa-4bfc-b798-a332e9984497"
+            },
+            {
+             "name": "Discovery Find Servers Self",
+             "optional": false,
+             "group": "6e970252-d1e2-4188-adec-10445a392fb4"
+            },
+            {
+             "name": "Discovery Get Endpoints",
+             "optional": false,
+             "group": "6e970252-d1e2-4188-adec-10445a392fb4"
+            },
+            {
+             "name": "Security Administration",
+             "optional": true,
+             "group": "00967b2c-7cb6-4112-bc75-c35668a3b378"
+            },
+            {
+             "name": "Security Role Server Authorization",
+             "optional": true,
+             "group": "00967b2c-7cb6-4112-bc75-c35668a3b378"
+            },
+            {
+             "name": "SecurityPolicy Support",
+             "optional": false,
+             "group": "00967b2c-7cb6-4112-bc75-c35668a3b378"
+            },
+            {
+             "name": "Session Base",
+             "optional": false,
+             "group": "371ad9b1-5fe1-4b42-a2d7-e9e647e96680"
+            },
+            {
+             "name": "Session Change User",
+             "optional": true,
+             "group": "371ad9b1-5fe1-4b42-a2d7-e9e647e96680"
+            },
+            {
+             "name": "Session General Service Behaviour",
+             "optional": false,
+             "group": "1d139d45-6cfa-4bfc-b798-a332e9984497"
+            },
+            {
+             "name": "Session Minimum 1",
+             "optional": false,
+             "group": "371ad9b1-5fe1-4b42-a2d7-e9e647e96680"
+            },
+            {
+             "name": "View Basic",
+             "optional": false,
+             "group": "50fd0054-89de-44ff-9337-c76f4ee50681"
+            },
+            {
+             "name": "View Minimum Continuation Point 01",
+             "optional": false,
+             "group": "50fd0054-89de-44ff-9337-c76f4ee50681"
+            },
+            {
+             "name": "View RegisterNodes",
+             "optional": false,
+             "group": "50fd0054-89de-44ff-9337-c76f4ee50681"
+            },
+            {
+             "name": "View TranslateBrowsePath",
+             "optional": false,
+             "group": "50fd0054-89de-44ff-9337-c76f4ee50681"
+            }
+           ],
+           "includedProfiles": [
+            {
+             "name": "User Token \u2013 User Name Password Server Facet",
+             "uri": "http://opcfoundation.org/UA-Profile/Security/UserToken/Server/UserNamePassword",
+             "optional": false,
+             "id": 1096,
+             "resolved": {
+              "id": 1096,
+              "conformanceUnits": [
+               {
+                "name": "Security Invalid user token",
+                "optional": false,
+                "group": "f2c8d0ff-6a43-4f67-bb28-d5771f3eade3"
+               },
+               {
+                "name": "Security User Name Password",
+                "optional": false,
+                "group": "f2c8d0ff-6a43-4f67-bb28-d5771f3eade3"
+               }
+              ],
+              "includedProfiles": []
+             }
+            }
+           ]
+          }
+         },
+         {
+          "name": "UA-TCP UA-SC UA-Binary",
+          "uri": "http://opcfoundation.org/UA-Profile/Transport/uatcp-uasc-uabinary",
+          "optional": false,
+          "id": 219,
+          "resolved": {
+           "id": 219,
+           "conformanceUnits": [
+            {
+             "name": "Protocol UA TCP",
+             "optional": false,
+             "group": "6c96bf31-9205-4bfd-8fe1-dd376bad6ce1"
+            },
+            {
+             "name": "UA Binary Encoding",
+             "optional": false,
+             "group": "6c96bf31-9205-4bfd-8fe1-dd376bad6ce1"
+            },
+            {
+             "name": "UA Secure Conversation",
+             "optional": false,
+             "group": "6c96bf31-9205-4bfd-8fe1-dd376bad6ce1"
+            }
+           ],
+           "includedProfiles": []
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "name": "Standard DataChange Subscription 2017 Server Facet",
+    "uri": "http://opcfoundation.org/UA-Profile/Server/StandardDataChangeSubscription2017",
+    "optional": false,
+    "id": 1675,
+    "resolved": {
+     "id": 1675,
+     "conformanceUnits": [
+      {
+       "name": "Base Info GetMonitoredItems Method",
+       "optional": false,
+       "group": "540eb91d-281a-495b-a7f5-63fd4455781c"
+      },
+      {
+       "name": "Base Info ResendData Method",
+       "optional": false,
+       "group": "540eb91d-281a-495b-a7f5-63fd4455781c"
+      },
+      {
+       "name": "Monitor Items 10",
+       "optional": false,
+       "group": "95e488d0-37c2-4848-85a3-9b82f88129ad"
+      },
+      {
+       "name": "Monitor Items 100",
+       "optional": false,
+       "group": "95e488d0-37c2-4848-85a3-9b82f88129ad"
+      },
+      {
+       "name": "Monitor MinQueueSize_02",
+       "optional": false,
+       "group": "95e488d0-37c2-4848-85a3-9b82f88129ad"
+      },
+      {
+       "name": "Monitor Triggering",
+       "optional": false,
+       "group": "95e488d0-37c2-4848-85a3-9b82f88129ad"
+      },
+      {
+       "name": "Monitored Items Deadband Filter",
+       "optional": false,
+       "group": "95e488d0-37c2-4848-85a3-9b82f88129ad"
+      },
+      {
+       "name": "Subscription Minimum 02",
+       "optional": false,
+       "group": "aa6816d9-c7d1-423a-bc55-10fb50a96c1a"
+      },
+      {
+       "name": "Subscription Publish Min 05",
+       "optional": false,
+       "group": "aa6816d9-c7d1-423a-bc55-10fb50a96c1a"
+      }
+     ],
+     "includedProfiles": [
+      {
+       "name": "Embedded DataChange Subscription Server Facet",
+       "uri": "http://opcfoundation.org/UA-Profile/Server/EmbeddedDataChangeSubscription",
+       "optional": false,
+       "id": 141
+      }
+     ]
+    }
+   }
+  ],
+  "name": "Embedded 2017 UA Server Profile",
+  "uri": "http://opcfoundation.org/UA-Profile/Server/EmbeddedUA2017",
+  "description": "This Profile is a FullFeatured Profile that is intended for devices with more than 50 MBs of memory and a more powerful processor. This Profile builds upon the Micro Embedded Device Server Profile. The most important additions are: support for security via the Security Policies and support for the Standard DataChange Subscription Server Facet. This Profile also requires that Servers expose all OPC-UA types that are used by the Server including their components and their super-types.<br>\nThis Profile supersedes the <a href=\"http://opcfoundation.org/UA-Profile/Server/EmbeddedUA\">Embedded UA Server Profile</a> and requires support of a security policy."
+ },
+ "Standard 2017 UA Server Profile": {
+  "id": 1663,
+  "conformanceUnits": [
+   {
+    "name": "Attribute Write StatusCode & Timestamp",
+    "optional": true,
+    "group": "fb20bea0-528d-4d4e-b084-fac11235d703"
+   },
+   {
+    "name": "Discovery Register",
+    "optional": false,
+    "group": "6e970252-d1e2-4188-adec-10445a392fb4"
+   },
+   {
+    "name": "Discovery Register2",
+    "optional": false,
+    "group": "6e970252-d1e2-4188-adec-10445a392fb4"
+   },
+   {
+    "name": "Session Cancel",
+    "optional": false,
+    "group": "371ad9b1-5fe1-4b42-a2d7-e9e647e96680"
+   },
+   {
+    "name": "Session Minimum 50 Parallel",
+    "optional": false,
+    "group": "371ad9b1-5fe1-4b42-a2d7-e9e647e96680"
+   },
+   {
+    "name": "View Minimum Continuation Point 05",
+    "optional": false,
+    "group": "50fd0054-89de-44ff-9337-c76f4ee50681"
+   }
+  ],
+  "includedProfiles": [
+   {
+    "name": "Embedded 2017 UA Server Profile",
+    "uri": "http://opcfoundation.org/UA-Profile/Server/EmbeddedUA2017",
+    "optional": false,
+    "id": 1661,
+    "resolved": {
+     "id": 1661,
+     "conformanceUnits": [
+      {
+       "name": "Base Info Engineering Units",
+       "optional": true,
+       "group": "540eb91d-281a-495b-a7f5-63fd4455781c"
+      },
+      {
+       "name": "Base Info Type System",
+       "optional": false,
+       "group": "540eb91d-281a-495b-a7f5-63fd4455781c"
+      },
+      {
+       "name": "Security \u2013 No Application Authentication",
+       "optional": true,
+       "group": "00967b2c-7cb6-4112-bc75-c35668a3b378"
+      },
+      {
+       "name": "Security Default ApplicationInstance Certificate",
+       "optional": false,
+       "group": "00967b2c-7cb6-4112-bc75-c35668a3b378"
+      },
+      {
+       "name": "Security Policy Required",
+       "optional": false,
+       "group": "00967b2c-7cb6-4112-bc75-c35668a3b378"
+      }
+     ],
+     "includedProfiles": [
+      {
+       "name": "Micro Embedded Device 2017 Server Profile",
+       "uri": "http://opcfoundation.org/UA-Profile/Server/MicroEmbeddedDevice2017",
+       "optional": false,
+       "id": 1659,
+       "resolved": {
+        "id": 1659,
+        "conformanceUnits": [
+         {
+          "name": "Session Minimum 2 Parallel",
+          "optional": false,
+          "group": "371ad9b1-5fe1-4b42-a2d7-e9e647e96680"
+         }
+        ],
+        "includedProfiles": [
+         {
+          "name": "Embedded DataChange Subscription Server Facet",
+          "uri": "http://opcfoundation.org/UA-Profile/Server/EmbeddedDataChangeSubscription",
+          "optional": false,
+          "id": 141,
+          "resolved": {
+           "id": 141,
+           "conformanceUnits": [
+            {
+             "name": "Monitor Basic",
+             "optional": false,
+             "group": "95e488d0-37c2-4848-85a3-9b82f88129ad"
+            },
+            {
+             "name": "Monitor Items 2",
+             "optional": false,
+             "group": "95e488d0-37c2-4848-85a3-9b82f88129ad"
+            },
+            {
+             "name": "Monitor QueueSize_1",
+             "optional": false,
+             "group": "95e488d0-37c2-4848-85a3-9b82f88129ad"
+            },
+            {
+             "name": "Monitor Value Change",
+             "optional": false,
+             "group": "95e488d0-37c2-4848-85a3-9b82f88129ad"
+            },
+            {
+             "name": "Subscription Basic",
+             "optional": false,
+             "group": "aa6816d9-c7d1-423a-bc55-10fb50a96c1a"
+            },
+            {
+             "name": "Subscription Minimum 1",
+             "optional": false,
+             "group": "aa6816d9-c7d1-423a-bc55-10fb50a96c1a"
+            },
+            {
+             "name": "Subscription Publish Min 02",
+             "optional": false,
+             "group": "aa6816d9-c7d1-423a-bc55-10fb50a96c1a"
+            },
+            {
+             "name": "Subscription PublishRequest Queue Overflow",
+             "optional": false,
+             "group": "aa6816d9-c7d1-423a-bc55-10fb50a96c1a"
+            }
+           ],
+           "includedProfiles": []
+          }
+         },
+         {
+          "name": "Nano Embedded Device 2017 Server Profile",
+          "uri": "http://opcfoundation.org/UA-Profile/Server/NanoEmbeddedDevice2017",
+          "optional": false,
+          "id": 1657,
+          "resolved": {
+           "id": 1657,
+           "conformanceUnits": [
+            {
+             "name": "Base Info Custom Type System",
+             "optional": true,
+             "group": "540eb91d-281a-495b-a7f5-63fd4455781c"
+            },
+            {
+             "name": "Base Info Diagnostics",
+             "optional": true,
+             "group": "540eb91d-281a-495b-a7f5-63fd4455781c"
+            }
+           ],
+           "includedProfiles": [
+            {
+             "name": "Core 2017 Server Facet",
+             "uri": "http://opcfoundation.org/UA-Profile/Server/Core2017Facet",
+             "optional": false,
+             "id": 1673,
+             "resolved": {
+              "id": 1673,
+              "conformanceUnits": [
+               {
+                "name": "Address Space AddIn DefaultInstanceBrowsename",
+                "optional": true,
+                "group": "71dbe508-8265-42fb-a7ac-f771cb6b85d8"
+               },
+               {
+                "name": "Address Space AddIn Reference",
+                "optional": true,
+                "group": "71dbe508-8265-42fb-a7ac-f771cb6b85d8"
+               },
+               {
+                "name": "Address Space Atomicity",
+                "optional": false,
+                "group": "71dbe508-8265-42fb-a7ac-f771cb6b85d8"
+               },
+               {
+                "name": "Address Space Base",
+                "optional": false,
+                "group": "71dbe508-8265-42fb-a7ac-f771cb6b85d8"
+               },
+               {
+                "name": "Address Space Dictionary Entries",
+                "optional": true,
+                "group": "71dbe508-8265-42fb-a7ac-f771cb6b85d8"
+               },
+               {
+                "name": "Address Space Full Array Only",
+                "optional": false,
+                "group": "71dbe508-8265-42fb-a7ac-f771cb6b85d8"
+               },
+               {
+                "name": "Address Space Interfaces",
+                "optional": true,
+                "group": "71dbe508-8265-42fb-a7ac-f771cb6b85d8"
+               },
+               {
+                "name": "Attribute Read",
+                "optional": false,
+                "group": "fb20bea0-528d-4d4e-b084-fac11235d703"
+               },
+               {
+                "name": "Attribute Write Index",
+                "optional": true,
+                "group": "fb20bea0-528d-4d4e-b084-fac11235d703"
+               },
+               {
+                "name": "Attribute Write Values",
+                "optional": true,
+                "group": "fb20bea0-528d-4d4e-b084-fac11235d703"
+               },
+               {
+                "name": "Base Info Core Structure",
+                "optional": false,
+                "group": "540eb91d-281a-495b-a7f5-63fd4455781c"
+               },
+               {
+                "name": "Base Info Currency",
+                "optional": true,
+                "group": "540eb91d-281a-495b-a7f5-63fd4455781c"
+               },
+               {
+                "name": "Base Info Estimated Return Time",
+                "optional": true,
+                "group": "540eb91d-281a-495b-a7f5-63fd4455781c"
+               },
+               {
+                "name": "Base Info OptionSet",
+                "optional": true,
+                "group": "540eb91d-281a-495b-a7f5-63fd4455781c"
+               },
+               {
+                "name": "Base Info Placeholder Modelling Rules",
+                "optional": true,
+                "group": "540eb91d-281a-495b-a7f5-63fd4455781c"
+               },
+               {
+                "name": "Base Info Selection List",
+                "optional": true,
+                "group": "540eb91d-281a-495b-a7f5-63fd4455781c"
+               },
+               {
+                "name": "Base Info Server Capabilities",
+                "optional": true,
+                "group": "540eb91d-281a-495b-a7f5-63fd4455781c"
+               },
+               {
+                "name": "Base Info ValueAsText",
+                "optional": true,
+                "group": "540eb91d-281a-495b-a7f5-63fd4455781c"
+               },
+               {
+                "name": "Base Services Diagnostics",
+                "optional": true,
+                "group": "1d139d45-6cfa-4bfc-b798-a332e9984497"
+               },
+               {
+                "name": "Discovery Find Servers Self",
+                "optional": false,
+                "group": "6e970252-d1e2-4188-adec-10445a392fb4"
+               },
+               {
+                "name": "Discovery Get Endpoints",
+                "optional": false,
+                "group": "6e970252-d1e2-4188-adec-10445a392fb4"
+               },
+               {
+                "name": "Security Administration",
+                "optional": true,
+                "group": "00967b2c-7cb6-4112-bc75-c35668a3b378"
+               },
+               {
+                "name": "Security Role Server Authorization",
+                "optional": true,
+                "group": "00967b2c-7cb6-4112-bc75-c35668a3b378"
+               },
+               {
+                "name": "SecurityPolicy Support",
+                "optional": false,
+                "group": "00967b2c-7cb6-4112-bc75-c35668a3b378"
+               },
+               {
+                "name": "Session Base",
+                "optional": false,
+                "group": "371ad9b1-5fe1-4b42-a2d7-e9e647e96680"
+               },
+               {
+                "name": "Session Change User",
+                "optional": true,
+                "group": "371ad9b1-5fe1-4b42-a2d7-e9e647e96680"
+               },
+               {
+                "name": "Session General Service Behaviour",
+                "optional": false,
+                "group": "1d139d45-6cfa-4bfc-b798-a332e9984497"
+               },
+               {
+                "name": "Session Minimum 1",
+                "optional": false,
+                "group": "371ad9b1-5fe1-4b42-a2d7-e9e647e96680"
+               },
+               {
+                "name": "View Basic",
+                "optional": false,
+                "group": "50fd0054-89de-44ff-9337-c76f4ee50681"
+               },
+               {
+                "name": "View Minimum Continuation Point 01",
+                "optional": false,
+                "group": "50fd0054-89de-44ff-9337-c76f4ee50681"
+               },
+               {
+                "name": "View RegisterNodes",
+                "optional": false,
+                "group": "50fd0054-89de-44ff-9337-c76f4ee50681"
+               },
+               {
+                "name": "View TranslateBrowsePath",
+                "optional": false,
+                "group": "50fd0054-89de-44ff-9337-c76f4ee50681"
+               }
+              ],
+              "includedProfiles": [
+               {
+                "name": "User Token \u2013 User Name Password Server Facet",
+                "uri": "http://opcfoundation.org/UA-Profile/Security/UserToken/Server/UserNamePassword",
+                "optional": false,
+                "id": 1096,
+                "resolved": {
+                 "id": 1096,
+                 "conformanceUnits": [
+                  {
+                   "name": "Security Invalid user token",
+                   "optional": false,
+                   "group": "f2c8d0ff-6a43-4f67-bb28-d5771f3eade3"
+                  },
+                  {
+                   "name": "Security User Name Password",
+                   "optional": false,
+                   "group": "f2c8d0ff-6a43-4f67-bb28-d5771f3eade3"
+                  }
+                 ],
+                 "includedProfiles": []
+                }
+               }
+              ]
+             }
+            },
+            {
+             "name": "UA-TCP UA-SC UA-Binary",
+             "uri": "http://opcfoundation.org/UA-Profile/Transport/uatcp-uasc-uabinary",
+             "optional": false,
+             "id": 219,
+             "resolved": {
+              "id": 219,
+              "conformanceUnits": [
+               {
+                "name": "Protocol UA TCP",
+                "optional": false,
+                "group": "6c96bf31-9205-4bfd-8fe1-dd376bad6ce1"
+               },
+               {
+                "name": "UA Binary Encoding",
+                "optional": false,
+                "group": "6c96bf31-9205-4bfd-8fe1-dd376bad6ce1"
+               },
+               {
+                "name": "UA Secure Conversation",
+                "optional": false,
+                "group": "6c96bf31-9205-4bfd-8fe1-dd376bad6ce1"
+               }
+              ],
+              "includedProfiles": []
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      },
+      {
+       "name": "Standard DataChange Subscription 2017 Server Facet",
+       "uri": "http://opcfoundation.org/UA-Profile/Server/StandardDataChangeSubscription2017",
+       "optional": false,
+       "id": 1675,
+       "resolved": {
+        "id": 1675,
+        "conformanceUnits": [
+         {
+          "name": "Base Info GetMonitoredItems Method",
+          "optional": false,
+          "group": "540eb91d-281a-495b-a7f5-63fd4455781c"
+         },
+         {
+          "name": "Base Info ResendData Method",
+          "optional": false,
+          "group": "540eb91d-281a-495b-a7f5-63fd4455781c"
+         },
+         {
+          "name": "Monitor Items 10",
+          "optional": false,
+          "group": "95e488d0-37c2-4848-85a3-9b82f88129ad"
+         },
+         {
+          "name": "Monitor Items 100",
+          "optional": false,
+          "group": "95e488d0-37c2-4848-85a3-9b82f88129ad"
+         },
+         {
+          "name": "Monitor MinQueueSize_02",
+          "optional": false,
+          "group": "95e488d0-37c2-4848-85a3-9b82f88129ad"
+         },
+         {
+          "name": "Monitor Triggering",
+          "optional": false,
+          "group": "95e488d0-37c2-4848-85a3-9b82f88129ad"
+         },
+         {
+          "name": "Monitored Items Deadband Filter",
+          "optional": false,
+          "group": "95e488d0-37c2-4848-85a3-9b82f88129ad"
+         },
+         {
+          "name": "Subscription Minimum 02",
+          "optional": false,
+          "group": "aa6816d9-c7d1-423a-bc55-10fb50a96c1a"
+         },
+         {
+          "name": "Subscription Publish Min 05",
+          "optional": false,
+          "group": "aa6816d9-c7d1-423a-bc55-10fb50a96c1a"
+         }
+        ],
+        "includedProfiles": [
+         {
+          "name": "Embedded DataChange Subscription Server Facet",
+          "uri": "http://opcfoundation.org/UA-Profile/Server/EmbeddedDataChangeSubscription",
+          "optional": false,
+          "id": 141
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "name": "Enhanced DataChange Subscription 2017 Server Facet",
+    "uri": "http://opcfoundation.org/UA-Profile/Server/EnhancedDataChangeSubscription2017",
+    "optional": false,
+    "id": 1678,
+    "resolved": {
+     "id": 1678,
+     "conformanceUnits": [
+      {
+       "name": "Monitor Items 500",
+       "optional": false,
+       "group": "95e488d0-37c2-4848-85a3-9b82f88129ad"
+      },
+      {
+       "name": "Monitor MinQueueSize_05",
+       "optional": false,
+       "group": "95e488d0-37c2-4848-85a3-9b82f88129ad"
+      },
+      {
+       "name": "Subscription Minimum 05",
+       "optional": false,
+       "group": "aa6816d9-c7d1-423a-bc55-10fb50a96c1a"
+      },
+      {
+       "name": "Subscription Publish Min 10",
+       "optional": false,
+       "group": "aa6816d9-c7d1-423a-bc55-10fb50a96c1a"
+      }
+     ],
+     "includedProfiles": [
+      {
+       "name": "Standard DataChange Subscription 2017 Server Facet",
+       "uri": "http://opcfoundation.org/UA-Profile/Server/StandardDataChangeSubscription2017",
+       "optional": false,
+       "id": 1675
+      }
+     ]
+    }
+   },
+   {
+    "name": "User Token \u2013 X509 Certificate Server Facet",
+    "uri": "http://opcfoundation.org/UA-Profile/Security/UserToken/Server/X509Certificate",
+    "optional": false,
+    "id": 1097,
+    "resolved": {
+     "id": 1097,
+     "conformanceUnits": [
+      {
+       "name": "Security Invalid user token",
+       "optional": false,
+       "group": "f2c8d0ff-6a43-4f67-bb28-d5771f3eade3"
+      },
+      {
+       "name": "Security User X509",
+       "optional": false,
+       "group": "f2c8d0ff-6a43-4f67-bb28-d5771f3eade3"
+      }
+     ],
+     "includedProfiles": []
+    }
+   }
+  ],
+  "name": "Standard 2017 UA Server Profile",
+  "uri": "http://opcfoundation.org/UA-Profile/Server/StandardUA2017",
+  "description": "This Profile is a FullFeatured Profile that defines a minimum set of functionality required for PC based OPC UA servers. Compared to the embedded profiles, the Profile requires higher limits for Sessions, Subscriptions and Monitored Items. It also requires support of diagnostic information.<br>\nThis Profile supersedes the <a href=\"http://opcfoundation.org/UA-Profile/Server/StandardUA\">Standard UA Server Profile</a>."
+ }
+}

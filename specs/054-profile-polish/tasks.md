@@ -127,7 +127,7 @@ rejection) green; symbol-absence script green; workspace suite (default features
 - [X] T017 [US1] Gate programs behind `programs`: `programs/mod.rs:12`
       (`register_program`, `ProgramMethodHandler`). Self-contained.
       [Cite: OPC 10000-10]
-- [ ] T018 [US1] Gate the LDS receive-side behind `lds`: `controller.rs:715,743`
+- [X] T018 [US1] Gate the LDS receive-side behind `lds`: `controller.rs:715,743`
       RegisterServer/RegisterServer2 arms + the bounded registry from feature 024;
       off ⇒ `BadServiceUnsupported` per-branch fault. [Cite: OPC 10000-12 §4.2.2/§5.1; OPC 10000-4 §5.5 RegisterServer/RegisterServer2]
 - [ ] T019 [US1] Gate alarms behind `alarms`: `alarms/` module decl, refs in

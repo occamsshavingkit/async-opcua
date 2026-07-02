@@ -27,25 +27,28 @@ use opcua_core::{
     sync::RwLock,
 };
 use opcua_crypto::{CertificateStore, SecurityPolicy};
-#[cfg(feature = "discovery-mdns")]
+#[cfg(all(feature = "lds", feature = "discovery-mdns"))]
 use opcua_types::MdnsDiscoveryConfiguration;
 use opcua_types::{
-    ChannelSecurityToken, DateTime, ExtensionObject, FindServersOnNetworkResponse,
-    FindServersResponse, GetEndpointsResponse, MessageSecurityMode, NodeId,
-    OpenSecureChannelRequest, OpenSecureChannelResponse, RegisterServer2Response,
-    RegisterServerResponse, ResponseHeader, SecurityTokenRequestType, ServiceFault, StatusCode,
+    ChannelSecurityToken, DateTime, FindServersOnNetworkResponse, FindServersResponse,
+    GetEndpointsResponse, MessageSecurityMode, NodeId, OpenSecureChannelRequest,
+    OpenSecureChannelResponse, ResponseHeader, SecurityTokenRequestType, ServiceFault, StatusCode,
     UAString,
 };
+#[cfg(feature = "lds")]
+use opcua_types::{ExtensionObject, RegisterServer2Response, RegisterServerResponse};
 use tokio_util::sync::CancellationToken;
 use tracing_futures::Instrument;
 
 use crate::{
     authenticator::UserToken,
     info::ServerInfo,
-    node_manager::{consume_results, NodeManagers},
+    node_manager::NodeManagers,
     transport::tcp::{ConnectionTransport, Request, TransportPollResult},
     transport::Connector,
 };
+#[cfg(feature = "lds")]
+use crate::node_manager::consume_results;
 #[cfg(feature = "subscriptions")]
 use crate::subscriptions::SubscriptionCache;
 
@@ -93,6 +96,7 @@ pub(crate) enum ControllerCommand {
 
 type PendingMessageResponse = dyn Future<Output = Result<Response, String>> + Send + Sync + 'static;
 
+#[cfg(feature = "lds")]
 fn register_server2_configuration_result(
     info: &ServerInfo,
     server: &opcua_types::RegisteredServer,
@@ -692,6 +696,7 @@ impl<T: ConnectionTransport> SessionController<T> {
                 } else {
                     Vec::new()
                 };
+                #[cfg(feature = "lds")]
                 servers.extend(self.info.registered_application_descriptions(
                     &request.endpoint_url,
                     &request.locale_ids,
@@ -737,6 +742,7 @@ impl<T: ConnectionTransport> SessionController<T> {
                     id,
                 )
             }
+            #[cfg(feature = "lds")]
             RequestMessage::RegisterServer(request) => {
                 let _h = span.enter();
                 let status = match self.register_server_caller_status(&request.server.server_uri) {
@@ -765,6 +771,17 @@ impl<T: ConnectionTransport> SessionController<T> {
                     RequestProcessResult::Ok
                 }
             }
+            #[cfg(not(feature = "lds"))]
+            RequestMessage::RegisterServer(request) => {
+                let _h = span.enter();
+                self.process_service_result(
+                    Err::<ResponseMessage, StatusCode>(StatusCode::BadServiceUnsupported),
+                    request.request_header.request_handle,
+                    request.request_header.return_diagnostics,
+                    id,
+                )
+            }
+            #[cfg(feature = "lds")]
             RequestMessage::RegisterServer2(request) => {
                 let _h = span.enter();
                 let status = match self.register_server_caller_status(&request.server.server_uri) {
@@ -820,6 +837,16 @@ impl<T: ConnectionTransport> SessionController<T> {
                 } else {
                     RequestProcessResult::Ok
                 }
+            }
+            #[cfg(not(feature = "lds"))]
+            RequestMessage::RegisterServer2(request) => {
+                let _h = span.enter();
+                self.process_service_result(
+                    Err::<ResponseMessage, StatusCode>(StatusCode::BadServiceUnsupported),
+                    request.request_header.request_handle,
+                    request.request_header.return_diagnostics,
+                    id,
+                )
             }
 
             message => {
@@ -986,6 +1013,7 @@ impl<T: ConnectionTransport> SessionController<T> {
     /// otherwise any client could register or unregister arbitrary servers (spoofing or a
     /// discovery denial-of-service by unregistering a victim). Returns `Good` when the caller
     /// is allowed to (un)register `server_uri`.
+    #[cfg(feature = "lds")]
     fn register_server_caller_status(&self, server_uri: &UAString) -> StatusCode {
         if self.channel.security_policy() == SecurityPolicy::None {
             return StatusCode::BadSecurityChecksFailed;

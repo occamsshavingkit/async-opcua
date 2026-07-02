@@ -373,7 +373,7 @@ impl Server {
             None
         };
 
-        #[cfg(feature = "discovery-mdns")]
+        #[cfg(all(feature = "lds", feature = "discovery-mdns"))]
         let registered_mdns = if config.multicast_discovery.enabled {
             match crate::discovery_mdns::MdnsAdvertisementRegistry::new() {
                 Ok(registry) => Some(Arc::new(registry)),
@@ -424,10 +424,11 @@ impl Server {
                 .type_tree_getter
                 .unwrap_or_else(|| Arc::new(DefaultTypeTreeGetter)),
             type_loaders: RwLock::new(builder.type_loaders),
+            #[cfg(feature = "lds")]
             registered_servers: RwLock::new(Default::default()),
             #[cfg(feature = "discovery-mdns")]
             mdns,
-            #[cfg(feature = "discovery-mdns")]
+            #[cfg(all(feature = "lds", feature = "discovery-mdns"))]
             registered_mdns,
             #[cfg(feature = "diagnostics")]
             diagnostics: ServerDiagnostics::new(config.diagnostics),

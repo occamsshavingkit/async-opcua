@@ -4,6 +4,7 @@
 
 //! Provides server state information, such as status, configuration, running servers and so on.
 
+#[cfg(feature = "lds")]
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU16, AtomicU8, Ordering};
 use std::sync::Arc;
@@ -34,7 +35,7 @@ use opcua_core::handle::AtomicHandle;
 use opcua_core::sync::RwLock;
 use opcua_crypto::identity::{LocalOAuth2Validator, OAuth2IdentityValidator};
 use opcua_crypto::{CertificateStore, PrivateKey, SecurityPolicy, SuppressedFinding, X509};
-#[cfg(feature = "discovery-mdns")]
+#[cfg(all(feature = "lds", feature = "discovery-mdns"))]
 use opcua_types::MdnsDiscoveryConfiguration;
 use opcua_types::{
     profiles, status_code::StatusCode, ActivateSessionRequest, AnonymousIdentityToken,
@@ -54,7 +55,7 @@ use super::authenticator::{AuthManager, UserToken};
 use super::identity_token::{IdentityToken, POLICY_ID_ANONYMOUS, POLICY_ID_X509};
 use super::{OperationalLimits, ServerCapabilities, ANONYMOUS_USER_TOKEN_ID};
 
-#[cfg(feature = "discovery-mdns")]
+#[cfg(all(feature = "lds", feature = "discovery-mdns"))]
 fn registered_mdns_name(server: &RegisteredServer, config: &MdnsDiscoveryConfiguration) -> String {
     if !config.mdns_server_name.is_null() && !config.mdns_server_name.is_empty() {
         return bounded_mdns_string(
@@ -73,7 +74,7 @@ fn registered_mdns_name(server: &RegisteredServer, config: &MdnsDiscoveryConfigu
     bounded_mdns_string(name, crate::discovery_mdns::MAX_STR)
 }
 
-#[cfg(feature = "discovery-mdns")]
+#[cfg(all(feature = "lds", feature = "discovery-mdns"))]
 fn registered_mdns_capabilities(config: &MdnsDiscoveryConfiguration) -> Vec<String> {
     let mut caps: Vec<String> = config
         .server_capabilities
@@ -92,7 +93,7 @@ fn registered_mdns_capabilities(config: &MdnsDiscoveryConfiguration) -> Vec<Stri
     caps
 }
 
-#[cfg(feature = "discovery-mdns")]
+#[cfg(all(feature = "lds", feature = "discovery-mdns"))]
 fn bounded_mdns_string(value: &str, max_len: usize) -> String {
     if value.len() <= max_len {
         return value.to_owned();
@@ -214,12 +215,13 @@ pub struct ServerInfo {
     /// List of active type loaders
     pub type_loaders: RwLock<TypeLoaderCollection>,
     /// Registered servers advertised by this server when acting as a Local Discovery Server.
+    #[cfg(feature = "lds")]
     pub(crate) registered_servers: RwLock<HashMap<UAString, RegisteredServer>>,
     /// Servers discovered via OPC UA Part 12 multicast discovery.
     #[cfg(feature = "discovery-mdns")]
     pub(crate) mdns: Option<std::sync::Arc<crate::discovery_mdns::MdnsDiscovery>>,
     /// mDNS advertisements for servers registered via RegisterServer2 discovery configuration.
-    #[cfg(feature = "discovery-mdns")]
+    #[cfg(all(feature = "lds", feature = "discovery-mdns"))]
     pub(crate) registered_mdns:
         Option<std::sync::Arc<crate::discovery_mdns::MdnsAdvertisementRegistry>>,
     /// Current server diagnostics.
@@ -409,6 +411,7 @@ impl ServerInfo {
     }
 
     /// Applies a RegisterServer request to the in-memory discovery registry.
+    #[cfg(feature = "lds")]
     pub(crate) fn apply_register_server(&self, server: RegisteredServer) -> StatusCode {
         if server.server_uri.is_null() || server.server_uri.is_empty() {
             return StatusCode::BadServerUriInvalid;
@@ -440,7 +443,7 @@ impl ServerInfo {
         StatusCode::Good
     }
 
-    #[cfg(feature = "discovery-mdns")]
+    #[cfg(all(feature = "lds", feature = "discovery-mdns"))]
     pub(crate) fn apply_register_server2_mdns_configuration(
         &self,
         server: &RegisteredServer,
@@ -483,7 +486,7 @@ impl ServerInfo {
         }
     }
 
-    #[cfg(feature = "discovery-mdns")]
+    #[cfg(all(feature = "lds", feature = "discovery-mdns"))]
     pub(crate) fn remove_registered_mdns(&self, server_uri: &UAString) {
         if let Some(registered_mdns) = &self.registered_mdns {
             registered_mdns.unregister(server_uri.as_ref());
@@ -499,12 +502,11 @@ impl ServerInfo {
         max_records_to_return: u32,
         capability_filter: &Option<Vec<UAString>>,
     ) -> Vec<opcua_types::ServerOnNetwork> {
-        let want_caps = capability_filter
-            .as_ref()
-            .is_some_and(|f| f.iter().any(|c| !c.is_null() && !c.is_empty()));
-
-        #[cfg(not(feature = "discovery-mdns"))]
+        #[cfg(all(feature = "lds", not(feature = "discovery-mdns")))]
         {
+            let want_caps = capability_filter
+                .as_ref()
+                .is_some_and(|f| f.iter().any(|c| !c.is_null() && !c.is_empty()));
             let registered = self.registered_servers.read();
             let mut servers: Vec<_> = registered.values().collect();
             servers.sort_by(|a, b| a.server_uri.as_ref().cmp(b.server_uri.as_ref()));
@@ -542,6 +544,10 @@ impl ServerInfo {
 
         #[cfg(feature = "discovery-mdns")]
         {
+            let want_caps = capability_filter
+                .as_ref()
+                .is_some_and(|f| f.iter().any(|c| !c.is_null() && !c.is_empty()));
+
             struct Candidate {
                 sort_key: String,
                 server_name: UAString,
@@ -549,6 +555,7 @@ impl ServerInfo {
                 caps: Option<Vec<String>>,
             }
 
+            #[cfg(feature = "lds")]
             let mut candidates: Vec<Candidate> = {
                 let registered = self.registered_servers.read();
                 registered
@@ -571,6 +578,8 @@ impl ServerInfo {
                     })
                     .collect()
             };
+            #[cfg(not(feature = "lds"))]
+            let mut candidates: Vec<Candidate> = Vec::new();
 
             let discovered = self
                 .mdns
@@ -620,9 +629,16 @@ impl ServerInfo {
                 })
                 .collect()
         }
+
+        #[cfg(not(any(feature = "lds", feature = "discovery-mdns")))]
+        {
+            let _ = (starting_record_id, max_records_to_return, capability_filter);
+            Vec::new()
+        }
     }
 
     /// Returns registered servers as application descriptions for FindServers.
+    #[cfg(feature = "lds")]
     pub(crate) fn registered_application_descriptions(
         &self,
         _endpoint_url: &UAString,
@@ -1350,6 +1366,7 @@ fn locale_id_matches(supported: &str, requested: &str) -> bool {
         || (requested_is_neutral && supported.starts_with(&format!("{requested}-")))
 }
 
+#[cfg(feature = "lds")]
 fn registered_server_application_name(
     server: &RegisteredServer,
     locale_ids: &Option<Vec<UAString>>,

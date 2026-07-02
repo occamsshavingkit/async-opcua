@@ -1,9 +1,11 @@
 //! Implementation of [AddressSpace], and in-memory OPC-UA address space.
 
 pub(crate) mod utils;
+pub(crate) mod write_validation;
 
 pub use opcua_nodes::*;
 pub use utils::*;
+pub use write_validation::*;
 
 #[cfg(feature = "generated-address-space")]
 pub use opcua_core_namespace::CoreNamespace;
@@ -480,7 +482,7 @@ impl AddressSpace {
             return Err(StatusCode::BadNodeIdUnknown);
         };
 
-        utils::validate_node_write_in_address_space(
+        write_validation::validate_node_write_in_address_space(
             self,
             &node,
             context,

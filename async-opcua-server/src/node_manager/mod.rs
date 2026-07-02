@@ -12,9 +12,9 @@ use std::{
 use async_trait::async_trait;
 use opcua_core::sync::RwLock;
 use opcua_nodes::DefaultTypeTree;
-use opcua_types::{
-    ExpandedNodeId, NodeId, RolePermissionType, StatusCode, TimestampsToReturn,
-};
+use opcua_types::{NodeId, RolePermissionType, StatusCode, TimestampsToReturn};
+#[cfg(feature = "node-management")]
+use opcua_types::ExpandedNodeId;
 #[cfg(feature = "history")]
 use opcua_types::{
     ReadAnnotationDataDetails, ReadAtTimeDetails, ReadEventDetails, ReadProcessedDetails,
@@ -25,6 +25,7 @@ use opcua_types::MonitoringMode;
 use tokio::sync::OnceCell;
 
 mod attributes;
+#[cfg(feature = "node-management")]
 mod audit_events;
 mod build;
 mod context;
@@ -38,6 +39,7 @@ mod method_typed;
 mod model_change;
 #[cfg(feature = "subscriptions")]
 mod monitored_items;
+#[cfg(feature = "node-management")]
 mod node_management;
 #[cfg(feature = "query")]
 mod query;
@@ -66,7 +68,6 @@ pub use {
         TypeTreeReadContext,
     },
     model_change::GeneralModelChangeEvent,
-    node_management::{AddNodeItem, AddReferenceItem, DeleteNodeItem, DeleteReferenceItem},
     utils::*,
     view::{
         impl_translate_browse_paths_using_browse, AddReferenceResult, BrowseNode, BrowsePathItem,
@@ -83,6 +84,8 @@ pub use {
         MethodHandlerWithContext,
     },
 };
+#[cfg(feature = "node-management")]
+pub use node_management::{AddNodeItem, AddReferenceItem, DeleteNodeItem, DeleteReferenceItem};
 #[cfg(feature = "subscriptions")]
 pub use monitored_items::{MonitoredItemRef, MonitoredItemUpdateRef};
 #[cfg(feature = "query")]
@@ -355,6 +358,7 @@ pub trait NodeManagerCore: IntoAnyArc + Any {
     /// Returning true here doesn't mean that creating the new node must
     /// succeed, only that _if_ the parent node exists, this node manager
     /// would be the one to create the requested node.
+    #[cfg(feature = "node-management")]
     fn handle_new_node(&self, parent_id: &ExpandedNodeId) -> bool {
         false
     }
@@ -665,6 +669,7 @@ pub trait NodeMutator {
     ///
     /// This should create the nodes, or set a failed status as appropriate.
     /// If a node was created, the status should be set to Good.
+    #[cfg(feature = "node-management")]
     async fn add_nodes(
         &self,
         context: &RequestContext,
@@ -684,6 +689,7 @@ pub trait NodeMutator {
     /// set both source and target status. Note that it may
     /// already have been added in a different node manager, you are
     /// responsible for any cleanup if you do this.
+    #[cfg(feature = "node-management")]
     async fn add_references(
         &self,
         context: &RequestContext,
@@ -698,6 +704,7 @@ pub trait NodeMutator {
     ///
     /// Typically, you also want to implement `delete_node_references` if
     /// there are other node managers that support deletes.
+    #[cfg(feature = "node-management")]
     async fn delete_nodes(
         &self,
         context: &RequestContext,
@@ -711,6 +718,7 @@ pub trait NodeMutator {
     ///
     /// This is not allowed to fail, you should make it impossible to delete
     /// nodes with immutable references.
+    #[cfg(feature = "node-management")]
     async fn delete_node_references(
         &self,
         context: &RequestContext,
@@ -729,6 +737,7 @@ pub trait NodeMutator {
     /// set both source and target status. Note that it may
     /// already have been deleted in a different node manager, you are
     /// responsible for any cleanup if you do this.
+    #[cfg(feature = "node-management")]
     async fn delete_references(
         &self,
         context: &RequestContext,

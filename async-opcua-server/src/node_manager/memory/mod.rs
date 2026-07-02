@@ -65,14 +65,16 @@ use opcua_types::{DataValue, DateTime, MonitoringMode};
 use super::{
     build::NodeManagerBuilder,
     view::{AddReferenceResult, ExternalReference, ExternalReferenceRequest, NodeMetadata},
-    AddNodeItem, AddReferenceItem, AttributeProvider, BrowseNode, BrowsePathItem, DefaultTypeTree,
-    DeleteNodeItem, DeleteReferenceItem, DynNodeManager, NodeManagerCore, NodeMutator,
-    ReadNode, RegisterNodeItem, RequestContext, ServerContext, ViewProvider, WriteNode,
+    AttributeProvider, BrowseNode, BrowsePathItem, DefaultTypeTree, DynNodeManager,
+    NodeManagerCore, NodeMutator, ReadNode, RegisterNodeItem, RequestContext, ServerContext,
+    ViewProvider, WriteNode,
 };
 #[cfg(feature = "history")]
 use super::{HistoryNode, HistoryProvider, HistoryUpdateDetails, HistoryUpdateNode};
 #[cfg(feature = "method-call")]
 use super::{MethodCall, MethodProvider};
+#[cfg(feature = "node-management")]
+use super::{AddNodeItem, AddReferenceItem, DeleteNodeItem, DeleteReferenceItem};
 #[cfg(feature = "query")]
 use super::QueryRequest;
 #[cfg(feature = "subscriptions")]
@@ -801,6 +803,7 @@ impl<TImpl: InMemoryNodeManagerImpl> NodeManagerCore for InMemoryNodeManager<TIm
         self.inner.namespaces()
     }
 
+    #[cfg(feature = "node-management")]
     fn handle_new_node(&self, parent_id: &ExpandedNodeId) -> bool {
         self.inner.handle_new_node(parent_id)
     }
@@ -1298,6 +1301,7 @@ impl<TImpl: InMemoryNodeManagerImpl> NodeMutator for InMemoryNodeManager<TImpl> 
     ///
     /// This should create the nodes, or set a failed status as appropriate.
     /// If a node was created, the status should be set to Good.
+    #[cfg(feature = "node-management")]
     async fn add_nodes(
         &self,
         context: &RequestContext,
@@ -1308,6 +1312,7 @@ impl<TImpl: InMemoryNodeManagerImpl> NodeMutator for InMemoryNodeManager<TImpl> 
             .await
     }
 
+    #[cfg(feature = "node-management")]
     async fn add_references(
         &self,
         context: &RequestContext,
@@ -1318,6 +1323,7 @@ impl<TImpl: InMemoryNodeManagerImpl> NodeMutator for InMemoryNodeManager<TImpl> 
             .await
     }
 
+    #[cfg(feature = "node-management")]
     async fn delete_nodes(
         &self,
         context: &RequestContext,
@@ -1328,6 +1334,7 @@ impl<TImpl: InMemoryNodeManagerImpl> NodeMutator for InMemoryNodeManager<TImpl> 
             .await
     }
 
+    #[cfg(feature = "node-management")]
     async fn delete_node_references(
         &self,
         context: &RequestContext,
@@ -1338,6 +1345,7 @@ impl<TImpl: InMemoryNodeManagerImpl> NodeMutator for InMemoryNodeManager<TImpl> 
             .await
     }
 
+    #[cfg(feature = "node-management")]
     async fn delete_references(
         &self,
         context: &RequestContext,

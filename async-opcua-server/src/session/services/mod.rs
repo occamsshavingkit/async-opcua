@@ -18,6 +18,7 @@ mod attribute;
 mod method;
 #[cfg(feature = "subscriptions")]
 mod monitored_items;
+#[cfg(feature = "node-management")]
 mod node_management;
 #[cfg(feature = "query")]
 mod query;
@@ -33,6 +34,7 @@ pub(super) use attribute::*;
 pub(super) use method::*;
 #[cfg(feature = "subscriptions")]
 pub(super) use monitored_items::*;
+#[cfg(feature = "node-management")]
 pub(super) use node_management::*;
 #[cfg(feature = "query")]
 pub(super) use query::*;

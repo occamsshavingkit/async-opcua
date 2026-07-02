@@ -410,18 +410,22 @@ impl MessageHandler {
                 async_service_call!(services::call, self, request, data)
             }
 
+            #[cfg(feature = "node-management")]
             RequestMessage::AddNodes(request) => {
                 async_service_call!(services::add_nodes, self, request, data)
             }
 
+            #[cfg(feature = "node-management")]
             RequestMessage::AddReferences(request) => {
                 async_service_call!(services::add_references, self, request, data)
             }
 
+            #[cfg(feature = "node-management")]
             RequestMessage::DeleteNodes(request) => {
                 async_service_call!(services::delete_nodes, self, request, data)
             }
 
+            #[cfg(feature = "node-management")]
             RequestMessage::DeleteReferences(request) => {
                 async_service_call!(services::delete_references, self, request, data)
             }

@@ -104,7 +104,7 @@ rejection) green; symbol-absence script green; workspace suite (default features
 - [X] T011 [US1] Gate QueryFirst/QueryNext behind `query`: dispatch arms
       (`message_handler.rs:357-383` range), `session/services/query.rs`,
       `node_manager/query.rs`. [Cite: OPC 10000-4 Annex B.2.3/B.2.4 (Query service set in 1.05.07)]
-- [ ] T012 [US1] Gate AddNodes/AddReferences/DeleteNodes/DeleteReferences behind
+- [X] T012 [US1] Gate AddNodes/AddReferences/DeleteNodes/DeleteReferences behind
       `node-management`: dispatch arms, `session/services/node_management.rs`,
       `node_manager/node_management.rs` (+ write-validation cluster refs).
       [Cite: OPC 10000-4 §5.8]

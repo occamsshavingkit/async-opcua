@@ -60,14 +60,14 @@ rejection) green; symbol-absence script green; workspace suite (default features
       Browse + BrowseNext, RegisterNodes, TranslateBrowsePathsToNodeIds, GetEndpoints,
       FindServers-self. [Cite: Core 2017 Server Facet CUs — Session Base/Minimum 1,
       Attribute Read, View Basic/RegisterNodes/TranslateBrowsePath, Discovery Get
-      Endpoints/Find Servers Self, Security User Name Password; OPC 10000-4 §5.5–§5.9]
+      Endpoints/Find Servers Self, Security User Name Password; OPC 10000-4 §5.5 Discovery, §5.7 Session, §5.9 View, §5.11 Attribute/Read]
 - [ ] T004 [P] [US1] Nano rejection test in
       `samples/foundation-profile-nano-server/tests/service_rejection.rs`:
       CreateSubscription, Publish, Call, HistoryRead, QueryFirst, AddNodes each answered
       `BadServiceUnsupported` via raw `UARequest` builders (error-mode convention, memory
       `errormode-selftest-campaign`), then a follow-up Read on the same session still
       succeeds (no corruption). RED today (these services currently succeed).
-      [Cite: OPC 10000-4 §4.4 service fault; constitution IV]
+      [Cite: OPC 10000-4 §5.3 Service results, §7.34 ServiceFault; constitution IV]
 - [ ] T005 [P] [US1] Symbol/dependency absence script
       `tools/check-profile-absence.sh <package> <deny-features> <deny-symbols>`:
       `cargo tree -e features` deny-list + `nm -C` sentinel check (SubscriptionCache,
@@ -80,19 +80,19 @@ rejection) green; symbol-absence script green; workspace suite (default features
       constructors + dispatch arms in `async-opcua-server/src/session/message_handler.rs`
       (arms → fallback `:408-421`), `session/controller.rs:46`, `session/manager.rs:23`,
       `session/audit.rs:13`, `server.rs:430`; use the `discovery-mdns` cfg-field pattern
-      (`info.rs:214-219`). [Cite: OPC 10000-4 §5.13; research.md R2/R5]
+      (`info.rs:214-219`). [Cite: OPC 10000-4 §5.13/§5.14 MonitoredItem+Subscription service sets; research.md R2/R5]
 - [ ] T007 [US1] Gate the `NodeManager` monitored-item trait surface + all in-tree impls
       behind `subscriptions`: `node_manager/mod.rs:44`, `node_manager/memory/mod.rs:35`,
       `memory/core.rs:26`, `memory/memory_mgr_impl.rs:15`,
       `session/services/monitored_items.rs`. Additive-only trait change (full build
-      unchanged). [Cite: OPC 10000-4 §5.12; research.md R5.3]
+      unchanged). [Cite: OPC 10000-4 §5.13 MonitoredItem service set; research.md R5.3]
 - [ ] T008 [US1] Gate the `subscriptions/` module decl + public re-exports
       (`lib.rs:60`, `lib.rs:82-102`) and `session/services/mod.rs:31` re-export behind
       `subscriptions`; fix resulting cfg fallout so `--no-default-features
       --features base-server`-equivalent builds compile. [Cite: research.md R3]
 - [ ] T009 [US1] Gate Call service behind `method-call`: `session/services/method.rs`,
       dispatch arm `message_handler.rs:365`, method-registration surface (typed_method
-      path stays compiled only with the feature). [Cite: OPC 10000-4 §5.11]
+      path stays compiled only with the feature). [Cite: OPC 10000-4 §5.12 Method service set]
 - [ ] T010 [US1] Gate history behind `history` and aggregates behind
       `history-aggregates`: dispatch arms `message_handler.rs:347-353`,
       `services/{history_read,history_update}.rs`, backend surface
@@ -100,10 +100,10 @@ rejection) green; symbol-absence script green; workspace suite (default features
       `memory/simple.rs:518-522`, `config/capabilities.rs` aggregate wiring. (Kept as ONE
       task deliberately: the aggregate hooks are inline in the same `simple.rs`
       history-read path — splitting would make two dispatches edit the same functions.)
-      [Cite: OPC 10000-11 §6.4; OPC 10000-13 §5]
+      [Cite: OPC 10000-11 §6.1/§6.5; OPC 10000-4 §5.11 HistoryRead/HistoryUpdate; OPC 10000-13 §5]
 - [ ] T011 [US1] Gate QueryFirst/QueryNext behind `query`: dispatch arms
       (`message_handler.rs:357-383` range), `session/services/query.rs`,
-      `node_manager/query.rs`. [Cite: OPC 10000-4 §5.10]
+      `node_manager/query.rs`. [Cite: OPC 10000-4 Annex B.2.3/B.2.4 (Query service set in 1.05.07)]
 - [ ] T012 [US1] Gate AddNodes/AddReferences/DeleteNodes/DeleteReferences behind
       `node-management`: dispatch arms, `session/services/node_management.rs`,
       `node_manager/node_management.rs` (+ write-validation cluster refs).
@@ -129,7 +129,7 @@ rejection) green; symbol-absence script green; workspace suite (default features
       [Cite: OPC 10000-10]
 - [ ] T018 [US1] Gate the LDS receive-side behind `lds`: `controller.rs:715,743`
       RegisterServer/RegisterServer2 arms + the bounded registry from feature 024;
-      off ⇒ `BadServiceUnsupported` per-branch fault. [Cite: OPC 10000-12 §6.4]
+      off ⇒ `BadServiceUnsupported` per-branch fault. [Cite: OPC 10000-12 §4.2.2/§5.1; OPC 10000-4 §5.5 RegisterServer/RegisterServer2]
 - [ ] T019 [US1] Gate alarms behind `alarms`: `alarms/` module decl, refs in
       `namespace/init.rs:5` and `node_manager/memory/simple.rs:13`, event dispatch
       touchpoints `alarms/dispatch.rs:110-114`, `alarms/methods.rs`. [Cite: OPC 10000-9]
@@ -141,7 +141,7 @@ rejection) green; symbol-absence script green; workspace suite (default features
 - [ ] T021 [US1] Switch `samples/foundation-profile-nano-server` to
       `features = ["nano"]` + Nano capacity config (≥1 session), minimal hand-rolled
       address space satisfying Address Space Base / Base Info Core Structure; verify
-      T003–T005 green and record the measured size. [Cite: Nano profile URI; Core 2017
+      T003–T005 green and record the measured size in `specs/054-profile-polish/research-assets/size-accounting.md`. [Cite: Nano profile URI; Core 2017
       CUs Address Space Base / Base Info Core Structure]
 
 **Checkpoint (US1 = MVP)**: nano < 7,636,648 B; full workspace suite green; commit.
@@ -165,7 +165,7 @@ basic data-change monitoring works; deadband/triggering/events/methods compiled 
       DataChangeFilter → `BadMonitoredItemFilterUnsupported`; EventFilter item →
       `BadMonitoredItemFilterUnsupported`; SetTriggering → `BadServiceUnsupported`;
       Call → `BadServiceUnsupported`; sessions stay healthy. RED until T024/T025.
-      [Cite: OPC 10000-4 §7.22.2 DataChangeFilter, §5.13.6 SetTriggering]
+      [Cite: OPC 10000-4 §7.22.2 DataChangeFilter, §5.13.5 SetTriggering]
 
 ### Implementation
 
@@ -174,16 +174,16 @@ basic data-change monitoring works; deadband/triggering/events/methods compiled 
       ungated path rejects filter-bearing create/modify with
       `BadMonitoredItemFilterUnsupported` (fail-closed, never silently ignore a filter).
       Pure move + gate; deadband tests (`monitored_item.rs:1293,1337`) ride along.
-      [Cite: OPC 10000-4 §7.22.2; OPC 10000-8 §6.2 PercentDeadband]
+      [Cite: OPC 10000-4 §7.22.2; OPC 10000-8 §7.2 PercentDeadband]
 - [ ] T025 [US2] Split triggering into `subscriptions/monitored_item/triggering.rs` +
       orchestration gates (`session_subscriptions.rs:571`, `subscriptions/mod.rs:1425`,
       SetTriggering dispatch arm) behind `subscriptions-standard`.
-      [Cite: OPC 10000-4 §5.13.6 Monitor Triggering]
+      [Cite: OPC 10000-4 §5.13.5 SetTriggering]
 - [ ] T026 [US2] Switch `samples/foundation-profile-micro-server` to
       `features = ["micro"]` + capacity config (≥2 sessions, ≥1 subscription, ≥2
       monitored items); verify T022/T023 + absence script (no deadband/trigger/event
-      sentinels) green; record measured size (must sit strictly between nano and
-      embedded). [Cite: Micro profile URI]
+      sentinels) green; record measured size in research-assets/size-accounting.md (must
+      sit strictly between nano and embedded). [Cite: Micro profile URI]
 
 **Checkpoint**: nano < micro (monotonic); full suite green; commit.
 
@@ -218,7 +218,8 @@ GetMonitoredItems/ResendData work; advertised capabilities honest.
 - [ ] T030 [US3] Switch `samples/foundation-profile-embedded-server` to
       `features = ["embedded"]` + capacity config (≥2 subscriptions, ≥100 monitored
       items) + demo certificate provisioning for the smoke test; verify T027 + absence
-      script (no alarm/history/query sentinels) green; record measured size.
+      script (no alarm/history/query sentinels) green; record measured size in
+      research-assets/size-accounting.md.
       [Cite: Embedded profile URI]
 
 **Checkpoint**: micro < embedded; full suite green; commit.
@@ -243,14 +244,14 @@ tokens, LDS self-registration, Cancel proven; still no events/history/etc.
       user-token activation over Sign&Encrypt; RegisterServer2 flow against an in-process
       `lds`-featured peer server (valid under the test-graph unification caveat — the
       binary absence check is separate); Cancel of an outstanding request per Part 4
-      §5.6.5. [Cite: Standard 2017 CUs — Security User X509, Discovery
-      Register/Register2, Session Cancel; OPC 10000-12 §6.4]
+      §5.7.5. [Cite: Standard 2017 CUs — Security User X509, Discovery
+      Register/Register2, Session Cancel; OPC 10000-4 §5.7.5; OPC 10000-12 §4.2.2]
 
 ### Verification
 
 - [ ] T033 [US4] Verify the standard composition end-to-end: T032 green, absence script
       (no alarm/history/query/gds sentinels) green, measured size strictly between
-      embedded and simple-server; record size. [Cite: spec SC-001]
+      embedded and simple-server; record size in research-assets/size-accounting.md. [Cite: spec SC-001]
 
 **Checkpoint**: embedded < standard < full; full suite green; commit.
 
@@ -260,16 +261,18 @@ tokens, LDS self-registration, Cancel proven; still no events/history/etc.
       matrix packages in an ISOLATED cargo invocation (`--locked --profile embedded`),
       emits bytes + MiB + markdown rows; used identically by docs and CI (research.md
       R10 caveat is a hard rule in the script). [Cite: research.md R10/R12]
-- [ ] T035 [US5] Rework `.github/workflows/ci_footprint.yml`: 4-profile matrix (add
-      standard row), per-row guards — `cargo tree -e features` deny-list, symbol
-      spot-check via `tools/check-profile-absence.sh`, `$GITHUB_STEP_SUMMARY` table rows
-      from `tools/footprint.sh` output. [Cite: spec FR-009]
-- [ ] T036 [US5] FR-006 lattice compile checks: CI leg + local script — each alias
-      standalone (`cargo check -p async-opcua --no-default-features --features <alias>`),
-      each of the 15 gates individually disabled from the full server-crate surface
-      (enumerated via `--no-default-features` + all-but-one), no-default baseline;
-      document the sampling rationale (not 2^15) in the workflow.
+- [ ] T035 [P] [US5] Lattice-check script `tools/check-feature-lattice.sh` (FR-006):
+      each alias standalone (`cargo check -p async-opcua --no-default-features
+      --features <alias>`), each of the 15 gates individually disabled from the full
+      server-crate surface (enumerated via `--no-default-features` + all-but-one),
+      no-default baseline; script header documents the sampling rationale (not 2^15).
+      Script only — no workflow edits (those are T036).
       [Cite: spec FR-006; plan.md Complexity Tracking]
+- [ ] T036 [US5] Rework `.github/workflows/ci_footprint.yml` (single owner of this
+      file): 4-profile matrix (add standard row), per-row guards — `cargo tree -e
+      features` deny-list + symbol spot-check via `tools/check-profile-absence.sh`,
+      `$GITHUB_STEP_SUMMARY` table rows from `tools/footprint.sh`, and a lattice job
+      running `tools/check-feature-lattice.sh`. [Cite: spec FR-009; spec FR-006]
 - [ ] T037 [US5] `docs/setup.md`: replace the 041 benchmark section with the six-row
       measured matrix (bytes, MiB, delta per rung) + provenance (arch/profile/rustc/date)
       + one-package-per-invocation caveat + feature-unification note + Nano/Micro
@@ -283,8 +286,8 @@ excluded feature) turns the row red; commit.
 ## Phase 7: User Story 6 — Further-Savings Report (P6)
 
 - [ ] T038 [US6] Symbol/section accounting for the four profile binaries (`cargo bloat`
-      if available, else `nm --size-sort`/`size -A`), recorded as evidence tables under
-      `specs/054-profile-polish/research-assets/size-accounting.md`.
+      if available, else `nm --size-sort`/`size -A`), extending the per-story size log in
+      `specs/054-profile-polish/research-assets/size-accounting.md` with evidence tables.
       [Cite: research.md R11]
 - [ ] T039 [US6] Write `docs/profile-size-report.md`: ≥5 ranked, non-overlapping
       suggestions (seed list research.md R11 — pruned type-only nodeset, None-only crypto

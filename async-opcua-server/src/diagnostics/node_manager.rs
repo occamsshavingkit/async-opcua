@@ -1,8 +1,9 @@
 use std::{
     collections::{BTreeMap, VecDeque},
     sync::Arc,
-    time::Duration,
 };
+#[cfg(feature = "subscriptions")]
+use std::time::Duration;
 
 use async_trait::async_trait;
 use opcua_nodes::{DefaultTypeTree, TypeTree};
@@ -13,11 +14,13 @@ use crate::{
     node_manager::{
         as_opaque_node_id, from_opaque_node_id, impl_translate_browse_paths_using_browse,
         AddReferenceResult, AttributeProvider, BrowseNode, BrowsePathItem, DynNodeManager,
-        ExternalReferenceRequest, HistoryProvider, MethodProvider, MonitoredItemProvider,
-        NodeManagerBuilder, NodeManagerCore, NodeManagersRef, NodeMetadata, NodeMutator,
-        QueryRequest, ReadNode, RequestContext, ServerContext, SyncSampler, ViewProvider,
+        ExternalReferenceRequest, HistoryProvider, MethodProvider, NodeManagerBuilder,
+        NodeManagerCore, NodeManagersRef, NodeMetadata, NodeMutator, QueryRequest, ReadNode,
+        RequestContext, ServerContext, ViewProvider,
     },
 };
+#[cfg(feature = "subscriptions")]
+use crate::node_manager::{MonitoredItemProvider, SyncSampler};
 use opcua_types::{
     AccessLevelExType, AccessRestrictionType, AttributeId, BrowseDirection, DataTypeId, DataValue,
     DateTime, ExpandedNodeId, ExtensionObject, IdType, LocalizedText, NodeClass, NodeId,
@@ -46,6 +49,7 @@ fn apply_namespace_metadata_defaults(
 /// core namespace, and that are somehow dynamic. This includes the node for each namespace,
 /// session diagnostics, etc.
 pub struct DiagnosticsNodeManager {
+    #[cfg(feature = "subscriptions")]
     sampler: SyncSampler,
     node_managers: NodeManagersRef,
     namespace_index: u16,
@@ -128,6 +132,7 @@ impl DiagnosticsNodeManager {
             namespace_index
         };
         Self {
+            #[cfg(feature = "subscriptions")]
             sampler: SyncSampler::new(),
             node_managers: context.node_managers.clone(),
             namespace_index,
@@ -605,19 +610,23 @@ impl NodeManagerCore for DiagnosticsNodeManager {
         }]
     }
 
+    #[cfg_attr(not(feature = "subscriptions"), allow(unused_variables))]
     async fn init(&self, _type_tree: &mut DefaultTypeTree, context: ServerContext) {
-        let interval = context
-            .info
-            .config
-            .limits
-            .subscriptions
-            .min_sampling_interval_ms
-            .floor() as u64;
-        let sampler_interval = if interval > 0 { interval } else { 100 };
-        self.sampler.run(
-            Duration::from_millis(sampler_interval),
-            context.subscriptions.clone(),
-        );
+        #[cfg(feature = "subscriptions")]
+        {
+            let interval = context
+                .info
+                .config
+                .limits
+                .subscriptions
+                .min_sampling_interval_ms
+                .floor() as u64;
+            let sampler_interval = if interval > 0 { interval } else { 100 };
+            self.sampler.run(
+                Duration::from_millis(sampler_interval),
+                context.subscriptions.clone(),
+            );
+        }
     }
 }
 
@@ -762,6 +771,7 @@ impl HistoryProvider for DiagnosticsNodeManager {}
 
 impl MethodProvider for DiagnosticsNodeManager {}
 
+#[cfg(feature = "subscriptions")]
 impl MonitoredItemProvider for DiagnosticsNodeManager {}
 
 impl NodeMutator for DiagnosticsNodeManager {}

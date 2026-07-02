@@ -26,33 +26,38 @@ use hashbrown::HashMap;
 
 use crate::{
     address_space::{
-        read_node_value, user_access_level, AccessLevel, EventNotifier, NodeType,
-        ReferenceDirection,
+        user_access_level, AccessLevel, EventNotifier, NodeType, ReferenceDirection,
     },
     diagnostics::NamespaceMetadata,
     rbac,
     session::continuation_points::ContinuationPoint,
-    subscriptions::CreateMonitoredItem,
-    SubscriptionCache,
 };
+#[cfg(feature = "subscriptions")]
+use crate::address_space::read_node_value;
+#[cfg(feature = "subscriptions")]
+use crate::{subscriptions::CreateMonitoredItem, SubscriptionCache};
 use opcua_core::sync::RwLock;
 use opcua_types::{
     argument::Argument, AccessRestrictionType, AttributeId, BrowseDescriptionResultMask,
-    BrowseDirection, DataEncoding, DataValue, DateTime, ExpandedNodeId, MonitoringMode, NodeClass,
-    NodeId, NumericRange, PermissionType, ReadAnnotationDataDetails, ReadAtTimeDetails,
-    ReadEventDetails, ReadProcessedDetails, ReadRawModifiedDetails, ReferenceDescription,
-    ReferenceTypeId, RolePermissionType, StatusCode, TimestampsToReturn, Variant,
+    BrowseDirection, DataEncoding, ExpandedNodeId, NodeClass, NodeId, NumericRange,
+    PermissionType, ReadAnnotationDataDetails, ReadAtTimeDetails, ReadEventDetails,
+    ReadProcessedDetails, ReadRawModifiedDetails, ReferenceDescription, ReferenceTypeId,
+    RolePermissionType, StatusCode, TimestampsToReturn, Variant,
 };
+#[cfg(feature = "subscriptions")]
+use opcua_types::{DataValue, DateTime, MonitoringMode};
 
 use super::{
     build::NodeManagerBuilder,
     view::{AddReferenceResult, ExternalReference, ExternalReferenceRequest, NodeMetadata},
     AddNodeItem, AddReferenceItem, AttributeProvider, BrowseNode, BrowsePathItem, DefaultTypeTree,
     DeleteNodeItem, DeleteReferenceItem, DynNodeManager, HistoryNode, HistoryProvider,
-    HistoryUpdateDetails, HistoryUpdateNode, MethodCall, MethodProvider, MonitoredItemProvider,
-    MonitoredItemRef, MonitoredItemUpdateRef, NodeManagerCore, NodeMutator, QueryRequest, ReadNode,
-    RegisterNodeItem, RequestContext, ServerContext, ViewProvider, WriteNode,
+    HistoryUpdateDetails, HistoryUpdateNode, MethodCall, MethodProvider, NodeManagerCore,
+    NodeMutator, QueryRequest, ReadNode, RegisterNodeItem, RequestContext, ServerContext,
+    ViewProvider, WriteNode,
 };
+#[cfg(feature = "subscriptions")]
+use super::{MonitoredItemProvider, MonitoredItemRef, MonitoredItemUpdateRef};
 
 use crate::address_space::AddressSpace;
 
@@ -150,6 +155,7 @@ impl<TImpl: InMemoryNodeManagerImpl> InMemoryNodeManager<TImpl> {
     /// about the changes.
     ///
     /// To set values, use [InMemoryNodeManager::set_values].
+    #[cfg(feature = "subscriptions")]
     pub fn set_attributes<'a>(
         &self,
         subscriptions: &SubscriptionCache,
@@ -192,6 +198,7 @@ impl<TImpl: InMemoryNodeManagerImpl> InMemoryNodeManager<TImpl> {
 
     /// Set the attribute given by `attribute_id` on the node with ID `id` to
     /// `value`.
+    #[cfg(feature = "subscriptions")]
     pub fn set_attribute(
         &self,
         subscriptions: &SubscriptionCache,
@@ -204,6 +211,7 @@ impl<TImpl: InMemoryNodeManagerImpl> InMemoryNodeManager<TImpl> {
 
     /// Set variable values with updates given by `values`, notifying any
     /// subscriptions of the changes.
+    #[cfg(feature = "subscriptions")]
     pub fn set_values<'a>(
         &self,
         subscriptions: &SubscriptionCache,
@@ -262,6 +270,7 @@ impl<TImpl: InMemoryNodeManagerImpl> InMemoryNodeManager<TImpl> {
 
     /// Set the variable value to `value`, using `index_range`, on the
     /// node with ID `id`.
+    #[cfg(feature = "subscriptions")]
     pub fn set_value(
         &self,
         subscriptions: &SubscriptionCache,
@@ -966,6 +975,7 @@ impl<TImpl: InMemoryNodeManagerImpl> ViewProvider for InMemoryNodeManager<TImpl>
     }
 }
 
+#[cfg(feature = "subscriptions")]
 #[async_trait]
 impl<TImpl: InMemoryNodeManagerImpl> MonitoredItemProvider for InMemoryNodeManager<TImpl> {
     async fn create_monitored_items(

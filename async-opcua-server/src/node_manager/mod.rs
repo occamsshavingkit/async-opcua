@@ -13,10 +13,12 @@ use async_trait::async_trait;
 use opcua_core::sync::RwLock;
 use opcua_nodes::DefaultTypeTree;
 use opcua_types::{
-    ExpandedNodeId, MonitoringMode, NodeId, ReadAnnotationDataDetails, ReadAtTimeDetails,
-    ReadEventDetails, ReadProcessedDetails, ReadRawModifiedDetails, RolePermissionType, StatusCode,
+    ExpandedNodeId, NodeId, ReadAnnotationDataDetails, ReadAtTimeDetails, ReadEventDetails,
+    ReadProcessedDetails, ReadRawModifiedDetails, RolePermissionType, StatusCode,
     TimestampsToReturn,
 };
+#[cfg(feature = "subscriptions")]
+use opcua_types::MonitoringMode;
 use tokio::sync::OnceCell;
 
 mod attributes;
@@ -28,6 +30,7 @@ pub mod memory;
 mod method;
 mod method_typed;
 mod model_change;
+#[cfg(feature = "subscriptions")]
 mod monitored_items;
 mod node_management;
 mod query;
@@ -42,7 +45,9 @@ use crate::{
 
 #[cfg(feature = "subscriptions")]
 use super::SubscriptionCache;
-use super::{authenticator::AuthManager, info::ServerInfo, subscriptions::CreateMonitoredItem};
+use super::{authenticator::AuthManager, info::ServerInfo};
+#[cfg(feature = "subscriptions")]
+use super::subscriptions::CreateMonitoredItem;
 
 pub use {
     attributes::{ParsedReadValueId, ParsedWriteValue, ReadNode, WriteNode},
@@ -58,7 +63,6 @@ pub use {
         MethodHandlerWithContext,
     },
     model_change::GeneralModelChangeEvent,
-    monitored_items::{MonitoredItemRef, MonitoredItemUpdateRef},
     node_management::{AddNodeItem, AddReferenceItem, DeleteNodeItem, DeleteReferenceItem},
     query::{ParsedNodeTypeDescription, ParsedQueryDataDescription, QueryRequest},
     utils::*,
@@ -67,6 +71,8 @@ pub use {
         ExternalReference, ExternalReferenceRequest, NodeMetadata, RegisterNodeItem,
     },
 };
+#[cfg(feature = "subscriptions")]
+pub use monitored_items::{MonitoredItemRef, MonitoredItemUpdateRef};
 
 pub(crate) use context::resolve_external_references;
 pub(crate) use context::DefaultTypeTreeGetter;
@@ -532,6 +538,7 @@ pub trait ViewProvider {
 }
 
 /// Monitored-item lifecycle capability for node managers.
+#[cfg(feature = "subscriptions")]
 #[async_trait]
 #[allow(unused_variables)]
 pub trait MonitoredItemProvider {
@@ -713,6 +720,7 @@ pub trait NodeMutator {
 }
 
 /// Full node-manager interface composed from capability traits.
+#[cfg(feature = "subscriptions")]
 pub trait NodeManager:
     NodeManagerCore
     + AttributeProvider
@@ -724,6 +732,18 @@ pub trait NodeManager:
 {
 }
 
+#[cfg(not(feature = "subscriptions"))]
+pub trait NodeManager:
+    NodeManagerCore
+    + AttributeProvider
+    + ViewProvider
+    + MethodProvider
+    + NodeMutator
+    + HistoryProvider
+{
+}
+
+#[cfg(feature = "subscriptions")]
 impl<T> NodeManager for T where
     T: NodeManagerCore
         + AttributeProvider
@@ -732,6 +752,18 @@ impl<T> NodeManager for T where
         + NodeMutator
         + HistoryProvider
         + MonitoredItemProvider
+        + ?Sized
+{
+}
+
+#[cfg(not(feature = "subscriptions"))]
+impl<T> NodeManager for T where
+    T: NodeManagerCore
+        + AttributeProvider
+        + ViewProvider
+        + MethodProvider
+        + NodeMutator
+        + HistoryProvider
         + ?Sized
 {
 }

@@ -81,7 +81,7 @@ rejection) green; symbol-absence script green; workspace suite (default features
       (arms → fallback `:408-421`), `session/controller.rs:46`, `session/manager.rs:23`,
       `session/audit.rs:13`, `server.rs:430`; use the `discovery-mdns` cfg-field pattern
       (`info.rs:214-219`). [Cite: OPC 10000-4 §5.13/§5.14 MonitoredItem+Subscription service sets; research.md R2/R5]
-- [ ] T007 [US1] Gate the `NodeManager` monitored-item trait surface + all in-tree impls
+- [X] T007 [US1] Gate the `NodeManager` monitored-item trait surface + all in-tree impls
       behind `subscriptions`: `node_manager/mod.rs:44`, `node_manager/memory/mod.rs:35`,
       `memory/core.rs:26`, `memory/memory_mgr_impl.rs:15`,
       `session/services/monitored_items.rs`. Additive-only trait change (full build

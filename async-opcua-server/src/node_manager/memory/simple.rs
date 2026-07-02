@@ -1,8 +1,10 @@
 use std::{
     collections::HashMap,
-    sync::{Arc, Weak},
+    sync::Arc,
     time::Duration,
 };
+#[cfg(feature = "subscriptions")]
+use std::sync::Weak;
 
 use async_trait::async_trait;
 use opcua_core::{trace_read_lock, trace_write_lock};
@@ -10,19 +12,26 @@ use opcua_nodes::{HasNodeId, NodeSetImport};
 
 use crate::{
     address_space::{read_node_value, write_node_value, AddressSpace, NodeType},
-    alarms::{AlarmSourceRegistry, LimitAlarm, ServerAlarmEvent},
+    alarms::{AlarmSourceRegistry, LimitAlarm},
     history::read::modification_infos_or_none,
     node_manager::{
-        DefaultTypeTree, MethodCall, MonitoredItemRef, MonitoredItemUpdateRef, NodeManagerBuilder,
-        NodeManagersRef, ParsedReadValueId, RequestContext, ServerContext, SyncSampler, WriteNode,
+        DefaultTypeTree, MethodCall, NodeManagerBuilder, NodeManagersRef, ParsedReadValueId,
+        RequestContext, ServerContext, WriteNode,
     },
+};
+#[cfg(feature = "subscriptions")]
+use crate::{
+    alarms::ServerAlarmEvent,
+    node_manager::{MonitoredItemRef, MonitoredItemUpdateRef, SyncSampler},
     CreateMonitoredItem, SubscriptionCache,
 };
 use opcua_core::sync::RwLock;
 use opcua_types::{
-    AttributeId, DataValue, MonitoringMode, NodeClass, NodeId, NumericRange, StatusCode,
-    TimestampsToReturn, Variant,
+    AttributeId, DataValue, NodeClass, NodeId, NumericRange, StatusCode, TimestampsToReturn,
+    Variant,
 };
+#[cfg(feature = "subscriptions")]
+use opcua_types::MonitoringMode;
 
 use super::{
     InMemoryNodeManager, InMemoryNodeManagerBuilder, InMemoryNodeManagerImpl,
@@ -159,43 +168,50 @@ pub struct SimpleNodeManagerImpl {
     #[allow(unused)]
     node_managers: NodeManagersRef,
     name: String,
+    #[cfg(feature = "subscriptions")]
     samplers: SyncSampler,
     history_backend: RwLock<Option<Arc<dyn crate::history::HistoryStorageBackend>>>,
+    #[cfg(feature = "subscriptions")]
     subscriptions: RwLock<Option<Arc<SubscriptionCache>>>,
     alarm_sources: Arc<AlarmSourceRegistry>,
+    #[cfg(feature = "subscriptions")]
     source_alarm_sampler_started: RwLock<bool>,
 }
 
 #[async_trait]
 impl InMemoryNodeManagerImpl for SimpleNodeManagerImpl {
+    #[cfg_attr(not(feature = "subscriptions"), allow(unused_variables))]
     async fn init(&self, _address_space: &mut AddressSpace, context: ServerContext) {
-        *self.subscriptions.write() = Some(context.subscriptions.clone());
-        let manager = self
-            .node_managers
-            .get_by_name::<SimpleNodeManager>(&self.name)
-            .expect("simple node manager must be registered before sampling alarm sources");
-        self.spawn_alarm_source_sampler(
-            Arc::clone(manager.address_space()),
-            Arc::downgrade(&context.subscriptions),
-        );
-        self.samplers.run(
-            Duration::from_micros(
-                // If this is set too low the server will just spin at 100% CPU. Cap it at
-                // 100 ms. In custom node manager implementations using the sync sampler
-                // users are free to set whatever minimum they want.
-                // In practice, if you need sampling rates much lower than 100ms you
-                // will likely want a different mechanism than the sync sampler.
-                (context
-                    .info
-                    .config
-                    .limits
-                    .subscriptions
-                    .min_sampling_interval_ms
-                    .max(100.0)
-                    * 1000.0) as u64,
-            ),
-            context.subscriptions.clone(),
-        );
+        #[cfg(feature = "subscriptions")]
+        {
+            *self.subscriptions.write() = Some(context.subscriptions.clone());
+            let manager = self
+                .node_managers
+                .get_by_name::<SimpleNodeManager>(&self.name)
+                .expect("simple node manager must be registered before sampling alarm sources");
+            self.spawn_alarm_source_sampler(
+                Arc::clone(manager.address_space()),
+                Arc::downgrade(&context.subscriptions),
+            );
+            self.samplers.run(
+                Duration::from_micros(
+                    // If this is set too low the server will just spin at 100% CPU. Cap it at
+                    // 100 ms. In custom node manager implementations using the sync sampler
+                    // users are free to set whatever minimum they want.
+                    // In practice, if you need sampling rates much lower than 100ms you
+                    // will likely want a different mechanism than the sync sampler.
+                    (context
+                        .info
+                        .config
+                        .limits
+                        .subscriptions
+                        .min_sampling_interval_ms
+                        .max(100.0)
+                        * 1000.0) as u64,
+                ),
+                context.subscriptions.clone(),
+            );
+        }
     }
 
     fn namespaces(&self) -> Vec<NamespaceMetadata> {
@@ -253,6 +269,7 @@ impl InMemoryNodeManagerImpl for SimpleNodeManagerImpl {
             .collect()
     }
 
+    #[cfg(feature = "subscriptions")]
     async fn create_value_monitored_items(
         &self,
         context: &RequestContext,
@@ -303,6 +320,7 @@ impl InMemoryNodeManagerImpl for SimpleNodeManagerImpl {
         }
     }
 
+    #[cfg(feature = "subscriptions")]
     async fn modify_monitored_items(
         &self,
         _context: &RequestContext,
@@ -318,6 +336,7 @@ impl InMemoryNodeManagerImpl for SimpleNodeManagerImpl {
         }
     }
 
+    #[cfg(feature = "subscriptions")]
     async fn set_monitoring_mode(
         &self,
         _context: &RequestContext,
@@ -330,6 +349,7 @@ impl InMemoryNodeManagerImpl for SimpleNodeManagerImpl {
         }
     }
 
+    #[cfg(feature = "subscriptions")]
     async fn delete_monitored_items(&self, _context: &RequestContext, items: &[&MonitoredItemRef]) {
         for it in items {
             self.samplers
@@ -343,6 +363,7 @@ impl InMemoryNodeManagerImpl for SimpleNodeManagerImpl {
         address_space: &RwLock<AddressSpace>,
         nodes_to_write: &mut [&mut WriteNode],
     ) -> Result<(), StatusCode> {
+        #[cfg(feature = "subscriptions")]
         let mut source_writes: Vec<(NodeId, DataValue)> = Vec::new();
 
         for write in nodes_to_write {
@@ -354,19 +375,27 @@ impl InMemoryNodeManagerImpl for SimpleNodeManagerImpl {
                 self.prepare_write_node_value(&cbs, context, &address_space, &type_tree, write)
             };
 
-            if let Some(notification) = Self::finish_prepared_write(prepared, write) {
+            let notification = Self::finish_prepared_write(prepared, write);
+            #[cfg(feature = "subscriptions")]
+            if let Some(notification) = notification {
                 Self::notify_write_data_change(context, notification);
             }
+            #[cfg(not(feature = "subscriptions"))]
+            let _ = notification;
 
-            let source = &write.value().node_id;
-            if write.status().is_good()
-                && write.value().attribute_id == AttributeId::Value
-                && !self.alarm_source_registry().alarms_for(source).is_empty()
+            #[cfg(feature = "subscriptions")]
             {
-                source_writes.push((source.clone(), write.value().value.clone()));
+                let source = &write.value().node_id;
+                if write.status().is_good()
+                    && write.value().attribute_id == AttributeId::Value
+                    && !self.alarm_source_registry().alarms_for(source).is_empty()
+                {
+                    source_writes.push((source.clone(), write.value().value.clone()));
+                }
             }
         }
 
+        #[cfg(feature = "subscriptions")]
         if !source_writes.is_empty() {
             let mut address_space = trace_write_lock!(address_space);
 
@@ -809,10 +838,13 @@ impl SimpleNodeManagerImpl {
             namespaces,
             name: name.to_owned(),
             node_managers,
+            #[cfg(feature = "subscriptions")]
             samplers: SyncSampler::new(),
             history_backend: RwLock::new(None),
+            #[cfg(feature = "subscriptions")]
             subscriptions: RwLock::new(None),
             alarm_sources: Arc::new(AlarmSourceRegistry::new()),
+            #[cfg(feature = "subscriptions")]
             source_alarm_sampler_started: RwLock::new(false),
         }
     }
@@ -890,6 +922,7 @@ impl SimpleNodeManagerImpl {
         Arc::new(alarm)
     }
 
+    #[cfg(feature = "subscriptions")]
     fn spawn_alarm_source_sampler(
         &self,
         address_space: Arc<RwLock<AddressSpace>>,
@@ -909,6 +942,7 @@ impl SimpleNodeManagerImpl {
         });
     }
 
+    #[cfg(feature = "subscriptions")]
     async fn run_alarm_source_sampler(
         address_space: Arc<RwLock<AddressSpace>>,
         alarm_sources: Arc<AlarmSourceRegistry>,
@@ -953,6 +987,7 @@ impl SimpleNodeManagerImpl {
         }
     }
 
+    #[cfg(feature = "subscriptions")]
     fn read_current_source_value(
         address_space: &RwLock<AddressSpace>,
         source: &NodeId,
@@ -971,6 +1006,7 @@ impl SimpleNodeManagerImpl {
         )
     }
 
+    #[cfg(feature = "subscriptions")]
     fn reevaluate_and_dispatch(
         alarm_sources: &AlarmSourceRegistry,
         space: &mut AddressSpace,
@@ -992,6 +1028,7 @@ impl SimpleNodeManagerImpl {
     }
 
     /// Programmatically sets a source Variable value and re-evaluates bound alarms.
+    #[cfg(feature = "subscriptions")]
     pub fn set_source_value(&self, source: &NodeId, value: DataValue) {
         if let Some(manager) = self
             .node_managers
@@ -1001,6 +1038,7 @@ impl SimpleNodeManagerImpl {
         }
     }
 
+    #[cfg(feature = "subscriptions")]
     fn set_source_value_on_address_space(
         &self,
         address_space: &RwLock<AddressSpace>,
@@ -1171,6 +1209,7 @@ impl SimpleNodeManagerImpl {
             .map(|value| (value, node.node_id().clone(), attribute_id))
     }
 
+    #[cfg(feature = "subscriptions")]
     fn notify_write_data_change(context: &RequestContext, notification: WriteNotification) {
         let (value, node_id, attribute_id) = notification;
         context
@@ -1258,6 +1297,7 @@ impl InMemoryNodeManager<SimpleNodeManagerImpl> {
     }
 
     /// Programmatically sets a source Variable value and re-evaluates bound alarms.
+    #[cfg(feature = "subscriptions")]
     pub fn set_source_value(&self, source: &NodeId, value: DataValue) {
         self.inner().set_source_value_on_address_space(
             self.address_space().as_ref(),

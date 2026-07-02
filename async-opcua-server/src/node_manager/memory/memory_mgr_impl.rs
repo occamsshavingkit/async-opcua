@@ -6,26 +6,34 @@ use crate::{
     diagnostics::NamespaceMetadata,
     node_manager::{
         audit_events, AddNodeItem, AddReferenceItem, DeleteNodeItem, DeleteReferenceItem,
-        GeneralModelChangeEvent, HistoryNode, HistoryUpdateNode, MethodCall, MonitoredItemRef,
-        MonitoredItemUpdateRef, ParsedReadValueId, RegisterNodeItem, RequestContext, ServerContext,
-        WriteNode,
+        HistoryNode, HistoryUpdateNode, MethodCall, ParsedReadValueId, RegisterNodeItem,
+        RequestContext, ServerContext, WriteNode,
     },
     rbac,
     session::continuation_points::ContinuationPoint,
+};
+#[cfg(feature = "subscriptions")]
+use crate::{
+    node_manager::{GeneralModelChangeEvent, MonitoredItemRef, MonitoredItemUpdateRef},
     subscriptions::CreateMonitoredItem,
 };
 use opcua_core::sync::RwLock;
 use opcua_nodes::{
-    DataType, Event, Method, NodeBase, Object, ObjectType, ReferenceType, TypeTree, Variable,
-    VariableType, View,
+    DataType, Method, NodeBase, Object, ObjectType, ReferenceType, TypeTree, Variable, VariableType,
+    View,
 };
+#[cfg(feature = "subscriptions")]
+use opcua_nodes::Event;
 use opcua_types::{
     AddNodeAttributes, AttributesMask, BrowseDirection, DataTypeId, DataValue, ExpandedNodeId,
-    LocalizedText, ModelChangeStructureDataType, MonitoringMode, NodeClass, NodeId, ObjectId,
-    PermissionType, ReadAnnotationDataDetails, ReadAtTimeDetails, ReadEventDetails,
-    ReadProcessedDetails, ReadRawModifiedDetails, ReferenceTypeId, StatusCode, TimestampsToReturn,
-    Variant, WriteMask,
+    LocalizedText, ModelChangeStructureDataType, NodeClass, NodeId, PermissionType,
+    ReadAnnotationDataDetails, ReadAtTimeDetails, ReadEventDetails, ReadProcessedDetails,
+    ReadRawModifiedDetails, ReferenceTypeId, StatusCode, TimestampsToReturn, Variant, WriteMask,
 };
+#[cfg(feature = "subscriptions")]
+use opcua_types::ObjectId;
+#[cfg(feature = "subscriptions")]
+use opcua_types::MonitoringMode;
 
 const MODEL_CHANGE_NODE_ADDED: u8 = 1;
 const MODEL_CHANGE_NODE_DELETED: u8 = 2;
@@ -85,6 +93,7 @@ fn model_change(affected: NodeId, verb: u8) -> ModelChangeStructureDataType {
     }
 }
 
+#[cfg(feature = "subscriptions")]
 fn notify_model_changes(context: &RequestContext, changes: Vec<ModelChangeStructureDataType>) {
     if changes.is_empty() {
         return;
@@ -95,6 +104,9 @@ fn notify_model_changes(context: &RequestContext, changes: Vec<ModelChangeStruct
     let items = std::iter::once((&event as &dyn Event, &server_node_id));
     context.subscriptions.notify_events(items);
 }
+
+#[cfg(not(feature = "subscriptions"))]
+fn notify_model_changes(_context: &RequestContext, _changes: Vec<ModelChangeStructureDataType>) {}
 
 fn add_nodes_impl(
     context: &RequestContext,
@@ -1293,6 +1305,7 @@ pub trait InMemoryNodeManagerImpl: Send + Sync + 'static {
     /// default implementation.
     ///
     /// It may also begin sampling as given by the monitored item request.
+    #[cfg(feature = "subscriptions")]
     async fn create_value_monitored_items(
         &self,
         context: &RequestContext,
@@ -1321,6 +1334,7 @@ pub trait InMemoryNodeManagerImpl: Send + Sync + 'static {
     /// Create monitored items for events.
     ///
     /// This does not need to do anything.
+    #[cfg(feature = "subscriptions")]
     async fn create_event_monitored_items(
         &self,
         context: &RequestContext,
@@ -1333,6 +1347,7 @@ pub trait InMemoryNodeManagerImpl: Send + Sync + 'static {
     /// Handle the SetMonitoringMode request, to pause or resume sampling.
     ///
     /// This will only get monitored items for events or value.
+    #[cfg(feature = "subscriptions")]
     async fn set_monitoring_mode(
         &self,
         context: &RequestContext,
@@ -1344,6 +1359,7 @@ pub trait InMemoryNodeManagerImpl: Send + Sync + 'static {
     /// Handle modification of monitored items, this may adjust
     /// sampling intervals or filters, and require action to update background
     /// processes.
+    #[cfg(feature = "subscriptions")]
     async fn modify_monitored_items(
         &self,
         context: &RequestContext,
@@ -1352,6 +1368,7 @@ pub trait InMemoryNodeManagerImpl: Send + Sync + 'static {
     }
 
     /// Handle deletion of monitored items.
+    #[cfg(feature = "subscriptions")]
     async fn delete_monitored_items(&self, context: &RequestContext, items: &[&MonitoredItemRef]) {}
 
     /// Perform the unregister nodes service. The default behavior for this service is to

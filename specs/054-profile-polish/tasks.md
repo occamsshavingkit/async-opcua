@@ -108,7 +108,7 @@ rejection) green; symbol-absence script green; workspace suite (default features
       `node-management`: dispatch arms, `session/services/node_management.rs`,
       `node_manager/node_management.rs` (+ write-validation cluster refs).
       [Cite: OPC 10000-4 §5.8]
-- [ ] T013 [US1] Gate diagnostics behind `diagnostics`: node-manager registration
+- [X] T013 [US1] Gate diagnostics behind `diagnostics`: node-manager registration
       `builder.rs:61` (composes with the surrounding `generated-address-space` cfg
       block), `diagnostics/` module, `ServerDiagnostics` wiring `server.rs:31`,
       `info.rs:221`. [Cite: OPC 10000-5 §6.3 — Base Info Diagnostics is OPTIONAL at every

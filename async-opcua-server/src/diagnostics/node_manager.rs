@@ -15,7 +15,8 @@ use crate::{
         as_opaque_node_id, from_opaque_node_id, impl_translate_browse_paths_using_browse,
         AddReferenceResult, AttributeProvider, BrowseNode, BrowsePathItem, DynNodeManager,
         ExternalReferenceRequest, NodeManagerBuilder, NodeManagerCore, NodeManagersRef,
-        NodeMetadata, NodeMutator, ReadNode, RequestContext, ServerContext, ViewProvider,
+        NamespaceMetadata, NodeMetadata, NodeMutator, ReadNode, RequestContext, ServerContext,
+        ViewProvider,
     },
 };
 #[cfg(feature = "history")]
@@ -29,7 +30,7 @@ use crate::node_manager::{MonitoredItemProvider, SyncSampler};
 use opcua_types::{
     AccessLevelExType, AccessRestrictionType, AttributeId, BrowseDirection, DataTypeId, DataValue,
     DateTime, ExpandedNodeId, ExtensionObject, IdType, LocalizedText, NodeClass, NodeId,
-    NumericRange, ObjectId, ObjectTypeId, QualifiedName, ReferenceDescription, ReferenceTypeId,
+    ObjectId, ObjectTypeId, QualifiedName, ReferenceDescription, ReferenceTypeId,
     RolePermissionType, StatusCode, TimestampsToReturn, VariableTypeId, Variant,
 };
 
@@ -72,34 +73,6 @@ We want to produce consistent node IDs without a cache, so we use opaque node ID
 make identifiers that describe where to find the data. That way we can handle Read's
 of nodes without explicitly storing each node ID.
 */
-
-#[derive(Default, Clone, Debug)]
-/// Namespace metadata. This is visible in the namespace array under
-/// the `Server` node.
-pub struct NamespaceMetadata {
-    /// Default access restrictions on this namespace.
-    pub default_access_restrictions: AccessRestrictionType,
-    /// Default role permissions on this namespace.
-    pub default_role_permissions: Option<Vec<RolePermissionType>>,
-    /// Default user role permissions on this namespace.
-    pub default_user_role_permissions: Option<Vec<RolePermissionType>>,
-    /// Whether this namespace is a subset of the full namespace.
-    pub is_namespace_subset: Option<bool>,
-    /// Time this namespace was last updated.
-    pub namespace_publication_date: Option<DateTime>,
-    /// Namespace URI.
-    pub namespace_uri: String,
-    /// Namespace version.
-    pub namespace_version: Option<String>,
-    /// List of ID types in this namespace.
-    pub static_node_id_types: Option<Vec<IdType>>,
-    /// List of ranges for numeric node IDs on static nodes in this namespace.
-    pub static_numeric_node_id_range: Option<Vec<NumericRange>>,
-    /// Pattern that applies to string node IDs on static nodes in this namespace.
-    pub static_string_node_id_pattern: Option<String>,
-    /// Namespace index on the server.
-    pub namespace_index: u16,
-}
 
 #[derive(Default)]
 struct BrowseContinuationPoint {

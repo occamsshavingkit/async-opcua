@@ -378,7 +378,11 @@ impl<T: ConnectionTransport> SessionController<T> {
             .cleanup_fota_for_secure_channel(self.channel.secure_channel_id());
     }
 
-    fn response_metrics(&self, msg: &Response) {
+    fn response_metrics(
+        &self,
+        #[cfg_attr(not(feature = "diagnostics"), allow(unused_variables))] msg: &Response,
+    ) {
+        #[cfg(feature = "diagnostics")]
         if self.info.diagnostics.enabled() {
             let status = msg.message.response_header().service_result;
             if status.is_bad() {
@@ -506,8 +510,11 @@ impl<T: ConnectionTransport> SessionController<T> {
                 if res.is_ok() {
                     self.deadline = self.channel.token_renewal_deadline();
                 } else {
+                    #[cfg(feature = "diagnostics")]
+                    {
                     self.info.diagnostics.inc_rejected_requests();
                     self.info.diagnostics.inc_security_rejected_requests();
+                    }
                 }
                 match res {
                     Ok(mut response) => {
@@ -847,8 +854,11 @@ impl<T: ConnectionTransport> SessionController<T> {
                     Ok(s) => s,
                     Err(mut e) => {
                         e.apply_return_diagnostics(return_diagnostics);
+                        #[cfg(feature = "diagnostics")]
+                        {
                         self.info.diagnostics.inc_rejected_requests();
                         self.info.diagnostics.inc_security_rejected_requests();
+                        }
                         dispatch_service_failure(
                             #[cfg(feature = "subscriptions")]
                             &self.subscriptions,
@@ -998,6 +1008,8 @@ impl<T: ConnectionTransport> SessionController<T> {
         let mut message = match res {
             Ok(m) => m.into(),
             Err(e) => {
+                #[cfg(feature = "diagnostics")]
+                {
                 self.info.diagnostics.inc_rejected_requests();
                 if matches!(
                     e,
@@ -1006,6 +1018,7 @@ impl<T: ConnectionTransport> SessionController<T> {
                         | StatusCode::BadUserAccessDenied
                 ) {
                     self.info.diagnostics.inc_security_rejected_requests();
+                }
                 }
 
                 ServiceFault::new(request_handle, e).into()

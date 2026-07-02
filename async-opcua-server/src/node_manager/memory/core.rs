@@ -1,30 +1,33 @@
-use std::{
-    sync::Arc,
-    time::Instant,
-};
+use std::sync::Arc;
+#[cfg(feature = "diagnostics")]
+use std::time::Instant;
 #[cfg(feature = "subscriptions")]
 use std::time::Duration;
 
 use async_trait::async_trait;
-use chrono::{Duration as ChronoDuration, Offset};
+#[cfg(feature = "diagnostics")]
+use chrono::Duration as ChronoDuration;
+use chrono::Offset;
 use hashbrown::HashMap;
 
 use crate::{
     address_space::{
         compute_user_role_permissions, read_node_value, AddressSpace, CoreNamespace, NodeType,
     },
-    config::ANONYMOUS_USER_TOKEN_ID,
-    diagnostics::NamespaceMetadata,
-    identity_token::IdentityToken,
     node_manager::{
-        NodeManagersRef, ParsedReadValueId, ParsedWriteValue, RequestContext, ServerContext,
-        WriteNode,
+        NamespaceMetadata, NodeManagersRef, ParsedReadValueId, ParsedWriteValue, RequestContext,
+        ServerContext, WriteNode,
     },
+    ServerCapabilities, ServerStatusWrapper,
+};
+#[cfg(feature = "diagnostics")]
+use crate::{
+    config::ANONYMOUS_USER_TOKEN_ID,
+    identity_token::IdentityToken,
     session::{
         instance::Session,
         manager::{locale_ids_for_session, SessionManager},
     },
-    ServerCapabilities, ServerStatusWrapper,
 };
 #[cfg(all(feature = "method-call", feature = "subscriptions-standard"))]
 use crate::load_method_args;
@@ -33,16 +36,25 @@ use crate::node_manager::MethodCall;
 #[cfg(feature = "subscriptions")]
 use crate::{
     node_manager::{MonitoredItemRef, MonitoredItemUpdateRef, SyncSampler},
-    subscriptions::{CreateMonitoredItem, SessionSubscriptionDiagnosticsSummary},
+    subscriptions::CreateMonitoredItem,
 };
-use opcua_core::{sync::RwLock, trace_read_lock};
+#[cfg(all(feature = "diagnostics", feature = "subscriptions"))]
+use crate::subscriptions::SessionSubscriptionDiagnosticsSummary;
+use opcua_core::sync::RwLock;
+#[cfg(any(feature = "diagnostics", feature = "method-call"))]
+use opcua_core::trace_read_lock;
 #[cfg(feature = "method-call")]
 use opcua_core::trace_write_lock;
 use opcua_types::{
-    profiles, AttributeId, ByteString, DataValue, DateTime, ExtensionObject, IdType, Identifier,
-    NodeId, NumericRange, ObjectId, ReferenceTypeId, RolePermissionType, SessionDiagnosticsDataType,
-    SessionSecurityDiagnosticsDataType, StatusCode, TimeZoneDataType, TimestampsToReturn, UAString,
+    DataValue, DateTime, ExtensionObject, IdType, Identifier, NodeId, NumericRange, ObjectId,
+    ReferenceTypeId, RolePermissionType, StatusCode, TimeZoneDataType, TimestampsToReturn,
     VariableId, Variant,
+};
+#[cfg(feature = "diagnostics")]
+use opcua_types::{
+    profiles, AttributeId, ByteString, SessionDiagnosticsDataType,
+    SessionSecurityDiagnosticsDataType,
+    UAString,
 };
 #[cfg(all(feature = "method-call", feature = "subscriptions-standard"))]
 use opcua_types::{MethodId, VariantScalarTypeId, VariantTypeId};
@@ -61,12 +73,14 @@ type MethodWithContextCB = Arc<
 
 enum PreparedCoreReadValue {
     Value(DataValue),
+    #[cfg(feature = "diagnostics")]
     DiagnosticsArray {
         kind: DiagnosticsArrayKind,
         index_range: NumericRange,
     },
 }
 
+#[cfg(feature = "diagnostics")]
 #[derive(Clone, Copy)]
 enum DiagnosticsArrayKind {
     Subscription,
@@ -79,16 +93,17 @@ pub struct CoreNodeManagerImpl {
     #[cfg(feature = "subscriptions")]
     sampler: SyncSampler,
     node_managers: NodeManagersRef,
+    #[cfg(feature = "diagnostics")]
     session_manager: Arc<RwLock<SessionManager>>,
     status: Arc<ServerStatusWrapper>,
     #[cfg(feature = "method-call")]
     method_with_context_cbs: Arc<RwLock<std::collections::HashMap<NodeId, MethodWithContextCB>>>,
 }
 
-#[cfg(feature = "subscriptions")]
+#[cfg(all(feature = "diagnostics", feature = "subscriptions"))]
 type CoreSessionSubscriptionDiagnosticsSummary = SessionSubscriptionDiagnosticsSummary;
 
-#[cfg(not(feature = "subscriptions"))]
+#[cfg(all(feature = "diagnostics", not(feature = "subscriptions")))]
 #[derive(Debug, Clone, Copy, Default)]
 struct CoreSessionSubscriptionDiagnosticsSummary {
     subscription_count: u32,
@@ -113,6 +128,7 @@ impl InMemoryNodeManagerImplBuilder for CoreNodeManagerBuilder {
 
         CoreNodeManagerImpl::new(
             context.node_managers.clone(),
+            #[cfg(feature = "diagnostics")]
             context.session_manager.clone(),
             context.status.clone(),
         )
@@ -203,6 +219,7 @@ impl InMemoryNodeManagerImpl for CoreNodeManagerImpl {
         for read in reads {
             values.push(match read {
                 PreparedCoreReadValue::Value(value) => value,
+                #[cfg(feature = "diagnostics")]
                 PreparedCoreReadValue::DiagnosticsArray { kind, index_range } => {
                     self.read_diagnostics_array(context, kind, &index_range)
                         .await
@@ -262,7 +279,10 @@ impl InMemoryNodeManagerImpl for CoreNodeManagerImpl {
                     node.handle(),
                     Duration::from_millis(node.sampling_interval() as u64),
                 );
-            } else if self.is_internal_sampled(&node.item_to_monitor().node_id, context) {
+                continue;
+            }
+            #[cfg(feature = "diagnostics")]
+            if self.is_internal_sampled(&node.item_to_monitor().node_id, context) {
                 if let Err(e) = self.add_internal_sampler(node, context) {
                     node.set_status(e);
                 }
@@ -339,6 +359,7 @@ impl InMemoryNodeManagerImpl for CoreNodeManagerImpl {
 impl CoreNodeManagerImpl {
     pub(super) fn new(
         node_managers: NodeManagersRef,
+        #[cfg(feature = "diagnostics")]
         session_manager: Arc<RwLock<SessionManager>>,
         status: Arc<ServerStatusWrapper>,
     ) -> Self {
@@ -347,6 +368,7 @@ impl CoreNodeManagerImpl {
             sampler: SyncSampler::new(),
             status,
             node_managers,
+            #[cfg(feature = "diagnostics")]
             session_manager,
             #[cfg(feature = "method-call")]
             method_with_context_cbs: Default::default(),
@@ -417,11 +439,14 @@ impl CoreNodeManagerImpl {
             }
         };
 
-        if let Some(kind) = self.diagnostics_array_kind(&node_to_read.node_id) {
-            return PreparedCoreReadValue::DiagnosticsArray {
-                kind,
-                index_range: node_to_read.index_range.clone(),
-            };
+        #[cfg(feature = "diagnostics")]
+        {
+            if let Some(kind) = self.diagnostics_array_kind(&node_to_read.node_id) {
+                return PreparedCoreReadValue::DiagnosticsArray {
+                    kind,
+                    index_range: node_to_read.index_range.clone(),
+                };
+            }
         }
 
         // Try to read a special value, that is obtained from somewhere else.
@@ -449,6 +474,7 @@ impl CoreNodeManagerImpl {
         VariableId::try_from(identifier).ok()
     }
 
+    #[cfg(feature = "diagnostics")]
     fn diagnostics_array_kind(&self, node: &NodeId) -> Option<DiagnosticsArrayKind> {
         match self.get_variable_id(node)? {
             VariableId::Server_ServerDiagnostics_SubscriptionDiagnosticsArray => {
@@ -464,6 +490,7 @@ impl CoreNodeManagerImpl {
         }
     }
 
+    #[cfg(feature = "diagnostics")]
     async fn read_diagnostics_array(
         &self,
         context: &RequestContext,
@@ -486,6 +513,7 @@ impl CoreNodeManagerImpl {
         }
     }
 
+    #[cfg(feature = "diagnostics")]
     async fn read_subscription_diagnostics_array(
         &self,
         context: &RequestContext,
@@ -518,6 +546,7 @@ impl CoreNodeManagerImpl {
         Self::extension_object_array_data_value(rows, index_range)
     }
 
+    #[cfg(feature = "diagnostics")]
     async fn read_session_diagnostics_array(
         &self,
         context: &RequestContext,
@@ -541,6 +570,7 @@ impl CoreNodeManagerImpl {
         Self::extension_object_array_data_value(rows, index_range)
     }
 
+    #[cfg(feature = "diagnostics")]
     async fn read_session_security_diagnostics_array(
         &self,
         context: &RequestContext,
@@ -563,6 +593,7 @@ impl CoreNodeManagerImpl {
         Self::extension_object_array_data_value(rows, index_range)
     }
 
+    #[cfg(feature = "diagnostics")]
     fn extension_object_array_data_value(
         rows: Vec<ExtensionObject>,
         index_range: &NumericRange,
@@ -584,6 +615,7 @@ impl CoreNodeManagerImpl {
         DataValue::new_now(value)
     }
 
+    #[cfg(feature = "diagnostics")]
     async fn session_diagnostics_rows(
         &self,
         context: &RequestContext,
@@ -612,6 +644,7 @@ impl CoreNodeManagerImpl {
         rows
     }
 
+    #[cfg(feature = "diagnostics")]
     fn session_security_diagnostics_rows(&self) -> Vec<SessionSecurityDiagnosticsDataType> {
         let sessions = self.snapshot_sessions();
         let mut rows = Vec::with_capacity(sessions.len());
@@ -624,11 +657,13 @@ impl CoreNodeManagerImpl {
         rows
     }
 
+    #[cfg(feature = "diagnostics")]
     fn snapshot_sessions(&self) -> Vec<Arc<RwLock<Session>>> {
         let session_manager = trace_read_lock!(self.session_manager);
         session_manager.snapshot_sessions()
     }
 
+    #[cfg(feature = "diagnostics")]
     fn session_diagnostics_row(
         context: &RequestContext,
         session: &Session,
@@ -651,6 +686,7 @@ impl CoreNodeManagerImpl {
         }
     }
 
+    #[cfg(feature = "diagnostics")]
     fn session_security_diagnostics_row(session: &Session) -> SessionSecurityDiagnosticsDataType {
         let (client_user_id_of_session, authentication_mechanism) =
             Self::session_user_and_authentication_mechanism(session);
@@ -672,6 +708,7 @@ impl CoreNodeManagerImpl {
         }
     }
 
+    #[cfg(feature = "diagnostics")]
     fn session_user_and_authentication_mechanism(session: &Session) -> (UAString, UAString) {
         match session.user_identity() {
             IdentityToken::None => (UAString::null(), UAString::null()),
@@ -690,6 +727,7 @@ impl CoreNodeManagerImpl {
         }
     }
 
+    #[cfg(feature = "diagnostics")]
     fn actual_session_timeout_ms(session: &Session) -> f64 {
         session
             .deadline()
@@ -698,6 +736,7 @@ impl CoreNodeManagerImpl {
             * 1000.0
     }
 
+    #[cfg(feature = "diagnostics")]
     fn instant_to_date_time(instant: Instant) -> DateTime {
         let now_instant = Instant::now();
         let now = chrono::Utc::now();
@@ -715,7 +754,7 @@ impl CoreNodeManagerImpl {
         }
     }
 
-    #[cfg(feature = "subscriptions")]
+    #[cfg(all(feature = "diagnostics", feature = "subscriptions"))]
     fn is_internal_sampled(&self, node: &NodeId, context: &RequestContext) -> bool {
         let Some(variable_id) = self.get_variable_id(node) else {
             return false;
@@ -724,7 +763,7 @@ impl CoreNodeManagerImpl {
         context.info.diagnostics.is_mapped(variable_id)
     }
 
-    #[cfg(feature = "subscriptions")]
+    #[cfg(all(feature = "diagnostics", feature = "subscriptions"))]
     fn add_internal_sampler(
         &self,
         monitored_item: &mut CreateMonitoredItem,
@@ -973,6 +1012,7 @@ impl CoreNodeManagerImpl {
                 vec![context.info.application_uri.clone()].into()
             }
 
+            #[cfg(feature = "diagnostics")]
             r if context.info.diagnostics.is_mapped(r) => {
                 let perms = context.info.authenticator.core_permissions(&context.token);
                 if !perms.read_diagnostics {
@@ -1010,51 +1050,59 @@ impl CoreNodeManagerImpl {
         })
     }
 
+    #[cfg_attr(not(feature = "diagnostics"), allow(unused_variables))]
     fn write_server_value(
         &self,
         context: &RequestContext,
         address_space: &RwLock<AddressSpace>,
         node: &ParsedWriteValue,
     ) -> StatusCode {
-        let Some(var_id) = self.get_variable_id(&node.node_id) else {
-            return StatusCode::BadServiceUnsupported;
-        };
-
-        if var_id != VariableId::Server_ServerDiagnostics_EnabledFlag
-            || node.attribute_id != AttributeId::Value
+        #[cfg(feature = "diagnostics")]
         {
-            return StatusCode::BadServiceUnsupported;
-        }
+            let Some(var_id) = self.get_variable_id(&node.node_id) else {
+                return StatusCode::BadServiceUnsupported;
+            };
 
-        if trace_read_lock!(address_space)
-            .find(&node.node_id)
-            .is_none()
+            if var_id != VariableId::Server_ServerDiagnostics_EnabledFlag
+                || node.attribute_id != AttributeId::Value
+            {
+                return StatusCode::BadServiceUnsupported;
+            }
+
+            if trace_read_lock!(address_space)
+                .find(&node.node_id)
+                .is_none()
+            {
+                return StatusCode::BadNodeIdUnknown;
+            }
+
+            let perms = context.info.authenticator.core_permissions(&context.token);
+            if !perms.write_diagnostics {
+                return StatusCode::BadUserAccessDenied;
+            }
+
+            let Some(Variant::Boolean(enabled)) = node.value.value.as_ref() else {
+                return StatusCode::BadTypeMismatch;
+            };
+
+            if node.index_range.has_range() {
+                return StatusCode::BadWriteNotSupported;
+            }
+
+            context.info.diagnostics.set_enabled(*enabled);
+            #[cfg(feature = "subscriptions")]
+            if let Some(value) = context.info.diagnostics.get(var_id) {
+                context
+                    .subscriptions
+                    .notify_data_change([(value, &node.node_id, node.attribute_id)].into_iter());
+            }
+
+            StatusCode::Good
+        }
+        #[cfg(not(feature = "diagnostics"))]
         {
-            return StatusCode::BadNodeIdUnknown;
+            StatusCode::BadServiceUnsupported
         }
-
-        let perms = context.info.authenticator.core_permissions(&context.token);
-        if !perms.write_diagnostics {
-            return StatusCode::BadUserAccessDenied;
-        }
-
-        let Some(Variant::Boolean(enabled)) = node.value.value.as_ref() else {
-            return StatusCode::BadTypeMismatch;
-        };
-
-        if node.index_range.has_range() {
-            return StatusCode::BadWriteNotSupported;
-        }
-
-        context.info.diagnostics.set_enabled(*enabled);
-        #[cfg(feature = "subscriptions")]
-        if let Some(value) = context.info.diagnostics.get(var_id) {
-            context
-                .subscriptions
-                .notify_data_change([(value, &node.node_id, node.attribute_id)].into_iter());
-        }
-
-        StatusCode::Good
     }
 
     fn add_aggregates(&self, address_space: &mut AddressSpace, capabilities: &ServerCapabilities) {

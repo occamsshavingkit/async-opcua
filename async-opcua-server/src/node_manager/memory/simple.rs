@@ -14,8 +14,8 @@ use crate::{
     address_space::{read_node_value, write_node_value, AddressSpace, NodeType},
     alarms::{AlarmSourceRegistry, LimitAlarm},
     node_manager::{
-        DefaultTypeTree, NodeManagerBuilder, NodeManagersRef, ParsedReadValueId, RequestContext,
-        ServerContext, WriteNode,
+        DefaultTypeTree, NamespaceMetadata, NodeManagerBuilder, NodeManagersRef,
+        ParsedReadValueId, RequestContext, ServerContext, WriteNode,
     },
 };
 #[cfg(feature = "history")]
@@ -39,7 +39,7 @@ use opcua_types::MonitoringMode;
 
 use super::{
     InMemoryNodeManager, InMemoryNodeManagerBuilder, InMemoryNodeManagerImpl,
-    InMemoryNodeManagerImplBuilder, NamespaceMetadata,
+    InMemoryNodeManagerImplBuilder,
 };
 
 /// A simple in-memory node manager with utility methods for updating the address space,

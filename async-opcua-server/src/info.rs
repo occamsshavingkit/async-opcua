@@ -17,6 +17,7 @@ use crate::authenticator::{
     issued_token_security_policy, user_pass_security_policy_id, verify_x509_user_token_signature,
     Password,
 };
+#[cfg(feature = "diagnostics")]
 use crate::diagnostics::{ServerDiagnostics, ServerDiagnosticsSummary};
 use crate::node_manager::TypeTreeForUser;
 use crate::rbac::defaults::NamespaceDefaults;
@@ -218,6 +219,7 @@ pub struct ServerInfo {
     pub(crate) registered_mdns:
         Option<std::sync::Arc<crate::discovery_mdns::MdnsAdvertisementRegistry>>,
     /// Current server diagnostics.
+    #[cfg(feature = "diagnostics")]
     pub diagnostics: ServerDiagnostics,
     /// Performance metrics for this server instance.
     pub metrics: Arc<crate::metrics::ServerMetrics>,
@@ -1311,6 +1313,7 @@ impl ServerInfo {
     }
 
     /// Convenience method to get the diagnostics summary.
+    #[cfg(feature = "diagnostics")]
     pub fn summary(&self) -> &ServerDiagnosticsSummary {
         &self.diagnostics.summary
     }

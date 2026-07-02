@@ -4,9 +4,9 @@ use std::sync::Arc;
 
 use crate::{
     address_space::AddressSpace,
-    diagnostics::NamespaceMetadata,
     node_manager::{
-        ParsedReadValueId, RegisterNodeItem, RequestContext, ServerContext, WriteNode,
+        NamespaceMetadata, ParsedReadValueId, RegisterNodeItem, RequestContext, ServerContext,
+        WriteNode,
     },
 };
 #[cfg(feature = "node-management")]

@@ -37,6 +37,7 @@ mod method;
 #[cfg(feature = "method-call")]
 mod method_typed;
 mod model_change;
+mod namespace_metadata;
 #[cfg(feature = "subscriptions")]
 mod monitored_items;
 #[cfg(feature = "node-management")]
@@ -46,11 +47,7 @@ mod query;
 mod utils;
 mod view;
 
-use crate::{
-    diagnostics::NamespaceMetadata,
-    session::manager::SessionManager,
-    ServerStatusWrapper,
-};
+use crate::{session::manager::SessionManager, ServerStatusWrapper};
 #[cfg(feature = "history")]
 use crate::session::continuation_points::ContinuationPoint;
 
@@ -68,6 +65,7 @@ pub use {
         TypeTreeReadContext,
     },
     model_change::GeneralModelChangeEvent,
+    namespace_metadata::NamespaceMetadata,
     utils::*,
     view::{
         impl_translate_browse_paths_using_browse, AddReferenceResult, BrowseNode, BrowsePathItem,

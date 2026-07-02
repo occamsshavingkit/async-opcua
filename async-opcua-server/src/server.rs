@@ -24,11 +24,12 @@ use tracing::{debug, error, info, warn};
 use opcua_core::{config::Config, handle::AtomicHandle};
 use opcua_crypto::{CertificateStore, RevocationMode, ValidationOptions};
 
+#[cfg(feature = "diagnostics")]
+use crate::diagnostics::ServerDiagnostics;
 use crate::metrics::ServerMetricsSnapshot;
 #[cfg(feature = "wss")]
 use crate::transport::WebSocketConnector;
 use crate::{
-    diagnostics::ServerDiagnostics,
     node_manager::{DefaultTypeTreeGetter, ServerContext},
     reverse_connect::{self, ReverseConnectionManager},
     session::controller::{ControllerCommand, SessionStarter},
@@ -422,6 +423,7 @@ impl Server {
             mdns,
             #[cfg(feature = "discovery-mdns")]
             registered_mdns,
+            #[cfg(feature = "diagnostics")]
             diagnostics: ServerDiagnostics::new(config.diagnostics),
             metrics: Arc::new(crate::metrics::ServerMetrics::new()),
             fota_cleanup: Default::default(),

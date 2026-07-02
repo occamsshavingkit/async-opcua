@@ -24,6 +24,7 @@ pub mod authorization {
 pub mod authenticator;
 mod builder;
 mod config;
+#[cfg(feature = "diagnostics")]
 pub mod diagnostics;
 #[cfg(feature = "discovery-server-registration")]
 mod discovery;

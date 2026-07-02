@@ -38,7 +38,7 @@ use opcua_types::{
     TransferSubscriptionsResponse, Variant,
 };
 
-#[cfg(feature = "generated-address-space")]
+#[cfg(all(feature = "generated-address-space", feature = "diagnostics"))]
 use opcua_types::SubscriptionDiagnosticsDataType;
 
 use crate::node_manager::{consume_results, RequestContextInner};
@@ -382,7 +382,7 @@ fn eu_range_from_data_value(value: &DataValue) -> Option<(f64, f64)> {
     (range.low <= range.high).then_some((range.low, range.high))
 }
 
-#[cfg(feature = "generated-address-space")] // consumed only by the core node manager
+#[cfg(all(feature = "generated-address-space", feature = "diagnostics"))] // consumed only by the core node manager
 fn session_subscription_diagnostics(
     subscriptions: &mut SessionSubscriptions,
 ) -> Vec<SubscriptionDiagnosticsDataType> {
@@ -401,7 +401,7 @@ fn session_subscription_diagnostics(
     diagnostics
 }
 
-#[cfg(feature = "generated-address-space")] // consumed only by the core node manager
+#[cfg(all(feature = "generated-address-space", feature = "diagnostics"))] // consumed only by the core node manager
 fn subscription_diagnostics_row(
     session_id: &NodeId,
     subscription: &Subscription,
@@ -427,13 +427,13 @@ fn subscription_diagnostics_row(
 }
 
 #[derive(Debug, Clone, Copy, Default)]
-#[cfg(feature = "generated-address-space")] // consumed only by the core node manager
+#[cfg(all(feature = "generated-address-space", feature = "diagnostics"))] // consumed only by the core node manager
 pub(crate) struct SessionSubscriptionDiagnosticsSummary {
     pub subscription_count: u32,
     pub monitored_item_count: u32,
 }
 
-#[cfg(feature = "generated-address-space")] // consumed only by the core node manager
+#[cfg(all(feature = "generated-address-space", feature = "diagnostics"))] // consumed only by the core node manager
 fn session_subscription_diagnostics_summary(
     subscriptions: &mut SessionSubscriptions,
 ) -> SessionSubscriptionDiagnosticsSummary {
@@ -454,7 +454,7 @@ fn session_subscription_diagnostics_summary(
     summary
 }
 
-#[cfg(feature = "generated-address-space")] // consumed only by the core node manager
+#[cfg(all(feature = "generated-address-space", feature = "diagnostics"))] // consumed only by the core node manager
 fn usize_to_u32_saturating(value: usize) -> u32 {
     value.min(u32::MAX as usize) as u32
 }
@@ -491,7 +491,10 @@ impl SubscriptionCache {
     }
 
     /// Get the `SessionSubscriptions` object for a single session by its numeric ID.
-    #[cfg_attr(not(feature = "generated-address-space"), allow(dead_code))]
+    #[cfg_attr(
+        not(all(feature = "method-call", feature = "subscriptions-standard")),
+        allow(dead_code)
+    )]
     pub(crate) fn get_session_subscriptions(
         &self,
         session_id: u32,
@@ -521,7 +524,7 @@ impl SubscriptionCache {
         cache.legacy(move |subs| f(subs)).await.ok()
     }
 
-    #[cfg(feature = "generated-address-space")] // consumed only by the core node manager
+    #[cfg(all(feature = "generated-address-space", feature = "diagnostics"))] // consumed only by the core node manager
     pub(crate) async fn subscription_diagnostics(&self) -> Vec<SubscriptionDiagnosticsDataType> {
         let handles = {
             let inner = trace_read_lock!(self.inner);
@@ -543,7 +546,7 @@ impl SubscriptionCache {
         diagnostics
     }
 
-    #[cfg(feature = "generated-address-space")] // consumed only by the core node manager
+    #[cfg(all(feature = "generated-address-space", feature = "diagnostics"))] // consumed only by the core node manager
     pub(crate) async fn session_diagnostics_summaries(
         &self,
     ) -> HashMap<u32, SessionSubscriptionDiagnosticsSummary> {
@@ -748,6 +751,7 @@ impl SubscriptionCache {
                         entry.handle.stop();
                     }
                 }
+                #[cfg(feature = "diagnostics")]
                 context
                     .info
                     .diagnostics
@@ -871,11 +875,14 @@ impl SubscriptionCache {
         let mut lck = trace_write_lock!(self.inner);
         lck.subscription_to_session
             .insert(res.subscription_id, session_id);
-        context
-            .info
-            .diagnostics
-            .set_current_subscription_count(lck.subscription_to_session.len() as u32);
-        context.info.diagnostics.inc_subscription_count();
+        #[cfg(feature = "diagnostics")]
+        {
+            context
+                .info
+                .diagnostics
+                .set_current_subscription_count(lck.subscription_to_session.len() as u32);
+            context.info.diagnostics.inc_subscription_count();
+        }
         Ok(res)
     }
 
@@ -1512,6 +1519,7 @@ impl SubscriptionCache {
             .collect::<Vec<_>>();
         let mut lck = trace_write_lock!(self.inner);
         Self::cleanup_removed_subscriptions(&mut lck, &removed_subscriptions);
+        #[cfg(feature = "diagnostics")]
         info.diagnostics
             .set_current_subscription_count(lck.subscription_to_session.len() as u32);
 
@@ -1555,6 +1563,7 @@ impl SubscriptionCache {
                 lck.subscription_to_session.remove(&id);
             }
             Self::cleanup_monitored_item_refs(&mut lck, &monitored_items);
+            #[cfg(feature = "diagnostics")]
             info.diagnostics
                 .set_current_subscription_count(lck.subscription_to_session.len() as u32);
         }

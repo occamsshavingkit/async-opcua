@@ -28,7 +28,6 @@ use crate::{
     address_space::{
         NodeType, ReferenceDirection,
     },
-    diagnostics::NamespaceMetadata,
     rbac,
 };
 #[cfg(feature = "history")]
@@ -66,8 +65,8 @@ use super::{
     build::NodeManagerBuilder,
     view::{AddReferenceResult, ExternalReference, ExternalReferenceRequest, NodeMetadata},
     AttributeProvider, BrowseNode, BrowsePathItem, DefaultTypeTree, DynNodeManager,
-    NodeManagerCore, NodeMutator, ReadNode, RegisterNodeItem, RequestContext, ServerContext,
-    ViewProvider, WriteNode,
+    NamespaceMetadata, NodeManagerCore, NodeMutator, ReadNode, RegisterNodeItem, RequestContext,
+    ServerContext, ViewProvider, WriteNode,
 };
 #[cfg(feature = "history")]
 use super::{HistoryNode, HistoryProvider, HistoryUpdateDetails, HistoryUpdateNode};

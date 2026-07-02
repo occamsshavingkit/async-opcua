@@ -745,10 +745,13 @@ impl SessionManager {
         );
         self.refresh_client_response_body_limit_for_channel(channel);
 
-        self.info
-            .diagnostics
-            .set_current_session_count(self.sessions.len() as u32);
-        self.info.diagnostics.inc_session_count();
+        #[cfg(feature = "diagnostics")]
+        {
+            self.info
+                .diagnostics
+                .set_current_session_count(self.sessions.len() as u32);
+            self.info.diagnostics.inc_session_count();
+        }
 
         self.notify.notify_waiters();
 
@@ -790,10 +793,13 @@ impl SessionManager {
         let Some(session) = self.sessions.remove(id) else {
             return;
         };
-        self.info
-            .diagnostics
-            .set_current_session_count(self.sessions.len() as u32);
-        self.info.diagnostics.inc_session_timeout_count();
+        #[cfg(feature = "diagnostics")]
+        {
+            self.info
+                .diagnostics
+                .set_current_session_count(self.sessions.len() as u32);
+            self.info.diagnostics.inc_session_timeout_count();
+        }
 
         info!(
             "Session {id} has expired, removing it from the session map. Subscriptions will remain until they individually expire"
@@ -911,6 +917,7 @@ pub(crate) async fn close_session(
         let mut mgr = trace_write_lock!(mgr_lck);
         mgr.sessions.remove(&terminated.session_id);
         clear_session_locale_ids(&mgr.info, id);
+        #[cfg(feature = "diagnostics")]
         mgr.info
             .diagnostics
             .set_current_session_count(mgr.sessions.len() as u32);

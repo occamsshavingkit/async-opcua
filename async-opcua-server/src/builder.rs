@@ -51,16 +51,13 @@ impl Default for ServerBuilder {
             type_loaders: TypeLoaderCollection::new(),
         };
         #[cfg(feature = "generated-address-space")]
-        {
-            builder
-                .with_node_manager(
-                    super::node_manager::memory::InMemoryNodeManagerBuilder::new(
-                        super::node_manager::memory::CoreNodeManagerBuilder,
-                    ),
-                )
-                .with_node_manager(super::diagnostics::DiagnosticsNodeManagerBuilder)
-        }
-        #[cfg(not(feature = "generated-address-space"))]
+        let builder = builder.with_node_manager(
+            super::node_manager::memory::InMemoryNodeManagerBuilder::new(
+                super::node_manager::memory::CoreNodeManagerBuilder,
+            ),
+        );
+        #[cfg(all(feature = "generated-address-space", feature = "diagnostics"))]
+        let builder = builder.with_node_manager(super::diagnostics::DiagnosticsNodeManagerBuilder);
         builder
     }
 }

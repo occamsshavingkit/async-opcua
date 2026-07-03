@@ -12,39 +12,62 @@ use std::{
 use async_trait::async_trait;
 use opcua_core::sync::RwLock;
 use opcua_nodes::DefaultTypeTree;
+#[cfg(feature = "node-management")]
+use opcua_types::ExpandedNodeId;
+#[cfg(feature = "subscriptions")]
+use opcua_types::MonitoringMode;
+use opcua_types::{NodeId, RolePermissionType, StatusCode, TimestampsToReturn};
+#[cfg(feature = "history")]
 use opcua_types::{
-    ExpandedNodeId, MonitoringMode, NodeId, ReadAnnotationDataDetails, ReadAtTimeDetails,
-    ReadEventDetails, ReadProcessedDetails, ReadRawModifiedDetails, RolePermissionType, StatusCode,
-    TimestampsToReturn,
+    ReadAnnotationDataDetails, ReadAtTimeDetails, ReadEventDetails, ReadProcessedDetails,
+    ReadRawModifiedDetails,
 };
 use tokio::sync::OnceCell;
 
 mod attributes;
+#[cfg(feature = "node-management")]
 mod audit_events;
 mod build;
 mod context;
+#[cfg(feature = "history")]
 mod history;
 pub mod memory;
+#[cfg(feature = "method-call")]
 mod method;
+#[cfg(feature = "method-call")]
 mod method_typed;
+#[cfg(feature = "events")]
 mod model_change;
+#[cfg(feature = "subscriptions")]
 mod monitored_items;
+mod namespace_metadata;
+#[cfg(feature = "node-management")]
 mod node_management;
+#[cfg(feature = "query")]
 mod query;
 mod utils;
 mod view;
 
-use crate::{
-    diagnostics::NamespaceMetadata,
-    session::{continuation_points::ContinuationPoint, manager::SessionManager},
-    ServerStatusWrapper,
-};
+#[cfg(feature = "history")]
+use crate::session::continuation_points::ContinuationPoint;
+use crate::{session::manager::SessionManager, ServerStatusWrapper};
 
-use super::{
-    authenticator::AuthManager, info::ServerInfo, subscriptions::CreateMonitoredItem,
-    SubscriptionCache,
-};
+#[cfg(feature = "subscriptions")]
+use super::subscriptions::CreateMonitoredItem;
+#[cfg(feature = "subscriptions")]
+use super::SubscriptionCache;
+use super::{authenticator::AuthManager, info::ServerInfo};
 
+#[cfg(feature = "history")]
+pub use history::{HistoryNode, HistoryResult, HistoryUpdateDetails, HistoryUpdateNode};
+#[cfg(feature = "events")]
+pub use model_change::GeneralModelChangeEvent;
+#[cfg(feature = "subscriptions")]
+pub use monitored_items::{MonitoredItemRef, MonitoredItemUpdateRef};
+#[cfg(feature = "node-management")]
+pub use node_management::{AddNodeItem, AddReferenceItem, DeleteNodeItem, DeleteReferenceItem};
+#[cfg(feature = "query")]
+pub use query::{ParsedNodeTypeDescription, ParsedQueryDataDescription, QueryRequest};
 pub use {
     attributes::{ParsedReadValueId, ParsedWriteValue, ReadNode, WriteNode},
     build::NodeManagerBuilder,
@@ -52,26 +75,27 @@ pub use {
         RequestContext, RequestContextInner, TypeTreeForUser, TypeTreeForUserStatic,
         TypeTreeReadContext,
     },
-    history::{HistoryNode, HistoryResult, HistoryUpdateDetails, HistoryUpdateNode},
-    method::MethodCall,
-    method_typed::{
-        typed_method, typed_method_with_context, IntoMethodOutputs, MethodArg, MethodHandler,
-        MethodHandlerWithContext,
-    },
-    model_change::GeneralModelChangeEvent,
-    monitored_items::{MonitoredItemRef, MonitoredItemUpdateRef},
-    node_management::{AddNodeItem, AddReferenceItem, DeleteNodeItem, DeleteReferenceItem},
-    query::{ParsedNodeTypeDescription, ParsedQueryDataDescription, QueryRequest},
+    namespace_metadata::NamespaceMetadata,
     utils::*,
     view::{
         impl_translate_browse_paths_using_browse, AddReferenceResult, BrowseNode, BrowsePathItem,
         ExternalReference, ExternalReferenceRequest, NodeMetadata, RegisterNodeItem,
     },
 };
+#[cfg(feature = "method-call")]
+pub use {
+    method::MethodCall,
+    method_typed::{
+        typed_method, typed_method_with_context, IntoMethodOutputs, MethodArg, MethodHandler,
+        MethodHandlerWithContext,
+    },
+};
 
 pub(crate) use context::resolve_external_references;
 pub(crate) use context::DefaultTypeTreeGetter;
+#[cfg(feature = "history")]
 pub(crate) use history::HistoryReadDetails;
+#[cfg(feature = "query")]
 pub(crate) use query::QueryContinuationPoint;
 pub(crate) use view::{BrowseContinuationPoint, ExternalReferencesContPoint};
 
@@ -255,6 +279,7 @@ pub struct ServerContext {
     /// Manager containing the server's live sessions.
     pub session_manager: Arc<RwLock<SessionManager>>,
     /// Cache containing the subscriptions managed by the server.
+    #[cfg(feature = "subscriptions")]
     pub subscriptions: Arc<SubscriptionCache>,
     /// General server state and configuration.
     pub info: Arc<ServerInfo>,
@@ -333,6 +358,7 @@ pub trait NodeManagerCore: IntoAnyArc + Any {
     /// Returning true here doesn't mean that creating the new node must
     /// succeed, only that _if_ the parent node exists, this node manager
     /// would be the one to create the requested node.
+    #[cfg(feature = "node-management")]
     fn handle_new_node(&self, parent_id: &ExpandedNodeId) -> bool {
         false
     }
@@ -373,6 +399,7 @@ pub trait AttributeProvider {
 }
 
 /// Historical data read/update capability for node managers.
+#[cfg(feature = "history")]
 #[async_trait]
 #[allow(unused_variables)]
 pub trait HistoryProvider {
@@ -522,6 +549,7 @@ pub trait ViewProvider {
     /// The node manager should set a continuation point if it reaches
     /// limits, but is responsible for not exceeding max_data_sets_to_return
     /// and max_references_to_return.
+    #[cfg(feature = "query")]
     async fn query(
         &self,
         context: &RequestContext,
@@ -532,6 +560,7 @@ pub trait ViewProvider {
 }
 
 /// Monitored-item lifecycle capability for node managers.
+#[cfg(feature = "subscriptions")]
 #[async_trait]
 #[allow(unused_variables)]
 pub trait MonitoredItemProvider {
@@ -597,6 +626,7 @@ pub trait MonitoredItemProvider {
 }
 
 /// Method-call capability for node managers.
+#[cfg(feature = "method-call")]
 #[async_trait]
 #[allow(unused_variables)]
 pub trait MethodProvider {
@@ -639,6 +669,7 @@ pub trait NodeMutator {
     ///
     /// This should create the nodes, or set a failed status as appropriate.
     /// If a node was created, the status should be set to Good.
+    #[cfg(feature = "node-management")]
     async fn add_nodes(
         &self,
         context: &RequestContext,
@@ -658,6 +689,7 @@ pub trait NodeMutator {
     /// set both source and target status. Note that it may
     /// already have been added in a different node manager, you are
     /// responsible for any cleanup if you do this.
+    #[cfg(feature = "node-management")]
     async fn add_references(
         &self,
         context: &RequestContext,
@@ -672,6 +704,7 @@ pub trait NodeMutator {
     ///
     /// Typically, you also want to implement `delete_node_references` if
     /// there are other node managers that support deletes.
+    #[cfg(feature = "node-management")]
     async fn delete_nodes(
         &self,
         context: &RequestContext,
@@ -685,6 +718,7 @@ pub trait NodeMutator {
     ///
     /// This is not allowed to fail, you should make it impossible to delete
     /// nodes with immutable references.
+    #[cfg(feature = "node-management")]
     async fn delete_node_references(
         &self,
         context: &RequestContext,
@@ -703,6 +737,7 @@ pub trait NodeMutator {
     /// set both source and target status. Note that it may
     /// already have been deleted in a different node manager, you are
     /// responsible for any cleanup if you do this.
+    #[cfg(feature = "node-management")]
     async fn delete_references(
         &self,
         context: &RequestContext,
@@ -713,6 +748,11 @@ pub trait NodeMutator {
 }
 
 /// Full node-manager interface composed from capability traits.
+#[cfg(all(
+    feature = "subscriptions",
+    feature = "method-call",
+    feature = "history"
+))]
 pub trait NodeManager:
     NodeManagerCore
     + AttributeProvider
@@ -724,6 +764,95 @@ pub trait NodeManager:
 {
 }
 
+/// Full node-manager interface composed from capability traits.
+#[cfg(all(
+    feature = "subscriptions",
+    not(feature = "method-call"),
+    feature = "history"
+))]
+pub trait NodeManager:
+    NodeManagerCore
+    + AttributeProvider
+    + ViewProvider
+    + NodeMutator
+    + HistoryProvider
+    + MonitoredItemProvider
+{
+}
+
+/// Full node-manager interface composed from capability traits.
+#[cfg(all(
+    not(feature = "subscriptions"),
+    feature = "method-call",
+    feature = "history"
+))]
+pub trait NodeManager:
+    NodeManagerCore + AttributeProvider + ViewProvider + MethodProvider + NodeMutator + HistoryProvider
+{
+}
+
+/// Full node-manager interface composed from capability traits.
+#[cfg(all(
+    not(feature = "subscriptions"),
+    not(feature = "method-call"),
+    feature = "history"
+))]
+pub trait NodeManager:
+    NodeManagerCore + AttributeProvider + ViewProvider + NodeMutator + HistoryProvider
+{
+}
+
+/// Full node-manager interface composed from capability traits.
+#[cfg(all(
+    feature = "subscriptions",
+    feature = "method-call",
+    not(feature = "history")
+))]
+pub trait NodeManager:
+    NodeManagerCore
+    + AttributeProvider
+    + ViewProvider
+    + MethodProvider
+    + NodeMutator
+    + MonitoredItemProvider
+{
+}
+
+/// Full node-manager interface composed from capability traits.
+#[cfg(all(
+    feature = "subscriptions",
+    not(feature = "method-call"),
+    not(feature = "history")
+))]
+pub trait NodeManager:
+    NodeManagerCore + AttributeProvider + ViewProvider + NodeMutator + MonitoredItemProvider
+{
+}
+
+/// Full node-manager interface composed from capability traits.
+#[cfg(all(
+    not(feature = "subscriptions"),
+    feature = "method-call",
+    not(feature = "history")
+))]
+pub trait NodeManager:
+    NodeManagerCore + AttributeProvider + ViewProvider + MethodProvider + NodeMutator
+{
+}
+
+/// Full node-manager interface composed from capability traits.
+#[cfg(all(
+    not(feature = "subscriptions"),
+    not(feature = "method-call"),
+    not(feature = "history")
+))]
+pub trait NodeManager: NodeManagerCore + AttributeProvider + ViewProvider + NodeMutator {}
+
+#[cfg(all(
+    feature = "subscriptions",
+    feature = "method-call",
+    feature = "history"
+))]
 impl<T> NodeManager for T where
     T: NodeManagerCore
         + AttributeProvider
@@ -733,5 +862,98 @@ impl<T> NodeManager for T where
         + HistoryProvider
         + MonitoredItemProvider
         + ?Sized
+{
+}
+
+#[cfg(all(
+    feature = "subscriptions",
+    not(feature = "method-call"),
+    feature = "history"
+))]
+impl<T> NodeManager for T where
+    T: NodeManagerCore
+        + AttributeProvider
+        + ViewProvider
+        + NodeMutator
+        + HistoryProvider
+        + MonitoredItemProvider
+        + ?Sized
+{
+}
+
+#[cfg(all(
+    not(feature = "subscriptions"),
+    feature = "method-call",
+    feature = "history"
+))]
+impl<T> NodeManager for T where
+    T: NodeManagerCore
+        + AttributeProvider
+        + ViewProvider
+        + MethodProvider
+        + NodeMutator
+        + HistoryProvider
+        + ?Sized
+{
+}
+
+#[cfg(all(
+    not(feature = "subscriptions"),
+    not(feature = "method-call"),
+    feature = "history"
+))]
+impl<T> NodeManager for T where
+    T: NodeManagerCore + AttributeProvider + ViewProvider + NodeMutator + HistoryProvider + ?Sized
+{
+}
+
+#[cfg(all(
+    feature = "subscriptions",
+    feature = "method-call",
+    not(feature = "history")
+))]
+impl<T> NodeManager for T where
+    T: NodeManagerCore
+        + AttributeProvider
+        + ViewProvider
+        + MethodProvider
+        + NodeMutator
+        + MonitoredItemProvider
+        + ?Sized
+{
+}
+
+#[cfg(all(
+    feature = "subscriptions",
+    not(feature = "method-call"),
+    not(feature = "history")
+))]
+impl<T> NodeManager for T where
+    T: NodeManagerCore
+        + AttributeProvider
+        + ViewProvider
+        + NodeMutator
+        + MonitoredItemProvider
+        + ?Sized
+{
+}
+
+#[cfg(all(
+    not(feature = "subscriptions"),
+    feature = "method-call",
+    not(feature = "history")
+))]
+impl<T> NodeManager for T where
+    T: NodeManagerCore + AttributeProvider + ViewProvider + MethodProvider + NodeMutator + ?Sized
+{
+}
+
+#[cfg(all(
+    not(feature = "subscriptions"),
+    not(feature = "method-call"),
+    not(feature = "history")
+))]
+impl<T> NodeManager for T where
+    T: NodeManagerCore + AttributeProvider + ViewProvider + NodeMutator + ?Sized
 {
 }

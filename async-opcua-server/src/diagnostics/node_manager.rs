@@ -1,28 +1,37 @@
+#[cfg(feature = "subscriptions")]
+use std::time::Duration;
 use std::{
     collections::{BTreeMap, VecDeque},
     sync::Arc,
-    time::Duration,
 };
 
 use async_trait::async_trait;
 use opcua_nodes::{DefaultTypeTree, TypeTree};
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "history")]
+use crate::node_manager::HistoryProvider;
+#[cfg(feature = "method-call")]
+use crate::node_manager::MethodProvider;
+#[cfg(feature = "query")]
+use crate::node_manager::QueryRequest;
+#[cfg(feature = "subscriptions")]
+use crate::node_manager::{MonitoredItemProvider, SyncSampler};
 use crate::{
     address_space::{compute_user_role_permissions, AccessLevel},
     node_manager::{
         as_opaque_node_id, from_opaque_node_id, impl_translate_browse_paths_using_browse,
         AddReferenceResult, AttributeProvider, BrowseNode, BrowsePathItem, DynNodeManager,
-        ExternalReferenceRequest, HistoryProvider, MethodProvider, MonitoredItemProvider,
-        NodeManagerBuilder, NodeManagerCore, NodeManagersRef, NodeMetadata, NodeMutator,
-        QueryRequest, ReadNode, RequestContext, ServerContext, SyncSampler, ViewProvider,
+        ExternalReferenceRequest, NamespaceMetadata, NodeManagerBuilder, NodeManagerCore,
+        NodeManagersRef, NodeMetadata, NodeMutator, ReadNode, RequestContext, ServerContext,
+        ViewProvider,
     },
 };
 use opcua_types::{
     AccessLevelExType, AccessRestrictionType, AttributeId, BrowseDirection, DataTypeId, DataValue,
-    DateTime, ExpandedNodeId, ExtensionObject, IdType, LocalizedText, NodeClass, NodeId,
-    NumericRange, ObjectId, ObjectTypeId, QualifiedName, ReferenceDescription, ReferenceTypeId,
-    RolePermissionType, StatusCode, TimestampsToReturn, VariableTypeId, Variant,
+    DateTime, ExpandedNodeId, ExtensionObject, IdType, LocalizedText, NodeClass, NodeId, ObjectId,
+    ObjectTypeId, QualifiedName, ReferenceDescription, ReferenceTypeId, RolePermissionType,
+    StatusCode, TimestampsToReturn, VariableTypeId, Variant,
 };
 
 fn apply_namespace_metadata_defaults(
@@ -46,6 +55,7 @@ fn apply_namespace_metadata_defaults(
 /// core namespace, and that are somehow dynamic. This includes the node for each namespace,
 /// session diagnostics, etc.
 pub struct DiagnosticsNodeManager {
+    #[cfg(feature = "subscriptions")]
     sampler: SyncSampler,
     node_managers: NodeManagersRef,
     namespace_index: u16,
@@ -63,34 +73,6 @@ We want to produce consistent node IDs without a cache, so we use opaque node ID
 make identifiers that describe where to find the data. That way we can handle Read's
 of nodes without explicitly storing each node ID.
 */
-
-#[derive(Default, Clone, Debug)]
-/// Namespace metadata. This is visible in the namespace array under
-/// the `Server` node.
-pub struct NamespaceMetadata {
-    /// Default access restrictions on this namespace.
-    pub default_access_restrictions: AccessRestrictionType,
-    /// Default role permissions on this namespace.
-    pub default_role_permissions: Option<Vec<RolePermissionType>>,
-    /// Default user role permissions on this namespace.
-    pub default_user_role_permissions: Option<Vec<RolePermissionType>>,
-    /// Whether this namespace is a subset of the full namespace.
-    pub is_namespace_subset: Option<bool>,
-    /// Time this namespace was last updated.
-    pub namespace_publication_date: Option<DateTime>,
-    /// Namespace URI.
-    pub namespace_uri: String,
-    /// Namespace version.
-    pub namespace_version: Option<String>,
-    /// List of ID types in this namespace.
-    pub static_node_id_types: Option<Vec<IdType>>,
-    /// List of ranges for numeric node IDs on static nodes in this namespace.
-    pub static_numeric_node_id_range: Option<Vec<NumericRange>>,
-    /// Pattern that applies to string node IDs on static nodes in this namespace.
-    pub static_string_node_id_pattern: Option<String>,
-    /// Namespace index on the server.
-    pub namespace_index: u16,
-}
 
 #[derive(Default)]
 struct BrowseContinuationPoint {
@@ -128,6 +110,7 @@ impl DiagnosticsNodeManager {
             namespace_index
         };
         Self {
+            #[cfg(feature = "subscriptions")]
             sampler: SyncSampler::new(),
             node_managers: context.node_managers.clone(),
             namespace_index,
@@ -605,19 +588,23 @@ impl NodeManagerCore for DiagnosticsNodeManager {
         }]
     }
 
+    #[cfg_attr(not(feature = "subscriptions"), allow(unused_variables))]
     async fn init(&self, _type_tree: &mut DefaultTypeTree, context: ServerContext) {
-        let interval = context
-            .info
-            .config
-            .limits
-            .subscriptions
-            .min_sampling_interval_ms
-            .floor() as u64;
-        let sampler_interval = if interval > 0 { interval } else { 100 };
-        self.sampler.run(
-            Duration::from_millis(sampler_interval),
-            context.subscriptions.clone(),
-        );
+        #[cfg(feature = "subscriptions")]
+        {
+            let interval = context
+                .info
+                .config
+                .limits
+                .subscriptions
+                .min_sampling_interval_ms
+                .floor() as u64;
+            let sampler_interval = if interval > 0 { interval } else { 100 };
+            self.sampler.run(
+                Duration::from_millis(sampler_interval),
+                context.subscriptions.clone(),
+            );
+        }
     }
 }
 
@@ -711,6 +698,7 @@ impl ViewProvider for DiagnosticsNodeManager {
         Ok(())
     }
 
+    #[cfg(feature = "query")]
     async fn query(
         &self,
         _context: &RequestContext,
@@ -758,10 +746,13 @@ impl AttributeProvider for DiagnosticsNodeManager {
     }
 }
 
+#[cfg(feature = "history")]
 impl HistoryProvider for DiagnosticsNodeManager {}
 
+#[cfg(feature = "method-call")]
 impl MethodProvider for DiagnosticsNodeManager {}
 
+#[cfg(feature = "subscriptions")]
 impl MonitoredItemProvider for DiagnosticsNodeManager {}
 
 impl NodeMutator for DiagnosticsNodeManager {}

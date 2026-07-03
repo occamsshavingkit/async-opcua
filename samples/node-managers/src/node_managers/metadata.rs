@@ -8,10 +8,9 @@ use opcua::{
     nodes::{ObjectBuilder, VariableBuilder},
     server::{
         address_space::AddressSpace,
-        diagnostics::NamespaceMetadata,
         node_manager::{
             memory::{InMemoryNodeManagerImpl, InMemoryNodeManagerImplBuilder},
-            ParsedReadValueId, RequestContext, ServerContext,
+            NamespaceMetadata, ParsedReadValueId, RequestContext, ServerContext,
         },
     },
     sync::RwLock,

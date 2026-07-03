@@ -366,11 +366,10 @@ mod tests {
     use crate::{
         address_space::{AddressSpace, EventNotifier},
         authenticator::UserToken,
-        diagnostics::NamespaceMetadata,
         identity_token::IdentityToken,
         node_manager::{
             memory::{InMemoryNodeManager, InMemoryNodeManagerImpl},
-            ServerContext,
+            NamespaceMetadata, ServerContext,
         },
         session::instance::Session,
         ServerBuilder,

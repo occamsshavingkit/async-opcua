@@ -12,15 +12,17 @@ use parking_lot::RwLock;
 use tokio::sync::{mpsc, Notify};
 use tracing::{error, info};
 
+#[cfg(feature = "fota")]
+use crate::fota::cleanup::cleanup_session;
+#[cfg(feature = "subscriptions")]
+use crate::subscriptions::SubscriptionCache;
 use crate::{
     authenticator::UserToken,
     config::ANONYMOUS_USER_TOKEN_ID,
-    fota::cleanup::cleanup_session,
     identity_token::IdentityToken,
     info::ServerInfo,
     node_manager::{NodeManagers, RequestContext, RequestContextInner},
     rbac::resolver::ResolvedIdentity,
-    subscriptions::SubscriptionCache,
 };
 use opcua_types::{
     ActivateSessionRequest, ActivateSessionResponse, ByteString, CloseSessionRequest,
@@ -634,7 +636,7 @@ impl SessionManager {
         session: Arc<RwLock<Session>>,
         session_id_numeric: u32,
         node_managers: NodeManagers,
-        subscriptions: Arc<SubscriptionCache>,
+        #[cfg(feature = "subscriptions")] subscriptions: Arc<SubscriptionCache>,
     ) {
         let (sender, receiver) = mpsc::channel(SESSION_ACTOR_QUEUE_CAPACITY);
         self.register_actor_sender(authentication_token.clone(), sender);
@@ -650,6 +652,7 @@ impl SessionManager {
                 user_roles,
                 type_tree: self.info.type_tree.clone(),
                 type_tree_getter: self.info.type_tree_getter.clone(),
+                #[cfg(feature = "subscriptions")]
                 subscriptions,
                 info: self.info.clone(),
             }),
@@ -665,6 +668,7 @@ impl SessionManager {
                 actor_senders.remove(&terminated.authentication_token);
                 closed_auth_tokens.insert(terminated.authentication_token.clone(), Instant::now());
                 clear_session_locale_ids_for_node_id(&info, &terminated.session_id);
+                #[cfg(feature = "fota")]
                 cleanup_session(&info, &terminated.session_id);
             });
 
@@ -687,7 +691,7 @@ impl SessionManager {
         draft: CreateSessionDraft,
         channel: &mut SecureChannel,
         node_managers: NodeManagers,
-        subscriptions: Arc<SubscriptionCache>,
+        #[cfg(feature = "subscriptions")] subscriptions: Arc<SubscriptionCache>,
     ) -> Result<CreateSessionResponse, StatusCode> {
         // OPC-10000-4 5.7.2: CreateSession publishes a Session and its
         // authentication token, so the global session limit must be checked
@@ -736,14 +740,18 @@ impl SessionManager {
             session_arc,
             session_id_numeric,
             node_managers,
+            #[cfg(feature = "subscriptions")]
             subscriptions,
         );
         self.refresh_client_response_body_limit_for_channel(channel);
 
-        self.info
-            .diagnostics
-            .set_current_session_count(self.sessions.len() as u32);
-        self.info.diagnostics.inc_session_count();
+        #[cfg(feature = "diagnostics")]
+        {
+            self.info
+                .diagnostics
+                .set_current_session_count(self.sessions.len() as u32);
+            self.info.diagnostics.inc_session_count();
+        }
 
         self.notify.notify_waiters();
 
@@ -785,10 +793,13 @@ impl SessionManager {
         let Some(session) = self.sessions.remove(id) else {
             return;
         };
-        self.info
-            .diagnostics
-            .set_current_session_count(self.sessions.len() as u32);
-        self.info.diagnostics.inc_session_timeout_count();
+        #[cfg(feature = "diagnostics")]
+        {
+            self.info
+                .diagnostics
+                .set_current_session_count(self.sessions.len() as u32);
+            self.info.diagnostics.inc_session_timeout_count();
+        }
 
         info!(
             "Session {id} has expired, removing it from the session map. Subscriptions will remain until they individually expire"
@@ -807,9 +818,11 @@ impl SessionManager {
         let mut session = trace_write_lock!(session);
         session.close();
         drop(session);
+        #[cfg(feature = "fota")]
         cleanup_session(&self.info, id);
     }
 
+    #[cfg(feature = "fota")]
     pub(crate) fn cleanup_fota_for_secure_channel(&self, secure_channel_id: u32) {
         let session_ids = self
             .sessions
@@ -853,6 +866,7 @@ impl SessionManager {
 
 // This is a non-self method to avoid holding the manager
 // across an await point.
+#[cfg_attr(not(feature = "subscriptions"), allow(unused_variables))]
 pub(crate) async fn close_session(
     mgr_lck: &RwLock<SessionManager>,
     channel: &mut SecureChannel,
@@ -905,6 +919,7 @@ pub(crate) async fn close_session(
         let mut mgr = trace_write_lock!(mgr_lck);
         mgr.sessions.remove(&terminated.session_id);
         clear_session_locale_ids(&mgr.info, id);
+        #[cfg(feature = "diagnostics")]
         mgr.info
             .diagnostics
             .set_current_session_count(mgr.sessions.len() as u32);
@@ -912,6 +927,7 @@ pub(crate) async fn close_session(
     }
     info!("Closed session with ID {}", terminated.session_id);
 
+    #[cfg(feature = "subscriptions")]
     if request.delete_subscriptions {
         if let Some(token) = token {
             handler
@@ -1058,6 +1074,7 @@ pub(crate) async fn activate_session(
                     Some(session.session_id().clone())
                 };
                 audit::dispatch_user_certificate_audit(
+                    #[cfg(feature = "events")]
                     handler.subscriptions(),
                     &info,
                     &request.request_header,
@@ -1077,6 +1094,7 @@ pub(crate) async fn activate_session(
             };
             for finding in &validation.suppressed_findings {
                 audit::dispatch_user_certificate_audit(
+                    #[cfg(feature = "events")]
                     handler.subscriptions(),
                     &info,
                     &request.request_header,
@@ -1128,6 +1146,7 @@ pub(crate) async fn activate_session(
                 .map(|cert| cert.as_byte_string())
                 .unwrap_or_else(ByteString::null);
             audit::dispatch_certificate_mismatch(
+                #[cfg(feature = "events")]
                 handler.subscriptions(),
                 &info,
                 &request.request_header,
@@ -1227,11 +1246,14 @@ pub(crate) async fn activate_session(
         channel.set_namespaces(namespaces);
     }
 
+    #[cfg(feature = "subscriptions")]
     if user_changed {
         handler
             .revalidate_monitored_items_for_user(session_lck, session_id, user_token)
             .await;
     }
+    #[cfg(not(feature = "subscriptions"))]
+    let _ = user_changed;
 
     // TODO: Audit
 

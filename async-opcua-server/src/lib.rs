@@ -12,7 +12,9 @@
 
 pub mod address_space;
 /// Mathematical aggregates (Part 13) support.
+#[cfg(feature = "history-aggregates")]
 pub mod aggregates;
+#[cfg(feature = "alarms")]
 pub mod alarms;
 /// Authentication helpers.
 pub mod auth;
@@ -23,6 +25,7 @@ pub mod authorization {
 pub mod authenticator;
 mod builder;
 mod config;
+#[cfg(feature = "diagnostics")]
 pub mod diagnostics;
 #[cfg(feature = "discovery-server-registration")]
 mod discovery;
@@ -30,10 +33,13 @@ mod discovery;
 #[path = "discovery/mdns.rs"]
 mod discovery_mdns;
 /// Firmware-over-the-air file transfer helpers.
+#[cfg(feature = "fota")]
 pub mod fota;
 /// Global Discovery Server (GDS) support.
+#[cfg(feature = "gds")]
 pub mod gds;
 /// Historical data access (HDA) support.
+#[cfg(feature = "history")]
 pub mod history;
 mod identity_token;
 mod info;
@@ -44,7 +50,12 @@ pub mod node_manager;
 /// Runtime NodeSet2 loader support.
 pub mod nodeset_loader;
 /// Program execution (Part 10) support.
+#[cfg(feature = "programs")]
 pub mod programs;
+#[cfg(feature = "rbac")]
+pub(crate) mod rbac;
+#[cfg(not(feature = "rbac"))]
+#[path = "rbac_stub.rs"]
 pub(crate) mod rbac;
 mod reverse_connect;
 mod server;
@@ -57,15 +68,18 @@ pub mod services;
 pub mod session;
 #[cfg(not(any(test, feature = "test-utils")))]
 mod session;
+#[cfg(feature = "subscriptions")]
 mod subscriptions;
 mod transport;
 
 pub use builder::ServerBuilder;
 pub use config::*;
+#[cfg(feature = "history")]
 pub use history::{attach_annotations_property, InMemoryDataHistory, InMemoryEventHistory};
 pub use identity_token::IdentityToken;
 pub use info::ServerInfo;
 pub use opcua_types::event_field::EventField;
+#[cfg(feature = "rbac")]
 pub use rbac::{
     anonymous_permissions, authenticated_user_permissions, configure_admin_permissions,
     engineer_permissions, observer_permissions, operator_permissions, rules::IdentityMappingRule,
@@ -79,12 +93,14 @@ pub use server::Server;
 pub use server_handle::ServerHandle;
 pub use server_status::ServerStatusWrapper;
 pub use session::continuation_points::ContinuationPoint;
+#[cfg(feature = "subscriptions")]
 pub use subscriptions::{
     CreateMonitoredItem, MonitoredItem, MonitoredItemHandle, SessionSubscriptions, Subscription,
     SubscriptionCache, SubscriptionState,
 };
 
 /// Notification allocation pooling utilities.
+#[cfg(feature = "subscriptions")]
 pub mod pool {
     pub use super::subscriptions::pool::NotificationBuffer;
 }
@@ -92,11 +108,13 @@ pub mod pool {
 /// Utilities for efficiently notifying subscriptions.
 ///
 /// See [SubscriptionCache::data_notifier] and [SubscriptionCache::event_notifier].
+#[cfg(feature = "subscriptions")]
 pub mod notify {
     pub use super::subscriptions::{
         MonitoredItemEntry, SubscriptionDataNotifier, SubscriptionDataNotifierBatch,
-        SubscriptionEventNotifier, SubscriptionEventNotifierBatch,
     };
+    #[cfg(feature = "events")]
+    pub use super::subscriptions::{SubscriptionEventNotifier, SubscriptionEventNotifierBatch};
 }
 
 /// Contains constaints for default configuration values.

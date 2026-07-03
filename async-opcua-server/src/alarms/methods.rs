@@ -5,14 +5,15 @@ use crate::alarms::dialog::DialogRegistry;
 use crate::alarms::dispatch::ServerAlarmEvent;
 use crate::alarms::refresh_events::{RefreshEndEvent, RefreshStartEvent};
 use crate::alarms::registry::ConditionRegistry;
-use crate::alarms::state_machine::{Branch, ConditionStateMachine};
+use crate::alarms::state_machine::Branch;
+use crate::alarms::state_machine::ConditionStateMachine;
 use crate::alarms::transitions::{acknowledge_alarm, confirm_alarm};
 use crate::node_manager::RequestContext;
 use crate::MonitoredItemHandle;
 use opcua_core::events::AlarmEvent;
 use opcua_core::traits::ConditionMethodHandler;
 use opcua_nodes::{Event, EventField};
-#[cfg(feature = "generated-address-space")]
+#[cfg(all(feature = "generated-address-space", feature = "method-call"))]
 use opcua_types::MethodId;
 use opcua_types::{
     AttributeId, ByteString, DateTime, LocalizedText, NodeId, NumericRange, QualifiedName,
@@ -143,9 +144,7 @@ impl AlarmMethodHandler {
             retain,
         };
 
-        let wrapper = ServerAlarmEvent { event: &event };
-        let items = std::iter::once((&wrapper as &dyn Event, &event.source_node));
-        context.subscriptions.notify_events(items);
+        notify_alarm_event(context, &event);
 
         Ok(vec![])
     }
@@ -217,9 +216,7 @@ impl AlarmMethodHandler {
             retain,
         };
 
-        let wrapper = ServerAlarmEvent { event: &event };
-        let items = std::iter::once((&wrapper as &dyn Event, &event.source_node));
-        context.subscriptions.notify_events(items);
+        notify_alarm_event(context, &event);
 
         Ok(vec![])
     }
@@ -272,9 +269,7 @@ impl AlarmMethodHandler {
         let mut address_space = opcua_core::trace_write_lock!(self.address_space);
         match confirm_alarm(&mut address_space, &self.state_machine, comment) {
             Ok(Some(event)) => {
-                let wrapper = ServerAlarmEvent { event: &event };
-                let items = std::iter::once((&wrapper as &dyn Event, &event.source_node));
-                context.subscriptions.notify_events(items);
+                notify_alarm_event(context, &event);
                 Ok(vec![])
             }
             Ok(None) => Ok(vec![]),
@@ -634,7 +629,7 @@ impl EventField for OwnedAlarmEvent {
 }
 
 /// Registers standard ConditionRefresh, ConditionRefresh2, AddComment, Acknowledge, and Confirm method callbacks.
-#[cfg(feature = "generated-address-space")]
+#[cfg(all(feature = "generated-address-space", feature = "method-call"))]
 pub fn register_condition_methods(
     core_node_manager: &crate::node_manager::memory::CoreNodeManager,
     registry: ConditionRegistry,
@@ -699,7 +694,7 @@ pub fn register_condition_methods(
 }
 
 /// Registers standard DialogConditionType Respond and Respond2 method callbacks.
-#[cfg(feature = "generated-address-space")]
+#[cfg(all(feature = "generated-address-space", feature = "method-call"))]
 pub fn register_dialog_condition_methods(
     core_node_manager: &crate::node_manager::memory::CoreNodeManager,
     registry: DialogRegistry,

@@ -14,20 +14,31 @@ macro_rules! take_service_items {
 }
 
 mod attribute;
+#[cfg(feature = "method-call")]
 mod method;
+#[cfg(feature = "subscriptions")]
 mod monitored_items;
+#[cfg(feature = "node-management")]
 mod node_management;
+#[cfg(feature = "query")]
 mod query;
+#[cfg(feature = "subscriptions")]
 mod subscriptions;
 mod view;
 
 use std::{future::Future, sync::Arc};
 
+#[cfg(any(feature = "history", feature = "subscriptions-standard"))]
 pub(super) use attribute::*;
+#[cfg(feature = "method-call")]
 pub(super) use method::*;
+#[cfg(feature = "subscriptions")]
 pub(super) use monitored_items::*;
+#[cfg(feature = "node-management")]
 pub(super) use node_management::*;
+#[cfg(feature = "query")]
 pub(super) use query::*;
+#[cfg(feature = "subscriptions")]
 pub(super) use subscriptions::*;
 pub(super) use view::*;
 
@@ -87,6 +98,7 @@ pub(crate) async fn invoke_service_concurrently_mut<T, F>(
     futures::future::join_all(futures).await;
 }
 
+#[cfg(feature = "subscriptions")]
 trait ServiceCbRef<T> {
     fn call(
         &self,
@@ -96,6 +108,7 @@ trait ServiceCbRef<T> {
     ) -> impl Future<Output = ()> + Send;
 }
 
+#[cfg(feature = "subscriptions")]
 async fn invoke_service_concurrently<T, F>(
     context: RequestContext,
     items: &[T],

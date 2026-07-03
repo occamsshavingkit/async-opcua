@@ -1,22 +1,30 @@
+#[cfg(feature = "subscriptions")]
+use std::time::Duration;
 use std::{
     sync::{Arc, OnceLock},
-    time::{Duration, Instant},
+    time::Instant,
 };
 
 use opcua_core::sync::Mutex;
+#[cfg(feature = "subscriptions")]
+use opcua_types::{AttributeId, DataValue, MonitoringMode, NodeId, VariableId};
 use opcua_types::{
-    AttributeId, BuildInfo, DataValue, DateTime, ExtensionObject, LocalizedText, MonitoringMode,
-    NodeId, ServerState, ServerStatusDataType, VariableId,
+    BuildInfo, DateTime, ExtensionObject, LocalizedText, ServerState, ServerStatusDataType,
 };
 
-use crate::{node_manager::SyncSampler, SubscriptionCache};
+#[cfg(feature = "subscriptions")]
+use crate::node_manager::SyncSampler;
+#[cfg(feature = "subscriptions")]
+use crate::SubscriptionCache;
 
 // Note: some of these are unused if the generated namespace feature is disabled.
 
 /// Wrapper for managing the `ServerStatus` variable on the server.
 pub struct ServerStatusWrapper {
     status: Arc<Mutex<ServerStatusDataType>>,
+    #[cfg(feature = "subscriptions")]
     subscriptions: Arc<SubscriptionCache>,
+    #[cfg(feature = "subscriptions")]
     #[allow(unused)]
     sampler: SyncSampler,
     shutdown: Arc<OnceLock<ShutdownTarget>>,
@@ -31,8 +39,13 @@ struct ShutdownTarget {
 
 #[allow(unused)]
 impl ServerStatusWrapper {
-    pub(crate) fn new(build_info: BuildInfo, subscriptions: Arc<SubscriptionCache>) -> Self {
+    pub(crate) fn new(
+        build_info: BuildInfo,
+        #[cfg(feature = "subscriptions")] subscriptions: Arc<SubscriptionCache>,
+    ) -> Self {
+        #[cfg(feature = "subscriptions")]
         let sampler = SyncSampler::new();
+        #[cfg(feature = "subscriptions")]
         sampler.run(Duration::from_secs(1), subscriptions.clone());
 
         Self {
@@ -44,12 +57,15 @@ impl ServerStatusWrapper {
                 seconds_till_shutdown: 0,
                 shutdown_reason: LocalizedText::null(),
             })),
+            #[cfg(feature = "subscriptions")]
             subscriptions,
+            #[cfg(feature = "subscriptions")]
             sampler,
             shutdown: Arc::new(OnceLock::new()),
         }
     }
 
+    #[cfg(feature = "subscriptions")]
     pub(crate) fn get_managed_id(&self, id: &NodeId) -> Option<VariableId> {
         let Ok(var_id) = id.as_variable_id() else {
             return None;
@@ -67,6 +83,7 @@ impl ServerStatusWrapper {
         }
     }
 
+    #[cfg(feature = "subscriptions")]
     pub(crate) fn subscribe_to_component(
         &self,
         id: VariableId,
@@ -135,10 +152,12 @@ impl ServerStatusWrapper {
         }
     }
 
+    #[cfg(feature = "subscriptions")]
     pub(crate) fn sampler(&self) -> &SyncSampler {
         &self.sampler
     }
 
+    #[cfg(feature = "subscriptions")]
     fn notify_status_object_change(&self) {
         self.subscriptions.maybe_notify(
             [(&VariableId::Server_ServerStatus.into(), AttributeId::Value)].into_iter(),
@@ -158,6 +177,7 @@ impl ServerStatusWrapper {
     /// behavior.
     pub fn set_state(&self, state: ServerState) {
         self.status.lock().state = state;
+        #[cfg(feature = "subscriptions")]
         self.subscriptions.notify_data_change(
             [(
                 DataValue::new_now(state as i32),
@@ -166,6 +186,7 @@ impl ServerStatusWrapper {
             )]
             .into_iter(),
         );
+        #[cfg(feature = "subscriptions")]
         self.notify_status_object_change();
     }
 

@@ -1,32 +1,45 @@
-use std::{
-    collections::HashMap,
-    sync::{Arc, Weak},
-    time::Duration,
-};
+#[cfg(all(feature = "alarms", feature = "subscriptions"))]
+use std::sync::Weak;
+#[cfg(any(feature = "subscriptions", feature = "alarms"))]
+use std::time::Duration;
+use std::{collections::HashMap, sync::Arc};
 
 use async_trait::async_trait;
 use opcua_core::{trace_read_lock, trace_write_lock};
 use opcua_nodes::{HasNodeId, NodeSetImport};
 
+#[cfg(all(feature = "alarms", feature = "subscriptions"))]
+use crate::alarms::ServerAlarmEvent;
+#[cfg(feature = "alarms")]
+use crate::alarms::{AlarmSourceRegistry, LimitAlarm};
+#[cfg(feature = "history")]
+use crate::history::read::modification_infos_or_none;
+#[cfg(feature = "method-call")]
+use crate::node_manager::MethodCall;
 use crate::{
     address_space::{read_node_value, write_node_value, AddressSpace, NodeType},
-    alarms::{AlarmSourceRegistry, LimitAlarm, ServerAlarmEvent},
-    history::read::modification_infos_or_none,
     node_manager::{
-        DefaultTypeTree, MethodCall, MonitoredItemRef, MonitoredItemUpdateRef, NodeManagerBuilder,
-        NodeManagersRef, ParsedReadValueId, RequestContext, ServerContext, SyncSampler, WriteNode,
+        DefaultTypeTree, NamespaceMetadata, NodeManagerBuilder, NodeManagersRef, ParsedReadValueId,
+        RequestContext, ServerContext, WriteNode,
     },
+};
+#[cfg(feature = "subscriptions")]
+use crate::{
+    node_manager::{MonitoredItemRef, MonitoredItemUpdateRef, SyncSampler},
     CreateMonitoredItem, SubscriptionCache,
 };
 use opcua_core::sync::RwLock;
+#[cfg(feature = "subscriptions")]
+use opcua_types::MonitoringMode;
+#[cfg(feature = "method-call")]
+use opcua_types::Variant;
 use opcua_types::{
-    AttributeId, DataValue, MonitoringMode, NodeClass, NodeId, NumericRange, StatusCode,
-    TimestampsToReturn, Variant,
+    AttributeId, DataValue, NodeClass, NodeId, NumericRange, StatusCode, TimestampsToReturn,
 };
 
 use super::{
     InMemoryNodeManager, InMemoryNodeManagerBuilder, InMemoryNodeManagerImpl,
-    InMemoryNodeManagerImplBuilder, NamespaceMetadata,
+    InMemoryNodeManagerImplBuilder,
 };
 
 /// A simple in-memory node manager with utility methods for updating the address space,
@@ -64,7 +77,9 @@ enum PreparedReadValue {
     },
 }
 
+#[cfg(feature = "method-call")]
 type MethodCB = Arc<dyn Fn(&[Variant]) -> Result<Vec<Variant>, StatusCode> + Send + Sync + 'static>;
+#[cfg(feature = "method-call")]
 type MethodWithContextCB = Arc<
     dyn Fn(&RequestContext, &[Variant]) -> Result<Vec<Variant>, StatusCode> + Send + Sync + 'static,
 >;
@@ -153,49 +168,63 @@ pub fn simple_node_manager_imports(
 pub struct SimpleNodeManagerImpl {
     write_cbs: RwLock<HashMap<NodeId, WriteCB>>,
     read_cbs: RwLock<HashMap<NodeId, ReadCB>>,
+    #[cfg(feature = "method-call")]
     method_cbs: RwLock<HashMap<NodeId, MethodCB>>,
+    #[cfg(feature = "method-call")]
     method_with_context_cbs: RwLock<HashMap<NodeId, MethodWithContextCB>>,
     namespaces: Vec<NamespaceMetadata>,
     #[allow(unused)]
     node_managers: NodeManagersRef,
     name: String,
+    #[cfg(feature = "subscriptions")]
     samplers: SyncSampler,
+    #[cfg(feature = "history")]
     history_backend: RwLock<Option<Arc<dyn crate::history::HistoryStorageBackend>>>,
+    #[cfg(feature = "subscriptions")]
     subscriptions: RwLock<Option<Arc<SubscriptionCache>>>,
+    #[cfg(feature = "alarms")]
     alarm_sources: Arc<AlarmSourceRegistry>,
+    #[cfg(all(feature = "alarms", feature = "subscriptions"))]
     source_alarm_sampler_started: RwLock<bool>,
 }
 
 #[async_trait]
 impl InMemoryNodeManagerImpl for SimpleNodeManagerImpl {
+    #[cfg_attr(not(feature = "subscriptions"), allow(unused_variables))]
     async fn init(&self, _address_space: &mut AddressSpace, context: ServerContext) {
-        *self.subscriptions.write() = Some(context.subscriptions.clone());
-        let manager = self
-            .node_managers
-            .get_by_name::<SimpleNodeManager>(&self.name)
-            .expect("simple node manager must be registered before sampling alarm sources");
-        self.spawn_alarm_source_sampler(
-            Arc::clone(manager.address_space()),
-            Arc::downgrade(&context.subscriptions),
-        );
-        self.samplers.run(
-            Duration::from_micros(
-                // If this is set too low the server will just spin at 100% CPU. Cap it at
-                // 100 ms. In custom node manager implementations using the sync sampler
-                // users are free to set whatever minimum they want.
-                // In practice, if you need sampling rates much lower than 100ms you
-                // will likely want a different mechanism than the sync sampler.
-                (context
-                    .info
-                    .config
-                    .limits
-                    .subscriptions
-                    .min_sampling_interval_ms
-                    .max(100.0)
-                    * 1000.0) as u64,
-            ),
-            context.subscriptions.clone(),
-        );
+        #[cfg(feature = "subscriptions")]
+        {
+            *self.subscriptions.write() = Some(context.subscriptions.clone());
+            #[cfg(feature = "alarms")]
+            {
+                let manager = self
+                    .node_managers
+                    .get_by_name::<SimpleNodeManager>(&self.name)
+                    .expect("simple node manager must be registered before sampling alarm sources");
+                self.spawn_alarm_source_sampler(
+                    Arc::clone(manager.address_space()),
+                    Arc::downgrade(&context.subscriptions),
+                );
+            }
+            self.samplers.run(
+                Duration::from_micros(
+                    // If this is set too low the server will just spin at 100% CPU. Cap it at
+                    // 100 ms. In custom node manager implementations using the sync sampler
+                    // users are free to set whatever minimum they want.
+                    // In practice, if you need sampling rates much lower than 100ms you
+                    // will likely want a different mechanism than the sync sampler.
+                    (context
+                        .info
+                        .config
+                        .limits
+                        .subscriptions
+                        .min_sampling_interval_ms
+                        .max(100.0)
+                        * 1000.0) as u64,
+                ),
+                context.subscriptions.clone(),
+            );
+        }
     }
 
     fn namespaces(&self) -> Vec<NamespaceMetadata> {
@@ -253,6 +282,7 @@ impl InMemoryNodeManagerImpl for SimpleNodeManagerImpl {
             .collect()
     }
 
+    #[cfg(feature = "subscriptions")]
     async fn create_value_monitored_items(
         &self,
         context: &RequestContext,
@@ -303,6 +333,7 @@ impl InMemoryNodeManagerImpl for SimpleNodeManagerImpl {
         }
     }
 
+    #[cfg(feature = "subscriptions")]
     async fn modify_monitored_items(
         &self,
         _context: &RequestContext,
@@ -318,6 +349,7 @@ impl InMemoryNodeManagerImpl for SimpleNodeManagerImpl {
         }
     }
 
+    #[cfg(feature = "subscriptions")]
     async fn set_monitoring_mode(
         &self,
         _context: &RequestContext,
@@ -330,6 +362,7 @@ impl InMemoryNodeManagerImpl for SimpleNodeManagerImpl {
         }
     }
 
+    #[cfg(feature = "subscriptions")]
     async fn delete_monitored_items(&self, _context: &RequestContext, items: &[&MonitoredItemRef]) {
         for it in items {
             self.samplers
@@ -343,6 +376,7 @@ impl InMemoryNodeManagerImpl for SimpleNodeManagerImpl {
         address_space: &RwLock<AddressSpace>,
         nodes_to_write: &mut [&mut WriteNode],
     ) -> Result<(), StatusCode> {
+        #[cfg(all(feature = "alarms", feature = "subscriptions"))]
         let mut source_writes: Vec<(NodeId, DataValue)> = Vec::new();
 
         for write in nodes_to_write {
@@ -354,19 +388,27 @@ impl InMemoryNodeManagerImpl for SimpleNodeManagerImpl {
                 self.prepare_write_node_value(&cbs, context, &address_space, &type_tree, write)
             };
 
-            if let Some(notification) = Self::finish_prepared_write(prepared, write) {
+            let notification = Self::finish_prepared_write(prepared, write);
+            #[cfg(feature = "subscriptions")]
+            if let Some(notification) = notification {
                 Self::notify_write_data_change(context, notification);
             }
+            #[cfg(not(feature = "subscriptions"))]
+            let _ = notification;
 
-            let source = &write.value().node_id;
-            if write.status().is_good()
-                && write.value().attribute_id == AttributeId::Value
-                && !self.alarm_source_registry().alarms_for(source).is_empty()
+            #[cfg(all(feature = "alarms", feature = "subscriptions"))]
             {
-                source_writes.push((source.clone(), write.value().value.clone()));
+                let source = &write.value().node_id;
+                if write.status().is_good()
+                    && write.value().attribute_id == AttributeId::Value
+                    && !self.alarm_source_registry().alarms_for(source).is_empty()
+                {
+                    source_writes.push((source.clone(), write.value().value.clone()));
+                }
             }
         }
 
+        #[cfg(all(feature = "alarms", feature = "subscriptions"))]
         if !source_writes.is_empty() {
             let mut address_space = trace_write_lock!(address_space);
 
@@ -384,6 +426,7 @@ impl InMemoryNodeManagerImpl for SimpleNodeManagerImpl {
         Ok(())
     }
 
+    #[cfg(feature = "method-call")]
     async fn call(
         &self,
         context: &RequestContext,
@@ -428,6 +471,7 @@ impl InMemoryNodeManagerImpl for SimpleNodeManagerImpl {
         Ok(())
     }
 
+    #[cfg(feature = "history")]
     async fn history_read_raw_modified(
         &self,
         _context: &RequestContext,
@@ -498,12 +542,17 @@ impl InMemoryNodeManagerImpl for SimpleNodeManagerImpl {
         }
     }
 
+    #[cfg(feature = "history")]
     async fn history_read_processed(
         &self,
+        #[cfg_attr(not(feature = "history-aggregates"), allow(unused_variables))]
         context: &RequestContext,
+        #[cfg_attr(not(feature = "history-aggregates"), allow(unused_variables))]
         address_space: &RwLock<AddressSpace>,
+        #[cfg_attr(not(feature = "history-aggregates"), allow(unused_variables))]
         details: &opcua_types::ReadProcessedDetails,
         nodes: &mut [&mut &mut crate::node_manager::history::HistoryNode],
+        #[cfg_attr(not(feature = "history-aggregates"), allow(unused_variables))]
         timestamps_to_return: TimestampsToReturn,
     ) -> Result<(), StatusCode> {
         let backend = {
@@ -511,28 +560,42 @@ impl InMemoryNodeManagerImpl for SimpleNodeManagerImpl {
             guard.clone()
         };
         if let Some(backend) = backend {
-            let stepped: Vec<bool> = {
-                let space = trace_read_lock!(address_space);
-                nodes
-                    .iter()
-                    .map(|n| crate::aggregates::resolve_stepped(&space, n.node_id()))
-                    .collect()
-            };
+            #[cfg(not(feature = "history-aggregates"))]
+            let _ = backend;
+            #[cfg(feature = "history-aggregates")]
+            {
+                let stepped: Vec<bool> = {
+                    let space = trace_read_lock!(address_space);
+                    nodes
+                        .iter()
+                        .map(|n| crate::aggregates::resolve_stepped(&space, n.node_id()))
+                        .collect()
+                };
 
-            crate::aggregates::read_processed_aggregates(
-                &backend,
-                context,
-                details,
-                nodes,
-                timestamps_to_return,
-                &stepped,
-            )
-            .await
+                crate::aggregates::read_processed_aggregates(
+                    &backend,
+                    context,
+                    details,
+                    nodes,
+                    timestamps_to_return,
+                    &stepped,
+                )
+                .await
+            }
+            #[cfg(not(feature = "history-aggregates"))]
+            {
+                let _ = timestamps_to_return;
+                for node in nodes {
+                    node.set_status(StatusCode::BadAggregateNotSupported);
+                }
+                Ok(())
+            }
         } else {
             Err(StatusCode::BadHistoryOperationUnsupported)
         }
     }
 
+    #[cfg(feature = "history")]
     async fn history_read_events(
         &self,
         _context: &RequestContext,
@@ -592,6 +655,7 @@ impl InMemoryNodeManagerImpl for SimpleNodeManagerImpl {
         }
     }
 
+    #[cfg(feature = "history")]
     async fn history_read_annotations(
         &self,
         _context: &RequestContext,
@@ -653,6 +717,7 @@ impl InMemoryNodeManagerImpl for SimpleNodeManagerImpl {
         }
     }
 
+    #[cfg(feature = "history")]
     async fn history_release_continuation_point(
         &self,
         _context: &RequestContext,
@@ -679,6 +744,7 @@ impl InMemoryNodeManagerImpl for SimpleNodeManagerImpl {
         }
     }
 
+    #[cfg(feature = "history")]
     async fn history_update(
         &self,
         _context: &RequestContext,
@@ -804,30 +870,40 @@ impl SimpleNodeManagerImpl {
         Self {
             write_cbs: Default::default(),
             read_cbs: Default::default(),
+            #[cfg(feature = "method-call")]
             method_cbs: Default::default(),
+            #[cfg(feature = "method-call")]
             method_with_context_cbs: Default::default(),
             namespaces,
             name: name.to_owned(),
             node_managers,
+            #[cfg(feature = "subscriptions")]
             samplers: SyncSampler::new(),
+            #[cfg(feature = "history")]
             history_backend: RwLock::new(None),
+            #[cfg(feature = "subscriptions")]
             subscriptions: RwLock::new(None),
+            #[cfg(feature = "alarms")]
             alarm_sources: Arc::new(AlarmSourceRegistry::new()),
+            #[cfg(all(feature = "alarms", feature = "subscriptions"))]
             source_alarm_sampler_started: RwLock::new(false),
         }
     }
 
     /// Sets the historical storage backend for this node manager.
+    #[cfg(feature = "history")]
     pub fn set_history_backend(&self, backend: Arc<dyn crate::history::HistoryStorageBackend>) {
         *self.history_backend.write() = Some(backend);
     }
 
     /// Returns the registry of alarms bound to source Variables.
+    #[cfg(feature = "alarms")]
     pub fn alarm_source_registry(&self) -> &AlarmSourceRegistry {
         self.alarm_sources.as_ref()
     }
 
     /// Binds a limit alarm to a source Variable and registers it for source writes.
+    #[cfg(feature = "alarms")]
     pub fn monitor_alarm_source(&self, source: &NodeId, alarm: LimitAlarm) -> Arc<LimitAlarm> {
         self.node_managers
             .get_by_name::<SimpleNodeManager>(&self.name)
@@ -836,6 +912,7 @@ impl SimpleNodeManagerImpl {
     }
 
     /// Binds a limit alarm to a source Variable with opt-in periodic source sampling.
+    #[cfg(feature = "alarms")]
     pub fn monitor_alarm_source_sampled(
         &self,
         source: &NodeId,
@@ -848,6 +925,7 @@ impl SimpleNodeManagerImpl {
             .monitor_alarm_source_sampled(source, alarm, interval)
     }
 
+    #[cfg(feature = "alarms")]
     fn monitor_alarm_source_on_address_space(
         &self,
         address_space: &RwLock<AddressSpace>,
@@ -860,6 +938,7 @@ impl SimpleNodeManagerImpl {
         alarm
     }
 
+    #[cfg(feature = "alarms")]
     fn monitor_alarm_source_sampled_on_address_space(
         &self,
         address_space: &RwLock<AddressSpace>,
@@ -873,6 +952,7 @@ impl SimpleNodeManagerImpl {
         alarm
     }
 
+    #[cfg(feature = "alarms")]
     fn bind_alarm_source_on_address_space(
         address_space: &RwLock<AddressSpace>,
         source: &NodeId,
@@ -890,6 +970,7 @@ impl SimpleNodeManagerImpl {
         Arc::new(alarm)
     }
 
+    #[cfg(all(feature = "alarms", feature = "subscriptions"))]
     fn spawn_alarm_source_sampler(
         &self,
         address_space: Arc<RwLock<AddressSpace>>,
@@ -909,6 +990,7 @@ impl SimpleNodeManagerImpl {
         });
     }
 
+    #[cfg(all(feature = "alarms", feature = "subscriptions"))]
     async fn run_alarm_source_sampler(
         address_space: Arc<RwLock<AddressSpace>>,
         alarm_sources: Arc<AlarmSourceRegistry>,
@@ -953,6 +1035,7 @@ impl SimpleNodeManagerImpl {
         }
     }
 
+    #[cfg(all(feature = "alarms", feature = "subscriptions"))]
     fn read_current_source_value(
         address_space: &RwLock<AddressSpace>,
         source: &NodeId,
@@ -971,6 +1054,7 @@ impl SimpleNodeManagerImpl {
         )
     }
 
+    #[cfg(all(feature = "alarms", feature = "subscriptions"))]
     fn reevaluate_and_dispatch(
         alarm_sources: &AlarmSourceRegistry,
         space: &mut AddressSpace,
@@ -992,6 +1076,7 @@ impl SimpleNodeManagerImpl {
     }
 
     /// Programmatically sets a source Variable value and re-evaluates bound alarms.
+    #[cfg(all(feature = "alarms", feature = "subscriptions"))]
     pub fn set_source_value(&self, source: &NodeId, value: DataValue) {
         if let Some(manager) = self
             .node_managers
@@ -1001,6 +1086,7 @@ impl SimpleNodeManagerImpl {
         }
     }
 
+    #[cfg(all(feature = "alarms", feature = "subscriptions"))]
     fn set_source_value_on_address_space(
         &self,
         address_space: &RwLock<AddressSpace>,
@@ -1171,6 +1257,7 @@ impl SimpleNodeManagerImpl {
             .map(|value| (value, node.node_id().clone(), attribute_id))
     }
 
+    #[cfg(feature = "subscriptions")]
     fn notify_write_data_change(context: &RequestContext, notification: WriteNotification) {
         let (value, node_id, attribute_id) = notification;
         context
@@ -1209,6 +1296,7 @@ impl SimpleNodeManagerImpl {
     }
 
     /// Add a callback for `Call` on the method given by `id`.
+    #[cfg(feature = "method-call")]
     pub fn add_method_callback(
         &self,
         id: NodeId,
@@ -1219,6 +1307,7 @@ impl SimpleNodeManagerImpl {
     }
 
     /// Add a callback for `Call` on the method given by `id` that has access to the RequestContext.
+    #[cfg(feature = "method-call")]
     pub fn add_method_callback_with_context(
         &self,
         id: NodeId,
@@ -1234,6 +1323,7 @@ impl SimpleNodeManagerImpl {
 
 impl InMemoryNodeManager<SimpleNodeManagerImpl> {
     /// Binds a limit alarm to a source Variable and registers it for source writes.
+    #[cfg(feature = "alarms")]
     pub fn monitor_alarm_source(&self, source: &NodeId, alarm: LimitAlarm) -> Arc<LimitAlarm> {
         self.inner().monitor_alarm_source_on_address_space(
             self.address_space().as_ref(),
@@ -1243,6 +1333,7 @@ impl InMemoryNodeManager<SimpleNodeManagerImpl> {
     }
 
     /// Binds a limit alarm to a source Variable with opt-in periodic source sampling.
+    #[cfg(feature = "alarms")]
     pub fn monitor_alarm_source_sampled(
         &self,
         source: &NodeId,
@@ -1258,6 +1349,7 @@ impl InMemoryNodeManager<SimpleNodeManagerImpl> {
     }
 
     /// Programmatically sets a source Variable value and re-evaluates bound alarms.
+    #[cfg(all(feature = "alarms", feature = "subscriptions"))]
     pub fn set_source_value(&self, source: &NodeId, value: DataValue) {
         self.inner().set_source_value_on_address_space(
             self.address_space().as_ref(),

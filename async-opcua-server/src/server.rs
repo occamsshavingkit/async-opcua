@@ -24,11 +24,12 @@ use tracing::{debug, error, info, warn};
 use opcua_core::{config::Config, handle::AtomicHandle};
 use opcua_crypto::{CertificateStore, RevocationMode, ValidationOptions};
 
+#[cfg(feature = "diagnostics")]
+use crate::diagnostics::ServerDiagnostics;
 use crate::metrics::ServerMetricsSnapshot;
 #[cfg(feature = "wss")]
 use crate::transport::WebSocketConnector;
 use crate::{
-    diagnostics::ServerDiagnostics,
     node_manager::{DefaultTypeTreeGetter, ServerContext},
     reverse_connect::{self, ReverseConnectionManager},
     session::controller::{ControllerCommand, SessionStarter},
@@ -40,6 +41,8 @@ use crate::{
 };
 use opcua_types::{DateTime, LocalizedText, ServerState, UAString};
 
+#[cfg(feature = "subscriptions")]
+use super::subscriptions::SubscriptionCache;
 use super::{
     authenticator::DefaultAuthenticator,
     builder::ServerBuilder,
@@ -48,7 +51,6 @@ use super::{
     node_manager::{NodeManagers, NodeManagersRef},
     server_handle::ServerHandle,
     session::manager::SessionManager,
-    subscriptions::SubscriptionCache,
     ServerCapabilities,
 };
 
@@ -70,6 +72,7 @@ struct TcpConnectionDeps {
     session_manager: Arc<RwLock<SessionManager>>,
     certificate_store: Arc<RwLock<CertificateStore>>,
     node_managers: NodeManagers,
+    #[cfg(feature = "subscriptions")]
     subscriptions: Arc<SubscriptionCache>,
 }
 
@@ -146,6 +149,7 @@ impl TcpConnectionDeps {
                     self.session_manager.clone(),
                     self.certificate_store.clone(),
                     self.node_managers.clone(),
+                    #[cfg(feature = "subscriptions")]
                     self.subscriptions.clone(),
                 );
                 spawn_connection(conn, recv, token, connection_counter)
@@ -163,6 +167,7 @@ impl TcpConnectionDeps {
                     self.session_manager.clone(),
                     self.certificate_store.clone(),
                     self.node_managers.clone(),
+                    #[cfg(feature = "subscriptions")]
                     self.subscriptions.clone(),
                 );
                 spawn_connection(conn, recv, token, connection_counter)
@@ -259,6 +264,7 @@ pub struct Server {
     /// Context for use by connections to access general server state.
     info: Arc<ServerInfo>,
     /// Subscription cache, global because subscriptions outlive sessions.
+    #[cfg(feature = "subscriptions")]
     subscriptions: Arc<SubscriptionCache>,
     /// List of node managers
     node_managers: NodeManagers,
@@ -336,11 +342,17 @@ impl Server {
             ..Default::default()
         });
 
-        let mut role_resolver =
-            crate::rbac::resolver::RoleResolver::from_user_tokens(&config.user_tokens);
-        for mapping in &config.identity_mapping_rules {
-            role_resolver.add_mapping(mapping.role_node_id.clone(), mapping.rule.clone());
-        }
+        #[cfg(feature = "rbac")]
+        let role_resolver = {
+            let mut role_resolver =
+                crate::rbac::resolver::RoleResolver::from_user_tokens(&config.user_tokens);
+            for mapping in &config.identity_mapping_rules {
+                role_resolver.add_mapping(mapping.role_node_id.clone(), mapping.rule.clone());
+            }
+            role_resolver
+        };
+        #[cfg(not(feature = "rbac"))]
+        let role_resolver = crate::rbac::resolver::RoleResolver;
         let namespace_defaults =
             crate::rbac::defaults::NamespaceDefaults::from_config(&config.namespace_defaults);
         let config = Arc::new(config);
@@ -361,7 +373,7 @@ impl Server {
             None
         };
 
-        #[cfg(feature = "discovery-mdns")]
+        #[cfg(all(feature = "lds", feature = "discovery-mdns"))]
         let registered_mdns = if config.multicast_discovery.enabled {
             match crate::discovery_mdns::MdnsAdvertisementRegistry::new() {
                 Ok(registry) => Some(Arc::new(registry)),
@@ -412,13 +424,16 @@ impl Server {
                 .type_tree_getter
                 .unwrap_or_else(|| Arc::new(DefaultTypeTreeGetter)),
             type_loaders: RwLock::new(builder.type_loaders),
+            #[cfg(feature = "lds")]
             registered_servers: RwLock::new(Default::default()),
             #[cfg(feature = "discovery-mdns")]
             mdns,
-            #[cfg(feature = "discovery-mdns")]
+            #[cfg(all(feature = "lds", feature = "discovery-mdns"))]
             registered_mdns,
+            #[cfg(feature = "diagnostics")]
             diagnostics: ServerDiagnostics::new(config.diagnostics),
             metrics: Arc::new(crate::metrics::ServerMetrics::new()),
+            #[cfg(feature = "fota")]
             fota_cleanup: Default::default(),
             localized_text_variants: Default::default(),
             next_session_id: std::sync::atomic::AtomicU32::new(1),
@@ -427,12 +442,14 @@ impl Server {
 
         let info = Arc::new(info);
         let node_managers_ref = NodeManagersRef::new_empty();
+        #[cfg(feature = "subscriptions")]
         let subscriptions = Arc::new(SubscriptionCache::new_with_node_managers(
             config.limits.subscriptions,
             node_managers_ref.clone(),
         ));
         let status_wrapper = Arc::new(ServerStatusWrapper::new(
             builder.build_info,
+            #[cfg(feature = "subscriptions")]
             subscriptions.clone(),
         ));
         let session_notify = Arc::new(Notify::new());
@@ -443,6 +460,7 @@ impl Server {
         let context = ServerContext {
             node_managers: node_managers_ref.clone(),
             session_manager: session_manager.clone(),
+            #[cfg(feature = "subscriptions")]
             subscriptions: subscriptions.clone(),
             info: info.clone(),
             authenticator: info.authenticator.clone(),
@@ -459,7 +477,11 @@ impl Server {
         let node_managers = NodeManagers::new(final_node_managers);
         node_managers_ref.init_from_node_managers(node_managers.clone());
 
-        #[cfg(feature = "generated-address-space")]
+        #[cfg(all(
+            feature = "generated-address-space",
+            feature = "method-call",
+            feature = "rbac"
+        ))]
         if let Some(core_node_manager) =
             node_managers.get_of_type::<crate::node_manager::memory::CoreNodeManager>()
         {
@@ -479,6 +501,7 @@ impl Server {
             info.clone(),
             certificate_store.clone(),
             service_level,
+            #[cfg(feature = "subscriptions")]
             subscriptions.clone(),
             node_managers.clone(),
             session_manager.clone(),
@@ -493,6 +516,7 @@ impl Server {
                 session_manager,
                 connections: FuturesUnordered::new(),
                 connection_map: HashMap::new(),
+                #[cfg(feature = "subscriptions")]
                 subscriptions,
                 config,
                 info,
@@ -507,6 +531,7 @@ impl Server {
     }
 
     /// Get a reference to the SubscriptionCache containing all subscriptions on the server.
+    #[cfg(feature = "subscriptions")]
     pub fn subscriptions(&self) -> Arc<SubscriptionCache> {
         self.subscriptions.clone()
     }
@@ -559,6 +584,7 @@ impl Server {
         ServerContext {
             node_managers: self.node_managers.as_weak(),
             session_manager: self.session_manager.clone(),
+            #[cfg(feature = "subscriptions")]
             subscriptions: self.subscriptions.clone(),
             info: self.info.clone(),
             authenticator: self.info.authenticator.clone(),
@@ -596,12 +622,14 @@ impl Server {
             session_manager: self.session_manager.clone(),
             certificate_store: self.certificate_store.clone(),
             node_managers: self.node_managers.clone(),
+            #[cfg(feature = "subscriptions")]
             subscriptions: self.subscriptions.clone(),
         }
     }
 
     async fn run_connection_loop<T: Send + 'static>(
         &mut self,
+        #[cfg_attr(not(feature = "subscriptions"), allow(unused_variables))]
         context: &ServerContext,
         mut connection_source: ConnectionSource<T>,
         transport: AcceptedTransport,
@@ -624,8 +652,11 @@ impl Server {
 
         pin!(mdns_fut);
 
+        #[cfg(feature = "subscriptions")]
         let subscription_fut =
             Self::run_subscription_ticks(self.config.subscription_poll_interval_ms, context);
+        #[cfg(not(feature = "subscriptions"))]
+        let subscription_fut = futures::future::pending();
         pin!(subscription_fut);
 
         let session_expiry_fut =
@@ -709,6 +740,7 @@ impl Server {
                         self.session_manager.clone(),
                         self.certificate_store.clone(),
                         self.node_managers.clone(),
+                        #[cfg(feature = "subscriptions")]
                         self.subscriptions.clone()
                     );
 
@@ -865,6 +897,7 @@ impl Server {
         self.run_with(listener).await
     }
 
+    #[cfg(feature = "subscriptions")]
     async fn run_subscription_ticks(_interval: u64, context: &ServerContext) -> Never {
         let context = context.clone();
         let cleanup_rx = context.subscriptions.take_cleanup_receiver();

@@ -5,14 +5,15 @@ use rustls_pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer};
 use tokio_util::sync::CancellationToken;
 use tracing::warn;
 
-use crate::{
-    config::IdentityMappingRuleConfig, constants, node_manager::TypeTreeForUser,
-    rbac::rules::IdentityMappingRule,
-};
+#[cfg(feature = "rbac")]
+use crate::{config::IdentityMappingRuleConfig, rbac::rules::IdentityMappingRule};
+use crate::{constants, node_manager::TypeTreeForUser};
 use opcua_core::config::Config;
 use opcua_crypto::SecurityPolicy;
+#[cfg(feature = "rbac")]
+use opcua_types::NodeId;
 use opcua_types::{
-    AccessRestrictionType, BuildInfo, MessageSecurityMode, NodeId, RolePermissionType, TypeLoader,
+    AccessRestrictionType, BuildInfo, MessageSecurityMode, RolePermissionType, TypeLoader,
     TypeLoaderCollection,
 };
 
@@ -51,16 +52,13 @@ impl Default for ServerBuilder {
             type_loaders: TypeLoaderCollection::new(),
         };
         #[cfg(feature = "generated-address-space")]
-        {
-            builder
-                .with_node_manager(
-                    super::node_manager::memory::InMemoryNodeManagerBuilder::new(
-                        super::node_manager::memory::CoreNodeManagerBuilder,
-                    ),
-                )
-                .with_node_manager(super::diagnostics::DiagnosticsNodeManagerBuilder)
-        }
-        #[cfg(not(feature = "generated-address-space"))]
+        let builder = builder.with_node_manager(
+            super::node_manager::memory::InMemoryNodeManagerBuilder::new(
+                super::node_manager::memory::CoreNodeManagerBuilder,
+            ),
+        );
+        #[cfg(all(feature = "generated-address-space", feature = "diagnostics"))]
+        let builder = builder.with_node_manager(super::diagnostics::DiagnosticsNodeManagerBuilder);
         builder
     }
 }
@@ -413,12 +411,14 @@ impl ServerBuilder {
     ///
     /// This turns on global fail-closed role enforcement and installs the Part 3 well-known role
     /// suggested permissions as namespace 0 default RolePermissions.
+    #[cfg(feature = "rbac")]
     pub fn with_secure_role_preset(self) -> Self {
         self.enforce_role_based_access(true)
             .default_role_permissions(0, crate::rbac::secure_well_known_permissions())
     }
 
     /// Add an identity-to-role mapping applied to the role resolver at startup.
+    #[cfg(feature = "rbac")]
     pub fn identity_mapping_rule(mut self, role: NodeId, rule: IdentityMappingRule) -> Self {
         self.config
             .identity_mapping_rules

@@ -17,7 +17,7 @@
 
 pub use opcua_core::sync;
 
-#[cfg(any(feature = "server", feature = "base-server"))]
+#[cfg(any(feature = "server", feature = "base-server", feature = "nano"))]
 pub use opcua_macros::{Event, EventField};
 
 #[cfg(feature = "client")]
@@ -26,13 +26,13 @@ pub use opcua_client as client;
 #[cfg(feature = "history")]
 #[doc(inline)]
 pub use opcua_history_sqlite as history;
-#[cfg(any(feature = "server", feature = "base-server"))]
+#[cfg(any(feature = "server", feature = "base-server", feature = "nano"))]
 #[doc(inline)]
 pub use opcua_nodes as nodes;
 #[cfg(feature = "pubsub")]
 #[doc(inline)]
 pub use opcua_pubsub as pubsub;
-#[cfg(any(feature = "server", feature = "base-server"))]
+#[cfg(any(feature = "server", feature = "base-server", feature = "nano"))]
 #[doc(inline)]
 pub use opcua_server as server;
 

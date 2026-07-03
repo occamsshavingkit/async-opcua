@@ -2,7 +2,8 @@
 
 mod node_manager;
 mod server;
-pub use node_manager::{DiagnosticsNodeManager, DiagnosticsNodeManagerBuilder, NamespaceMetadata};
+pub use crate::node_manager::NamespaceMetadata;
+pub use node_manager::{DiagnosticsNodeManager, DiagnosticsNodeManagerBuilder};
 use opcua_core::sync::Mutex;
 use opcua_types::{DataValue, DateTime, IntoVariant};
 pub use server::{ServerDiagnostics, ServerDiagnosticsSummary};

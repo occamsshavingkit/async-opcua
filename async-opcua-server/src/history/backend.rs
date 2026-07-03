@@ -1,3 +1,4 @@
+#[cfg(feature = "history-aggregates")]
 use crate::aggregates::engine::{compute_processed_intervals, get_value_timestamp};
 use async_trait::async_trait;
 use moka::future::Cache;
@@ -83,66 +84,91 @@ pub trait HistoryStorageBackend: Send + Sync {
     #[allow(clippy::too_many_arguments)]
     async fn read_processed(
         &self,
-        node_id: &NodeId,
+        #[cfg_attr(not(feature = "history-aggregates"), allow(unused_variables))] node_id: &NodeId,
+        #[cfg_attr(not(feature = "history-aggregates"), allow(unused_variables))]
         start_time: DateTime,
+        #[cfg_attr(not(feature = "history-aggregates"), allow(unused_variables))]
         end_time: DateTime,
+        #[cfg_attr(not(feature = "history-aggregates"), allow(unused_variables))]
         processing_interval: f64,
+        #[cfg_attr(not(feature = "history-aggregates"), allow(unused_variables))]
         aggregate_type: &NodeId,
+        #[cfg_attr(not(feature = "history-aggregates"), allow(unused_variables))]
         aggregate_configuration: &AggregateConfiguration,
-        stepped: bool,
+        #[cfg_attr(not(feature = "history-aggregates"), allow(unused_variables))] stepped: bool,
         continuation_point: Option<Vec<u8>>,
     ) -> Result<(Vec<DataValue>, Option<Vec<u8>>), StatusCode> {
-        if continuation_point.is_some() {
-            return Err(StatusCode::BadContinuationPointInvalid);
-        }
-
-        let mut raw_values = Vec::new();
-        let mut next_token = None;
-        loop {
-            let (values, _modification_infos, token) = self
-                .read_raw_modified(
-                    node_id, start_time, end_time, 100_000, true, false, next_token,
-                )
-                .await?;
-            raw_values.extend(values);
-
-            let Some(token) = token else {
-                break;
-            };
-            next_token = Some(token);
-        }
-
-        raw_values.sort_by_key(get_value_timestamp);
-
-        let annotation_times: Vec<DateTime> = if aggregate_type == &NodeId::new(0u16, 2351u32) {
-            match self.read_annotations(node_id, &[], None).await {
-                Ok((dvs, _)) => {
-                    let mut timestamps: Vec<DateTime> = dvs
-                        .iter()
-                        .map(get_value_timestamp)
-                        .filter(|timestamp| *timestamp >= start_time && *timestamp <= end_time)
-                        .collect();
-                    timestamps.sort();
-                    timestamps
-                }
-                Err(_) => Vec::new(),
+        #[cfg(not(feature = "history-aggregates"))]
+        {
+            let _ = (
+                node_id,
+                start_time,
+                end_time,
+                processing_interval,
+                aggregate_type,
+                aggregate_configuration,
+                stepped,
+            );
+            if continuation_point.is_some() {
+                return Err(StatusCode::BadContinuationPointInvalid);
             }
-        } else {
-            Vec::new()
-        };
+            return Err(StatusCode::BadAggregateNotSupported);
+        }
 
-        let processed_values = compute_processed_intervals(
-            &raw_values,
-            aggregate_type,
-            aggregate_configuration,
-            start_time,
-            end_time,
-            processing_interval,
-            stepped,
-            &annotation_times,
-        );
+        #[cfg(feature = "history-aggregates")]
+        {
+            if continuation_point.is_some() {
+                return Err(StatusCode::BadContinuationPointInvalid);
+            }
 
-        Ok((processed_values, None))
+            let mut raw_values = Vec::new();
+            let mut next_token = None;
+            loop {
+                let (values, _modification_infos, token) = self
+                    .read_raw_modified(
+                        node_id, start_time, end_time, 100_000, true, false, next_token,
+                    )
+                    .await?;
+                raw_values.extend(values);
+
+                let Some(token) = token else {
+                    break;
+                };
+                next_token = Some(token);
+            }
+
+            raw_values.sort_by_key(get_value_timestamp);
+
+            let annotation_times: Vec<DateTime> = if aggregate_type == &NodeId::new(0u16, 2351u32) {
+                match self.read_annotations(node_id, &[], None).await {
+                    Ok((dvs, _)) => {
+                        let mut timestamps: Vec<DateTime> = dvs
+                            .iter()
+                            .map(get_value_timestamp)
+                            .filter(|timestamp| *timestamp >= start_time && *timestamp <= end_time)
+                            .collect();
+                        timestamps.sort();
+                        timestamps
+                    }
+                    Err(_) => Vec::new(),
+                }
+            } else {
+                Vec::new()
+            };
+
+            let processed_values = compute_processed_intervals(
+                &raw_values,
+                aggregate_type,
+                aggregate_configuration,
+                start_time,
+                end_time,
+                processing_interval,
+                stepped,
+                &annotation_times,
+            );
+
+            Ok((processed_values, None))
+        }
     }
 
     /// Reads historical events from the history backend.

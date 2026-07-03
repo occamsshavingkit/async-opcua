@@ -2,17 +2,22 @@ use std::sync::Arc;
 
 use opcua_core::sync::RwLock;
 use opcua_nodes::DefaultTypeTree;
+#[cfg(feature = "method-call")]
+use opcua_types::MethodId;
 use opcua_types::{
-    BrowseDirection, EndpointType, IdentityMappingRuleType, MethodId, NodeId, ObjectId,
-    ObjectTypeId, QualifiedName, ReferenceTypeId, StatusCode, Variant,
+    BrowseDirection, EndpointType, IdentityMappingRuleType, NodeId, ObjectId, ObjectTypeId,
+    QualifiedName, ReferenceTypeId, StatusCode, Variant,
 };
 
+#[cfg(feature = "method-call")]
+use crate::node_manager::memory::CoreNodeManager;
 use crate::{
     address_space::{AddressSpace, ObjectBuilder},
-    node_manager::{memory::CoreNodeManager, RequestContext},
+    node_manager::RequestContext,
     rbac::{resolver::RoleResolver, rules::IdentityMappingRule, WellKnownRole},
 };
 
+#[cfg(feature = "method-call")]
 type Handler = fn(
     &RequestContext,
     &Arc<RwLock<AddressSpace>>,
@@ -27,6 +32,7 @@ pub(crate) fn is_security_admin(context: &RequestContext) -> bool {
         .contains(&WellKnownRole::SecurityAdmin.node_id())
 }
 
+#[cfg(feature = "method-call")]
 pub(crate) fn register_role_management_methods(
     core_node_manager: &CoreNodeManager,
     role_resolver: Arc<RwLock<RoleResolver>>,

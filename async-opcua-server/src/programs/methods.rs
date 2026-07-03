@@ -1,17 +1,22 @@
 //! Client method callbacks and registration for Program execution.
 
 use crate::address_space::{AddressSpace, ObjectBuilder, VariableBuilder};
+#[cfg(feature = "method-call")]
 use crate::node_manager::RequestContext;
 use crate::programs::engine::ProgramEngine;
-use opcua_types::{NodeId, StatusCode, Variant};
+use opcua_types::NodeId;
+#[cfg(feature = "method-call")]
+use opcua_types::{StatusCode, Variant};
 use std::sync::Arc;
 
 /// Handler for Program control method calls.
+#[cfg(feature = "method-call")]
 pub struct ProgramMethodHandler {
     /// Associated Program execution engine
     pub engine: Arc<ProgramEngine>,
 }
 
+#[cfg(feature = "method-call")]
 impl ProgramMethodHandler {
     /// Creates a new `ProgramMethodHandler` instance.
     pub fn new(engine: Arc<ProgramEngine>) -> Self {
@@ -93,6 +98,7 @@ impl ProgramMethodHandler {
 /// Registers a new Program and its associated control methods in the AddressSpace.
 pub fn register_program(
     address_space: &Arc<opcua_core::sync::RwLock<AddressSpace>>,
+    #[cfg_attr(not(feature = "method-call"), allow(unused_variables))]
     node_manager: &crate::node_manager::memory::SimpleNodeManager,
     device: &str,
     name: &str,
@@ -228,115 +234,119 @@ pub fn register_program(
         );
     }
 
-    // 4. Create the method nodes under the Program object
-    let start_method_id = NodeId::new(ns_idx, format!("{}_Start", base_s));
-    let suspend_method_id = NodeId::new(ns_idx, format!("{}_Suspend", base_s));
-    let resume_method_id = NodeId::new(ns_idx, format!("{}_Resume", base_s));
-    let halt_method_id = NodeId::new(ns_idx, format!("{}_Halt", base_s));
-    let reset_method_id = NodeId::new(ns_idx, format!("{}_Reset", base_s));
-
+    #[cfg(feature = "method-call")]
     {
-        let mut space = opcua_core::trace_write_lock!(address_space);
+        // 4. Create the method nodes under the Program object
+        let start_method_id = NodeId::new(ns_idx, format!("{}_Start", base_s));
+        let suspend_method_id = NodeId::new(ns_idx, format!("{}_Suspend", base_s));
+        let resume_method_id = NodeId::new(ns_idx, format!("{}_Resume", base_s));
+        let halt_method_id = NodeId::new(ns_idx, format!("{}_Halt", base_s));
+        let reset_method_id = NodeId::new(ns_idx, format!("{}_Reset", base_s));
 
-        let start_method = opcua_nodes::MethodBuilder::new(&start_method_id, "Start", "Start")
-            .component_of(parent_id.clone())
-            .build();
-        space.insert(
-            start_method,
-            Some(&[(
-                &parent_id,
-                &NodeId::new(0, 47),
-                opcua_nodes::ReferenceDirection::Inverse,
-            )]),
-        );
+        {
+            let mut space = opcua_core::trace_write_lock!(address_space);
 
-        let suspend_method =
-            opcua_nodes::MethodBuilder::new(&suspend_method_id, "Suspend", "Suspend")
+            let start_method = opcua_nodes::MethodBuilder::new(&start_method_id, "Start", "Start")
                 .component_of(parent_id.clone())
                 .build();
-        space.insert(
-            suspend_method,
-            Some(&[(
-                &parent_id,
-                &NodeId::new(0, 47),
-                opcua_nodes::ReferenceDirection::Inverse,
-            )]),
-        );
+            space.insert(
+                start_method,
+                Some(&[(
+                    &parent_id,
+                    &NodeId::new(0, 47),
+                    opcua_nodes::ReferenceDirection::Inverse,
+                )]),
+            );
 
-        let resume_method = opcua_nodes::MethodBuilder::new(&resume_method_id, "Resume", "Resume")
-            .component_of(parent_id.clone())
-            .build();
-        space.insert(
-            resume_method,
-            Some(&[(
-                &parent_id,
-                &NodeId::new(0, 47),
-                opcua_nodes::ReferenceDirection::Inverse,
-            )]),
-        );
+            let suspend_method =
+                opcua_nodes::MethodBuilder::new(&suspend_method_id, "Suspend", "Suspend")
+                    .component_of(parent_id.clone())
+                    .build();
+            space.insert(
+                suspend_method,
+                Some(&[(
+                    &parent_id,
+                    &NodeId::new(0, 47),
+                    opcua_nodes::ReferenceDirection::Inverse,
+                )]),
+            );
 
-        let halt_method = opcua_nodes::MethodBuilder::new(&halt_method_id, "Halt", "Halt")
-            .component_of(parent_id.clone())
-            .build();
-        space.insert(
-            halt_method,
-            Some(&[(
-                &parent_id,
-                &NodeId::new(0, 47),
-                opcua_nodes::ReferenceDirection::Inverse,
-            )]),
-        );
+            let resume_method =
+                opcua_nodes::MethodBuilder::new(&resume_method_id, "Resume", "Resume")
+                    .component_of(parent_id.clone())
+                    .build();
+            space.insert(
+                resume_method,
+                Some(&[(
+                    &parent_id,
+                    &NodeId::new(0, 47),
+                    opcua_nodes::ReferenceDirection::Inverse,
+                )]),
+            );
 
-        let reset_method = opcua_nodes::MethodBuilder::new(&reset_method_id, "Reset", "Reset")
-            .component_of(parent_id.clone())
-            .build();
-        space.insert(
-            reset_method,
-            Some(&[(
-                &parent_id,
-                &NodeId::new(0, 47),
-                opcua_nodes::ReferenceDirection::Inverse,
-            )]),
-        );
+            let halt_method = opcua_nodes::MethodBuilder::new(&halt_method_id, "Halt", "Halt")
+                .component_of(parent_id.clone())
+                .build();
+            space.insert(
+                halt_method,
+                Some(&[(
+                    &parent_id,
+                    &NodeId::new(0, 47),
+                    opcua_nodes::ReferenceDirection::Inverse,
+                )]),
+            );
+
+            let reset_method = opcua_nodes::MethodBuilder::new(&reset_method_id, "Reset", "Reset")
+                .component_of(parent_id.clone())
+                .build();
+            space.insert(
+                reset_method,
+                Some(&[(
+                    &parent_id,
+                    &NodeId::new(0, 47),
+                    opcua_nodes::ReferenceDirection::Inverse,
+                )]),
+            );
+        }
+
+        // 5. Register the callbacks with the SimpleNodeManager using method callbacks
+        let handler = Arc::new(ProgramMethodHandler::new(engine.clone()));
+
+        let h_start = handler.clone();
+        node_manager
+            .inner()
+            .add_method_callback_with_context(start_method_id, move |ctx, args| {
+                h_start.handle_start(ctx, args)
+            });
+
+        let h_suspend = handler.clone();
+        node_manager
+            .inner()
+            .add_method_callback_with_context(suspend_method_id, move |ctx, args| {
+                h_suspend.handle_suspend(ctx, args)
+            });
+
+        let h_resume = handler.clone();
+        node_manager
+            .inner()
+            .add_method_callback_with_context(resume_method_id, move |ctx, args| {
+                h_resume.handle_resume(ctx, args)
+            });
+
+        let h_halt = handler.clone();
+        node_manager
+            .inner()
+            .add_method_callback_with_context(halt_method_id, move |ctx, args| {
+                h_halt.handle_halt(ctx, args)
+            });
+
+        let h_reset = handler;
+        node_manager
+            .inner()
+            .add_method_callback_with_context(reset_method_id, move |ctx, args| {
+                h_reset.handle_reset(ctx, args)
+            });
     }
-
-    // 5. Register the callbacks with the SimpleNodeManager using method callbacks
-    let handler = Arc::new(ProgramMethodHandler::new(engine.clone()));
-
-    let h_start = handler.clone();
-    node_manager
-        .inner()
-        .add_method_callback_with_context(start_method_id, move |ctx, args| {
-            h_start.handle_start(ctx, args)
-        });
-
-    let h_suspend = handler.clone();
-    node_manager
-        .inner()
-        .add_method_callback_with_context(suspend_method_id, move |ctx, args| {
-            h_suspend.handle_suspend(ctx, args)
-        });
-
-    let h_resume = handler.clone();
-    node_manager
-        .inner()
-        .add_method_callback_with_context(resume_method_id, move |ctx, args| {
-            h_resume.handle_resume(ctx, args)
-        });
-
-    let h_halt = handler.clone();
-    node_manager
-        .inner()
-        .add_method_callback_with_context(halt_method_id, move |ctx, args| {
-            h_halt.handle_halt(ctx, args)
-        });
-
-    let h_reset = handler;
-    node_manager
-        .inner()
-        .add_method_callback_with_context(reset_method_id, move |ctx, args| {
-            h_reset.handle_reset(ctx, args)
-        });
 
     engine
 }

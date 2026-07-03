@@ -27,23 +27,27 @@ use opcua_core::{
     sync::RwLock,
 };
 use opcua_crypto::{CertificateStore, SecurityPolicy};
-#[cfg(feature = "discovery-mdns")]
+#[cfg(all(feature = "lds", feature = "discovery-mdns"))]
 use opcua_types::MdnsDiscoveryConfiguration;
 use opcua_types::{
-    ChannelSecurityToken, DateTime, ExtensionObject, FindServersOnNetworkResponse,
-    FindServersResponse, GetEndpointsResponse, MessageSecurityMode, NodeId,
-    OpenSecureChannelRequest, OpenSecureChannelResponse, RegisterServer2Response,
-    RegisterServerResponse, ResponseHeader, SecurityTokenRequestType, ServiceFault, StatusCode,
+    ChannelSecurityToken, DateTime, FindServersOnNetworkResponse, FindServersResponse,
+    GetEndpointsResponse, MessageSecurityMode, NodeId, OpenSecureChannelRequest,
+    OpenSecureChannelResponse, ResponseHeader, SecurityTokenRequestType, ServiceFault, StatusCode,
     UAString,
 };
+#[cfg(feature = "lds")]
+use opcua_types::{ExtensionObject, RegisterServer2Response, RegisterServerResponse};
 use tokio_util::sync::CancellationToken;
 use tracing_futures::Instrument;
 
+#[cfg(feature = "lds")]
+use crate::node_manager::consume_results;
+#[cfg(feature = "subscriptions")]
+use crate::subscriptions::SubscriptionCache;
 use crate::{
     authenticator::UserToken,
     info::ServerInfo,
-    node_manager::{consume_results, NodeManagers},
-    subscriptions::SubscriptionCache,
+    node_manager::NodeManagers,
     transport::tcp::{ConnectionTransport, Request, TransportPollResult},
     transport::Connector,
 };
@@ -67,6 +71,7 @@ pub(crate) struct Response {
 }
 
 impl Response {
+    #[cfg_attr(not(feature = "subscriptions"), allow(dead_code))]
     pub(super) fn from_result(
         result: Result<impl Into<ResponseMessage>, StatusCode>,
         request_handle: u32,
@@ -91,6 +96,7 @@ pub(crate) enum ControllerCommand {
 
 type PendingMessageResponse = dyn Future<Output = Result<Response, String>> + Send + Sync + 'static;
 
+#[cfg(feature = "lds")]
 fn register_server2_configuration_result(
     info: &ServerInfo,
     server: &opcua_types::RegisteredServer,
@@ -119,6 +125,7 @@ pub(crate) struct SessionController<T: ConnectionTransport> {
     certificate_store: Arc<RwLock<CertificateStore>>,
     node_managers: NodeManagers,
     message_handler: MessageHandler,
+    #[cfg(feature = "subscriptions")]
     subscriptions: Arc<SubscriptionCache>,
     pending_messages: FuturesUnordered<Pin<Box<PendingMessageResponse>>>,
     max_inflight: usize,
@@ -189,6 +196,7 @@ pub(crate) struct SessionStarter<T> {
     session_manager: Arc<RwLock<SessionManager>>,
     certificate_store: Arc<RwLock<CertificateStore>>,
     node_managers: NodeManagers,
+    #[cfg(feature = "subscriptions")]
     subscriptions: Arc<SubscriptionCache>,
 }
 
@@ -203,7 +211,7 @@ where
         session_manager: Arc<RwLock<SessionManager>>,
         certificate_store: Arc<RwLock<CertificateStore>>,
         node_managers: NodeManagers,
-        subscriptions: Arc<SubscriptionCache>,
+        #[cfg(feature = "subscriptions")] subscriptions: Arc<SubscriptionCache>,
     ) -> Self {
         Self {
             connector,
@@ -211,6 +219,7 @@ where
             session_manager,
             certificate_store,
             node_managers,
+            #[cfg(feature = "subscriptions")]
             subscriptions,
         }
     }
@@ -257,6 +266,7 @@ where
             self.certificate_store,
             self.info,
             self.node_managers,
+            #[cfg(feature = "subscriptions")]
             self.subscriptions,
         );
         controller.run(command).await
@@ -270,7 +280,7 @@ impl<T: ConnectionTransport> SessionController<T> {
         certificate_store: Arc<RwLock<CertificateStore>>,
         info: Arc<ServerInfo>,
         node_managers: NodeManagers,
-        subscriptions: Arc<SubscriptionCache>,
+        #[cfg(feature = "subscriptions")] subscriptions: Arc<SubscriptionCache>,
     ) -> Self {
         let mut channel = SecureChannel::new(
             certificate_store.clone(),
@@ -289,8 +299,10 @@ impl<T: ConnectionTransport> SessionController<T> {
             message_handler: MessageHandler::new(
                 info.clone(),
                 node_managers,
+                #[cfg(feature = "subscriptions")]
                 subscriptions.clone(),
             ),
+            #[cfg(feature = "subscriptions")]
             subscriptions,
             deadline: Instant::now()
                 + Duration::from_secs(info.config.tcp_config.hello_timeout as u64),
@@ -364,11 +376,16 @@ impl<T: ConnectionTransport> SessionController<T> {
                 }
             }
         }
+        #[cfg(feature = "fota")]
         trace_read_lock!(self.session_manager)
             .cleanup_fota_for_secure_channel(self.channel.secure_channel_id());
     }
 
-    fn response_metrics(&self, msg: &Response) {
+    fn response_metrics(
+        &self,
+        #[cfg_attr(not(feature = "diagnostics"), allow(unused_variables))] msg: &Response,
+    ) {
+        #[cfg(feature = "diagnostics")]
         if self.info.diagnostics.enabled() {
             let status = msg.message.response_header().service_result;
             if status.is_bad() {
@@ -416,6 +433,7 @@ impl<T: ConnectionTransport> SessionController<T> {
         }
 
         dispatch_suppressed_certificate_audit_success(
+            #[cfg(feature = "events")]
             &self.subscriptions,
             &self.info,
             &request.request_header,
@@ -480,6 +498,7 @@ impl<T: ConnectionTransport> SessionController<T> {
                     _ => opcua_types::ByteString::null(),
                 };
                 dispatch_open_secure_channel(
+                    #[cfg(feature = "events")]
                     &self.subscriptions,
                     &self.info,
                     &r.request_header,
@@ -494,8 +513,11 @@ impl<T: ConnectionTransport> SessionController<T> {
                 if res.is_ok() {
                     self.deadline = self.channel.token_renewal_deadline();
                 } else {
-                    self.info.diagnostics.inc_rejected_requests();
-                    self.info.diagnostics.inc_security_rejected_requests();
+                    #[cfg(feature = "diagnostics")]
+                    {
+                        self.info.diagnostics.inc_rejected_requests();
+                        self.info.diagnostics.inc_security_rejected_requests();
+                    }
                 }
                 match res {
                     Ok(mut response) => {
@@ -537,12 +559,14 @@ impl<T: ConnectionTransport> SessionController<T> {
                 )
                 .and_then(|draft| {
                     let node_managers = self.node_managers.clone();
+                    #[cfg(feature = "subscriptions")]
                     let subscriptions = self.subscriptions.clone();
                     let mut mgr = trace_write_lock!(self.session_manager);
                     mgr.commit_create_session_draft(
                         draft,
                         &mut self.channel,
                         node_managers,
+                        #[cfg(feature = "subscriptions")]
                         subscriptions,
                     )
                 });
@@ -555,6 +579,7 @@ impl<T: ConnectionTransport> SessionController<T> {
                     Err(status) => (None, None, *status),
                 };
                 dispatch_create_session(
+                    #[cfg(feature = "events")]
                     &self.subscriptions,
                     &self.info,
                     &request,
@@ -567,6 +592,7 @@ impl<T: ConnectionTransport> SessionController<T> {
                 // AuditCertificateEventType subtype (no-op for non-certificate failures).
                 if status.is_bad() {
                     dispatch_certificate_audit(
+                        #[cfg(feature = "events")]
                         &self.subscriptions,
                         &self.info,
                         &request.request_header,
@@ -603,6 +629,7 @@ impl<T: ConnectionTransport> SessionController<T> {
                 let session_id =
                     self.session_id_for_token(&request.request_header.authentication_token);
                 dispatch_activate_session(
+                    #[cfg(feature = "events")]
                     &self.subscriptions,
                     &self.info,
                     &request,
@@ -667,6 +694,7 @@ impl<T: ConnectionTransport> SessionController<T> {
                 } else {
                     Vec::new()
                 };
+                #[cfg(feature = "lds")]
                 servers.extend(self.info.registered_application_descriptions(
                     &request.endpoint_url,
                     &request.locale_ids,
@@ -712,6 +740,7 @@ impl<T: ConnectionTransport> SessionController<T> {
                     id,
                 )
             }
+            #[cfg(feature = "lds")]
             RequestMessage::RegisterServer(request) => {
                 let _h = span.enter();
                 let status = match self.register_server_caller_status(&request.server.server_uri) {
@@ -740,6 +769,17 @@ impl<T: ConnectionTransport> SessionController<T> {
                     RequestProcessResult::Ok
                 }
             }
+            #[cfg(not(feature = "lds"))]
+            RequestMessage::RegisterServer(request) => {
+                let _h = span.enter();
+                self.process_service_result(
+                    Err::<ResponseMessage, StatusCode>(StatusCode::BadServiceUnsupported),
+                    request.request_header.request_handle,
+                    request.request_header.return_diagnostics,
+                    id,
+                )
+            }
+            #[cfg(feature = "lds")]
             RequestMessage::RegisterServer2(request) => {
                 let _h = span.enter();
                 let status = match self.register_server_caller_status(&request.server.server_uri) {
@@ -796,6 +836,16 @@ impl<T: ConnectionTransport> SessionController<T> {
                     RequestProcessResult::Ok
                 }
             }
+            #[cfg(not(feature = "lds"))]
+            RequestMessage::RegisterServer2(request) => {
+                let _h = span.enter();
+                self.process_service_result(
+                    Err::<ResponseMessage, StatusCode>(StatusCode::BadServiceUnsupported),
+                    request.request_header.request_handle,
+                    request.request_header.return_diagnostics,
+                    id,
+                )
+            }
 
             message => {
                 let _h = span.enter();
@@ -830,9 +880,13 @@ impl<T: ConnectionTransport> SessionController<T> {
                     Ok(s) => s,
                     Err(mut e) => {
                         e.apply_return_diagnostics(return_diagnostics);
-                        self.info.diagnostics.inc_rejected_requests();
-                        self.info.diagnostics.inc_security_rejected_requests();
+                        #[cfg(feature = "diagnostics")]
+                        {
+                            self.info.diagnostics.inc_rejected_requests();
+                            self.info.diagnostics.inc_security_rejected_requests();
+                        }
                         dispatch_service_failure(
+                            #[cfg(feature = "events")]
                             &self.subscriptions,
                             &self.info,
                             &unauthenticated_audit_context,
@@ -878,6 +932,7 @@ impl<T: ConnectionTransport> SessionController<T> {
                     super::message_handler::HandleMessageResult::AsyncMessage(mut handle) => {
                         let audit_context = audit_context.clone();
                         let info = self.info.clone();
+                        #[cfg(feature = "events")]
                         let subscriptions = self.subscriptions.clone();
                         self.pending_messages
                             .push(Box::pin(async move {
@@ -909,6 +964,7 @@ impl<T: ConnectionTransport> SessionController<T> {
                                 if let Ok(response) = &mut response {
                                     response.message.apply_return_diagnostics(return_diagnostics);
                                     dispatch_response_failure(
+                                        #[cfg(feature = "events")]
                                         &subscriptions,
                                         &info,
                                         &audit_context,
@@ -927,6 +983,7 @@ impl<T: ConnectionTransport> SessionController<T> {
                         );
                         self.response_metrics(&s);
                         dispatch_response_failure(
+                            #[cfg(feature = "events")]
                             &self.subscriptions,
                             &self.info,
                             &audit_context,
@@ -954,6 +1011,7 @@ impl<T: ConnectionTransport> SessionController<T> {
     /// otherwise any client could register or unregister arbitrary servers (spoofing or a
     /// discovery denial-of-service by unregistering a victim). Returns `Good` when the caller
     /// is allowed to (un)register `server_uri`.
+    #[cfg(feature = "lds")]
     fn register_server_caller_status(&self, server_uri: &UAString) -> StatusCode {
         if self.channel.security_policy() == SecurityPolicy::None {
             return StatusCode::BadSecurityChecksFailed;
@@ -977,14 +1035,17 @@ impl<T: ConnectionTransport> SessionController<T> {
         let mut message = match res {
             Ok(m) => m.into(),
             Err(e) => {
-                self.info.diagnostics.inc_rejected_requests();
-                if matches!(
-                    e,
-                    StatusCode::BadSessionIdInvalid
-                        | StatusCode::BadSecurityChecksFailed
-                        | StatusCode::BadUserAccessDenied
-                ) {
-                    self.info.diagnostics.inc_security_rejected_requests();
+                #[cfg(feature = "diagnostics")]
+                {
+                    self.info.diagnostics.inc_rejected_requests();
+                    if matches!(
+                        e,
+                        StatusCode::BadSessionIdInvalid
+                            | StatusCode::BadSecurityChecksFailed
+                            | StatusCode::BadUserAccessDenied
+                    ) {
+                        self.info.diagnostics.inc_security_rejected_requests();
+                    }
                 }
 
                 ServiceFault::new(request_handle, e).into()
@@ -1147,6 +1208,7 @@ impl<T: ConnectionTransport> SessionController<T> {
                     let validation_status = e.status();
                     error!("OpenSecureChannel rejected: client certificate failed validation: {e}");
                     dispatch_open_secure_channel_certificate_audit(
+                        #[cfg(feature = "events")]
                         &self.subscriptions,
                         &self.info,
                         &request.request_header,

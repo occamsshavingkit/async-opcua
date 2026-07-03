@@ -1,10 +1,12 @@
 //! Server service helpers.
 
 /// HistoryRead service helpers.
+#[cfg(feature = "history")]
 pub mod history_read;
 /// Node access authorization helpers.
 pub mod node_access;
 /// Graph query service helpers.
+#[cfg(feature = "query")]
 pub mod query;
 /// PubSub security key service contracts.
 pub mod security;

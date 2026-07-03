@@ -4,11 +4,14 @@ use std::{
 };
 
 use opcua_core::handle::Handle;
+#[cfg(feature = "events")]
 use opcua_nodes::{Event, TypeTree};
 use opcua_types::{
-    DataChangeNotification, DataValue, DateTime, DateTimeUtc, EventFieldList,
-    EventNotificationList, MonitoredItemNotification, NotificationMessage, StatusCode,
+    DataChangeNotification, DataValue, DateTime, DateTimeUtc, MonitoredItemNotification,
+    NotificationMessage, StatusCode,
 };
+#[cfg(feature = "events")]
+use opcua_types::{EventFieldList, EventNotificationList};
 use tracing::{debug, trace, warn};
 
 use crate::node_manager::MonitoredItemRef;
@@ -20,6 +23,7 @@ const DATA_CHANGE_NOTIFICATION_VEC_POOL_LIMIT: usize = 4;
 
 pub(super) struct DataChangeNotificationVecPool {
     free: Vec<Vec<MonitoredItemNotification>>,
+    #[cfg(feature = "events")]
     free_events: Vec<Vec<EventFieldList>>,
     max_retained: usize,
 }
@@ -28,6 +32,7 @@ impl DataChangeNotificationVecPool {
     fn new(max_retained: usize) -> Self {
         Self {
             free: Vec::with_capacity(max_retained),
+            #[cfg(feature = "events")]
             free_events: Vec::with_capacity(max_retained),
             max_retained,
         }
@@ -44,6 +49,7 @@ impl DataChangeNotificationVecPool {
         Vec::with_capacity(capacity)
     }
 
+    #[cfg(feature = "events")]
     fn draw_events(&mut self, capacity: usize) -> Vec<EventFieldList> {
         while let Some(mut events) = self.free_events.pop() {
             events.clear();
@@ -62,6 +68,7 @@ impl DataChangeNotificationVecPool {
         }
     }
 
+    #[cfg(feature = "events")]
     pub(super) fn reclaim_events(&mut self, mut events: Vec<EventFieldList>) {
         events.clear();
         if self.free_events.len() < self.max_retained {
@@ -99,14 +106,17 @@ pub(super) fn reclaim_data_change_notification_vecs(
                 continue;
             };
             pool.reclaim(monitored_items);
-        } else if notification.inner_is::<EventNotificationList>() {
-            let Some(mut events) = notification.into_inner_as::<EventNotificationList>() else {
-                continue;
-            };
-            let Some(events) = events.events.take() else {
-                continue;
-            };
-            pool.reclaim_events(events);
+        } else {
+            #[cfg(feature = "events")]
+            if notification.inner_is::<EventNotificationList>() {
+                let Some(mut events) = notification.into_inner_as::<EventNotificationList>() else {
+                    continue;
+                };
+                let Some(events) = events.events.take() else {
+                    continue;
+                };
+                pool.reclaim_events(events);
+            }
         }
     }
 }
@@ -372,6 +382,7 @@ impl Subscription {
         }
     }
 
+    #[cfg(feature = "subscriptions-standard")]
     pub(super) fn notify_eu_range_changed(&mut self, id: &u32, low: f64, high: f64) {
         if let Some(item) = self.monitored_items.get_mut(id) {
             item.notify_eu_range_changed(low, high);
@@ -379,6 +390,7 @@ impl Subscription {
     }
 
     /// Notify the given monitored item of a new event.
+    #[cfg(feature = "events")]
     pub fn notify_event(&mut self, id: &u32, event: &dyn Event, type_tree: &dyn TypeTree) {
         if let Some(item) = self.monitored_items.get_mut(id) {
             if item.notify_event(event, type_tree) {
@@ -388,6 +400,7 @@ impl Subscription {
     }
 
     #[allow(dead_code)]
+    #[cfg(feature = "events")]
     pub(crate) fn refresh_events(
         &mut self,
         monitored_item: Option<MonitoredItemHandle>,
@@ -772,6 +785,7 @@ impl Subscription {
         self.state == SubscriptionState::Closed && self.notifications.is_empty()
     }
 
+    #[cfg(feature = "subscriptions-standard")]
     fn handle_triggers(
         &mut self,
         now: &DateTimeUtc,
@@ -821,14 +835,21 @@ impl Subscription {
                 .iter()
                 .fold((0usize, 0usize), |(dc, ev), notif| match notif {
                     Notification::MonitoredItemNotification(_) => (dc + 1, ev),
+                    #[cfg(feature = "events")]
                     Notification::Event(_) => (dc, ev + 1),
                 });
+        #[cfg(not(feature = "events"))]
+        let _ = event_count;
         let mut data_change_notifications = data_change_notification_pool.draw(data_change_count);
+        #[cfg(feature = "events")]
         let mut event_notifications = data_change_notification_pool.draw_events(event_count);
+        #[cfg(not(feature = "events"))]
+        let event_notifications = Vec::new();
 
         for notif in notifications.drain(..) {
             match notif {
                 Notification::MonitoredItemNotification(n) => data_change_notifications.push(n),
+                #[cfg(feature = "events")]
                 Notification::Event(n) => event_notifications.push(n),
             }
         }
@@ -847,7 +868,7 @@ impl Subscription {
         now: &DateTimeUtc,
         resend_data: bool,
         max_notifications: usize,
-        triggers: &mut Vec<(u32, u32)>,
+        #[cfg(feature = "subscriptions-standard")] triggers: &mut Vec<(u32, u32)>,
         notifications: &mut Vec<Notification>,
         messages: &mut Vec<NotificationMessage>,
         sequence_numbers: &mut Handle,
@@ -856,6 +877,7 @@ impl Subscription {
         monitored_item.maybe_enqueue_skipped_value(&(*now).into());
         monitored_item.maybe_flush_aggregate(&(*now).into());
 
+        #[cfg(feature = "subscriptions-standard")]
         if monitored_item.is_sampling() && monitored_item.has_new_notifications() {
             triggers.extend(
                 monitored_item
@@ -896,10 +918,9 @@ impl Subscription {
         data_change_notification_pool: &mut DataChangeNotificationVecPool,
     ) -> Vec<NotificationMessage> {
         let mut messages = Vec::new();
-        let NotificationBuffer {
-            notifications,
-            triggers,
-        } = buffer;
+        let notifications = &mut buffer.notifications;
+        #[cfg(feature = "subscriptions-standard")]
+        let triggers = &mut buffer.triggers;
 
         // If resend data is true, we must visit ever monitored item
         if resend_data {
@@ -909,6 +930,7 @@ impl Subscription {
                     now,
                     resend_data,
                     self.max_notifications_per_publish,
+                    #[cfg(feature = "subscriptions-standard")]
                     triggers,
                     notifications,
                     &mut messages,
@@ -926,6 +948,7 @@ impl Subscription {
                     now,
                     resend_data,
                     self.max_notifications_per_publish,
+                    #[cfg(feature = "subscriptions-standard")]
                     triggers,
                     notifications,
                     &mut messages,
@@ -935,6 +958,7 @@ impl Subscription {
             }
         }
 
+        #[cfg(feature = "subscriptions-standard")]
         self.handle_triggers(
             now,
             triggers,
@@ -1939,6 +1963,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "subscriptions-standard")]
     fn monitored_item_triggers() {
         let mut buffer = super::NotificationBuffer::new();
         let mut data_change_notification_pool = DataChangeNotificationVecPool::default();

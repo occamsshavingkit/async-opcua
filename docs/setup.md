@@ -195,39 +195,50 @@ instead of `"z"` if profiling shows you need more throughput headroom.
 
 ### OPC Foundation profile benchmark builds
 
-The repository also ships CI-visible benchmark builds for the OPC Foundation 2017 Nano, Micro,
-and Embedded server profile family. These builds are footprint benchmarks: an integrator selects
-the library features they need, and unused feature surfaces should stay out of the linked binary.
-The benchmark samples use `base-server` and intentionally omit the generated core namespace. They
-label each benchmark with a target profile URI, but they do not advertise
-`ServerCapabilities.ServerProfileArray` conformance.
+The repository ships CI-visible benchmark builds for the OPC Foundation 2017
+Nano, Micro, Embedded, and Standard server profile ladder. These are **footprint
+benchmarks**, not OPC Foundation certification claims. Each alias selects a
+feature composition grounded in the 2017 profile database; an integrator selects
+the library features they need and unused feature surfaces stay out of the
+linked binary.
 
-| Profile benchmark | Package | Target profile URI |
-|-------------------|---------|--------------------|
-| Nano | `async-opcua-foundation-profile-nano-server` | `http://opcfoundation.org/UA-Profile/Server/NanoEmbeddedDevice2017` |
-| Micro | `async-opcua-foundation-profile-micro-server` | `http://opcfoundation.org/UA-Profile/Server/MicroEmbeddedDevice2017` |
-| Embedded | `async-opcua-foundation-profile-embedded-server` | `http://opcfoundation.org/UA-Profile/Server/EmbeddedUA2017` |
+| Profile | Package | Feature alias | Target profile URI | Binary size |
+|---------|---------|---------------|--------------------|-------------|
+| Nano | `async-opcua-foundation-profile-nano-server` | `nano` | `…/NanoEmbeddedDevice2017` | 6,765,888 B (6.45 MiB) |
+| Micro | `async-opcua-foundation-profile-micro-server` | `micro` | `…/MicroEmbeddedDevice2017` | 7,213,200 B (6.88 MiB) |
+| Embedded | `async-opcua-foundation-profile-embedded-server` | `embedded` | `…/EmbeddedUA2017` | 9,906,256 B (9.45 MiB) |
+| Standard | `async-opcua-foundation-profile-standard-server` | `standard` | `…/StandardUA2017` | 16,751,080 B (15.98 MiB) |
+
+> **Provenance**: x86-64 Linux, `--profile embedded` (optimized, stripped),
+> rustc 1.96.0, 2026-07-02. Each package built in an isolated cargo invocation
+> (one package per `cargo build` — a workspace-wide build unifies features and
+> invalidates per-profile measurements). Sizes are dated measurements, not
+> stable guarantees. Nano and Micro use SecurityPolicy None with no crypto
+> backend; Embedded and Standard include `aws-lc-rs` and Basic256Sha256
+> endpoints.
 
 ```bash
-cargo build --locked -p async-opcua-foundation-profile-nano-server
-cargo build --locked -p async-opcua-foundation-profile-micro-server
-cargo build --locked -p async-opcua-foundation-profile-embedded-server
+# Build each profile in isolation (one package per invocation):
+cargo build --locked --profile embedded -p async-opcua-foundation-profile-nano-server
+cargo build --locked --profile embedded -p async-opcua-foundation-profile-micro-server
+cargo build --locked --profile embedded -p async-opcua-foundation-profile-embedded-server
+cargo build --locked --profile embedded -p async-opcua-foundation-profile-standard-server
 
-for package in \
-    async-opcua-foundation-profile-nano-server \
-    async-opcua-foundation-profile-micro-server \
-    async-opcua-foundation-profile-embedded-server
-do
-    cargo build --locked --profile embedded \
-        -p "$package"
-    stat -c "${package}: %s bytes %n" \
-        "target/embedded/$package"
-done
+# Or use the measurement script:
+tools/footprint.sh
 ```
 
-Each package is one profile benchmark target. These builds are not official OPC Foundation
-certification results; use the OPC Foundation conformance tooling for certification-grade evidence,
-and only advertise profile URIs after validating the server's mandatory conformance units.
+Profile behavior tests are gated behind each sample's `profile-tests` feature
+(run in isolation, not via `cargo test --workspace` which unifies features):
+```bash
+cargo test -p async-opcua-foundation-profile-nano-server --features profile-tests
+cargo test -p async-opcua-foundation-profile-micro-server --features profile-tests
+cargo test -p async-opcua-foundation-profile-embedded-server --features profile-tests
+cargo test -p async-opcua-foundation-profile-standard-server --features profile-tests
+```
+
+These builds are not official OPC Foundation certification results; use the OPC
+Foundation conformance tooling for certification-grade evidence.
 
 ### Deployment limit profiles
 

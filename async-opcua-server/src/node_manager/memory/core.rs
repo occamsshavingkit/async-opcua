@@ -1,41 +1,91 @@
-use std::{
-    sync::Arc,
-    time::{Duration, Instant},
-};
+use std::sync::Arc;
+#[cfg(feature = "subscriptions")]
+use std::time::Duration;
+#[cfg(feature = "diagnostics")]
+use std::time::Instant;
 
 use async_trait::async_trait;
-use chrono::{Duration as ChronoDuration, Offset};
+#[cfg(feature = "diagnostics")]
+use chrono::Duration as ChronoDuration;
+use chrono::Offset;
 use hashbrown::HashMap;
 
+#[cfg(not(feature = "history"))]
+use crate::config::HistoryServerCapabilities;
+#[cfg(all(feature = "method-call", feature = "subscriptions-standard"))]
+use crate::load_method_args;
+#[cfg(feature = "method-call")]
+use crate::node_manager::MethodCall;
+#[cfg(all(feature = "diagnostics", feature = "subscriptions"))]
+use crate::subscriptions::SessionSubscriptionDiagnosticsSummary;
 use crate::{
     address_space::{
         compute_user_role_permissions, read_node_value, AddressSpace, CoreNamespace, NodeType,
     },
-    config::ANONYMOUS_USER_TOKEN_ID,
-    diagnostics::NamespaceMetadata,
-    identity_token::IdentityToken,
-    load_method_args,
     node_manager::{
-        MethodCall, MonitoredItemRef, MonitoredItemUpdateRef, NodeManagersRef, ParsedReadValueId,
-        ParsedWriteValue, RequestContext, ServerContext, SyncSampler, WriteNode,
+        NamespaceMetadata, NodeManagersRef, ParsedReadValueId, ParsedWriteValue, RequestContext,
+        ServerContext, WriteNode,
     },
+    ServerCapabilities, ServerStatusWrapper,
+};
+#[cfg(feature = "diagnostics")]
+use crate::{
+    config::ANONYMOUS_USER_TOKEN_ID,
+    identity_token::IdentityToken,
     session::{
         instance::Session,
         manager::{locale_ids_for_session, SessionManager},
     },
-    subscriptions::{CreateMonitoredItem, SessionSubscriptionDiagnosticsSummary},
-    ServerCapabilities, ServerStatusWrapper,
 };
-use opcua_core::{sync::RwLock, trace_read_lock, trace_write_lock};
+#[cfg(feature = "subscriptions")]
+use crate::{
+    node_manager::{MonitoredItemRef, MonitoredItemUpdateRef, SyncSampler},
+    subscriptions::CreateMonitoredItem,
+};
+use opcua_core::sync::RwLock;
+#[cfg(any(feature = "diagnostics", feature = "method-call"))]
+use opcua_core::trace_read_lock;
+#[cfg(feature = "method-call")]
+use opcua_core::trace_write_lock;
+#[cfg(feature = "subscriptions")]
+use opcua_types::MonitoringMode;
+#[cfg(feature = "diagnostics")]
 use opcua_types::{
-    profiles, AttributeId, ByteString, DataValue, DateTime, ExtensionObject, IdType, Identifier,
-    MethodId, MonitoringMode, NodeId, NumericRange, ObjectId, ReferenceTypeId, RolePermissionType,
-    SessionDiagnosticsDataType, SessionSecurityDiagnosticsDataType, StatusCode, TimeZoneDataType,
-    TimestampsToReturn, UAString, VariableId, Variant, VariantScalarTypeId, VariantTypeId,
+    profiles, AttributeId, ByteString, SessionDiagnosticsDataType,
+    SessionSecurityDiagnosticsDataType, UAString,
 };
+use opcua_types::{
+    DataValue, DateTime, ExtensionObject, IdType, Identifier, NodeId, NumericRange, ObjectId,
+    ReferenceTypeId, RolePermissionType, StatusCode, TimeZoneDataType, TimestampsToReturn,
+    VariableId, Variant,
+};
+#[cfg(all(feature = "method-call", feature = "subscriptions-standard"))]
+use opcua_types::{MethodId, VariantScalarTypeId, VariantTypeId};
 
 use super::{InMemoryNodeManager, InMemoryNodeManagerImpl, InMemoryNodeManagerImplBuilder};
 
+/// Zeroed-out history capabilities used when the `history` gate is off (FR-004).
+#[cfg(not(feature = "history"))]
+const HISTORY_OFF: HistoryServerCapabilities = HistoryServerCapabilities {
+    access_history_data: false,
+    access_history_events: false,
+    delete_at_time: false,
+    delete_event: false,
+    delete_raw: false,
+    insert_annotation: false,
+    insert_data: false,
+    insert_event: false,
+    max_return_data_values: 0,
+    max_return_event_values: 0,
+    replace_data: false,
+    replace_event: false,
+    server_timestamp_supported: false,
+    update_data: false,
+    update_event: false,
+    aggregates: Vec::new(),
+};
+
+#[cfg(feature = "method-call")]
 type MethodWithContextCB = Arc<
     dyn Fn(&RequestContext, &NodeId, &[Variant]) -> Result<Vec<Variant>, StatusCode>
         + Send
@@ -45,12 +95,14 @@ type MethodWithContextCB = Arc<
 
 enum PreparedCoreReadValue {
     Value(DataValue),
+    #[cfg(feature = "diagnostics")]
     DiagnosticsArray {
         kind: DiagnosticsArrayKind,
         index_range: NumericRange,
     },
 }
 
+#[cfg(feature = "diagnostics")]
 #[derive(Clone, Copy)]
 enum DiagnosticsArrayKind {
     Subscription,
@@ -60,11 +112,24 @@ enum DiagnosticsArrayKind {
 
 /// Node manager impl for the core namespace.
 pub struct CoreNodeManagerImpl {
+    #[cfg(feature = "subscriptions")]
     sampler: SyncSampler,
     node_managers: NodeManagersRef,
+    #[cfg(feature = "diagnostics")]
     session_manager: Arc<RwLock<SessionManager>>,
     status: Arc<ServerStatusWrapper>,
+    #[cfg(feature = "method-call")]
     method_with_context_cbs: Arc<RwLock<std::collections::HashMap<NodeId, MethodWithContextCB>>>,
+}
+
+#[cfg(all(feature = "diagnostics", feature = "subscriptions"))]
+type CoreSessionSubscriptionDiagnosticsSummary = SessionSubscriptionDiagnosticsSummary;
+
+#[cfg(all(feature = "diagnostics", not(feature = "subscriptions")))]
+#[derive(Debug, Clone, Copy, Default)]
+struct CoreSessionSubscriptionDiagnosticsSummary {
+    subscription_count: u32,
+    monitored_item_count: u32,
 }
 
 /// Node manager for the core namespace.
@@ -85,6 +150,7 @@ impl InMemoryNodeManagerImplBuilder for CoreNodeManagerBuilder {
 
         CoreNodeManagerImpl::new(
             context.node_managers.clone(),
+            #[cfg(feature = "diagnostics")]
             context.session_manager.clone(),
             context.status.clone(),
         )
@@ -105,18 +171,21 @@ impl InMemoryNodeManagerImpl for CoreNodeManagerImpl {
     async fn init(&self, address_space: &mut AddressSpace, context: ServerContext) {
         self.set_core_namespace_metadata_defaults(address_space, &context);
         self.add_aggregates(address_space, &context.info.capabilities);
-        let interval = context
-            .info
-            .config
-            .limits
-            .subscriptions
-            .min_sampling_interval_ms
-            .floor() as u64;
-        let sampler_interval = if interval > 0 { interval } else { 100 };
-        self.sampler.run(
-            Duration::from_millis(sampler_interval),
-            context.subscriptions.clone(),
-        );
+        #[cfg(feature = "subscriptions")]
+        {
+            let interval = context
+                .info
+                .config
+                .limits
+                .subscriptions
+                .min_sampling_interval_ms
+                .floor() as u64;
+            let sampler_interval = if interval > 0 { interval } else { 100 };
+            self.sampler.run(
+                Duration::from_millis(sampler_interval),
+                context.subscriptions.clone(),
+            );
+        }
     }
 
     fn namespaces(&self) -> Vec<NamespaceMetadata> {
@@ -138,6 +207,7 @@ impl InMemoryNodeManagerImpl for CoreNodeManagerImpl {
         "core"
     }
 
+    #[cfg(feature = "method-call")]
     fn accepts_method_without_object_component(&self, method_id: &NodeId) -> bool {
         trace_read_lock!(self.method_with_context_cbs).contains_key(method_id)
     }
@@ -171,6 +241,7 @@ impl InMemoryNodeManagerImpl for CoreNodeManagerImpl {
         for read in reads {
             values.push(match read {
                 PreparedCoreReadValue::Value(value) => value,
+                #[cfg(feature = "diagnostics")]
                 PreparedCoreReadValue::DiagnosticsArray { kind, index_range } => {
                     self.read_diagnostics_array(context, kind, &index_range)
                         .await
@@ -195,6 +266,7 @@ impl InMemoryNodeManagerImpl for CoreNodeManagerImpl {
         Ok(())
     }
 
+    #[cfg(feature = "subscriptions")]
     async fn create_value_monitored_items(
         &self,
         context: &RequestContext,
@@ -229,7 +301,10 @@ impl InMemoryNodeManagerImpl for CoreNodeManagerImpl {
                     node.handle(),
                     Duration::from_millis(node.sampling_interval() as u64),
                 );
-            } else if self.is_internal_sampled(&node.item_to_monitor().node_id, context) {
+                continue;
+            }
+            #[cfg(feature = "diagnostics")]
+            if self.is_internal_sampled(&node.item_to_monitor().node_id, context) {
                 if let Err(e) = self.add_internal_sampler(node, context) {
                     node.set_status(e);
                 }
@@ -237,6 +312,7 @@ impl InMemoryNodeManagerImpl for CoreNodeManagerImpl {
         }
     }
 
+    #[cfg(feature = "method-call")]
     async fn call(
         &self,
         context: &RequestContext,
@@ -251,6 +327,7 @@ impl InMemoryNodeManagerImpl for CoreNodeManagerImpl {
         Ok(())
     }
 
+    #[cfg(feature = "subscriptions")]
     async fn set_monitoring_mode(
         &self,
         _context: &RequestContext,
@@ -269,6 +346,7 @@ impl InMemoryNodeManagerImpl for CoreNodeManagerImpl {
         }
     }
 
+    #[cfg(feature = "subscriptions")]
     async fn modify_monitored_items(
         &self,
         _context: &RequestContext,
@@ -286,6 +364,7 @@ impl InMemoryNodeManagerImpl for CoreNodeManagerImpl {
         }
     }
 
+    #[cfg(feature = "subscriptions")]
     async fn delete_monitored_items(&self, _context: &RequestContext, items: &[&MonitoredItemRef]) {
         for item in items {
             if self.status.get_managed_id(item.node_id()).is_some() {
@@ -302,14 +381,17 @@ impl InMemoryNodeManagerImpl for CoreNodeManagerImpl {
 impl CoreNodeManagerImpl {
     pub(super) fn new(
         node_managers: NodeManagersRef,
-        session_manager: Arc<RwLock<SessionManager>>,
+        #[cfg(feature = "diagnostics")] session_manager: Arc<RwLock<SessionManager>>,
         status: Arc<ServerStatusWrapper>,
     ) -> Self {
         Self {
+            #[cfg(feature = "subscriptions")]
             sampler: SyncSampler::new(),
             status,
             node_managers,
+            #[cfg(feature = "diagnostics")]
             session_manager,
+            #[cfg(feature = "method-call")]
             method_with_context_cbs: Default::default(),
         }
     }
@@ -378,11 +460,14 @@ impl CoreNodeManagerImpl {
             }
         };
 
-        if let Some(kind) = self.diagnostics_array_kind(&node_to_read.node_id) {
-            return PreparedCoreReadValue::DiagnosticsArray {
-                kind,
-                index_range: node_to_read.index_range.clone(),
-            };
+        #[cfg(feature = "diagnostics")]
+        {
+            if let Some(kind) = self.diagnostics_array_kind(&node_to_read.node_id) {
+                return PreparedCoreReadValue::DiagnosticsArray {
+                    kind,
+                    index_range: node_to_read.index_range.clone(),
+                };
+            }
         }
 
         // Try to read a special value, that is obtained from somewhere else.
@@ -410,6 +495,7 @@ impl CoreNodeManagerImpl {
         VariableId::try_from(identifier).ok()
     }
 
+    #[cfg(feature = "diagnostics")]
     fn diagnostics_array_kind(&self, node: &NodeId) -> Option<DiagnosticsArrayKind> {
         match self.get_variable_id(node)? {
             VariableId::Server_ServerDiagnostics_SubscriptionDiagnosticsArray => {
@@ -425,6 +511,7 @@ impl CoreNodeManagerImpl {
         }
     }
 
+    #[cfg(feature = "diagnostics")]
     async fn read_diagnostics_array(
         &self,
         context: &RequestContext,
@@ -447,6 +534,7 @@ impl CoreNodeManagerImpl {
         }
     }
 
+    #[cfg(feature = "diagnostics")]
     async fn read_subscription_diagnostics_array(
         &self,
         context: &RequestContext,
@@ -458,13 +546,20 @@ impl CoreNodeManagerImpl {
         }
 
         let rows = if context.info.diagnostics.enabled() {
-            context
-                .subscriptions
-                .subscription_diagnostics()
-                .await
-                .into_iter()
-                .map(ExtensionObject::from_message)
-                .collect()
+            #[cfg(feature = "subscriptions")]
+            {
+                context
+                    .subscriptions
+                    .subscription_diagnostics()
+                    .await
+                    .into_iter()
+                    .map(ExtensionObject::from_message)
+                    .collect()
+            }
+            #[cfg(not(feature = "subscriptions"))]
+            {
+                Vec::<ExtensionObject>::new()
+            }
         } else {
             Vec::new()
         };
@@ -472,6 +567,7 @@ impl CoreNodeManagerImpl {
         Self::extension_object_array_data_value(rows, index_range)
     }
 
+    #[cfg(feature = "diagnostics")]
     async fn read_session_diagnostics_array(
         &self,
         context: &RequestContext,
@@ -495,6 +591,7 @@ impl CoreNodeManagerImpl {
         Self::extension_object_array_data_value(rows, index_range)
     }
 
+    #[cfg(feature = "diagnostics")]
     async fn read_session_security_diagnostics_array(
         &self,
         context: &RequestContext,
@@ -517,6 +614,7 @@ impl CoreNodeManagerImpl {
         Self::extension_object_array_data_value(rows, index_range)
     }
 
+    #[cfg(feature = "diagnostics")]
     fn extension_object_array_data_value(
         rows: Vec<ExtensionObject>,
         index_range: &NumericRange,
@@ -538,20 +636,25 @@ impl CoreNodeManagerImpl {
         DataValue::new_now(value)
     }
 
+    #[cfg(feature = "diagnostics")]
     async fn session_diagnostics_rows(
         &self,
         context: &RequestContext,
     ) -> Vec<SessionDiagnosticsDataType> {
+        #[cfg(feature = "subscriptions")]
         let subscription_summaries = context.subscriptions.session_diagnostics_summaries().await;
         let sessions = self.snapshot_sessions();
         let mut rows = Vec::with_capacity(sessions.len());
 
         for session in sessions {
             let session = trace_read_lock!(session);
+            #[cfg(feature = "subscriptions")]
             let subscription_summary = subscription_summaries
                 .get(&session.session_id_numeric())
                 .copied()
                 .unwrap_or_default();
+            #[cfg(not(feature = "subscriptions"))]
+            let subscription_summary = CoreSessionSubscriptionDiagnosticsSummary::default();
             rows.push(Self::session_diagnostics_row(
                 context,
                 &session,
@@ -562,6 +665,7 @@ impl CoreNodeManagerImpl {
         rows
     }
 
+    #[cfg(feature = "diagnostics")]
     fn session_security_diagnostics_rows(&self) -> Vec<SessionSecurityDiagnosticsDataType> {
         let sessions = self.snapshot_sessions();
         let mut rows = Vec::with_capacity(sessions.len());
@@ -574,15 +678,17 @@ impl CoreNodeManagerImpl {
         rows
     }
 
+    #[cfg(feature = "diagnostics")]
     fn snapshot_sessions(&self) -> Vec<Arc<RwLock<Session>>> {
         let session_manager = trace_read_lock!(self.session_manager);
         session_manager.snapshot_sessions()
     }
 
+    #[cfg(feature = "diagnostics")]
     fn session_diagnostics_row(
         context: &RequestContext,
         session: &Session,
-        subscription_summary: SessionSubscriptionDiagnosticsSummary,
+        subscription_summary: CoreSessionSubscriptionDiagnosticsSummary,
     ) -> SessionDiagnosticsDataType {
         SessionDiagnosticsDataType {
             session_id: session.session_id().clone(),
@@ -601,6 +707,7 @@ impl CoreNodeManagerImpl {
         }
     }
 
+    #[cfg(feature = "diagnostics")]
     fn session_security_diagnostics_row(session: &Session) -> SessionSecurityDiagnosticsDataType {
         let (client_user_id_of_session, authentication_mechanism) =
             Self::session_user_and_authentication_mechanism(session);
@@ -622,6 +729,7 @@ impl CoreNodeManagerImpl {
         }
     }
 
+    #[cfg(feature = "diagnostics")]
     fn session_user_and_authentication_mechanism(session: &Session) -> (UAString, UAString) {
         match session.user_identity() {
             IdentityToken::None => (UAString::null(), UAString::null()),
@@ -640,6 +748,7 @@ impl CoreNodeManagerImpl {
         }
     }
 
+    #[cfg(feature = "diagnostics")]
     fn actual_session_timeout_ms(session: &Session) -> f64 {
         session
             .deadline()
@@ -648,6 +757,7 @@ impl CoreNodeManagerImpl {
             * 1000.0
     }
 
+    #[cfg(feature = "diagnostics")]
     fn instant_to_date_time(instant: Instant) -> DateTime {
         let now_instant = Instant::now();
         let now = chrono::Utc::now();
@@ -665,6 +775,7 @@ impl CoreNodeManagerImpl {
         }
     }
 
+    #[cfg(all(feature = "diagnostics", feature = "subscriptions"))]
     fn is_internal_sampled(&self, node: &NodeId, context: &RequestContext) -> bool {
         let Some(variable_id) = self.get_variable_id(node) else {
             return false;
@@ -673,6 +784,7 @@ impl CoreNodeManagerImpl {
         context.info.diagnostics.is_mapped(variable_id)
     }
 
+    #[cfg(all(feature = "diagnostics", feature = "subscriptions"))]
     fn add_internal_sampler(
         &self,
         monitored_item: &mut CreateMonitoredItem,
@@ -706,7 +818,12 @@ impl CoreNodeManagerImpl {
         let var_id = self.get_variable_id(&node.node_id)?;
 
         let limits = &context.info.config.limits;
+
+        // History capabilities: advertise false/0 when the history gate is off (FR-004).
+        #[cfg(feature = "history")]
         let hist_cap = &context.info.capabilities.history;
+        #[cfg(not(feature = "history"))]
+        let hist_cap: &HistoryServerCapabilities = &HISTORY_OFF;
 
         let v: Variant = match var_id {
             VariableId::Server_ServerCapabilities_MaxArrayLength => {
@@ -719,10 +836,16 @@ impl CoreNodeManagerImpl {
                 (limits.max_byte_string_length as u32).into()
             }
             VariableId::Server_ServerCapabilities_MaxHistoryContinuationPoints => {
-                (limits.max_history_continuation_points as u16).into()
+                #[cfg(feature = "history")]
+                { (limits.max_history_continuation_points as u16).into() }
+                #[cfg(not(feature = "history"))]
+                { 0u16.into() }
             }
             VariableId::Server_ServerCapabilities_MaxQueryContinuationPoints => {
-                (limits.max_query_continuation_points as u16).into()
+                #[cfg(feature = "query")]
+                { (limits.max_query_continuation_points as u16).into() }
+                #[cfg(not(feature = "query"))]
+                { 0u16.into() }
             }
             VariableId::Server_ServerCapabilities_MaxStringLength => {
                 (limits.max_string_length as u32).into()
@@ -739,22 +862,40 @@ impl CoreNodeManagerImpl {
                 (limits.operational.max_nodes_per_browse as u32).into()
             }
             VariableId::Server_ServerCapabilities_OperationLimits_MaxNodesPerHistoryReadData => {
-                (limits.operational.max_nodes_per_history_read_data as u32).into()
+                #[cfg(feature = "history")]
+                { (limits.operational.max_nodes_per_history_read_data as u32).into() }
+                #[cfg(not(feature = "history"))]
+                { 0u32.into() }
             }
             VariableId::Server_ServerCapabilities_OperationLimits_MaxNodesPerHistoryReadEvents => {
-                (limits.operational.max_nodes_per_history_read_events as u32).into()
+                #[cfg(feature = "history")]
+                { (limits.operational.max_nodes_per_history_read_events as u32).into() }
+                #[cfg(not(feature = "history"))]
+                { 0u32.into() }
             }
             VariableId::Server_ServerCapabilities_OperationLimits_MaxNodesPerHistoryUpdateData => {
-                (limits.operational.max_nodes_per_history_update as u32).into()
+                #[cfg(feature = "history")]
+                { (limits.operational.max_nodes_per_history_update as u32).into() }
+                #[cfg(not(feature = "history"))]
+                { 0u32.into() }
             }
             VariableId::Server_ServerCapabilities_OperationLimits_MaxNodesPerHistoryUpdateEvents => {
-                (limits.operational.max_nodes_per_history_update as u32).into()
+                #[cfg(feature = "history")]
+                { (limits.operational.max_nodes_per_history_update as u32).into() }
+                #[cfg(not(feature = "history"))]
+                { 0u32.into() }
             }
             VariableId::Server_ServerCapabilities_OperationLimits_MaxNodesPerMethodCall => {
-                (limits.operational.max_nodes_per_method_call as u32).into()
+                #[cfg(feature = "method-call")]
+                { (limits.operational.max_nodes_per_method_call as u32).into() }
+                #[cfg(not(feature = "method-call"))]
+                { 0u32.into() }
             }
             VariableId::Server_ServerCapabilities_OperationLimits_MaxNodesPerNodeManagement => {
-                (limits.operational.max_nodes_per_node_management as u32).into()
+                #[cfg(feature = "node-management")]
+                { (limits.operational.max_nodes_per_node_management as u32).into() }
+                #[cfg(not(feature = "node-management"))]
+                { 0u32.into() }
             }
             VariableId::Server_ServerCapabilities_OperationLimits_MaxNodesPerRead => {
                 (limits.operational.max_nodes_per_read as u32).into()
@@ -921,6 +1062,7 @@ impl CoreNodeManagerImpl {
                 vec![context.info.application_uri.clone()].into()
             }
 
+            #[cfg(feature = "diagnostics")]
             r if context.info.diagnostics.is_mapped(r) => {
                 let perms = context.info.authenticator.core_permissions(&context.token);
                 if !perms.read_diagnostics {
@@ -958,50 +1100,59 @@ impl CoreNodeManagerImpl {
         })
     }
 
+    #[cfg_attr(not(feature = "diagnostics"), allow(unused_variables))]
     fn write_server_value(
         &self,
         context: &RequestContext,
         address_space: &RwLock<AddressSpace>,
         node: &ParsedWriteValue,
     ) -> StatusCode {
-        let Some(var_id) = self.get_variable_id(&node.node_id) else {
-            return StatusCode::BadServiceUnsupported;
-        };
-
-        if var_id != VariableId::Server_ServerDiagnostics_EnabledFlag
-            || node.attribute_id != AttributeId::Value
+        #[cfg(feature = "diagnostics")]
         {
-            return StatusCode::BadServiceUnsupported;
-        }
+            let Some(var_id) = self.get_variable_id(&node.node_id) else {
+                return StatusCode::BadServiceUnsupported;
+            };
 
-        if trace_read_lock!(address_space)
-            .find(&node.node_id)
-            .is_none()
+            if var_id != VariableId::Server_ServerDiagnostics_EnabledFlag
+                || node.attribute_id != AttributeId::Value
+            {
+                return StatusCode::BadServiceUnsupported;
+            }
+
+            if trace_read_lock!(address_space)
+                .find(&node.node_id)
+                .is_none()
+            {
+                return StatusCode::BadNodeIdUnknown;
+            }
+
+            let perms = context.info.authenticator.core_permissions(&context.token);
+            if !perms.write_diagnostics {
+                return StatusCode::BadUserAccessDenied;
+            }
+
+            let Some(Variant::Boolean(enabled)) = node.value.value.as_ref() else {
+                return StatusCode::BadTypeMismatch;
+            };
+
+            if node.index_range.has_range() {
+                return StatusCode::BadWriteNotSupported;
+            }
+
+            context.info.diagnostics.set_enabled(*enabled);
+            #[cfg(feature = "subscriptions")]
+            if let Some(value) = context.info.diagnostics.get(var_id) {
+                context
+                    .subscriptions
+                    .notify_data_change([(value, &node.node_id, node.attribute_id)].into_iter());
+            }
+
+            StatusCode::Good
+        }
+        #[cfg(not(feature = "diagnostics"))]
         {
-            return StatusCode::BadNodeIdUnknown;
+            StatusCode::BadServiceUnsupported
         }
-
-        let perms = context.info.authenticator.core_permissions(&context.token);
-        if !perms.write_diagnostics {
-            return StatusCode::BadUserAccessDenied;
-        }
-
-        let Some(Variant::Boolean(enabled)) = node.value.value.as_ref() else {
-            return StatusCode::BadTypeMismatch;
-        };
-
-        if node.index_range.has_range() {
-            return StatusCode::BadWriteNotSupported;
-        }
-
-        context.info.diagnostics.set_enabled(*enabled);
-        if let Some(value) = context.info.diagnostics.get(var_id) {
-            context
-                .subscriptions
-                .notify_data_change([(value, &node.node_id, node.attribute_id)].into_iter());
-        }
-
-        StatusCode::Good
     }
 
     fn add_aggregates(&self, address_space: &mut AddressSpace, capabilities: &ServerCapabilities) {
@@ -1015,6 +1166,7 @@ impl CoreNodeManagerImpl {
     }
 
     /// Add a callback for `Call` on the method given by `id` that has access to the RequestContext.
+    #[cfg(feature = "method-call")]
     pub fn add_method_callback_with_context(
         &self,
         id: NodeId,
@@ -1027,72 +1179,77 @@ impl CoreNodeManagerImpl {
         cbs.insert(id, Arc::new(cb));
     }
 
+    #[cfg(feature = "method-call")]
     async fn call_builtin_method(
         &self,
         call: &mut MethodCall,
         context: &RequestContext,
     ) -> Result<(), StatusCode> {
-        let Ok(id) = call.method_id().as_method_id() else {
-            return Ok(());
-        };
+        #[cfg(feature = "subscriptions-standard")]
+        {
+            let Ok(id) = call.method_id().as_method_id() else {
+                return Ok(());
+            };
 
-        match id {
-            MethodId::Server_GetMonitoredItems => {
-                let id = load_method_args!(call, UInt32)?;
-                let subs = context
-                    .subscriptions
-                    .get_session_subscriptions(context.session_id)
-                    .ok_or(StatusCode::BadSessionIdInvalid)?;
-                let (ids, handles) = subs
-                    .legacy(move |subs| {
-                        let sub = subs.get(id).ok_or(StatusCode::BadSubscriptionIdInvalid)?;
-                        let (ids, handles): (Vec<_>, Vec<_>) =
-                            sub.items().map(|i| (i.id(), i.client_handle())).unzip();
-                        Ok::<_, StatusCode>((ids, handles))
+            match id {
+                MethodId::Server_GetMonitoredItems => {
+                    let id = load_method_args!(call, UInt32)?;
+                    let subs = context
+                        .subscriptions
+                        .get_session_subscriptions(context.session_id)
+                        .ok_or(StatusCode::BadSessionIdInvalid)?;
+                    let (ids, handles) = subs
+                        .legacy(move |subs| {
+                            let sub = subs.get(id).ok_or(StatusCode::BadSubscriptionIdInvalid)?;
+                            let (ids, handles): (Vec<_>, Vec<_>) =
+                                sub.items().map(|i| (i.id(), i.client_handle())).unzip();
+                            Ok::<_, StatusCode>((ids, handles))
+                        })
+                        .await
+                        .map_err(|_| StatusCode::BadSessionIdInvalid)??;
+                    call.set_outputs(vec![ids.into(), handles.into()]);
+                    call.set_status(StatusCode::Good);
+                    return Ok(());
+                }
+                MethodId::Server_ResendData => {
+                    let id = load_method_args!(call, UInt32)?;
+                    let subs = context
+                        .subscriptions
+                        .get_session_subscriptions(context.session_id)
+                        .ok_or(StatusCode::BadSessionIdInvalid)?;
+                    subs.legacy(move |subs| {
+                        let sub = subs
+                            .get_mut(id)
+                            .ok_or(StatusCode::BadSubscriptionIdInvalid)?;
+                        sub.set_resend_data();
+                        Ok::<_, StatusCode>(())
                     })
                     .await
                     .map_err(|_| StatusCode::BadSessionIdInvalid)??;
-                call.set_outputs(vec![ids.into(), handles.into()]);
-                call.set_status(StatusCode::Good);
-            }
-            MethodId::Server_ResendData => {
-                let id = load_method_args!(call, UInt32)?;
-                let subs = context
-                    .subscriptions
-                    .get_session_subscriptions(context.session_id)
-                    .ok_or(StatusCode::BadSessionIdInvalid)?;
-                subs.legacy(move |subs| {
-                    let sub = subs
-                        .get_mut(id)
-                        .ok_or(StatusCode::BadSubscriptionIdInvalid)?;
-                    sub.set_resend_data();
-                    Ok::<_, StatusCode>(())
-                })
-                .await
-                .map_err(|_| StatusCode::BadSessionIdInvalid)??;
-                call.set_status(StatusCode::Good);
-            }
-            _ => {
-                let cb = {
-                    let cbs = trace_read_lock!(self.method_with_context_cbs);
-                    cbs.get(call.method_id()).cloned()
-                };
-
-                if let Some(cb) = cb {
-                    match cb(context, call.object_id(), call.arguments()) {
-                        Ok(r) => {
-                            call.set_outputs(r);
-                            call.set_status(StatusCode::Good);
-                        }
-                        Err(e) => call.set_status(e),
-                    }
+                    call.set_status(StatusCode::Good);
                     return Ok(());
                 }
-
-                return Err(StatusCode::BadNotSupported);
+                _ => {}
             }
         }
-        Ok(())
+
+        let cb = {
+            let cbs = trace_read_lock!(self.method_with_context_cbs);
+            cbs.get(call.method_id()).cloned()
+        };
+
+        if let Some(cb) = cb {
+            match cb(context, call.object_id(), call.arguments()) {
+                Ok(r) => {
+                    call.set_outputs(r);
+                    call.set_status(StatusCode::Good);
+                }
+                Err(e) => call.set_status(e),
+            }
+            return Ok(());
+        }
+
+        Err(StatusCode::BadNotSupported)
     }
 }
 

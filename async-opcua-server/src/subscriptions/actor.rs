@@ -11,10 +11,11 @@ use tokio::sync::{mpsc, oneshot, Notify};
 use crate::node_manager::TypeTreeForUserStatic;
 
 use super::{
-    pool::NotificationBuffer, ring::NotificationWorkItem,
-    session_subscriptions::PendingRefreshDrain, PendingPublish, SessionSubscriptions,
-    SubscriptionCleanup, NOTIFICATION_RING_CAPACITY, RING_DRAIN_BUDGET, RING_DRAIN_EVENT_CHUNK,
+    pool::NotificationBuffer, ring::NotificationWorkItem, PendingPublish, SessionSubscriptions,
+    SubscriptionCleanup, NOTIFICATION_RING_CAPACITY, RING_DRAIN_BUDGET,
 };
+#[cfg(feature = "events")]
+use super::{session_subscriptions::PendingRefreshDrain, RING_DRAIN_EVENT_CHUNK};
 use crate::subscriptions::subscription::TickReason;
 use opcua_types::DateTimeUtc;
 use std::time::{Duration, Instant};
@@ -101,6 +102,7 @@ pub(crate) struct SubscriptionActor {
     /// Per-user TypeTree provider. The actor stores the provider, not a live read context,
     /// so default reads can use published snapshots and custom static getters stay in effect.
     type_tree_for_user: Arc<dyn TypeTreeForUserStatic>,
+    #[cfg(feature = "events")]
     pending_refresh: Option<PendingRefreshDrain>,
 }
 
@@ -185,20 +187,29 @@ impl SubscriptionActor {
             }
 
             let drained = {
-                // Keep the read context scoped to this synchronous drain chunk.
-                let type_tree = self.type_tree_for_user.get_type_tree();
-                self.subs.drain_ring_chunk(
-                    self.ring.as_ref(),
-                    type_tree.get(),
-                    RING_DRAIN_EVENT_CHUNK,
-                    &mut self.pending_refresh,
-                )
+                #[cfg(feature = "events")]
+                {
+                    // Keep the read context scoped to this synchronous drain chunk.
+                    let type_tree = self.type_tree_for_user.get_type_tree();
+                    self.subs.drain_ring_chunk(
+                        self.ring.as_ref(),
+                        type_tree.get(),
+                        RING_DRAIN_EVENT_CHUNK,
+                        &mut self.pending_refresh,
+                    )
+                }
+                #[cfg(not(feature = "events"))]
+                {
+                    self.subs.drain_ring_chunk(self.ring.as_ref())
+                }
             };
 
+            #[cfg(feature = "events")]
             let completed_refresh = self
                 .pending_refresh
                 .as_ref()
                 .is_some_and(PendingRefreshDrain::is_complete);
+            #[cfg(feature = "events")]
             if completed_refresh {
                 self.pending_refresh = None;
             }
@@ -235,6 +246,7 @@ pub(crate) fn spawn(
             commands_rx,
             cleanup_tx,
             type_tree_for_user,
+            #[cfg(feature = "events")]
             pending_refresh: None,
         }
         .run(),

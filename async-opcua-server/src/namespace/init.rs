@@ -1,15 +1,20 @@
 //! Server namespace initializer.
 //! Provides helper functions to register Alarm Conditions and associate their callbacks in the node manager.
 
+#[cfg(feature = "alarms")]
 use crate::address_space::AddressSpace;
+#[cfg(feature = "alarms")]
 use crate::alarms::{
     read_eurange, ConditionStateMachine, DiscreteAlarm, DiscreteAlarmKind, LimitAlarm, LimitConfig,
     LimitMode,
 };
+#[cfg(feature = "alarms")]
 use opcua_types::{MethodId, NodeId, ReferenceTypeId, StatusCode, Variant};
+#[cfg(feature = "alarms")]
 use std::sync::Arc;
 
 /// Registers a new Alarm Condition state machine and exposes the standard Acknowledge/Confirm methods.
+#[cfg(feature = "alarms")]
 pub fn register_alarm_condition(
     address_space: &Arc<opcua_core::sync::RwLock<AddressSpace>>,
     _node_manager: &crate::node_manager::memory::SimpleNodeManager,
@@ -49,6 +54,7 @@ pub fn register_alarm_condition(
 }
 
 /// Registers a new LimitAlarm condition and exposes the standard Acknowledge/Confirm methods.
+#[cfg(feature = "alarms")]
 pub fn register_limit_alarm(
     address_space: &Arc<opcua_core::sync::RwLock<AddressSpace>>,
     _node_manager: &crate::node_manager::memory::SimpleNodeManager,
@@ -101,6 +107,7 @@ pub fn register_limit_alarm(
 /// Registers a new LimitAlarm condition after validating limits against the source EURange.
 ///
 /// If the source variable does not expose an AnalogItem EURange property, validation is skipped.
+#[cfg(feature = "alarms")]
 pub fn register_limit_alarm_checked(
     address_space: &Arc<opcua_core::sync::RwLock<AddressSpace>>,
     node_manager: &crate::node_manager::memory::SimpleNodeManager,
@@ -129,6 +136,7 @@ pub fn register_limit_alarm_checked(
 }
 
 /// Registers a new DiscreteAlarm condition and exposes the standard Acknowledge/Confirm methods.
+#[cfg(feature = "alarms")]
 pub fn register_discrete_alarm(
     address_space: &Arc<opcua_core::sync::RwLock<AddressSpace>>,
     _node_manager: &crate::node_manager::memory::SimpleNodeManager,

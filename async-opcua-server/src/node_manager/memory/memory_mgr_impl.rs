@@ -1,38 +1,73 @@
 use async_trait::async_trait;
+#[cfg(feature = "method-call")]
 use std::sync::Arc;
 
+#[cfg(all(feature = "node-management", feature = "events"))]
+use crate::node_manager::GeneralModelChangeEvent;
+#[cfg(feature = "method-call")]
+use crate::node_manager::MethodCall;
 use crate::{
-    address_space::{AccessLevel, AddressSpace, EventNotifier, NodeType, ReferenceDirection},
-    diagnostics::NamespaceMetadata,
+    address_space::AddressSpace,
     node_manager::{
-        audit_events, AddNodeItem, AddReferenceItem, DeleteNodeItem, DeleteReferenceItem,
-        GeneralModelChangeEvent, HistoryNode, HistoryUpdateNode, MethodCall, MonitoredItemRef,
-        MonitoredItemUpdateRef, ParsedReadValueId, RegisterNodeItem, RequestContext, ServerContext,
+        NamespaceMetadata, ParsedReadValueId, RegisterNodeItem, RequestContext, ServerContext,
         WriteNode,
     },
+};
+#[cfg(feature = "node-management")]
+use crate::{
+    address_space::{AccessLevel, EventNotifier, NodeType, ReferenceDirection},
+    node_manager::{
+        audit_events, AddNodeItem, AddReferenceItem, DeleteNodeItem, DeleteReferenceItem,
+    },
     rbac,
+};
+#[cfg(feature = "history")]
+use crate::{
+    node_manager::{HistoryNode, HistoryUpdateNode},
     session::continuation_points::ContinuationPoint,
+};
+#[cfg(feature = "subscriptions")]
+use crate::{
+    node_manager::{MonitoredItemRef, MonitoredItemUpdateRef},
     subscriptions::CreateMonitoredItem,
 };
 use opcua_core::sync::RwLock;
+#[cfg(all(feature = "node-management", feature = "events"))]
+use opcua_nodes::Event;
+#[cfg(feature = "node-management")]
 use opcua_nodes::{
-    DataType, Event, Method, NodeBase, Object, ObjectType, ReferenceType, TypeTree, Variable,
+    DataType, Method, NodeBase, Object, ObjectType, ReferenceType, TypeTree, Variable,
     VariableType, View,
 };
+#[cfg(feature = "subscriptions")]
+use opcua_types::MonitoringMode;
+#[cfg(all(feature = "node-management", feature = "events"))]
+use opcua_types::ObjectId;
+#[cfg(any(feature = "method-call", feature = "node-management"))]
+use opcua_types::Variant;
+#[cfg(feature = "node-management")]
 use opcua_types::{
-    AddNodeAttributes, AttributesMask, BrowseDirection, DataTypeId, DataValue, ExpandedNodeId,
-    LocalizedText, ModelChangeStructureDataType, MonitoringMode, NodeClass, NodeId, ObjectId,
-    PermissionType, ReadAnnotationDataDetails, ReadAtTimeDetails, ReadEventDetails,
-    ReadProcessedDetails, ReadRawModifiedDetails, ReferenceTypeId, StatusCode, TimestampsToReturn,
-    Variant, WriteMask,
+    AddNodeAttributes, AttributesMask, BrowseDirection, DataTypeId, ExpandedNodeId, LocalizedText,
+    ModelChangeStructureDataType, NodeClass, PermissionType, ReferenceTypeId, WriteMask,
+};
+use opcua_types::{DataValue, NodeId, StatusCode, TimestampsToReturn};
+#[cfg(feature = "history")]
+use opcua_types::{
+    ReadAnnotationDataDetails, ReadAtTimeDetails, ReadEventDetails, ReadProcessedDetails,
+    ReadRawModifiedDetails,
 };
 
+#[cfg(feature = "node-management")]
 const MODEL_CHANGE_NODE_ADDED: u8 = 1;
+#[cfg(feature = "node-management")]
 const MODEL_CHANGE_NODE_DELETED: u8 = 2;
+#[cfg(feature = "node-management")]
 const MODEL_CHANGE_REFERENCE_ADDED: u8 = 4;
+#[cfg(feature = "node-management")]
 const MODEL_CHANGE_REFERENCE_DELETED: u8 = 8;
 
 /// Callback used by the default in-memory method `Call` implementation.
+#[cfg(feature = "method-call")]
 pub type InMemoryMethodCallback = Arc<
     dyn Fn(&RequestContext, &[Variant]) -> Result<Vec<Variant>, StatusCode> + Send + Sync + 'static,
 >;
@@ -60,10 +95,12 @@ where
     }
 }
 
+#[cfg(feature = "node-management")]
 fn clients_can_modify_address_space(context: &RequestContext) -> bool {
     context.info.config.limits.clients_can_modify_address_space
 }
 
+#[cfg(feature = "node-management")]
 fn authorize_node_management_permission(
     context: &RequestContext,
     address_space: &AddressSpace,
@@ -77,6 +114,7 @@ fn authorize_node_management_permission(
     rbac::decision::authorize_ctx(context, &node, required)
 }
 
+#[cfg(feature = "node-management")]
 fn model_change(affected: NodeId, verb: u8) -> ModelChangeStructureDataType {
     ModelChangeStructureDataType {
         affected,
@@ -85,6 +123,7 @@ fn model_change(affected: NodeId, verb: u8) -> ModelChangeStructureDataType {
     }
 }
 
+#[cfg(all(feature = "node-management", feature = "events"))]
 fn notify_model_changes(context: &RequestContext, changes: Vec<ModelChangeStructureDataType>) {
     if changes.is_empty() {
         return;
@@ -96,6 +135,10 @@ fn notify_model_changes(context: &RequestContext, changes: Vec<ModelChangeStruct
     context.subscriptions.notify_events(items);
 }
 
+#[cfg(all(feature = "node-management", not(feature = "events")))]
+fn notify_model_changes(_context: &RequestContext, _changes: Vec<ModelChangeStructureDataType>) {}
+
+#[cfg(feature = "node-management")]
 fn add_nodes_impl(
     context: &RequestContext,
     address_space: &RwLock<AddressSpace>,
@@ -225,6 +268,7 @@ fn add_nodes_impl(
     notify_model_changes(context, changes);
 }
 
+#[cfg(feature = "node-management")]
 fn delete_nodes_impl(
     context: &RequestContext,
     address_space: &RwLock<AddressSpace>,
@@ -277,6 +321,7 @@ fn delete_nodes_impl(
     notify_model_changes(context, changes);
 }
 
+#[cfg(feature = "node-management")]
 fn add_references_impl(
     context: &RequestContext,
     address_space: &RwLock<AddressSpace>,
@@ -465,6 +510,7 @@ fn add_references_impl(
     notify_model_changes(context, changes);
 }
 
+#[cfg(feature = "node-management")]
 fn delete_references_impl(
     context: &RequestContext,
     address_space: &RwLock<AddressSpace>,
@@ -572,6 +618,7 @@ fn delete_references_impl(
 
 /// Resolve a node's NodeClass, preferring a full node in the address space and
 /// falling back to type metadata for type-only nodes; `None` if unknown.
+#[cfg(feature = "node-management")]
 fn resolve_node_class(
     address_space: &AddressSpace,
     type_tree: &dyn TypeTree,
@@ -587,6 +634,7 @@ fn resolve_node_class(
 /// (OPC 10000-4 §5.8.3, OPC 10000-3 §5.3). Conservative: only rejects clearly
 /// forbidden combinations; unknown endpoints are permitted so legitimate models
 /// (including every combination in the standard nodeset) are never rejected.
+#[cfg(feature = "node-management")]
 fn reference_is_structurally_allowed(
     address_space: &AddressSpace,
     type_tree: &dyn TypeTree,
@@ -636,6 +684,7 @@ fn reference_is_structurally_allowed(
 /// supertype's DataType and ValueRank (OPC 10000-3 §5.6.5 / §6.3 subtyping).
 /// Only applied when the node is a VariableType added as a HasSubtype of a
 /// resolvable VariableType supertype; unknown DataTypes are not judged.
+#[cfg(feature = "node-management")]
 fn validate_type_refinement(
     address_space: &AddressSpace,
     type_tree: &dyn TypeTree,
@@ -677,6 +726,7 @@ fn validate_type_refinement(
 /// (OPC 10000-3): Any (-2) accepts anything; ScalarOrOneDimension (-3) accepts
 /// scalar or a single dimension; OneOrMoreDimensions (0) accepts any array;
 /// Scalar (-1) and fixed ranks (>=1) require an exact match.
+#[cfg(feature = "node-management")]
 fn value_rank_is_restriction_of(parent: i32, child: i32) -> bool {
     const ANY: i32 = -2;
     const SCALAR_OR_ONE_DIMENSION: i32 = -3;
@@ -691,6 +741,7 @@ fn value_rank_is_restriction_of(parent: i32, child: i32) -> bool {
     }
 }
 
+#[cfg(feature = "node-management")]
 fn reference_type_is_abstract(address_space: &AddressSpace, reference_type_id: &NodeId) -> bool {
     if let Some(reference_type) = address_space.find(reference_type_id) {
         return match &*reference_type {
@@ -702,6 +753,7 @@ fn reference_type_is_abstract(address_space: &AddressSpace, reference_type_id: &
     standard_reference_type_is_abstract(reference_type_id)
 }
 
+#[cfg(feature = "node-management")]
 fn standard_reference_type_is_abstract(reference_type_id: &NodeId) -> bool {
     reference_type_id
         .as_reference_type_id()
@@ -717,6 +769,7 @@ fn standard_reference_type_is_abstract(reference_type_id: &NodeId) -> bool {
         })
 }
 
+#[cfg(feature = "node-management")]
 fn validate_type_definition(
     address_space: &AddressSpace,
     type_tree: &dyn TypeTree,
@@ -766,6 +819,7 @@ fn validate_type_definition(
     }
 }
 
+#[cfg(feature = "node-management")]
 fn next_unused_node_id(address_space: &AddressSpace, namespace: u16) -> NodeId {
     loop {
         let node_id = NodeId::next_numeric(namespace);
@@ -775,6 +829,7 @@ fn next_unused_node_id(address_space: &AddressSpace, namespace: u16) -> NodeId {
     }
 }
 
+#[cfg(feature = "node-management")]
 fn build_node(item: &AddNodeItem, node_id: &NodeId) -> Result<NodeType, StatusCode> {
     match (item.node_class(), item.node_attributes()) {
         (NodeClass::Object, AddNodeAttributes::Object(attributes)) => {
@@ -817,6 +872,7 @@ fn build_node(item: &AddNodeItem, node_id: &NodeId) -> Result<NodeType, StatusCo
     }
 }
 
+#[cfg(feature = "node-management")]
 fn build_object(
     node_id: &NodeId,
     browse_name: impl Into<opcua_types::QualifiedName>,
@@ -843,6 +899,7 @@ fn build_object(
     Ok(node)
 }
 
+#[cfg(feature = "node-management")]
 fn build_variable(
     node_id: &NodeId,
     browse_name: impl Into<opcua_types::QualifiedName>,
@@ -909,6 +966,7 @@ fn build_variable(
     Ok(node)
 }
 
+#[cfg(feature = "node-management")]
 fn build_method(
     node_id: &NodeId,
     browse_name: impl Into<opcua_types::QualifiedName>,
@@ -937,6 +995,7 @@ fn build_method(
     Ok(node)
 }
 
+#[cfg(feature = "node-management")]
 fn build_object_type(
     node_id: &NodeId,
     browse_name: impl Into<opcua_types::QualifiedName>,
@@ -965,6 +1024,7 @@ fn build_object_type(
     Ok(node)
 }
 
+#[cfg(feature = "node-management")]
 fn build_variable_type(
     node_id: &NodeId,
     browse_name: impl Into<opcua_types::QualifiedName>,
@@ -1018,6 +1078,7 @@ fn build_variable_type(
     Ok(node)
 }
 
+#[cfg(feature = "node-management")]
 fn validate_array_dimensions(value_rank: i32, array_dimensions: &[u32]) -> Result<(), StatusCode> {
     if value_rank >= 1 && array_dimensions.len() != value_rank as usize {
         Err(StatusCode::BadNodeAttributesInvalid)
@@ -1026,6 +1087,7 @@ fn validate_array_dimensions(value_rank: i32, array_dimensions: &[u32]) -> Resul
     }
 }
 
+#[cfg(feature = "node-management")]
 fn build_reference_type(
     node_id: &NodeId,
     browse_name: impl Into<opcua_types::QualifiedName>,
@@ -1066,6 +1128,7 @@ fn build_reference_type(
     Ok(node)
 }
 
+#[cfg(feature = "node-management")]
 fn build_data_type(
     node_id: &NodeId,
     browse_name: impl Into<opcua_types::QualifiedName>,
@@ -1091,6 +1154,7 @@ fn build_data_type(
     Ok(node)
 }
 
+#[cfg(feature = "node-management")]
 fn build_view(
     node_id: &NodeId,
     browse_name: impl Into<opcua_types::QualifiedName>,
@@ -1121,6 +1185,7 @@ fn build_view(
     Ok(node)
 }
 
+#[cfg(feature = "node-management")]
 fn attributes_mask(
     specified_attributes: u32,
     allowed_attributes: AttributesMask,
@@ -1133,6 +1198,7 @@ fn attributes_mask(
     Ok(mask)
 }
 
+#[cfg(feature = "node-management")]
 fn base_attributes_mask() -> AttributesMask {
     AttributesMask::DESCRIPTION
         | AttributesMask::DISPLAY_NAME
@@ -1140,10 +1206,12 @@ fn base_attributes_mask() -> AttributesMask {
         | AttributesMask::USER_WRITE_MASK
 }
 
+#[cfg(feature = "node-management")]
 fn object_attributes_mask() -> AttributesMask {
     base_attributes_mask() | AttributesMask::EVENT_NOTIFIER
 }
 
+#[cfg(feature = "node-management")]
 fn variable_attributes_mask() -> AttributesMask {
     base_attributes_mask()
         | AttributesMask::ACCESS_LEVEL
@@ -1156,14 +1224,17 @@ fn variable_attributes_mask() -> AttributesMask {
         | AttributesMask::VALUE_RANK
 }
 
+#[cfg(feature = "node-management")]
 fn method_attributes_mask() -> AttributesMask {
     base_attributes_mask() | AttributesMask::EXECUTABLE | AttributesMask::USER_EXECUTABLE
 }
 
+#[cfg(feature = "node-management")]
 fn object_type_attributes_mask() -> AttributesMask {
     base_attributes_mask() | AttributesMask::IS_ABSTRACT
 }
 
+#[cfg(feature = "node-management")]
 fn variable_type_attributes_mask() -> AttributesMask {
     base_attributes_mask()
         | AttributesMask::ARRAY_DIMENSIONS
@@ -1173,6 +1244,7 @@ fn variable_type_attributes_mask() -> AttributesMask {
         | AttributesMask::VALUE_RANK
 }
 
+#[cfg(feature = "node-management")]
 fn reference_type_attributes_mask() -> AttributesMask {
     base_attributes_mask()
         | AttributesMask::INVERSE_NAME
@@ -1180,14 +1252,17 @@ fn reference_type_attributes_mask() -> AttributesMask {
         | AttributesMask::SYMMETRIC
 }
 
+#[cfg(feature = "node-management")]
 fn data_type_attributes_mask() -> AttributesMask {
     base_attributes_mask() | AttributesMask::IS_ABSTRACT
 }
 
+#[cfg(feature = "node-management")]
 fn view_attributes_mask() -> AttributesMask {
     base_attributes_mask() | AttributesMask::CONTAINS_NO_LOOPS | AttributesMask::EVENT_NOTIFIER
 }
 
+#[cfg(feature = "node-management")]
 fn display_name_or_browse_name(
     mask: &AttributesMask,
     display_name: LocalizedText,
@@ -1200,6 +1275,7 @@ fn display_name_or_browse_name(
     }
 }
 
+#[cfg(feature = "node-management")]
 fn apply_base_attributes<T: NodeBase>(
     node: &mut T,
     mask: AttributesMask,
@@ -1241,6 +1317,7 @@ pub trait InMemoryNodeManagerImpl: Send + Sync + 'static {
     /// Return `true` when this implementation can handle `method_id` even if the call object does
     /// not expose that exact method node as a component (e.g. a cross-node-manager shared method that
     /// validates its own object). Default false.
+    #[cfg(feature = "method-call")]
     fn accepts_method_without_object_component(&self, _method_id: &NodeId) -> bool {
         false
     }
@@ -1250,6 +1327,7 @@ pub trait InMemoryNodeManagerImpl: Send + Sync + 'static {
     ///
     /// This does not commit to actually allowing the node to be created, it just means
     /// that no other node managers will be called to create the node.
+    #[cfg(feature = "node-management")]
     fn handle_new_node(&self, parent_id: &ExpandedNodeId) -> bool {
         false
     }
@@ -1293,6 +1371,7 @@ pub trait InMemoryNodeManagerImpl: Send + Sync + 'static {
     /// default implementation.
     ///
     /// It may also begin sampling as given by the monitored item request.
+    #[cfg(feature = "subscriptions")]
     async fn create_value_monitored_items(
         &self,
         context: &RequestContext,
@@ -1321,6 +1400,7 @@ pub trait InMemoryNodeManagerImpl: Send + Sync + 'static {
     /// Create monitored items for events.
     ///
     /// This does not need to do anything.
+    #[cfg(feature = "events")]
     async fn create_event_monitored_items(
         &self,
         context: &RequestContext,
@@ -1333,6 +1413,7 @@ pub trait InMemoryNodeManagerImpl: Send + Sync + 'static {
     /// Handle the SetMonitoringMode request, to pause or resume sampling.
     ///
     /// This will only get monitored items for events or value.
+    #[cfg(feature = "subscriptions")]
     async fn set_monitoring_mode(
         &self,
         context: &RequestContext,
@@ -1344,6 +1425,7 @@ pub trait InMemoryNodeManagerImpl: Send + Sync + 'static {
     /// Handle modification of monitored items, this may adjust
     /// sampling intervals or filters, and require action to update background
     /// processes.
+    #[cfg(feature = "subscriptions")]
     async fn modify_monitored_items(
         &self,
         context: &RequestContext,
@@ -1352,6 +1434,7 @@ pub trait InMemoryNodeManagerImpl: Send + Sync + 'static {
     }
 
     /// Handle deletion of monitored items.
+    #[cfg(feature = "subscriptions")]
     async fn delete_monitored_items(&self, context: &RequestContext, items: &[&MonitoredItemRef]) {}
 
     /// Perform the unregister nodes service. The default behavior for this service is to
@@ -1370,6 +1453,7 @@ pub trait InMemoryNodeManagerImpl: Send + Sync + 'static {
     /// to the `nodes` list of type either `HistoryData` or `HistoryModifiedData`
     ///
     /// Nodes are verified to be readable before this is called.
+    #[cfg(feature = "history")]
     async fn history_read_raw_modified(
         &self,
         context: &RequestContext,
@@ -1384,6 +1468,7 @@ pub trait InMemoryNodeManagerImpl: Send + Sync + 'static {
     /// to the `nodes` list of type `HistoryData`.
     ///
     /// Nodes are verified to be readable before this is called.
+    #[cfg(feature = "history")]
     async fn history_read_processed(
         &self,
         context: &RequestContext,
@@ -1399,6 +1484,7 @@ pub trait InMemoryNodeManagerImpl: Send + Sync + 'static {
     /// to the `nodes` list of type `HistoryData`.
     ///
     /// Nodes are verified to be readable before this is called.
+    #[cfg(feature = "history")]
     async fn history_read_at_time(
         &self,
         context: &RequestContext,
@@ -1413,6 +1499,7 @@ pub trait InMemoryNodeManagerImpl: Send + Sync + 'static {
     /// to the `nodes` list of type `HistoryEvent`.
     ///
     /// Nodes are verified to be readable before this is called.
+    #[cfg(feature = "history")]
     async fn history_read_events(
         &self,
         context: &RequestContext,
@@ -1427,6 +1514,7 @@ pub trait InMemoryNodeManagerImpl: Send + Sync + 'static {
     /// results to the `nodes` list of type `Annotation`.
     ///
     /// Nodes are verified to be readable before this is called.
+    #[cfg(feature = "history")]
     async fn history_read_annotations(
         &self,
         context: &RequestContext,
@@ -1438,6 +1526,7 @@ pub trait InMemoryNodeManagerImpl: Send + Sync + 'static {
     }
 
     /// Release a history continuation point after the service removes it from the session cache.
+    #[cfg(feature = "history")]
     async fn history_release_continuation_point(
         &self,
         context: &RequestContext,
@@ -1451,6 +1540,7 @@ pub trait InMemoryNodeManagerImpl: Send + Sync + 'static {
     /// status codes to the `nodes` list as appropriate.
     ///
     /// Nodes are verified to be writable before this is called.
+    #[cfg(feature = "history")]
     async fn history_update(
         &self,
         context: &RequestContext,
@@ -1479,6 +1569,7 @@ pub trait InMemoryNodeManagerImpl: Send + Sync + 'static {
     /// The methods have already had their arguments verified to have valid length
     /// and the method is verified to exist on the given object. This should try
     /// to execute the methods, and set the result.
+    #[cfg(feature = "method-call")]
     async fn call(
         &self,
         context: &RequestContext,
@@ -1504,6 +1595,7 @@ pub trait InMemoryNodeManagerImpl: Send + Sync + 'static {
     }
 
     /// Return a callback for executing a method, if this implementation has one registered.
+    #[cfg(feature = "method-call")]
     fn method_callback(&self, method_id: &NodeId) -> Option<InMemoryMethodCallback> {
         None
     }
@@ -1512,6 +1604,7 @@ pub trait InMemoryNodeManagerImpl: Send + Sync + 'static {
     ///
     /// This should create the nodes, or set a failed status as appropriate.
     /// If a node was created, the status should be set to Good.
+    #[cfg(feature = "node-management")]
     async fn add_nodes(
         &self,
         context: &RequestContext,
@@ -1533,6 +1626,7 @@ pub trait InMemoryNodeManagerImpl: Send + Sync + 'static {
     /// set both source and target status. Note that it may
     /// already have been added in a different node manager, you are
     /// responsible for any cleanup if you do this.
+    #[cfg(feature = "node-management")]
     async fn add_references(
         &self,
         context: &RequestContext,
@@ -1549,6 +1643,7 @@ pub trait InMemoryNodeManagerImpl: Send + Sync + 'static {
     ///
     /// Typically, you also want to implement `delete_node_references` if
     /// there are other node managers that support deletes.
+    #[cfg(feature = "node-management")]
     async fn delete_nodes(
         &self,
         context: &RequestContext,
@@ -1564,6 +1659,7 @@ pub trait InMemoryNodeManagerImpl: Send + Sync + 'static {
     ///
     /// This is not allowed to fail, you should make it impossible to delete
     /// nodes with immutable references.
+    #[cfg(feature = "node-management")]
     async fn delete_node_references(
         &self,
         _context: &RequestContext,
@@ -1590,6 +1686,7 @@ pub trait InMemoryNodeManagerImpl: Send + Sync + 'static {
     /// set both source and target status. Note that it may
     /// already have been deleted in a different node manager, you are
     /// responsible for any cleanup if you do this.
+    #[cfg(feature = "node-management")]
     async fn delete_references(
         &self,
         context: &RequestContext,

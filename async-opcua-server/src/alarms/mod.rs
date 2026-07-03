@@ -35,7 +35,7 @@ pub use limit::{
     read_eurange, ActiveLimits, LimitAlarm, LimitConfig, LimitDef, LimitEvaluator, LimitLevel,
     LimitMode, LimitOutcome, NonExclusiveState,
 };
-#[cfg(feature = "generated-address-space")]
+#[cfg(all(feature = "generated-address-space", feature = "method-call"))]
 pub use methods::{register_condition_methods, register_dialog_condition_methods};
 pub use methods::{AlarmMethodHandler, ConditionRefreshHandler};
 pub use refresh_events::{RefreshEndEvent, RefreshStartEvent};

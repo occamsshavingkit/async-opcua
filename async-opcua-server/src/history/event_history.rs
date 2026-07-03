@@ -4,17 +4,18 @@ use std::collections::{hash_map::Entry, HashMap, VecDeque};
 
 use async_trait::async_trait;
 use opcua_core::{events::AlarmEvent, sync::RwLock};
-use opcua_nodes::DefaultTypeTree;
+#[cfg(feature = "events")]
+use opcua_nodes::{DefaultTypeTree, Event, EventField};
+#[cfg(feature = "events")]
+use opcua_types::{AttributeId, NumericRange, UAString};
 use opcua_types::{
     ByteString, DataValue, DateTime, EventFilter, HistoryEventFieldList, NodeId, ObjectTypeId,
     PerformUpdateType, QualifiedName, SimpleAttributeOperand, StatusCode, Variant,
 };
 
-use crate::{
-    alarms::ServerAlarmEvent,
-    history::{HistoryRawModifiedResult, HistoryStorageBackend},
-    services::subscription::filter::ParsedEventFilter,
-};
+use crate::history::{HistoryRawModifiedResult, HistoryStorageBackend};
+#[cfg(feature = "events")]
+use crate::services::subscription::filter::ParsedEventFilter;
 
 const DEFAULT_MAX_EVENTS_PER_NODE: usize = 1000;
 const EVENT_ID_FIELD_NAME: &str = "EventId";
@@ -73,58 +74,67 @@ impl HistoryStorageBackend for InMemoryEventHistory {
         filter: &EventFilter,
         _continuation_point: Option<Vec<u8>>,
     ) -> Result<(Vec<HistoryEventFieldList>, Option<Vec<u8>>), StatusCode> {
-        let type_tree = DefaultTypeTree::new();
-        let (_, parsed) = ParsedEventFilter::parse(filter.clone(), &type_tree);
-        let parsed = parsed?;
-
-        let mut events = self
-            .events
-            .read()
-            .get(node_id)
-            .map(|events| events.iter().cloned().collect::<Vec<_>>())
-            .unwrap_or_default();
-        events.sort_by_key(|event| event.time);
-
-        let limit = (num_values_per_node > 0).then_some(num_values_per_node as usize);
-        let mut field_lists = Vec::new();
-        for event in events
-            .into_iter()
-            .filter(|event| event_time_in_range(event.time, start_time, end_time))
+        #[cfg(not(feature = "events"))]
         {
-            // ponytail: reverse reads use the same inclusive range but keep ascending order.
-            if !has_event_read_capacity(limit, field_lists.len()) {
-                // ponytail: this backend truncates to num_values_per_node without a continuation.
-                break;
-            }
-
-            let event = ServerAlarmEvent { event: &event };
-            if let Some(fields) = parsed.evaluate(&event, 0, &type_tree) {
-                field_lists.push(HistoryEventFieldList {
-                    event_fields: fields.event_fields,
-                });
-            }
+            let _ = (node_id, start_time, end_time, num_values_per_node, filter);
+            return Err(StatusCode::BadHistoryOperationUnsupported);
         }
 
-        if has_event_read_capacity(limit, field_lists.len()) {
-            let inserted_events = self
-                .inserted_events
+        #[cfg(feature = "events")]
+        {
+            let type_tree = DefaultTypeTree::new();
+            let (_, parsed) = ParsedEventFilter::parse(filter.clone(), &type_tree);
+            let parsed = parsed?;
+
+            let mut events = self
+                .events
                 .read()
                 .get(node_id)
-                .map(|events| events.values().cloned().collect::<Vec<_>>())
+                .map(|events| events.iter().cloned().collect::<Vec<_>>())
                 .unwrap_or_default();
+            events.sort_by_key(|event| event.time);
 
-            for event in inserted_events {
-                // ponytail: inserted events are returned with the field shape they were written
-                // with, without cross-filter re-evaluation. Upgrade path: store the full event
-                // and re-evaluate it against the read filter.
+            let limit = (num_values_per_node > 0).then_some(num_values_per_node as usize);
+            let mut field_lists = Vec::new();
+            for event in events
+                .into_iter()
+                .filter(|event| event_time_in_range(event.time, start_time, end_time))
+            {
+                // ponytail: reverse reads use the same inclusive range but keep ascending order.
                 if !has_event_read_capacity(limit, field_lists.len()) {
+                    // ponytail: this backend truncates to num_values_per_node without a continuation.
                     break;
                 }
-                field_lists.push(event);
-            }
-        }
 
-        Ok((field_lists, None))
+                let event = HistoryAlarmEvent { event: &event };
+                if let Some(fields) = parsed.evaluate(&event, 0, &type_tree) {
+                    field_lists.push(HistoryEventFieldList {
+                        event_fields: fields.event_fields,
+                    });
+                }
+            }
+
+            if has_event_read_capacity(limit, field_lists.len()) {
+                let inserted_events = self
+                    .inserted_events
+                    .read()
+                    .get(node_id)
+                    .map(|events| events.values().cloned().collect::<Vec<_>>())
+                    .unwrap_or_default();
+
+                for event in inserted_events {
+                    // ponytail: inserted events are returned with the field shape they were written
+                    // with, without cross-filter re-evaluation. Upgrade path: store the full event
+                    // and re-evaluate it against the read filter.
+                    if !has_event_read_capacity(limit, field_lists.len()) {
+                        break;
+                    }
+                    field_lists.push(event);
+                }
+            }
+
+            Ok((field_lists, None))
+        }
     }
 
     async fn read_raw_modified(
@@ -240,6 +250,147 @@ impl HistoryStorageBackend for InMemoryEventHistory {
     }
 }
 
+#[cfg(feature = "events")]
+struct HistoryAlarmEvent<'a> {
+    event: &'a AlarmEvent,
+}
+
+#[cfg(feature = "events")]
+impl Event for HistoryAlarmEvent<'_> {
+    fn clone_box(&self) -> Box<dyn Event + Send> {
+        Box::new(OwnedHistoryAlarmEvent {
+            event: self.event.clone(),
+        })
+    }
+
+    fn time(&self) -> &DateTime {
+        &self.event.time
+    }
+
+    fn event_type_id(&self) -> &NodeId {
+        &self.event.event_type
+    }
+
+    fn get_field(
+        &self,
+        _type_definition_id: &NodeId,
+        attribute_id: AttributeId,
+        index_range: &NumericRange,
+        browse_path: &[QualifiedName],
+    ) -> Variant {
+        self.get_value(attribute_id, index_range, browse_path)
+    }
+}
+
+#[cfg(feature = "events")]
+impl EventField for HistoryAlarmEvent<'_> {
+    fn get_value(
+        &self,
+        attribute_id: AttributeId,
+        _index_range: &NumericRange,
+        remaining_path: &[QualifiedName],
+    ) -> Variant {
+        alarm_event_field(self.event, attribute_id, remaining_path)
+    }
+}
+
+#[cfg(feature = "events")]
+struct OwnedHistoryAlarmEvent {
+    event: AlarmEvent,
+}
+
+#[cfg(feature = "events")]
+impl Event for OwnedHistoryAlarmEvent {
+    fn clone_box(&self) -> Box<dyn Event + Send> {
+        Box::new(Self {
+            event: self.event.clone(),
+        })
+    }
+
+    fn time(&self) -> &DateTime {
+        &self.event.time
+    }
+
+    fn event_type_id(&self) -> &NodeId {
+        &self.event.event_type
+    }
+
+    fn get_field(
+        &self,
+        _type_definition_id: &NodeId,
+        attribute_id: AttributeId,
+        index_range: &NumericRange,
+        browse_path: &[QualifiedName],
+    ) -> Variant {
+        self.get_value(attribute_id, index_range, browse_path)
+    }
+}
+
+#[cfg(feature = "events")]
+impl EventField for OwnedHistoryAlarmEvent {
+    fn get_value(
+        &self,
+        attribute_id: AttributeId,
+        _index_range: &NumericRange,
+        remaining_path: &[QualifiedName],
+    ) -> Variant {
+        alarm_event_field(&self.event, attribute_id, remaining_path)
+    }
+}
+
+#[cfg(feature = "events")]
+fn alarm_event_field(
+    event: &AlarmEvent,
+    attribute_id: AttributeId,
+    remaining_path: &[QualifiedName],
+) -> Variant {
+    if attribute_id != AttributeId::Value || remaining_path.is_empty() {
+        return Variant::Empty;
+    }
+
+    let first_name = remaining_path[0].name.as_ref();
+    if remaining_path.len() == 2
+        && remaining_path[1].name.as_ref() == "Id"
+        && matches!(
+            first_name,
+            "ActiveState" | "AckedState" | "ConfirmedState" | "DialogState" | "EnabledState"
+        )
+    {
+        return match first_name {
+            "ActiveState" => Variant::from(event.active_state),
+            "AckedState" => Variant::from(event.acked_state),
+            "ConfirmedState" => Variant::from(event.confirmed_state),
+            "DialogState" => Variant::from(event.active_state),
+            "EnabledState" => Variant::from(true),
+            _ => Variant::Empty,
+        };
+    }
+
+    if remaining_path.len() != 1 {
+        return Variant::Empty;
+    }
+
+    match first_name {
+        "EventId" => Variant::from(ByteString::from(event.event_id.clone())),
+        "EventType" => Variant::from(event.event_type.clone()),
+        "SourceNode" => Variant::from(event.source_node.clone()),
+        "SourceName" => Variant::from(UAString::from(event.source_name.clone())),
+        "Time" | "ReceiveTime" => Variant::from(event.time),
+        "Message" => Variant::from(event.message.clone()),
+        "Severity" => Variant::from(event.severity),
+        "ConditionId" => Variant::from(event.condition_id.clone()),
+        "BranchId" => Variant::NodeId(Box::new(event.branch_id.clone())),
+        "ConditionName" => Variant::from(UAString::from(event.condition_name.clone())),
+        "Retain" => Variant::from(event.retain),
+        "ActiveState" => Variant::from(event.active_state),
+        "AckedState" => Variant::from(event.acked_state),
+        "ConfirmedState" => Variant::from(event.confirmed_state),
+        "DialogState" => Variant::from(event.active_state),
+        "EnabledState" => Variant::from(true),
+        _ => Variant::Empty,
+    }
+}
+
 fn event_id_select_clause_index(filter: &EventFilter) -> Option<usize> {
     filter
         .select_clauses
@@ -270,6 +421,7 @@ fn event_id_from_field_list(
     }
 }
 
+#[cfg(feature = "events")]
 fn has_event_read_capacity(limit: Option<usize>, len: usize) -> bool {
     match limit {
         Some(limit) => len < limit,
@@ -277,6 +429,7 @@ fn has_event_read_capacity(limit: Option<usize>, len: usize) -> bool {
     }
 }
 
+#[cfg(feature = "events")]
 fn event_time_in_range(event_time: DateTime, start_time: DateTime, end_time: DateTime) -> bool {
     let start_tick = start_time.ticks();
     let end_tick = end_time.ticks();
@@ -290,10 +443,12 @@ fn event_time_in_range(event_time: DateTime, start_time: DateTime, end_time: Dat
     event_time.ticks() >= end_tick && event_time.ticks() <= start_tick
 }
 
+#[cfg(feature = "events")]
 fn is_unbounded_start(ticks: i64) -> bool {
     ticks <= DateTime::null().ticks()
 }
 
+#[cfg(feature = "events")]
 fn is_unbounded_end(ticks: i64) -> bool {
     ticks == DateTime::null().ticks() || ticks == i64::MAX
 }

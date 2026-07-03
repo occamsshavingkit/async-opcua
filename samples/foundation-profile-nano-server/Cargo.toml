@@ -5,10 +5,33 @@ authors = ["Adam Lock <locka99@gmail.com>"]
 edition = "2021"
 publish = false
 
+[features]
+# Enables the profile behavior tests (tests/). NOT in default: under a unified
+# multi-package build (e.g. `cargo test --workspace`) feature unification compiles
+# the server WITH the gated subsystems, which inverts the rejection semantics.
+# Run: cargo test -p async-opcua-foundation-profile-nano-server --features profile-tests
+profile-tests = []
+
 [dependencies]
 tokio = { version = "^1", default-features = false, features = ["macros", "rt", "signal"] }
 
 [dependencies.async-opcua]
 path = "../../async-opcua"
-features = ["base-server"]
+features = ["nano"]
+default-features = false
+
+# Dev-only: the in-tree client drives the profile smoke/rejection tests
+# (tests/profile_smoke.rs, tests/service_rejection.rs). Dev-deps do NOT affect the
+# built benchmark binary; binary absence is verified by tools/check-profile-absence.sh.
+[dev-dependencies]
+tokio = { version = "^1", default-features = false, features = [
+  "macros",
+  "rt",
+  "net",
+  "time",
+] }
+
+[dev-dependencies.async-opcua]
+path = "../../async-opcua"
+features = ["client"]
 default-features = false

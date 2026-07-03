@@ -11,6 +11,7 @@ use std::{
 
 use futures::never::Never;
 use opcua_core::sync::RwLock;
+#[cfg(feature = "lds")]
 use opcua_core::{comms::url::hostname_port_from_url, constants::DEFAULT_OPC_UA_SERVER_PORT};
 
 /// Maximum number of capability identifiers accepted from a DNS-SD TXT record.
@@ -109,11 +110,13 @@ impl Drop for MdnsResponder {
 }
 
 /// mDNS advertisements for servers that registered with this LDS via RegisterServer2.
+#[cfg(feature = "lds")]
 pub(crate) struct MdnsAdvertisementRegistry {
     daemon: mdns_sd::ServiceDaemon,
     fullnames_by_server_uri: RwLock<HashMap<String, String>>,
 }
 
+#[cfg(feature = "lds")]
 impl MdnsAdvertisementRegistry {
     pub(crate) fn new() -> Result<Self, mdns_sd::Error> {
         Ok(Self {
@@ -162,6 +165,7 @@ impl MdnsAdvertisementRegistry {
     }
 }
 
+#[cfg(feature = "lds")]
 impl Drop for MdnsAdvertisementRegistry {
     fn drop(&mut self) {
         let fullnames: Vec<_> = self

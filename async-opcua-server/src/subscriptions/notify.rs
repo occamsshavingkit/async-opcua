@@ -1,8 +1,10 @@
 use hashbrown::HashMap;
+#[cfg(feature = "events")]
 use opcua_nodes::Event;
+#[cfg(feature = "events")]
+use opcua_types::ObjectId;
 use opcua_types::{
-    node_id::IntoNodeIdRef, AttributeId, DataEncoding, DataValue, DateTime, NumericRange, ObjectId,
-    Variant,
+    node_id::IntoNodeIdRef, AttributeId, DataEncoding, DataValue, DateTime, NumericRange, Variant,
 };
 use parking_lot::RwLockReadGuard;
 
@@ -91,6 +93,7 @@ impl NotificationRouteSnapshot {
         snapshot
     }
 
+    #[cfg(feature = "events")]
     #[must_use]
     pub(crate) fn for_events<'a>(
         inner: &SubscriptionCacheInner,
@@ -335,6 +338,7 @@ impl Drop for SubscriptionDataNotifier<'_> {
     }
 }
 
+#[cfg(feature = "events")]
 struct PendingEventNotifications<'b> {
     subscription_handle: SubscriptionActorHandle,
     items: Vec<(MonitoredItemHandle, &'b dyn Event)>,
@@ -343,17 +347,20 @@ struct PendingEventNotifications<'b> {
 /// Handle for notifying the subscription cache of a batch of events,
 /// without allocating NodeIds unnecessarily.
 /// Notifications are actually submitted once the notifier is dropped.
+#[cfg(feature = "events")]
 pub struct SubscriptionEventNotifier<'a, 'b> {
     lock: Option<RwLockReadGuard<'a, SubscriptionCacheInner>>,
     by_subscription: HashMap<(u32, u32), PendingEventNotifications<'b>>,
 }
 
 /// Notifier for a specific node emitting events.
+#[cfg(feature = "events")]
 pub struct SubscriptionEventNotifierBatch<'a, 'b> {
     route_batches: Vec<NotificationRouteBatch>,
     by_subscription: &'a mut HashMap<(u32, u32), PendingEventNotifications<'b>>,
 }
 
+#[cfg(feature = "events")]
 impl<'b> SubscriptionEventNotifierBatch<'_, 'b> {
     /// Notify the referenced node of a new event.
     pub fn event(&mut self, event: &'b dyn Event) {
@@ -372,6 +379,7 @@ impl<'b> SubscriptionEventNotifierBatch<'_, 'b> {
     }
 }
 
+#[cfg(feature = "events")]
 impl<'a, 'b> SubscriptionEventNotifier<'a, 'b> {
     pub(super) fn new(lock: RwLockReadGuard<'a, SubscriptionCacheInner>) -> Self {
         Self {
@@ -421,6 +429,7 @@ impl<'a, 'b> SubscriptionEventNotifier<'a, 'b> {
     }
 }
 
+#[cfg(feature = "events")]
 impl Drop for SubscriptionEventNotifier<'_, '_> {
     fn drop(&mut self) {
         drop(self.lock.take());

@@ -24,35 +24,58 @@ use std::{
 use async_trait::async_trait;
 use hashbrown::HashMap;
 
+#[cfg(feature = "subscriptions")]
+use crate::address_space::read_node_value;
+#[cfg(any(feature = "history", feature = "events"))]
+use crate::address_space::EventNotifier;
+#[cfg(feature = "history")]
 use crate::{
-    address_space::{
-        read_node_value, user_access_level, AccessLevel, EventNotifier, NodeType,
-        ReferenceDirection,
-    },
-    diagnostics::NamespaceMetadata,
-    rbac,
+    address_space::{user_access_level, AccessLevel},
     session::continuation_points::ContinuationPoint,
-    subscriptions::CreateMonitoredItem,
-    SubscriptionCache,
 };
+use crate::{
+    address_space::{NodeType, ReferenceDirection},
+    rbac,
+};
+#[cfg(feature = "subscriptions")]
+use crate::{subscriptions::CreateMonitoredItem, SubscriptionCache};
 use opcua_core::sync::RwLock;
+#[cfg(feature = "method-call")]
+use opcua_types::argument::Argument;
+#[cfg(feature = "method-call")]
+use opcua_types::DataEncoding;
 use opcua_types::{
-    argument::Argument, AccessRestrictionType, AttributeId, BrowseDescriptionResultMask,
-    BrowseDirection, DataEncoding, DataValue, DateTime, ExpandedNodeId, MonitoringMode, NodeClass,
-    NodeId, NumericRange, PermissionType, ReadAnnotationDataDetails, ReadAtTimeDetails,
-    ReadEventDetails, ReadProcessedDetails, ReadRawModifiedDetails, ReferenceDescription,
-    ReferenceTypeId, RolePermissionType, StatusCode, TimestampsToReturn, Variant,
+    AccessRestrictionType, AttributeId, BrowseDescriptionResultMask, BrowseDirection,
+    ExpandedNodeId, NodeClass, NodeId, PermissionType, ReferenceDescription, ReferenceTypeId,
+    RolePermissionType, StatusCode, TimestampsToReturn,
+};
+#[cfg(feature = "subscriptions")]
+use opcua_types::{DataValue, DateTime, MonitoringMode};
+#[cfg(any(feature = "subscriptions", feature = "method-call"))]
+use opcua_types::{NumericRange, Variant};
+#[cfg(feature = "history")]
+use opcua_types::{
+    ReadAnnotationDataDetails, ReadAtTimeDetails, ReadEventDetails, ReadProcessedDetails,
+    ReadRawModifiedDetails,
 };
 
+#[cfg(feature = "query")]
+use super::QueryRequest;
 use super::{
     build::NodeManagerBuilder,
     view::{AddReferenceResult, ExternalReference, ExternalReferenceRequest, NodeMetadata},
-    AddNodeItem, AddReferenceItem, AttributeProvider, BrowseNode, BrowsePathItem, DefaultTypeTree,
-    DeleteNodeItem, DeleteReferenceItem, DynNodeManager, HistoryNode, HistoryProvider,
-    HistoryUpdateDetails, HistoryUpdateNode, MethodCall, MethodProvider, MonitoredItemProvider,
-    MonitoredItemRef, MonitoredItemUpdateRef, NodeManagerCore, NodeMutator, QueryRequest, ReadNode,
-    RegisterNodeItem, RequestContext, ServerContext, ViewProvider, WriteNode,
+    AttributeProvider, BrowseNode, BrowsePathItem, DefaultTypeTree, DynNodeManager,
+    NamespaceMetadata, NodeManagerCore, NodeMutator, ReadNode, RegisterNodeItem, RequestContext,
+    ServerContext, ViewProvider, WriteNode,
 };
+#[cfg(feature = "node-management")]
+use super::{AddNodeItem, AddReferenceItem, DeleteNodeItem, DeleteReferenceItem};
+#[cfg(feature = "history")]
+use super::{HistoryNode, HistoryProvider, HistoryUpdateDetails, HistoryUpdateNode};
+#[cfg(feature = "method-call")]
+use super::{MethodCall, MethodProvider};
+#[cfg(feature = "subscriptions")]
+use super::{MonitoredItemProvider, MonitoredItemRef, MonitoredItemUpdateRef};
 
 use crate::address_space::AddressSpace;
 
@@ -124,6 +147,7 @@ impl<TImpl: InMemoryNodeManagerImpl> InMemoryNodeManager<TImpl> {
         &self.namespaces
     }
 
+    #[cfg(feature = "method-call")]
     fn resolve_method_node_id(
         &self,
         address_space: &AddressSpace,
@@ -150,6 +174,7 @@ impl<TImpl: InMemoryNodeManagerImpl> InMemoryNodeManager<TImpl> {
     /// about the changes.
     ///
     /// To set values, use [InMemoryNodeManager::set_values].
+    #[cfg(feature = "subscriptions")]
     pub fn set_attributes<'a>(
         &self,
         subscriptions: &SubscriptionCache,
@@ -192,6 +217,7 @@ impl<TImpl: InMemoryNodeManagerImpl> InMemoryNodeManager<TImpl> {
 
     /// Set the attribute given by `attribute_id` on the node with ID `id` to
     /// `value`.
+    #[cfg(feature = "subscriptions")]
     pub fn set_attribute(
         &self,
         subscriptions: &SubscriptionCache,
@@ -204,6 +230,7 @@ impl<TImpl: InMemoryNodeManagerImpl> InMemoryNodeManager<TImpl> {
 
     /// Set variable values with updates given by `values`, notifying any
     /// subscriptions of the changes.
+    #[cfg(feature = "subscriptions")]
     pub fn set_values<'a>(
         &self,
         subscriptions: &SubscriptionCache,
@@ -262,6 +289,7 @@ impl<TImpl: InMemoryNodeManagerImpl> InMemoryNodeManager<TImpl> {
 
     /// Set the variable value to `value`, using `index_range`, on the
     /// node with ID `id`.
+    #[cfg(feature = "subscriptions")]
     pub fn set_value(
         &self,
         subscriptions: &SubscriptionCache,
@@ -490,6 +518,7 @@ impl<TImpl: InMemoryNodeManagerImpl> InMemoryNodeManager<TImpl> {
         }
     }
 
+    #[cfg(feature = "history")]
     fn validate_history_read_nodes<'a, 'b>(
         &self,
         context: &RequestContext,
@@ -543,6 +572,7 @@ impl<TImpl: InMemoryNodeManagerImpl> InMemoryNodeManager<TImpl> {
         valid
     }
 
+    #[cfg(feature = "history")]
     fn validate_history_write_nodes<'a, 'b>(
         &self,
         context: &RequestContext,
@@ -604,6 +634,7 @@ impl<TImpl: InMemoryNodeManagerImpl> InMemoryNodeManager<TImpl> {
         valid
     }
 
+    #[cfg(feature = "method-call")]
     fn validate_method_calls<'a, 'b>(
         &self,
         context: &RequestContext,
@@ -769,6 +800,7 @@ impl<TImpl: InMemoryNodeManagerImpl> NodeManagerCore for InMemoryNodeManager<TIm
         self.inner.namespaces()
     }
 
+    #[cfg(feature = "node-management")]
     fn handle_new_node(&self, parent_id: &ExpandedNodeId) -> bool {
         self.inner.handle_new_node(parent_id)
     }
@@ -940,6 +972,7 @@ impl<TImpl: InMemoryNodeManagerImpl> ViewProvider for InMemoryNodeManager<TImpl>
             .await
     }
 
+    #[cfg(feature = "query")]
     async fn query(
         &self,
         context: &RequestContext,
@@ -966,6 +999,7 @@ impl<TImpl: InMemoryNodeManagerImpl> ViewProvider for InMemoryNodeManager<TImpl>
     }
 }
 
+#[cfg(feature = "subscriptions")]
 #[async_trait]
 impl<TImpl: InMemoryNodeManagerImpl> MonitoredItemProvider for InMemoryNodeManager<TImpl> {
     async fn create_monitored_items(
@@ -974,6 +1008,7 @@ impl<TImpl: InMemoryNodeManagerImpl> MonitoredItemProvider for InMemoryNodeManag
         items: &mut [&mut CreateMonitoredItem],
     ) -> Result<(), StatusCode> {
         let mut value_items = Vec::new();
+        #[cfg(feature = "events")]
         let mut event_items = Vec::new();
 
         {
@@ -1009,6 +1044,7 @@ impl<TImpl: InMemoryNodeManagerImpl> MonitoredItemProvider for InMemoryNodeManag
 
                 // Event monitored items are global, so all we need to do is to validate that the
                 // node allows subscribing to events.
+                #[cfg(feature = "events")]
                 if node.item_to_monitor().attribute_id == AttributeId::EventNotifier {
                     let Some(Variant::Byte(notifier)) = &read_result.value else {
                         node.set_status(StatusCode::BadAttributeIdInvalid);
@@ -1023,6 +1059,12 @@ impl<TImpl: InMemoryNodeManagerImpl> MonitoredItemProvider for InMemoryNodeManag
                     // No further action beyond just validation.
                     node.set_status(StatusCode::Good);
                     event_items.push(node);
+                    continue;
+                }
+
+                #[cfg(not(feature = "events"))]
+                if node.item_to_monitor().attribute_id == AttributeId::EventNotifier {
+                    node.set_status(StatusCode::BadMonitoredItemFilterUnsupported);
                     continue;
                 }
 
@@ -1042,6 +1084,7 @@ impl<TImpl: InMemoryNodeManagerImpl> MonitoredItemProvider for InMemoryNodeManag
                 .await;
         }
 
+        #[cfg(feature = "events")]
         if !event_items.is_empty() {
             self.inner
                 .create_event_monitored_items(context, &self.address_space, &mut event_items)
@@ -1059,10 +1102,8 @@ impl<TImpl: InMemoryNodeManagerImpl> MonitoredItemProvider for InMemoryNodeManag
         let items: Vec<_> = items
             .iter()
             .filter(|it| {
-                matches!(
-                    it.attribute(),
-                    AttributeId::Value | AttributeId::EventNotifier
-                )
+                it.attribute() == AttributeId::Value
+                    || (cfg!(feature = "events") && it.attribute() == AttributeId::EventNotifier)
             })
             .copied()
             .collect();
@@ -1078,10 +1119,8 @@ impl<TImpl: InMemoryNodeManagerImpl> MonitoredItemProvider for InMemoryNodeManag
         let items: Vec<_> = items
             .iter()
             .filter(|it| {
-                matches!(
-                    it.attribute(),
-                    AttributeId::Value | AttributeId::EventNotifier
-                )
+                it.attribute() == AttributeId::Value
+                    || (cfg!(feature = "events") && it.attribute() == AttributeId::EventNotifier)
             })
             .copied()
             .collect();
@@ -1092,10 +1131,8 @@ impl<TImpl: InMemoryNodeManagerImpl> MonitoredItemProvider for InMemoryNodeManag
         let items: Vec<_> = items
             .iter()
             .filter(|it| {
-                matches!(
-                    it.attribute(),
-                    AttributeId::Value | AttributeId::EventNotifier
-                )
+                it.attribute() == AttributeId::Value
+                    || (cfg!(feature = "events") && it.attribute() == AttributeId::EventNotifier)
             })
             .copied()
             .collect();
@@ -1104,6 +1141,7 @@ impl<TImpl: InMemoryNodeManagerImpl> MonitoredItemProvider for InMemoryNodeManag
 }
 
 #[async_trait]
+#[cfg(feature = "history")]
 impl<TImpl: InMemoryNodeManagerImpl> HistoryProvider for InMemoryNodeManager<TImpl> {
     async fn history_read_raw_modified(
         &self,
@@ -1198,6 +1236,7 @@ impl<TImpl: InMemoryNodeManagerImpl> HistoryProvider for InMemoryNodeManager<TIm
 }
 
 #[async_trait]
+#[cfg(feature = "method-call")]
 impl<TImpl: InMemoryNodeManagerImpl> MethodProvider for InMemoryNodeManager<TImpl> {
     fn authorize_method_calls(
         &self,
@@ -1262,6 +1301,7 @@ impl<TImpl: InMemoryNodeManagerImpl> NodeMutator for InMemoryNodeManager<TImpl> 
     ///
     /// This should create the nodes, or set a failed status as appropriate.
     /// If a node was created, the status should be set to Good.
+    #[cfg(feature = "node-management")]
     async fn add_nodes(
         &self,
         context: &RequestContext,
@@ -1272,6 +1312,7 @@ impl<TImpl: InMemoryNodeManagerImpl> NodeMutator for InMemoryNodeManager<TImpl> 
             .await
     }
 
+    #[cfg(feature = "node-management")]
     async fn add_references(
         &self,
         context: &RequestContext,
@@ -1282,6 +1323,7 @@ impl<TImpl: InMemoryNodeManagerImpl> NodeMutator for InMemoryNodeManager<TImpl> 
             .await
     }
 
+    #[cfg(feature = "node-management")]
     async fn delete_nodes(
         &self,
         context: &RequestContext,
@@ -1292,6 +1334,7 @@ impl<TImpl: InMemoryNodeManagerImpl> NodeMutator for InMemoryNodeManager<TImpl> 
             .await
     }
 
+    #[cfg(feature = "node-management")]
     async fn delete_node_references(
         &self,
         context: &RequestContext,
@@ -1302,6 +1345,7 @@ impl<TImpl: InMemoryNodeManagerImpl> NodeMutator for InMemoryNodeManager<TImpl> 
             .await
     }
 
+    #[cfg(feature = "node-management")]
     async fn delete_references(
         &self,
         context: &RequestContext,

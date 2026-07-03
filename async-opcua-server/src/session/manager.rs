@@ -1066,8 +1066,20 @@ pub(crate) async fn activate_session(
         )
         .await
     {
-        Ok(authentication) => authentication,
+        Ok(authentication) => {
+            info.security_checks.write().record_pass(
+                crate::security_checks::SecurityCheckCategory::UserAuthentication,
+                "user",
+            );
+            authentication
+        }
         Err(error) => {
+            let status = error.status();
+            info.security_checks.write().record_fail(
+                crate::security_checks::SecurityCheckCategory::UserAuthentication,
+                status,
+                "user",
+            );
             if let Some(certificate) = x509_user_certificate_from_request(request) {
                 let session_id = {
                     let session = trace_read_lock!(session_lck);
@@ -1080,7 +1092,7 @@ pub(crate) async fn activate_session(
                     &request.request_header,
                     certificate,
                     session_id,
-                    error.status(),
+                    status,
                 );
             }
             return Err(error.status());
@@ -1176,6 +1188,11 @@ pub(crate) async fn activate_session(
             Some(endpoint_url.clone()),
         )?;
         let roles = Arc::new(info.role_resolver.read().resolve(&resolved_identity));
+        #[cfg(feature = "rbac")]
+        info.security_checks.write().record_pass(
+            crate::security_checks::SecurityCheckCategory::RbacDecision,
+            "session-activation",
+        );
         let locale_ids = request.locale_ids.clone();
         session.activate(
             secure_channel_id,

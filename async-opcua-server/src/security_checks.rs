@@ -69,6 +69,26 @@ impl SecurityCheckRegistry {
         });
     }
 
+    /// Convenience: record a pass event.
+    pub fn record_pass(&mut self, category: SecurityCheckCategory, identity: impl Into<String>) {
+        self.record(
+            category,
+            SecurityCheckOutcome::Pass,
+            StatusCode::Good,
+            identity,
+        )
+    }
+
+    /// Convenience: record a fail event.
+    pub fn record_fail(
+        &mut self,
+        category: SecurityCheckCategory,
+        reason: StatusCode,
+        identity: impl Into<String>,
+    ) {
+        self.record(category, SecurityCheckOutcome::Fail, reason, identity)
+    }
+
     pub fn snapshot(&self) -> Vec<SecurityCheckEntry> {
         self.entries.iter().cloned().collect()
     }

@@ -10,7 +10,7 @@ use opcua_types::{status_code::StatusCode, Error};
 use crate::{
     aes::{aes_key_wrap_decrypt, AesKey},
     algorithms::{ENC_RSA_OAEP, ENC_RSA_OAEP_SHA256},
-    policy::aes::{AesAsymmetricEncryptionAlgorithm, OaepSha1, OaepSha256},
+    policy::aes::{OaepSha1, OaepSha256},
     KeySize, PrivateKey,
 };
 

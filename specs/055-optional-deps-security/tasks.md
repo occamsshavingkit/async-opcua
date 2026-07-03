@@ -94,32 +94,32 @@ panic. Per constitution III, one task per line, independently verifiable.
 - [X] T017 [US3] Add `max_security_check_entries: usize` field to `ServerConfig`
       (`async-opcua-server/src/config/mod.rs` and `server.rs` builder), defaulting to 1000.
       [Cite: spec FR-010]
-- [ ] T018 [US3] Wire certificate validation results into the registry in
+- [X] T018 [US3] Wire certificate validation results into the registry in
       `async-opcua-server/src/session/controller.rs` (open_secure_channel handler) and
       `async-opcua-server/src/session/manager.rs` (activate_session handler). Record
       CertificateValidation entries for both pass and fail outcomes. [Cite: OPC 10000-4 §6.5.5, §6.5.6]
-- [ ] T019 [US3] Wire user authentication results into the registry in
+- [X] T019 [US3] Wire user authentication results into the registry in
       `async-opcua-server/src/session/manager.rs` (activate_session handler). Record
       UserAuthentication entries for UserName, X509, and IssuedToken identity results.
       [Cite: OPC 10000-4 §6.5.6]
-- [ ] T020 [US3] Wire channel negotiation results into the registry in
+- [X] T020 [US3] Wire channel negotiation results into the registry in
       `async-opcua-server/src/session/controller.rs` (`open_secure_channel()` method). Record
       ChannelNegotiation entries for security policy/mode negotiation outcomes.
       [Cite: OPC 10000-4 §6.5.5]
-- [ ] T021 [US3] Add RBAC decision recording (gated behind `#[cfg(feature = "rbac")]`): when the
+- [X] T021 [US3] Add RBAC decision recording (gated behind `#[cfg(feature = "rbac")]`): when the
       rbac feature is enabled, record RbacDecision entries in
       `async-opcua-server/src/rbac/role_management.rs` or the enforcement point. When rbac is off,
       the category is simply never emitted (no compile error). [Cite: spec FR-012; OPC 10000-18 §6.3]
-- [ ] T022 [US3] Verify T014/T015 green. Manual test: start server, connect with untrusted cert,
+- [X] T022 [US3] Verify T014/T015 green. Manual test: start server, connect with untrusted cert,
       call `handle.security_checks()`, assert at least one CertificateValidation/Fail entry exists.
 
 **Checkpoint**: Security check registry captures cert, auth, channel, and RBAC events; bounded; queryable.
 
 ## Phase 5: Polish & Final Verification
 
-- [ ] T023 Pre-push gate: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features`,
+- [X] T023 Pre-push gate: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features`,
       `cargo test --workspace --all-features`, `RUSTFLAGS="-D warnings" cargo check -p async-opcua --no-default-features --features nano`.
-- [ ] T024 Verify cross-doc consistency: data-model.md, contracts/feature-flags.md, and
+- [X] T024 Verify cross-doc consistency: data-model.md, contracts/feature-flags.md, and
       `async-opcua/Cargo.toml` comments all match the shipped feature flag/alias set. Walk spec.md
       Success Criteria SC-001–SC-005 and check each off with evidence.
 

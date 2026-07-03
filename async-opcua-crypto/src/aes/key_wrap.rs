@@ -2,13 +2,8 @@
 //!
 //! Uses 128-bit AES blocks as two 64-bit halves: A (integrity) and R[i] (data).
 
-use aes::cipher::{
-    generic_array::GenericArray, BlockDecrypt, BlockEncrypt, BlockSizeUser, KeyInit,
-};
-
 use crate::aes::AesKey;
-
-type AesBlock = GenericArray<u8, <aes::Aes128 as BlockSizeUser>::BlockSize>;
+use aes::cipher::{generic_array::GenericArray, BlockDecrypt, KeyInit};
 
 const IV: [u8; 8] = [0xa6, 0xa6, 0xa6, 0xa6, 0xa6, 0xa6, 0xa6, 0xa6];
 
@@ -19,7 +14,7 @@ pub(crate) fn aes_key_wrap_decrypt(
     output: &mut [u8],
 ) -> Result<usize, ()> {
     let n = (ciphertext.len() / 8) - 1;
-    if n < 1 || ciphertext.len() % 8 != 0 {
+    if n < 1 || !ciphertext.len().is_multiple_of(8) {
         return Err(());
     }
 
@@ -55,7 +50,7 @@ fn aes_unwrap_128(
             let mut combined: [u8; 16] = [0u8; 16];
             combined[..8].copy_from_slice(&a);
             combined[8..].copy_from_slice(&r[i - 1]);
-            aes.decrypt_block(GenericArray::from_mut_slice(&mut combined));
+            BlockDecrypt::decrypt_block(&aes, GenericArray::from_mut_slice(&mut combined));
             a.copy_from_slice(&combined[..8]);
             r[i - 1].copy_from_slice(&combined[8..]);
         }
@@ -89,7 +84,7 @@ fn aes_unwrap_256(
             let mut combined: [u8; 16] = [0u8; 16];
             combined[..8].copy_from_slice(&a);
             combined[8..].copy_from_slice(&r[i - 1]);
-            aes.decrypt_block(GenericArray::from_mut_slice(&mut combined));
+            BlockDecrypt::decrypt_block(&aes, GenericArray::from_mut_slice(&mut combined));
             a.copy_from_slice(&combined[..8]);
             r[i - 1].copy_from_slice(&combined[8..]);
         }
@@ -110,7 +105,6 @@ mod tests {
 
     #[test]
     fn aes_key_wrap_128_known_vector() {
-        // RFC 3394 §4.1 test vector
         let kek = crate::AesKey::new(vec![
             0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D,
             0x0E, 0x0F,

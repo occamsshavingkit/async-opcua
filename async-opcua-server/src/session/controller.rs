@@ -1119,6 +1119,11 @@ impl<T: ConnectionTransport> SessionController<T> {
                 if let Err(e) = validation_result {
                     let validation_status = e.status();
                     error!("OpenSecureChannel rejected: client certificate failed validation: {e}");
+                    self.info.security_checks.write().record_fail(
+                        crate::security_checks::SecurityCheckCategory::CertificateValidation,
+                        validation_status,
+                        "client",
+                    );
                     dispatch_open_secure_channel_certificate_audit(
                         #[cfg(feature = "events")]
                         &self.subscriptions,
@@ -1133,8 +1138,19 @@ impl<T: ConnectionTransport> SessionController<T> {
                     )
                     .into());
                 }
+                // Record successful cert validation in the security check registry.
+                self.info.security_checks.write().record_pass(
+                    crate::security_checks::SecurityCheckCategory::CertificateValidation,
+                    "client",
+                );
             }
         }
+
+        // Record channel negotiation outcome in the security check registry (T020).
+        self.info.security_checks.write().record_pass(
+            crate::security_checks::SecurityCheckCategory::ChannelNegotiation,
+            "channel",
+        );
 
         let revised_lifetime = revise_secure_channel_lifetime(
             request.requested_lifetime,

@@ -538,6 +538,9 @@ pub struct ServerConfig {
     /// Server OPA UA limits
     #[serde(default)]
     pub limits: Limits,
+    /// Maximum number of security check entries stored in the registry (default 1000).
+    #[serde(default = "defaults::security_check_max_entries")]
+    pub security_check_max_entries: usize,
     /// Supported locale ids
     #[serde(default)]
     pub locale_ids: Vec<String>,
@@ -627,6 +630,10 @@ mod defaults {
 
     pub(super) fn subscription_poll_interval_ms() -> u64 {
         constants::SUBSCRIPTION_TIMER_RATE_MS
+    }
+
+    pub(super) fn security_check_max_entries() -> usize {
+        1000
     }
 
     pub(super) fn publish_timeout_default_ms() -> u64 {
@@ -799,6 +806,7 @@ impl Default for ServerConfig {
             max_connections: defaults::max_connections(),
             max_connections_per_ip: defaults::max_connections_per_ip(),
             limits: Limits::default(),
+            security_check_max_entries: defaults::security_check_max_entries(),
             user_tokens: BTreeMap::new(),
             #[cfg(feature = "rbac")]
             identity_mapping_rules: Vec::new(),

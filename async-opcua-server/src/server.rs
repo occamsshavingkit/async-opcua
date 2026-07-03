@@ -409,6 +409,9 @@ impl Server {
             server_certificate: RwLock::new(server_certificate),
             server_pkey: RwLock::new(server_pkey),
             certificate_store: certificate_store.clone(),
+            security_checks: RwLock::new(crate::security_checks::SecurityCheckRegistry::new(
+                config.security_check_max_entries,
+            )),
             operational_limits: config.limits.operational.clone(),
             state: ArcSwap::new(Arc::new(ServerState::Shutdown)),
             send_buffer_size,

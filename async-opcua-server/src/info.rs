@@ -172,6 +172,8 @@ pub struct ServerInfo {
     pub server_pkey: RwLock<Option<PrivateKey>>,
     /// Certificate store used to validate incoming application and user identity certificates.
     pub(crate) certificate_store: Arc<RwLock<CertificateStore>>,
+    /// Security check registry — bounded audit log of security-relevant events.
+    pub(crate) security_checks: RwLock<crate::security_checks::SecurityCheckRegistry>,
     /// Operational limits
     pub(crate) operational_limits: OperationalLimits,
     /// Current state

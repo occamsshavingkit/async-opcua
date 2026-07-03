@@ -58,6 +58,7 @@ pub(crate) mod rbac;
 #[path = "rbac_stub.rs"]
 pub(crate) mod rbac;
 mod reverse_connect;
+pub mod security_checks;
 mod server;
 mod server_handle;
 mod server_status;

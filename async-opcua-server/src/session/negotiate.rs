@@ -8,8 +8,8 @@
 use std::{error::Error as StdError, fmt, time::Duration};
 
 use opcua_crypto::{
-    identity::decrypt_rsa_oaep_secret, legacy_decrypt_secret, LegacySecret, PrivateKey,
-    SecurityPolicy,
+    identity::{decrypt_rsa_kem_secret, decrypt_rsa_oaep_secret},
+    legacy_decrypt_secret, LegacySecret, PrivateKey, SecurityPolicy,
 };
 use opcua_types::{ByteString, Error, IssuedIdentityToken, StatusCode, UserNameIdentityToken};
 
@@ -184,14 +184,23 @@ pub(crate) fn decrypt_identity_token_secret(
 
     let encryption_algorithm = secret.encryption_algorithm().as_ref();
     if is_rsa_oaep_encrypted_secret_algorithm(encryption_algorithm) {
-        legacy_decrypt_secret(secret, server_nonce, server_key).or_else(|_| {
-            decrypt_rsa_oaep_secret(
-                encryption_algorithm,
-                secret.raw_secret().as_ref(),
-                server_key,
-            )
-            .map(ByteString::from)
-        })
+        legacy_decrypt_secret(secret, server_nonce, server_key)
+            .or_else(|_| {
+                decrypt_rsa_oaep_secret(
+                    encryption_algorithm,
+                    secret.raw_secret().as_ref(),
+                    server_key,
+                )
+                .map(ByteString::from)
+            })
+            .or_else(|_| {
+                decrypt_rsa_kem_secret(
+                    encryption_algorithm,
+                    secret.raw_secret().as_ref(),
+                    server_key,
+                )
+                .map(ByteString::from)
+            })
     } else {
         legacy_decrypt_secret(secret, server_nonce, server_key)
     }

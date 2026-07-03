@@ -111,6 +111,18 @@ impl ServerHandle {
         &self.session_manager
     }
 
+    /// Get a snapshot of the security check registry entries.
+    pub fn security_checks(&self) -> Vec<crate::security_checks::SecurityCheckEntry> {
+        let reg = self.info.security_checks.read();
+        reg.snapshot()
+    }
+
+    /// Get the number of entries currently in the security check registry.
+    pub fn security_check_count(&self) -> usize {
+        let reg = self.info.security_checks.read();
+        reg.count()
+    }
+
     /// Get the mutable global type tree used by compatibility callers.
     ///
     /// This accessor intentionally returns the shared `RwLock<DefaultTypeTree>` rather than an

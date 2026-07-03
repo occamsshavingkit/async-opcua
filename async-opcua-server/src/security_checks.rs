@@ -3,7 +3,7 @@ use std::{collections::VecDeque, fmt};
 use opcua_types::{DateTime, StatusCode};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum SecurityCheckCategory {
+pub enum SecurityCheckCategory {
     CertificateValidation,
     UserAuthentication,
     ChannelNegotiation,
@@ -22,13 +22,13 @@ impl fmt::Display for SecurityCheckCategory {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum SecurityCheckOutcome {
+pub enum SecurityCheckOutcome {
     Pass,
     Fail,
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct SecurityCheckEntry {
+pub struct SecurityCheckEntry {
     pub timestamp: DateTime,
     pub category: SecurityCheckCategory,
     pub outcome: SecurityCheckOutcome,

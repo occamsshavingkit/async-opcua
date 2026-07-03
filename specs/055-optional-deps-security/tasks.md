@@ -87,11 +87,11 @@ panic. Per constitution III, one task per line, independently verifiable.
 
 ### Implementation
 
-- [ ] T016 [US3] Add `SecurityCheckRegistry` field to `ServerInfo` in
+- [X] T016 [US3] Add `SecurityCheckRegistry` field to `ServerInfo` in
       `async-opcua-server/src/info.rs`, initialized with `max_entries` from `ServerConfig`
       (new field, default 1000). Expose `security_checks()` and `security_check_count()` on
       `ServerHandle` (`async-opcua-server/src/server_handle.rs`). [Cite: contracts/feature-flags.md §3]
-- [ ] T017 [US3] Add `max_security_check_entries: usize` field to `ServerConfig`
+- [X] T017 [US3] Add `max_security_check_entries: usize` field to `ServerConfig`
       (`async-opcua-server/src/config/mod.rs` and `server.rs` builder), defaulting to 1000.
       [Cite: spec FR-010]
 - [ ] T018 [US3] Wire certificate validation results into the registry in

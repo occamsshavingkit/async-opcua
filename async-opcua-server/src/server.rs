@@ -32,7 +32,8 @@ use crate::transport::WebSocketConnector;
 use crate::{
     node_manager::{DefaultTypeTreeGetter, ServerContext},
     reverse_connect::{self, ReverseConnectionManager},
-    session::controller::{ControllerCommand, SessionStarter},
+    session::controller_command::ControllerCommand,
+    session::session_starter::SessionStarter,
     transport::{
         tcp::{TcpConnector, TransportConfig},
         ReverseTcpConnector,

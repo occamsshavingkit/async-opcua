@@ -6,6 +6,7 @@ pub(crate) mod actor;
 pub(crate) mod audit;
 pub(crate) mod continuation_points;
 pub(crate) mod controller;
+pub(crate) mod controller_command;
 /// Session error types.
 #[cfg(any(test, feature = "test-utils"))]
 pub mod errors;
@@ -23,6 +24,8 @@ pub mod manager;
 #[cfg(not(any(test, feature = "test-utils")))]
 pub(crate) mod manager;
 pub(crate) mod negotiate;
+pub(crate) mod secure_channel_state;
+pub(crate) mod session_starter;
 #[macro_use]
 pub(crate) mod message_handler;
 mod services;

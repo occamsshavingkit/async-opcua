@@ -23,7 +23,6 @@ use opcua_core::{
         security_header::SecurityHeader,
         tcp_types::ErrorMessage,
     },
-    handle::AtomicHandle,
     sync::RwLock,
 };
 use opcua_crypto::{CertificateStore, SecurityPolicy};
@@ -37,7 +36,6 @@ use opcua_types::{
 };
 #[cfg(feature = "lds")]
 use opcua_types::{ExtensionObject, RegisterServer2Response, RegisterServerResponse};
-use tokio_util::sync::CancellationToken;
 use tracing_futures::Instrument;
 
 #[cfg(feature = "lds")]
@@ -49,7 +47,6 @@ use crate::{
     info::ServerInfo,
     node_manager::NodeManagers,
     transport::tcp::{ConnectionTransport, Request, TransportPollResult},
-    transport::Connector,
 };
 
 use super::{
@@ -60,9 +57,11 @@ use super::{
         dispatch_response_failure, dispatch_service_failure,
         dispatch_suppressed_certificate_audit_success, AuditEventContext,
     },
+    controller_command::ControllerCommand,
     instance::Session,
     manager::{activate_session, close_session, CreateSessionDraft, SessionManager},
     message_handler::MessageHandler,
+    secure_channel_state::SecureChannelState,
 };
 
 pub(crate) struct Response {
@@ -88,10 +87,6 @@ impl Response {
             },
         }
     }
-}
-
-pub(crate) enum ControllerCommand {
-    Close,
 }
 
 type PendingMessageResponse = dyn Future<Output = Result<Response, String>> + Send + Sync + 'static;
@@ -190,91 +185,8 @@ fn revise_secure_channel_lifetime(requested_lifetime: u32, max_lifetime_ms: u32)
     }
 }
 
-pub(crate) struct SessionStarter<T> {
-    connector: T,
-    info: Arc<ServerInfo>,
-    session_manager: Arc<RwLock<SessionManager>>,
-    certificate_store: Arc<RwLock<CertificateStore>>,
-    node_managers: NodeManagers,
-    #[cfg(feature = "subscriptions")]
-    subscriptions: Arc<SubscriptionCache>,
-}
-
-impl<T> SessionStarter<T>
-where
-    T: Connector,
-    T::Transport: ConnectionTransport,
-{
-    pub(crate) fn new(
-        connector: T,
-        info: Arc<ServerInfo>,
-        session_manager: Arc<RwLock<SessionManager>>,
-        certificate_store: Arc<RwLock<CertificateStore>>,
-        node_managers: NodeManagers,
-        #[cfg(feature = "subscriptions")] subscriptions: Arc<SubscriptionCache>,
-    ) -> Self {
-        Self {
-            connector,
-            info,
-            session_manager,
-            certificate_store,
-            node_managers,
-            #[cfg(feature = "subscriptions")]
-            subscriptions,
-        }
-    }
-
-    pub(crate) async fn run(
-        self,
-        mut command: tokio::sync::mpsc::Receiver<ControllerCommand>,
-        on_connect: impl FnOnce(StatusCode) + Send,
-    ) {
-        let token = CancellationToken::new();
-        let span = tracing::info_span!("Establish TCP channel");
-        let fut = self
-            .connector
-            .connect(self.info.clone(), token.clone())
-            .instrument(span.clone());
-        tokio::pin!(fut);
-        let transport = tokio::select! {
-            cmd = command.recv() => {
-                match cmd {
-                    Some(ControllerCommand::Close) | None => {
-                        token.cancel();
-                        let _ = fut.await;
-                        return;
-                    }
-                }
-            }
-            r = &mut fut => {
-                match r {
-                    Ok(t) => t,
-                    Err(e) => {
-                        on_connect(e);
-                        span.in_scope(|| {
-                            tracing::error!("Connection failed while waiting for channel to be established: {e}");
-                        });
-                        return;
-                    }
-                }
-            }
-        };
-
-        let controller = SessionController::new(
-            transport,
-            self.session_manager,
-            self.certificate_store,
-            self.info,
-            self.node_managers,
-            #[cfg(feature = "subscriptions")]
-            self.subscriptions,
-        );
-        controller.run(command).await
-    }
-}
-
 impl<T: ConnectionTransport> SessionController<T> {
-    fn new(
+    pub(crate) fn new(
         transport: T,
         session_manager: Arc<RwLock<SessionManager>>,
         certificate_store: Arc<RwLock<CertificateStore>>,
@@ -312,7 +224,7 @@ impl<T: ConnectionTransport> SessionController<T> {
         }
     }
 
-    async fn run(mut self, mut command: tokio::sync::mpsc::Receiver<ControllerCommand>) {
+    pub(crate) async fn run(mut self, mut command: tokio::sync::mpsc::Receiver<ControllerCommand>) {
         loop {
             let can_poll_transport =
                 self.max_inflight == 0 || self.pending_messages.len() < self.max_inflight;
@@ -1267,37 +1179,6 @@ impl<T: ConnectionTransport> SessionController<T> {
             SecurityTokenRequestType::Renew => self.info.metrics.record_secure_channel_renewed(),
         }
         Ok(response.into())
-    }
-}
-
-struct SecureChannelState {
-    // Issued flag
-    issued: bool,
-    // Renew count, debugging
-    renew_count: usize,
-    // Last secure channel id
-    secure_channel_id: Arc<AtomicHandle>,
-    /// Last token id number
-    last_token_id: u32,
-}
-
-impl SecureChannelState {
-    fn new(handle: Arc<AtomicHandle>) -> SecureChannelState {
-        SecureChannelState {
-            secure_channel_id: handle,
-            issued: false,
-            renew_count: 0,
-            last_token_id: 0,
-        }
-    }
-
-    fn create_secure_channel_id(&mut self) -> u32 {
-        self.secure_channel_id.next()
-    }
-
-    fn create_token_id(&mut self) -> u32 {
-        self.last_token_id += 1;
-        self.last_token_id
     }
 }
 

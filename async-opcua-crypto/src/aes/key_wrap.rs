@@ -1,6 +1,7 @@
 //! AES Key Wrap (RFC 3394) for use in RSA-KEM identity token decryption.
 //!
 //! Uses 128-bit AES blocks as two 64-bit halves: A (integrity) and R[i] (data).
+#![allow(clippy::unwrap_used, clippy::indexing_slicing, clippy::panic)]
 
 use crate::aes::AesKey;
 use aes::cipher::{generic_array::GenericArray, BlockDecrypt, KeyInit};

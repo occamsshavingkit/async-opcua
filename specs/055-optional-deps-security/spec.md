@@ -118,8 +118,9 @@ events (certificate accepted/rejected, user authenticated/rejected) that can be 
   `history-sqlite` feature flag that defaults to ON.
 - **FR-003**: The `nano`, `micro`, `embedded`, and `standard` profile aliases MUST NOT
   enable `pubsub` or `history-sqlite`.
-- **FR-004**: The `server` and `base-server` feature aliases MUST continue to enable
-  both `pubsub` and `history-sqlite` (preserving their pre-feature surface).
+- **FR-004**: The `server` feature alias MUST continue to enable both `pubsub` and
+  `history-sqlite`. The `base-server` alias does NOT enable them (base-server is the
+  minimal server surface; `pubsub`/`history` are available via `default` features).
 - **FR-005**: The server MUST support decryption of UserName identity tokens encrypted
   with the RSA-KEM algorithm as defined in OPC 10000-6 §6.7.3 (RSA Key Encapsulation
   Mechanism: RSA-OAEP key transport + AES-256-KeyWrap).

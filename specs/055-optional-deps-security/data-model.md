@@ -15,7 +15,7 @@
 | `micro` | OFF | OFF | New — explicitly disabled |
 | `embedded` | OFF | OFF | New — explicitly disabled |
 | `standard` | OFF | OFF | New — explicitly disabled |
-| `base-server` | ON | ON | Unchanged |
+| `base-server` | OFF | OFF | Unchanged — minimal surface |
 | `server` | ON | ON | Unchanged |
 
 ## Security Check Registry

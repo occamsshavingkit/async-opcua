@@ -49,8 +49,9 @@ wss = ["async-opcua-client?/wss", "async-opcua-server?/wss"]
 server = ["base-server", "generated-address-space", "pubsub", "history"]
 # Base server, without the core address space. Forwards ALL subsystem gates (feature
 # 054) so its meaning — "the full server surface, minus the core nodeset" — is
-# unchanged. Includes pubsub + history-sqlite (feature 055). For profile-minimal
-# surfaces use the nano/micro/embedded/standard aliases below.
+# unchanged. Does NOT include pubsub or history-sqlite (feature 055: those are in
+# the `server` alias and default features). For profile-minimal surfaces use the
+# nano/micro/embedded/standard aliases below.
 base-server = [
   "dep:async-opcua-server",
   "dep:async-opcua-nodes",

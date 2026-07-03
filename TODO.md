@@ -4,12 +4,9 @@ This is a list of things that are known to be missing, or ideas that could be im
 
  - Flesh out the server and client SDK with tooling for ease if use.
    - Make it even easier to implement custom node managers.
- - Add Nano/Micro/Embedded conformance-profile builds. There is no profile feature today — the crate
-   gates by capability (`generated-address-space`, crypto backend, `ecc`, `wss`, `json`, `xml`,
-   `server`/`base-server`). Proposed: `nano`/`micro` feature aliases selecting the minimal set, plus a
-   `samples/nano-server` that compiles against `base-server` with a minimal custom node manager (the
-   default managers assume the core address space, so `base-server` doesn't build out of the box). The
-   generated core address space is the dominant size lever (~4.7 MB of a 24 MB stripped server binary).
+ - ~~Add Nano/Micro/Embedded conformance-profile builds..~~ **Done** — feature 054 added `nano`/`micro`/`embedded`/`standard`
+    facade aliases with 15 subsystem cfg gates. Measured: nano 6.45 MiB, micro 6.87 MiB,
+    embedded 9.44 MiB, standard 15.97 MiB.
  - Encrypted identity-token secrets now cover legacy RSA, RSA-OAEP, and ECC `EccEncryptedSecret`.
    Remaining optional follow-ups are RSA-DH / authenticated-encryption variants if a target profile
    requires them.

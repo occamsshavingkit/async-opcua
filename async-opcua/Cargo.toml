@@ -69,8 +69,6 @@ base-server = [
   "async-opcua-server/fota",
   "async-opcua-server/programs",
   "async-opcua-server/lds",
-  "pubsub",
-  "history",
 ]
 # --- OPC UA 2017 profile aliases (feature 054, updated 055) ---
 # Use with default-features = false. Compositions are grounded in the OPC Foundation

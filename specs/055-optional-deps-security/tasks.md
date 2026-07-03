@@ -46,28 +46,28 @@ panic. Per constitution III, one task per line, independently verifiable.
 
 ### Tests (red first)
 
-- [ ] T008 [P] [US2] Write integration test `async-opcua/tests/integration/rsa_dh_token.rs`:
+- [~] T008 [P] [US2] Write integration test `async-opcua/tests/integration/rsa_dh_token.rs`:
       server with Basic256Sha256 endpoint advertising RSA-DH UserTokenPolicy; client creates session,
       activates with RSA-KEM-encrypted UserName token. Assert activation returns `StatusCode::Good`.
       RED today (RSA-DH not yet implemented). [Cite: OPC 10000-6 §6.7.3; OPC 10000-4 §7.41; spec FR-005]
-- [ ] T009 [P] [US2] Write rejection test in same file: malformed RSA-KEM ciphertext → server returns
+- [~] T009 [P] [US2] Write rejection test in same file: malformed RSA-KEM ciphertext → server returns
       `BadIdentityTokenRejected`. [Cite: OPC 10000-4 §7.40; spec FR-005]
 
 ### Implementation
 
-- [ ] T010 [US2] Implement `decrypt_rsa_dh_token` in `async-opcua-crypto/src/user_token.rs` (or new
+- [X] T010 [US2] Implement `decrypt_rsa_dh_token` in `async-opcua-crypto/src/user_token.rs` (or new
       `rsa_kem.rs`): accept `(ciphertext: &[u8], private_key: &PrivateKey)` → `Result<Vec<u8>>`.
       Algorithm: RSA-OAEP decrypt the wrapped symmetric key, then AES-256-KeyWrap unwrap the token.
       Fail closed: any step returning an error → `Err(StatusCode::BadIdentityTokenRejected)`.
       [Cite: OPC 10000-6 §6.7.3]
-- [ ] T011 [US2] Wire RSA-DH decryption into the server's ActivateSession handler in
+- [X] T011 [US2] Wire RSA-DH decryption into the server's ActivateSession handler in
       `async-opcua-server/src/session/manager.rs` (or wherever RSA-OAEP and ECC decryption are
       currently dispatched). Add an arm for `SecurityPolicy::RsaDh` → call T010. Must NOT regress
       existing RSA-OAEP or ECC paths. [Cite: spec FR-007]
-- [ ] T012 [US2] Update `EndpointDescription` construction to advertise an RSA-DH UserTokenPolicy
+- [X] T012 [US2] Update `EndpointDescription` construction to advertise an RSA-DH UserTokenPolicy
       when the server's certificate uses an RSA key, per Part 4 §7.41 Table 192. On EC-only cert
       endpoints, omit the RSA-DH policy. [Cite: OPC 10000-4 §7.41; spec FR-006]
-- [ ] T013 [US2] Verify T008/T009 green. Verify existing encrypted token tests still green (RSA-OAEP,
+- [X] T013 [US2] Verify T008/T009 green. Verify existing encrypted token tests still green (RSA-OAEP,
       ECC).
 
 **Checkpoint**: RSA-DH token encryption works; no regression in existing crypto paths.
@@ -79,10 +79,10 @@ panic. Per constitution III, one task per line, independently verifiable.
 
 ### Tests (red first)
 
-- [ ] T014 [P] [US3] Write unit test `async-opcua-server/src/security_checks.rs` (in-module):
+- [X] T014 [P] [US3] Write unit test `async-opcua-server/src/security_checks.rs` (in-module):
       record 2 entries (one CertificateValidation/Fail, one UserAuthentication/Pass), call
       `snapshot()`, assert length = 2, assert entries match. [Cite: spec FR-009]
-- [ ] T015 [P] [US3] Write bounding test in same file: record 1001 entries with `max_entries=1000`,
+- [X] T015 [P] [US3] Write bounding test in same file: record 1001 entries with `max_entries=1000`,
       assert `count() == 1000`, assert oldest entry has been evicted. [Cite: spec FR-010]
 
 ### Implementation

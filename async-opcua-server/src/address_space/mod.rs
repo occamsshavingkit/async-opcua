@@ -335,10 +335,16 @@ impl AddressSpace {
     }
 
     /// Return a reference to the browse-name index, building it first if needed.
+    /// Ensure the browse-name index is built, building it if necessary.
     pub fn ensure_browse_name_index(&mut self, type_tree: &dyn TypeTree) {
         if self.browse_name_index.is_none() {
             self.build_browse_name_index(type_tree);
         }
+    }
+
+    /// Return `true` if the browse-name index has already been built.
+    pub fn browse_name_index_is_built(&self) -> bool {
+        self.browse_name_index.is_some()
     }
 
     /// Return a reference to the browse-name index. Panics if not yet built.

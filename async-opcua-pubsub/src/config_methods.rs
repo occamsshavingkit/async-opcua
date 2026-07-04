@@ -356,14 +356,18 @@ fn add_connection(
 ) -> Result<Vec<Variant>, StatusCode> {
     let configuration = decode_argument::<PubSubConnectionDataType>(args)?;
 
-    let mut manager = manager.lock();
-    let ns = manager.namespace;
-    let connection_id = manager.unique_connection_id(&ua_string_to_string(&configuration.name));
-    let connection = PubSubConnectionConfig::from_data_type(configuration, connection_id.clone());
-    manager.connections.push(connection);
+    let (ns, connection_id, connections_snapshot) = {
+        let mut manager = manager.lock();
+        let ns = manager.namespace;
+        let connection_id = manager.unique_connection_id(&ua_string_to_string(&configuration.name));
+        let connection =
+            PubSubConnectionConfig::from_data_type(configuration, connection_id.clone());
+        manager.connections.push(connection);
+        (ns, connection_id, manager.connections.clone())
+    };
 
     let mut space = address_space.write();
-    let _ = reflect_pubsub_config(&mut space, ns, &manager.connections);
+    let _ = reflect_pubsub_config(&mut space, ns, &connections_snapshot);
     Ok(vec![Variant::from(connection_node_id(ns, &connection_id))])
 }
 
@@ -373,20 +377,23 @@ fn remove_connection(
     _object_id: &NodeId,
     args: &[Variant],
 ) -> Result<Vec<Variant>, StatusCode> {
-    let node_id = decode_node_id_argument(args)?;
+    let node_id = decode_node_id_argument(args)?.clone();
 
-    let mut manager = manager.lock();
-    let ns = manager.namespace;
-    let index = manager
-        .connections
-        .iter()
-        .position(|connection| &connection_node_id(ns, &connection.connection_id) == node_id)
-        .ok_or(StatusCode::BadNodeIdUnknown)?;
-    let removed = manager.connections.remove(index);
+    let (ns, removed, connections_snapshot) = {
+        let mut manager = manager.lock();
+        let ns = manager.namespace;
+        let index = manager
+            .connections
+            .iter()
+            .position(|connection| connection_node_id(ns, &connection.connection_id) == node_id)
+            .ok_or(StatusCode::BadNodeIdUnknown)?;
+        let removed = manager.connections.remove(index);
+        (ns, removed, manager.connections.clone())
+    };
 
     let mut space = address_space.write();
     delete_connection_nodes(&mut space, ns, &removed);
-    let _ = reflect_pubsub_config(&mut space, ns, &manager.connections);
+    let _ = reflect_pubsub_config(&mut space, ns, &connections_snapshot);
     Ok(Vec::new())
 }
 
@@ -398,31 +405,41 @@ fn add_writer_group(
 ) -> Result<Vec<Variant>, StatusCode> {
     let configuration = decode_argument::<WriterGroupDataType>(args)?;
 
-    let mut manager = manager.lock();
-    let ns = manager.namespace;
-    let ci = manager
-        .connection_index_for_node(object_id)
-        .ok_or(StatusCode::BadNodeIdUnknown)?;
-    let connection_id = manager.connections[ci].connection_id.clone();
+    let (ns, connection_id, writer_group_id, connections_snapshot) = {
+        let mut manager = manager.lock();
+        let ns = manager.namespace;
+        let ci = manager
+            .connection_index_for_node(object_id)
+            .ok_or(StatusCode::BadNodeIdUnknown)?;
+        let connection_id = manager.connections[ci].connection_id.clone();
 
-    let mut group = WriterGroupConfig::from_data_type(configuration);
-    {
-        let connection = &manager.connections[ci];
-        if group.writer_group_id == 0 || writer_group_id_taken(connection, group.writer_group_id) {
-            group.writer_group_id = next_writer_group_id(connection);
+        let mut group = WriterGroupConfig::from_data_type(configuration);
+        {
+            let connection = &manager.connections[ci];
+            if group.writer_group_id == 0
+                || writer_group_id_taken(connection, group.writer_group_id)
+            {
+                group.writer_group_id = next_writer_group_id(connection);
+            }
+            // Mint connection-unique dataset-writer ids so node ids never collide across groups.
+            let mut next = next_dataset_writer_id(connection);
+            for writer in &mut group.dataset_writers {
+                writer.dataset_writer_id = next;
+                next = next.saturating_add(1);
+            }
         }
-        // Mint connection-unique dataset-writer ids so node ids never collide across groups.
-        let mut next = next_dataset_writer_id(connection);
-        for writer in &mut group.dataset_writers {
-            writer.dataset_writer_id = next;
-            next = next.saturating_add(1);
-        }
-    }
-    let writer_group_id = group.writer_group_id;
-    manager.connections[ci].writer_groups.push(group);
+        let writer_group_id = group.writer_group_id;
+        manager.connections[ci].writer_groups.push(group);
+        (
+            ns,
+            connection_id,
+            writer_group_id,
+            manager.connections.clone(),
+        )
+    };
 
     let mut space = address_space.write();
-    let _ = reflect_pubsub_config(&mut space, ns, &manager.connections);
+    let _ = reflect_pubsub_config(&mut space, ns, &connections_snapshot);
     Ok(vec![Variant::from(writer_group_node_id(
         ns,
         &connection_id,
@@ -438,27 +455,35 @@ fn add_reader_group(
 ) -> Result<Vec<Variant>, StatusCode> {
     let configuration = decode_argument::<ReaderGroupDataType>(args)?;
 
-    let mut manager = manager.lock();
-    let ns = manager.namespace;
-    let ci = manager
-        .connection_index_for_node(object_id)
-        .ok_or(StatusCode::BadNodeIdUnknown)?;
-    let connection_id = manager.connections[ci].connection_id.clone();
+    let (ns, connection_id, reader_group_id, connections_snapshot) = {
+        let mut manager = manager.lock();
+        let ns = manager.namespace;
+        let ci = manager
+            .connection_index_for_node(object_id)
+            .ok_or(StatusCode::BadNodeIdUnknown)?;
+        let connection_id = manager.connections[ci].connection_id.clone();
 
-    let reader_group_id = next_reader_group_id(&manager.connections[ci]);
-    let mut group = ReaderGroupConfig::from_data_type(configuration, reader_group_id);
-    {
-        // Mint connection-unique dataset-reader ids so node ids never collide across groups.
-        let mut next = next_dataset_reader_id(&manager.connections[ci]);
-        for reader in &mut group.dataset_readers {
-            reader.dataset_reader_id = next;
-            next = next.saturating_add(1);
+        let reader_group_id = next_reader_group_id(&manager.connections[ci]);
+        let mut group = ReaderGroupConfig::from_data_type(configuration, reader_group_id);
+        {
+            // Mint connection-unique dataset-reader ids so node ids never collide across groups.
+            let mut next = next_dataset_reader_id(&manager.connections[ci]);
+            for reader in &mut group.dataset_readers {
+                reader.dataset_reader_id = next;
+                next = next.saturating_add(1);
+            }
         }
-    }
-    manager.connections[ci].reader_groups.push(group);
+        manager.connections[ci].reader_groups.push(group);
+        (
+            ns,
+            connection_id,
+            reader_group_id,
+            manager.connections.clone(),
+        )
+    };
 
     let mut space = address_space.write();
-    let _ = reflect_pubsub_config(&mut space, ns, &manager.connections);
+    let _ = reflect_pubsub_config(&mut space, ns, &connections_snapshot);
     Ok(vec![Variant::from(reader_group_node_id(
         ns,
         &connection_id,
@@ -472,40 +497,58 @@ fn remove_group(
     object_id: &NodeId,
     args: &[Variant],
 ) -> Result<Vec<Variant>, StatusCode> {
-    let group_node = decode_node_id_argument(args)?;
+    let group_node = decode_node_id_argument(args)?.clone();
 
-    let mut manager = manager.lock();
-    let ns = manager.namespace;
-    let ci = manager
-        .connection_index_for_node(object_id)
-        .ok_or(StatusCode::BadNodeIdUnknown)?;
-    let connection_id = manager.connections[ci].connection_id.clone();
-
-    if let Some(gi) = manager.connections[ci]
-        .writer_groups
-        .iter()
-        .position(|g| &writer_group_node_id(ns, &connection_id, g.writer_group_id) == group_node)
-    {
-        let removed = manager.connections[ci].writer_groups.remove(gi);
-        let mut space = address_space.write();
-        delete_writer_group_nodes(&mut space, ns, &connection_id, &removed);
-        let _ = reflect_pubsub_config(&mut space, ns, &manager.connections);
-        return Ok(Vec::new());
+    enum RemovedGroup {
+        Writer(WriterGroupConfig),
+        Reader(ReaderGroupConfig),
     }
 
-    if let Some(gi) = manager.connections[ci]
-        .reader_groups
-        .iter()
-        .position(|g| &reader_group_node_id(ns, &connection_id, g.reader_group_id) == group_node)
-    {
-        let removed = manager.connections[ci].reader_groups.remove(gi);
-        let mut space = address_space.write();
-        delete_reader_group_nodes(&mut space, ns, &connection_id, &removed);
-        let _ = reflect_pubsub_config(&mut space, ns, &manager.connections);
-        return Ok(Vec::new());
-    }
+    let (ns, connection_id, removed, connections_snapshot) =
+        {
+            let mut manager = manager.lock();
+            let ns = manager.namespace;
+            let ci = manager
+                .connection_index_for_node(object_id)
+                .ok_or(StatusCode::BadNodeIdUnknown)?;
+            let connection_id = manager.connections[ci].connection_id.clone();
 
-    Err(StatusCode::BadNodeIdUnknown)
+            if let Some(gi) = manager.connections[ci].writer_groups.iter().position(|g| {
+                writer_group_node_id(ns, &connection_id, g.writer_group_id) == group_node
+            }) {
+                let removed = manager.connections[ci].writer_groups.remove(gi);
+                (
+                    ns,
+                    connection_id,
+                    RemovedGroup::Writer(removed),
+                    manager.connections.clone(),
+                )
+            } else if let Some(gi) = manager.connections[ci].reader_groups.iter().position(|g| {
+                reader_group_node_id(ns, &connection_id, g.reader_group_id) == group_node
+            }) {
+                let removed = manager.connections[ci].reader_groups.remove(gi);
+                (
+                    ns,
+                    connection_id,
+                    RemovedGroup::Reader(removed),
+                    manager.connections.clone(),
+                )
+            } else {
+                return Err(StatusCode::BadNodeIdUnknown);
+            }
+        };
+
+    let mut space = address_space.write();
+    match removed {
+        RemovedGroup::Writer(group) => {
+            delete_writer_group_nodes(&mut space, ns, &connection_id, &group);
+        }
+        RemovedGroup::Reader(group) => {
+            delete_reader_group_nodes(&mut space, ns, &connection_id, &group);
+        }
+    }
+    let _ = reflect_pubsub_config(&mut space, ns, &connections_snapshot);
+    Ok(Vec::new())
 }
 
 fn add_dataset_writer(
@@ -516,26 +559,34 @@ fn add_dataset_writer(
 ) -> Result<Vec<Variant>, StatusCode> {
     let configuration = decode_argument::<DataSetWriterDataType>(args)?;
 
-    let mut manager = manager.lock();
-    let ns = manager.namespace;
-    let (ci, gi) = manager
-        .writer_group_location(object_id)
-        .ok_or(StatusCode::BadNodeIdUnknown)?;
-    let connection_id = manager.connections[ci].connection_id.clone();
+    let (ns, connection_id, dataset_writer_id, connections_snapshot) = {
+        let mut manager = manager.lock();
+        let ns = manager.namespace;
+        let (ci, gi) = manager
+            .writer_group_location(object_id)
+            .ok_or(StatusCode::BadNodeIdUnknown)?;
+        let connection_id = manager.connections[ci].connection_id.clone();
 
-    let mut writer = DataSetWriterConfig::from_data_type(configuration);
-    if writer.dataset_writer_id == 0
-        || dataset_writer_id_taken(&manager.connections[ci], writer.dataset_writer_id)
-    {
-        writer.dataset_writer_id = next_dataset_writer_id(&manager.connections[ci]);
-    }
-    let dataset_writer_id = writer.dataset_writer_id;
-    manager.connections[ci].writer_groups[gi]
-        .dataset_writers
-        .push(writer);
+        let mut writer = DataSetWriterConfig::from_data_type(configuration);
+        if writer.dataset_writer_id == 0
+            || dataset_writer_id_taken(&manager.connections[ci], writer.dataset_writer_id)
+        {
+            writer.dataset_writer_id = next_dataset_writer_id(&manager.connections[ci]);
+        }
+        let dataset_writer_id = writer.dataset_writer_id;
+        manager.connections[ci].writer_groups[gi]
+            .dataset_writers
+            .push(writer);
+        (
+            ns,
+            connection_id,
+            dataset_writer_id,
+            manager.connections.clone(),
+        )
+    };
 
     let mut space = address_space.write();
-    let _ = reflect_pubsub_config(&mut space, ns, &manager.connections);
+    let _ = reflect_pubsub_config(&mut space, ns, &connections_snapshot);
     Ok(vec![Variant::from(dataset_writer_node_id(
         ns,
         &connection_id,
@@ -549,27 +600,30 @@ fn remove_dataset_writer(
     object_id: &NodeId,
     args: &[Variant],
 ) -> Result<Vec<Variant>, StatusCode> {
-    let node = decode_node_id_argument(args)?;
+    let node = decode_node_id_argument(args)?.clone();
 
-    let mut manager = manager.lock();
-    let ns = manager.namespace;
-    let (ci, gi) = manager
-        .writer_group_location(object_id)
-        .ok_or(StatusCode::BadNodeIdUnknown)?;
-    let connection_id = manager.connections[ci].connection_id.clone();
+    let (ns, connection_id, removed, connections_snapshot) = {
+        let mut manager = manager.lock();
+        let ns = manager.namespace;
+        let (ci, gi) = manager
+            .writer_group_location(object_id)
+            .ok_or(StatusCode::BadNodeIdUnknown)?;
+        let connection_id = manager.connections[ci].connection_id.clone();
 
-    let idx = manager.connections[ci].writer_groups[gi]
-        .dataset_writers
-        .iter()
-        .position(|w| &dataset_writer_node_id(ns, &connection_id, w.dataset_writer_id) == node)
-        .ok_or(StatusCode::BadNodeIdUnknown)?;
-    let removed = manager.connections[ci].writer_groups[gi]
-        .dataset_writers
-        .remove(idx);
+        let idx = manager.connections[ci].writer_groups[gi]
+            .dataset_writers
+            .iter()
+            .position(|w| dataset_writer_node_id(ns, &connection_id, w.dataset_writer_id) == node)
+            .ok_or(StatusCode::BadNodeIdUnknown)?;
+        let removed = manager.connections[ci].writer_groups[gi]
+            .dataset_writers
+            .remove(idx);
+        (ns, connection_id, removed, manager.connections.clone())
+    };
 
     let mut space = address_space.write();
     delete_dataset_writer_nodes(&mut space, ns, &connection_id, &removed);
-    let _ = reflect_pubsub_config(&mut space, ns, &manager.connections);
+    let _ = reflect_pubsub_config(&mut space, ns, &connections_snapshot);
     Ok(Vec::new())
 }
 
@@ -581,21 +635,29 @@ fn add_dataset_reader(
 ) -> Result<Vec<Variant>, StatusCode> {
     let configuration = decode_argument::<DataSetReaderDataType>(args)?;
 
-    let mut manager = manager.lock();
-    let ns = manager.namespace;
-    let (ci, gi) = manager
-        .reader_group_location(object_id)
-        .ok_or(StatusCode::BadNodeIdUnknown)?;
-    let connection_id = manager.connections[ci].connection_id.clone();
+    let (ns, connection_id, dataset_reader_id, connections_snapshot) = {
+        let mut manager = manager.lock();
+        let ns = manager.namespace;
+        let (ci, gi) = manager
+            .reader_group_location(object_id)
+            .ok_or(StatusCode::BadNodeIdUnknown)?;
+        let connection_id = manager.connections[ci].connection_id.clone();
 
-    let dataset_reader_id = next_dataset_reader_id(&manager.connections[ci]);
-    let reader = DataSetReaderConfig::from_data_type(configuration, dataset_reader_id);
-    manager.connections[ci].reader_groups[gi]
-        .dataset_readers
-        .push(reader);
+        let dataset_reader_id = next_dataset_reader_id(&manager.connections[ci]);
+        let reader = DataSetReaderConfig::from_data_type(configuration, dataset_reader_id);
+        manager.connections[ci].reader_groups[gi]
+            .dataset_readers
+            .push(reader);
+        (
+            ns,
+            connection_id,
+            dataset_reader_id,
+            manager.connections.clone(),
+        )
+    };
 
     let mut space = address_space.write();
-    let _ = reflect_pubsub_config(&mut space, ns, &manager.connections);
+    let _ = reflect_pubsub_config(&mut space, ns, &connections_snapshot);
     Ok(vec![Variant::from(dataset_reader_node_id(
         ns,
         &connection_id,
@@ -609,27 +671,30 @@ fn remove_dataset_reader(
     object_id: &NodeId,
     args: &[Variant],
 ) -> Result<Vec<Variant>, StatusCode> {
-    let node = decode_node_id_argument(args)?;
+    let node = decode_node_id_argument(args)?.clone();
 
-    let mut manager = manager.lock();
-    let ns = manager.namespace;
-    let (ci, gi) = manager
-        .reader_group_location(object_id)
-        .ok_or(StatusCode::BadNodeIdUnknown)?;
-    let connection_id = manager.connections[ci].connection_id.clone();
+    let (ns, connection_id, removed, connections_snapshot) = {
+        let mut manager = manager.lock();
+        let ns = manager.namespace;
+        let (ci, gi) = manager
+            .reader_group_location(object_id)
+            .ok_or(StatusCode::BadNodeIdUnknown)?;
+        let connection_id = manager.connections[ci].connection_id.clone();
 
-    let idx = manager.connections[ci].reader_groups[gi]
-        .dataset_readers
-        .iter()
-        .position(|r| &dataset_reader_node_id(ns, &connection_id, r.dataset_reader_id) == node)
-        .ok_or(StatusCode::BadNodeIdUnknown)?;
-    let removed = manager.connections[ci].reader_groups[gi]
-        .dataset_readers
-        .remove(idx);
+        let idx = manager.connections[ci].reader_groups[gi]
+            .dataset_readers
+            .iter()
+            .position(|r| dataset_reader_node_id(ns, &connection_id, r.dataset_reader_id) == node)
+            .ok_or(StatusCode::BadNodeIdUnknown)?;
+        let removed = manager.connections[ci].reader_groups[gi]
+            .dataset_readers
+            .remove(idx);
+        (ns, connection_id, removed, manager.connections.clone())
+    };
 
     let mut space = address_space.write();
     delete_dataset_reader_nodes(&mut space, ns, &connection_id, &removed);
-    let _ = reflect_pubsub_config(&mut space, ns, &manager.connections);
+    let _ = reflect_pubsub_config(&mut space, ns, &connections_snapshot);
     Ok(Vec::new())
 }
 
@@ -647,22 +712,25 @@ fn add_published_data_items(
     let variables = decode_published_variable_node_ids(args, 3);
     let add_results: Vec<StatusCode> = variables.iter().map(|_| StatusCode::Good).collect();
 
-    let mut manager = manager.lock();
-    let ns = manager.namespace;
-    let unique = manager.unique_dataset_name(&name);
-    // New DataSet starts at version {1, 0}; structural changes bump it (see add/remove variables).
-    let version = ConfigurationVersionDataType {
-        major_version: 1,
-        minor_version: 0,
+    let (ns, unique, version, datasets_snapshot) = {
+        let mut manager = manager.lock();
+        let ns = manager.namespace;
+        let unique = manager.unique_dataset_name(&name);
+        // New DataSet starts at version {1, 0}; structural changes bump it (see add/remove variables).
+        let version = ConfigurationVersionDataType {
+            major_version: 1,
+            minor_version: 0,
+        };
+        manager.published_data_sets.push(PublishedDataItemsConfig {
+            name: unique.clone(),
+            published_variables: variables,
+            configuration_version: version.clone(),
+        });
+        (ns, unique, version, manager.published_data_sets.clone())
     };
-    manager.published_data_sets.push(PublishedDataItemsConfig {
-        name: unique.clone(),
-        published_variables: variables,
-        configuration_version: version.clone(),
-    });
 
     let mut space = address_space.write();
-    let _ = reflect_published_data_sets(&mut space, ns, &manager.published_data_sets);
+    let _ = reflect_published_data_sets(&mut space, ns, &datasets_snapshot);
     Ok(vec![
         Variant::from(published_data_set_node_id(ns, &unique)),
         Variant::from(ExtensionObject::from_message(version)),
@@ -676,18 +744,21 @@ fn remove_published_data_set(
     _object_id: &NodeId,
     args: &[Variant],
 ) -> Result<Vec<Variant>, StatusCode> {
-    let node = decode_node_id_argument(args)?;
+    let node = decode_node_id_argument(args)?.clone();
 
-    let mut manager = manager.lock();
-    let ns = manager.namespace;
-    let idx = manager
-        .dataset_index_for_node(node)
-        .ok_or(StatusCode::BadNodeIdUnknown)?;
-    let removed = manager.published_data_sets.remove(idx);
+    let (ns, removed_name, datasets_snapshot) = {
+        let mut manager = manager.lock();
+        let ns = manager.namespace;
+        let idx = manager
+            .dataset_index_for_node(&node)
+            .ok_or(StatusCode::BadNodeIdUnknown)?;
+        let removed = manager.published_data_sets.remove(idx);
+        (ns, removed.name, manager.published_data_sets.clone())
+    };
 
     let mut space = address_space.write();
-    space.delete(&published_data_set_node_id(ns, &removed.name), true);
-    let _ = reflect_published_data_sets(&mut space, ns, &manager.published_data_sets);
+    space.delete(&published_data_set_node_id(ns, &removed_name), true);
+    let _ = reflect_published_data_sets(&mut space, ns, &datasets_snapshot);
     Ok(Vec::new())
 }
 
@@ -702,29 +773,32 @@ fn add_variables(
     let variables = decode_published_variable_node_ids(args, 3);
     let add_results: Vec<StatusCode> = variables.iter().map(|_| StatusCode::Good).collect();
 
-    let mut manager = manager.lock();
-    let ns = manager.namespace;
-    let idx = manager
-        .dataset_index_for_node(object_id)
-        .ok_or(StatusCode::BadNodeIdUnknown)?;
+    let (ns, new_version, datasets_snapshot) = {
+        let mut manager = manager.lock();
+        let ns = manager.namespace;
+        let idx = manager
+            .dataset_index_for_node(object_id)
+            .ok_or(StatusCode::BadNodeIdUnknown)?;
 
-    let new_version = {
-        let dataset = &mut manager.published_data_sets[idx];
-        // Part 14 §9.1.4.3.2: the supplied version must match the current configuration version.
-        if !version_matches(&expected, &dataset.configuration_version) {
-            return Err(StatusCode::BadInvalidState);
-        }
-        dataset.published_variables.extend(variables);
-        // Adding fields is a non-breaking change: bump the minor version.
-        dataset.configuration_version.minor_version = dataset
-            .configuration_version
-            .minor_version
-            .saturating_add(1);
-        dataset.configuration_version.clone()
+        let new_version = {
+            let dataset = &mut manager.published_data_sets[idx];
+            // Part 14 §9.1.4.3.2: the supplied version must match the current configuration version.
+            if !version_matches(&expected, &dataset.configuration_version) {
+                return Err(StatusCode::BadInvalidState);
+            }
+            dataset.published_variables.extend(variables);
+            // Adding fields is a non-breaking change: bump the minor version.
+            dataset.configuration_version.minor_version = dataset
+                .configuration_version
+                .minor_version
+                .saturating_add(1);
+            dataset.configuration_version.clone()
+        };
+        (ns, new_version, manager.published_data_sets.clone())
     };
 
     let mut space = address_space.write();
-    let _ = reflect_published_data_sets(&mut space, ns, &manager.published_data_sets);
+    let _ = reflect_published_data_sets(&mut space, ns, &datasets_snapshot);
     Ok(vec![
         Variant::from(ExtensionObject::from_message(new_version)),
         add_results.into(),
@@ -741,49 +815,57 @@ fn remove_variables(
     let expected = decode_configuration_version(args, 0)?;
     let indices = decode_u32_array(args, 1);
 
-    let mut manager = manager.lock();
-    let ns = manager.namespace;
-    let idx = manager
-        .dataset_index_for_node(object_id)
-        .ok_or(StatusCode::BadNodeIdUnknown)?;
+    let (ns, new_version, remove_results, datasets_snapshot) = {
+        let mut manager = manager.lock();
+        let ns = manager.namespace;
+        let idx = manager
+            .dataset_index_for_node(object_id)
+            .ok_or(StatusCode::BadNodeIdUnknown)?;
 
-    let (new_version, remove_results) = {
-        let dataset = &mut manager.published_data_sets[idx];
-        if !version_matches(&expected, &dataset.configuration_version) {
-            return Err(StatusCode::BadInvalidState);
-        }
-
-        let len = dataset.published_variables.len();
-        let mut remove_results = Vec::with_capacity(indices.len());
-        let mut to_remove = Vec::new();
-        for &index in &indices {
-            if (index as usize) < len {
-                remove_results.push(StatusCode::Good);
-                to_remove.push(index as usize);
-            } else {
-                remove_results.push(StatusCode::BadInvalidArgument);
+        let (new_version, remove_results) = {
+            let dataset = &mut manager.published_data_sets[idx];
+            if !version_matches(&expected, &dataset.configuration_version) {
+                return Err(StatusCode::BadInvalidState);
             }
-        }
-        // Remove highest-index-first so the earlier indices stay valid as we delete.
-        to_remove.sort_unstable();
-        to_remove.dedup();
-        for &index in to_remove.iter().rev() {
-            dataset.published_variables.remove(index);
-        }
 
-        if !to_remove.is_empty() {
-            // Removing fields is a breaking change: bump major, reset minor.
-            dataset.configuration_version.major_version = dataset
-                .configuration_version
-                .major_version
-                .saturating_add(1);
-            dataset.configuration_version.minor_version = 0;
-        }
-        (dataset.configuration_version.clone(), remove_results)
+            let len = dataset.published_variables.len();
+            let mut remove_results = Vec::with_capacity(indices.len());
+            let mut to_remove = Vec::new();
+            for &index in &indices {
+                if (index as usize) < len {
+                    remove_results.push(StatusCode::Good);
+                    to_remove.push(index as usize);
+                } else {
+                    remove_results.push(StatusCode::BadInvalidArgument);
+                }
+            }
+            // Remove highest-index-first so the earlier indices stay valid as we delete.
+            to_remove.sort_unstable();
+            to_remove.dedup();
+            for &index in to_remove.iter().rev() {
+                dataset.published_variables.remove(index);
+            }
+
+            if !to_remove.is_empty() {
+                // Removing fields is a breaking change: bump major, reset minor.
+                dataset.configuration_version.major_version = dataset
+                    .configuration_version
+                    .major_version
+                    .saturating_add(1);
+                dataset.configuration_version.minor_version = 0;
+            }
+            (dataset.configuration_version.clone(), remove_results)
+        };
+        (
+            ns,
+            new_version,
+            remove_results,
+            manager.published_data_sets.clone(),
+        )
     };
 
     let mut space = address_space.write();
-    let _ = reflect_published_data_sets(&mut space, ns, &manager.published_data_sets);
+    let _ = reflect_published_data_sets(&mut space, ns, &datasets_snapshot);
     Ok(vec![
         Variant::from(ExtensionObject::from_message(new_version)),
         remove_results.into(),

@@ -89,20 +89,20 @@ fn verify_ocsp_signature(
         issuer_public_key
             .verify_sha1(&tbs, signature)
             .is_ok_and(|ok| ok)
-    } else if algorithm_oid == const_oid::db::rfc5912::ECDSA_WITH_SHA_256
-        || algorithm_oid == const_oid::db::rfc5912::ECDSA_WITH_SHA_384
-    {
+    } else {
         #[cfg(feature = "ecc")]
         {
-            issuer_public_key.ecc_key().is_some_and(|ecc_key| {
-                crate::ecc::ecdsa_verify_der(ecc_key, &tbs, signature).is_ok()
-            })
+            if algorithm_oid == const_oid::db::rfc5912::ECDSA_WITH_SHA_256
+                || algorithm_oid == const_oid::db::rfc5912::ECDSA_WITH_SHA_384
+            {
+                issuer_public_key.ecc_key().is_some_and(|ecc_key| {
+                    crate::ecc::ecdsa_verify_der(ecc_key, &tbs, signature).is_ok()
+                })
+            } else {
+                false
+            }
         }
         #[cfg(not(feature = "ecc"))]
-        {
-            false
-        }
-    } else {
         false
     };
 

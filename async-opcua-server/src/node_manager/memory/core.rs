@@ -1199,12 +1199,7 @@ impl CoreNodeManagerImpl {
                         .get_session_subscriptions(context.session_id)
                         .ok_or(StatusCode::BadSessionIdInvalid)?;
                     let (ids, handles) = subs
-                        .legacy(move |subs| {
-                            let sub = subs.get(id).ok_or(StatusCode::BadSubscriptionIdInvalid)?;
-                            let (ids, handles): (Vec<_>, Vec<_>) =
-                                sub.items().map(|i| (i.id(), i.client_handle())).unzip();
-                            Ok::<_, StatusCode>((ids, handles))
-                        })
+                        .get_subscription_item_ids(id)
                         .await
                         .map_err(|_| StatusCode::BadSessionIdInvalid)??;
                     call.set_outputs(vec![ids.into(), handles.into()]);
@@ -1217,15 +1212,9 @@ impl CoreNodeManagerImpl {
                         .subscriptions
                         .get_session_subscriptions(context.session_id)
                         .ok_or(StatusCode::BadSessionIdInvalid)?;
-                    subs.legacy(move |subs| {
-                        let sub = subs
-                            .get_mut(id)
-                            .ok_or(StatusCode::BadSubscriptionIdInvalid)?;
-                        sub.set_resend_data();
-                        Ok::<_, StatusCode>(())
-                    })
-                    .await
-                    .map_err(|_| StatusCode::BadSessionIdInvalid)??;
+                    subs.resend_data(id)
+                        .await
+                        .map_err(|_| StatusCode::BadSessionIdInvalid)??;
                     call.set_status(StatusCode::Good);
                     return Ok(());
                 }

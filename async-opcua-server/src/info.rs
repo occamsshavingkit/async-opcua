@@ -4,10 +4,11 @@
 
 //! Provides server state information, such as status, configuration, running servers and so on.
 
-#[cfg(feature = "lds")]
-use std::collections::HashMap;
-use std::sync::atomic::{AtomicU16, AtomicU8, Ordering};
-use std::sync::Arc;
+use std::{
+    collections::HashMap,
+    sync::atomic::{AtomicU16, AtomicU8, Ordering},
+    sync::Arc,
+};
 
 use arc_swap::ArcSwap;
 use opcua_nodes::{DefaultTypeTree, TypeTree};
@@ -49,7 +50,7 @@ use opcua_types::{
     TypeLoaderCollection, UAString,
 };
 
-use crate::config::{ServerConfig, ServerEndpoint};
+use crate::config::{EndpointIdentifier, ServerConfig, ServerEndpoint};
 
 use super::authenticator::{AuthManager, UserToken};
 use super::identity_token::{IdentityToken, POLICY_ID_ANONYMOUS, POLICY_ID_X509};
@@ -166,9 +167,11 @@ pub struct ServerInfo {
     pub servers: Vec<String>,
     /// Server configuration
     pub config: Arc<ServerConfig>,
-    /// Server public certificate read from config location or null if there is none
-    pub server_certificate: RwLock<Option<X509>>,
-    /// Server private key
+    /// Per-endpoint certificate and private key map. Keyed by EndpointIdentifier
+    /// (path, security_policy, security_mode). Each value stores the X.509
+    /// certificate and its corresponding private key, or None if unconfigured.
+    pub endpoint_certificates: RwLock<HashMap<EndpointIdentifier, Option<(X509, PrivateKey)>>>,
+    /// Server private key (global fallback for endpoints without explicit certs)
     pub server_pkey: RwLock<Option<PrivateKey>>,
     /// Certificate store used to validate incoming application and user identity certificates.
     pub(crate) certificate_store: Arc<RwLock<CertificateStore>>,
@@ -741,13 +744,14 @@ impl ServerInfo {
             return Ok(());
         }
 
-        if self
-            .server_certificate
-            .read()
-            .as_ref()
-            .is_some_and(|cert| cert.is_hostname_valid(&hostname).is_ok())
         {
-            return Ok(());
+            let certs = self.endpoint_certificates.read();
+            let any_cert_valid = certs.values().any(|entry| {
+                entry.as_ref().is_some_and(|(cert, _)| cert.is_hostname_valid(&hostname).is_ok())
+            });
+            if any_cert_valid {
+                return Ok(());
+            }
         }
 
         error!(
@@ -832,7 +836,7 @@ impl ServerInfo {
                     discovery_profile_uri: UAString::null(),
                     discovery_urls: self.discovery_urls(),
                 },
-                self.server_certificate_as_byte_string(),
+                self.server_certificate_as_byte_string(&EndpointIdentifier::from(endpoint)),
             )
         } else {
             (
@@ -910,10 +914,10 @@ impl ServerInfo {
         )
     }
 
-    /// Get the server certificate as a byte string.
-    pub fn server_certificate_as_byte_string(&self) -> ByteString {
-        let cert = self.server_certificate.read();
-        if let Some(ref server_certificate) = *cert {
+    /// Get the server certificate for a specific endpoint as a byte string.
+    pub fn server_certificate_as_byte_string(&self, endpoint_id: &EndpointIdentifier) -> ByteString {
+        let certs = self.endpoint_certificates.read();
+        if let Some(Some((ref server_certificate, _))) = certs.get(endpoint_id) {
             server_certificate.as_byte_string()
         } else {
             ByteString::null()
@@ -1018,7 +1022,10 @@ impl ServerInfo {
                 IdentityToken::X509(token) => {
                     // Clone out of the lock; the guard must not be held
                     // across the await below.
-                    let server_cert = self.server_certificate.read().clone();
+                    let server_cert = {
+                        let certs = self.endpoint_certificates.read();
+                        certs.get(&EndpointIdentifier::from(endpoint)).cloned().flatten().map(|(cert, _)| cert)
+                    };
                     self.authenticate_x509_identity_token(
                         endpoint,
                         &token,
@@ -1651,8 +1658,8 @@ mod tests {
                 "modern",
                 (
                     "/",
-                    SecurityPolicy::Aes256Sha256RsaPss,
-                    MessageSecurityMode::Sign,
+                    SecurityPolicy::None,
+                    MessageSecurityMode::None,
                     &user_token_ids as &[&str],
                 ),
             )
@@ -1680,9 +1687,12 @@ mod tests {
             alt_host_names,
             certificate_duration_days: 30,
         })
-        .expect("test certificate should be generated")
-        .0;
-        *handle.info().server_certificate.write() = Some(cert);
+        .expect("test certificate should be generated");
+        {
+            let mut certs = handle.info().endpoint_certificates.write();
+            let ep = crate::config::EndpointIdentifier { path: "/".into(), security_policy: "None".into(), security_mode: "None".into() };
+            certs.insert(ep, Some(cert));
+        }
 
         handle
             .info()

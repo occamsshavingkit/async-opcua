@@ -8,6 +8,7 @@
 use std::fs::{read_dir, File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::time::{Duration, SystemTime};
 
 #[cfg(unix)]
 use std::os::unix::fs::OpenOptionsExt;
@@ -17,7 +18,7 @@ use tracing::{debug, error, info, trace, warn};
 
 use x509_cert::{
     crl::CertificateList,
-    der::{Decode, Reader},
+    der::{Decode, Encode, Reader},
 };
 
 use crate::{
@@ -28,6 +29,10 @@ use crate::{
 use super::{
     security_policy::SecurityPolicy,
     x509::{X509Data, X509},
+};
+
+use super::ocsp::{
+    self, CertStatusResult, CacheKey, OcspError, OcspFetchConfig, OcspFetchPolicy,
 };
 
 /// Default path to the applications own certificate
@@ -98,6 +103,10 @@ pub struct CertificateStore {
     trust_unknown_certs: bool,
     /// Certificate validation options applied to incoming application instance certificates.
     validation_options: ValidationOptions,
+    /// OCSP fetch configuration. When `None` or `policy == Off`, no live OCSP fetching is performed.
+    ocsp_fetch_config: Option<OcspFetchConfig>,
+    /// OCSP response cache, shared across all validations.
+    ocsp_cache: parking_lot::Mutex<ocsp::cache::OcspCache>,
 }
 
 impl CertificateStore {
@@ -113,6 +122,8 @@ impl CertificateStore {
             skip_verify_certs: false,
             trust_unknown_certs: false,
             validation_options: ValidationOptions::default(),
+            ocsp_fetch_config: None,
+            ocsp_cache: parking_lot::Mutex::new(ocsp::cache::OcspCache::new()),
         }
     }
 
@@ -188,6 +199,12 @@ impl CertificateStore {
     /// Set certificate validation options for incoming application instance certificates.
     pub fn set_validation_options(&mut self, options: ValidationOptions) {
         self.validation_options = options;
+    }
+
+    /// Configure live OCSP fetching. `None` or `Off` policy preserves
+    /// backward-compatible behavior (stapled/supplied OCSP only).
+    pub fn set_ocsp_fetch_config(&mut self, config: Option<OcspFetchConfig>) {
+        self.ocsp_fetch_config = config;
     }
 
     /// Reads a private key from a path on disk.
@@ -502,12 +519,40 @@ impl CertificateStore {
         let mut crls = self.read_trusted_crls();
         crls.extend(self.read_issuer_crls());
         let now = chrono::Utc::now();
+
+        let mut fetched_ocsp = Vec::new();
+        if let Some(ref config) = self.ocsp_fetch_config {
+            if config.policy != OcspFetchPolicy::Off {
+                let result =
+                    self.fetch_ocsp_for_cert(cert, config, &trusted, &issuers, &now);
+                match (&config.policy, result) {
+                    (OcspFetchPolicy::Strict, Err(e)) => {
+                        warn!(
+                            "Certificate {}: OCSP fetch failed (strict mode): {e}",
+                            cert_file_name
+                        );
+                        let _ = self.store_rejected_cert(cert);
+                        return Err(Error::new(
+                            StatusCode::BadCertificateRevoked,
+                            format!(
+                                "Certificate {} OCSP check failed: {e}",
+                                cert_file_name
+                            ),
+                        ));
+                    }
+                    (_, Ok(Some(ocsp_der))) => {
+                        fetched_ocsp.push(ocsp_der);
+                    }
+                    _ => {}
+                }
+            }
+        }
+
         let context = ChainValidationContext {
             trusted_certs: &trusted,
             issuer_certs: &issuers,
             crls: &crls,
-            // No live OCSP fetch; the store has no out-of-band/stapled responses to supply.
-            ocsp_responses: &[],
+            ocsp_responses: &fetched_ocsp,
             security_policy,
             purpose,
             options: &options,
@@ -520,6 +565,74 @@ impl CertificateStore {
             }
             Ok(findings) => Ok(findings),
         }
+    }
+
+    fn fetch_ocsp_for_cert(
+        &self,
+        cert: &X509,
+        config: &OcspFetchConfig,
+        trusted: &[X509],
+        issuers: &[X509],
+        now: &chrono::DateTime<chrono::Utc>,
+    ) -> Result<Option<Vec<u8>>, OcspError> {
+        let issuer = find_issuer_for_cert(cert, trusted, issuers).ok_or(OcspError::NoIssuerCert)?;
+        let url = ocsp::aia::extract_ocsp_url(cert)?;
+
+        let cache_key = self.build_cache_key(cert, issuer);
+
+        {
+            let mut cache = self.ocsp_cache.lock();
+            if let Some(cached_der) = cache.get(&cache_key) {
+                return Ok(Some(cached_der));
+            }
+        }
+
+        let request_der = ocsp::codec::build_ocsp_request(cert, issuer)?;
+        let response_der =
+            ocsp::fetch::fetch_ocsp_response(&url, &request_der, config)?;
+
+        let issuer_pk = issuer
+            .public_key()
+            .map_err(|_| OcspError::InvalidResponse("issuer has no public key".into()))?;
+
+        let _verdict = ocsp::validate::validate_ocsp_response(
+            &response_der,
+            &cert.serial_number(),
+            &issuer_pk,
+            now,
+        )?;
+
+        let next_update = compute_next_update(&response_der, now);
+        {
+            let mut cache = self.ocsp_cache.lock();
+            cache.insert(cache_key, response_der.clone(), next_update);
+        }
+
+        Ok(Some(response_der))
+    }
+
+    fn build_cache_key(&self, cert: &X509, issuer: &X509) -> CacheKey {
+        use sha1::Digest;
+
+        let issuer_name_der = issuer
+            .inner()
+            .tbs_certificate
+            .subject
+            .to_der()
+            .unwrap_or_default();
+        let issuer_name_hash = sha1::Sha1::digest(&issuer_name_der).to_vec();
+
+        let issuer_key_hash = sha1::Sha1::digest(
+            issuer
+                .inner()
+                .tbs_certificate
+                .subject_public_key_info
+                .subject_public_key
+                .raw_bytes(),
+        )
+        .to_vec();
+
+        (issuer_name_hash, issuer_key_hash, cert.serial_number())
     }
 
     fn ensure_trusted_certs_dir_available(
@@ -981,4 +1094,56 @@ impl CertificateStore {
             }
         }
     }
+}
+
+fn find_issuer_for_cert<'a>(
+    cert: &X509,
+    trusted: &'a [X509],
+    issuers: &'a [X509],
+) -> Option<&'a X509> {
+    issuers
+        .iter()
+        .chain(trusted.iter())
+        .find(|candidate| candidate.subject_name() == cert.issuer_name())
+}
+
+fn compute_next_update(
+    response_der: &[u8],
+    now: &chrono::DateTime<chrono::Utc>,
+) -> SystemTime {
+    use x509_ocsp::{BasicOcspResponse, OcspResponse, OcspResponseStatus};
+
+    let now_sys: SystemTime = (*now).into();
+
+    let response = match OcspResponse::from_der(response_der) {
+        Ok(r) => r,
+        Err(_) => return fallback_next_update(now_sys),
+    };
+
+    if response.response_status != OcspResponseStatus::Successful {
+        return fallback_next_update(now_sys);
+    }
+
+    let Some(response_bytes) = response.response_bytes else {
+        return fallback_next_update(now_sys);
+    };
+
+    let basic = match BasicOcspResponse::from_der(response_bytes.response.as_bytes()) {
+        Ok(b) => b,
+        Err(_) => return fallback_next_update(now_sys),
+    };
+
+    basic
+        .tbs_response_data
+        .responses
+        .iter()
+        .filter_map(|single| single.next_update.as_ref())
+        .map(|next_update| next_update.0.to_system_time())
+        .filter(|next| *next > now_sys)
+        .max()
+        .unwrap_or_else(|| fallback_next_update(now_sys))
+}
+
+fn fallback_next_update(now_sys: SystemTime) -> SystemTime {
+    now_sys + Duration::from_secs(300)
 }

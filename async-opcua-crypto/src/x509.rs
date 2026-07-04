@@ -1012,6 +1012,11 @@ impl X509 {
         }
     }
 
+    /// Returns a reference to the inner `x509_cert::Certificate`.
+    pub fn inner(&self) -> &x509::certificate::Certificate {
+        &self.value
+    }
+
     /// Returns the SubjectKeyIdentifier bytes, when present and well-formed.
     pub fn subject_key_identifier(&self) -> Option<Vec<u8>> {
         let r: Result<Option<(bool, SubjectKeyIdentifier)>, _> =

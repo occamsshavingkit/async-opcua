@@ -22,7 +22,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 
 use opcua_core::{config::Config, handle::AtomicHandle};
-use opcua_crypto::{CertificateStore, RevocationMode, ValidationOptions};
+use opcua_crypto::{CertificateStore, PrivateKey, RevocationMode, SecurityPolicy, ValidationOptions, X509};
 
 #[cfg(feature = "diagnostics")]
 use crate::diagnostics::ServerDiagnostics;
@@ -47,7 +47,7 @@ use super::subscriptions::SubscriptionCache;
 use super::{
     authenticator::DefaultAuthenticator,
     builder::ServerBuilder,
-    config::{ServerConfig, TcpKeepaliveConfig},
+    config::{EndpointIdentifier, ServerConfig, ServerEndpoint, TcpKeepaliveConfig},
     info::ServerInfo,
     node_manager::{NodeManagers, NodeManagersRef},
     server_handle::ServerHandle,
@@ -310,7 +310,7 @@ impl Server {
             None
         };
 
-        let (mut certificate_store, server_certificate, server_pkey) =
+        let (mut certificate_store, global_cert, global_pkey) =
             CertificateStore::new_with_x509_data(
                 &config.pki_dir,
                 false,
@@ -319,10 +319,128 @@ impl Server {
                 application_description,
             );
 
-        if server_certificate.is_none() || server_pkey.is_none() {
+        if global_cert.is_none() || global_pkey.is_none() {
             warn!(
                 "Server is missing its application instance certificate and/or its private key. Encrypted endpoints will not function correctly."
             );
+        }
+
+        // T019: Per-endpoint cert loading
+        let mut endpoint_certificates: HashMap<EndpointIdentifier, Option<(X509, PrivateKey)>> =
+            HashMap::new();
+        let server_pkey = RwLock::new(global_pkey.clone());
+
+        for (_name, endpoint) in &config.endpoints {
+            let endpoint_id = EndpointIdentifier::from(endpoint);
+            if endpoint_certificates.contains_key(&endpoint_id) {
+                continue;
+            }
+
+            let cert_path = endpoint
+                .certificate_path
+                .as_deref()
+                .or(config.certificate_path.as_deref());
+            let key_path = endpoint
+                .private_key_path
+                .as_deref()
+                .or(config.private_key_path.as_deref());
+
+            let cert_entry = match (cert_path, key_path) {
+                (Some(cp), Some(kp)) => {
+                    let cert = match CertificateStore::read_cert(cp) {
+                        Ok(cert) => cert,
+                        Err(e) => {
+                            warn!(
+                                "Endpoint '{}': failed to load certificate from {:?}: {e}",
+                                endpoint_id.path, cp
+                            );
+                            endpoint_certificates.insert(endpoint_id, None);
+                            continue;
+                        }
+                    };
+                    let key = match CertificateStore::read_pkey(kp) {
+                        Ok(key) => key,
+                        Err(e) => {
+                            warn!(
+                                "Endpoint '{}': failed to load private key from {:?}: {e}",
+                                endpoint_id.path, kp
+                            );
+                            endpoint_certificates.insert(endpoint_id, None);
+                            continue;
+                        }
+                    };
+                    Some((cert, key))
+                }
+                _ => {
+                    // No certificate configured for this endpoint — will be
+                    // caught by startup validation below if the policy needs one
+                    None
+                }
+            };
+
+            endpoint_certificates.insert(endpoint_id, cert_entry);
+        }
+
+        // T020: Startup validation — ensure all security-policy endpoints have
+        // compatible certificates
+        for (_name, endpoint) in &config.endpoints {
+            let security_policy = endpoint.security_policy();
+            let security_mode = endpoint.message_security_mode();
+
+            if security_policy == SecurityPolicy::None {
+                continue;
+            }
+
+            let endpoint_id = EndpointIdentifier::from(endpoint);
+            let cert_entry = endpoint_certificates
+                .get(&endpoint_id)
+                .and_then(|entry| entry.as_ref());
+
+            match cert_entry {
+                None => {
+                    warn!(
+                        "Endpoint '{}' uses security policy {} but no compatible certificate is configured. Clients connecting to this endpoint may fail.",
+                        endpoint.path,
+                        endpoint.security_policy
+                    );
+                }
+                Some((cert, _key)) => {
+                    // Validate cert key type is compatible with the policy
+                    let cert_is_ecc = cert
+                        .public_key()
+                        .ok()
+                        .and_then(|pk| {
+                            #[cfg(feature = "ecc")]
+                            {
+                                pk.ecc_curve()
+                            }
+                            #[cfg(not(feature = "ecc"))]
+                            {
+                                None
+                            }
+                        })
+                        .is_some();
+                    let policy_is_ecc = security_policy.is_ecc();
+                    if cert_is_ecc != policy_is_ecc {
+                        let cert_type = if cert_is_ecc { "EC" } else { "RSA" };
+                        let policy_type = if policy_is_ecc { "EC" } else { "RSA" };
+                        error!(
+                            "Endpoint '{}' uses security policy {} (requires {} key) but certificate is {}.",
+                            endpoint.path,
+                            endpoint.security_policy,
+                            policy_type,
+                            cert_type
+                        );
+                        return Err(format!(
+                            "Endpoint '{}' uses security policy {} (requires {} key) but certificate is {}.",
+                            endpoint.path,
+                            endpoint.security_policy,
+                            policy_type,
+                            cert_type
+                        ));
+                    }
+                }
+            }
         }
 
         config.read_x509_thumbprints();
@@ -406,8 +524,8 @@ impl Server {
             start_time: ArcSwap::new(Arc::new(opcua_types::DateTime::now())),
             servers,
             config: config.clone(),
-            server_certificate: RwLock::new(server_certificate),
-            server_pkey: RwLock::new(server_pkey),
+            endpoint_certificates: RwLock::new(endpoint_certificates),
+            server_pkey,
             certificate_store: certificate_store.clone(),
             security_checks: RwLock::new(crate::security_checks::SecurityCheckRegistry::new(
                 config.security_check_max_entries,

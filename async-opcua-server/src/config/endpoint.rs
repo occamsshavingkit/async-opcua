@@ -1,5 +1,6 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
+    path::PathBuf,
     str::FromStr,
 };
 
@@ -25,6 +26,14 @@ pub struct ServerEndpoint {
     pub password_security_policy: Option<String>,
     /// User tokens
     pub user_token_ids: BTreeSet<String>,
+    /// Per-endpoint certificate path override. If None, the server-level
+    /// `certificate_path` is used as a fallback.
+    #[serde(default)]
+    pub certificate_path: Option<PathBuf>,
+    /// Per-endpoint private key path override. If None, the server-level
+    /// `private_key_path` is used as a fallback.
+    #[serde(default)]
+    pub private_key_path: Option<PathBuf>,
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize, Clone, Hash, Eq)]
@@ -58,6 +67,8 @@ impl<'a> From<(&'a str, SecurityPolicy, MessageSecurityMode, &'a [&'a str])> for
             security_level: Self::security_level(v.1, v.2),
             password_security_policy: None,
             user_token_ids: v.3.iter().map(|id| id.to_string()).collect(),
+            certificate_path: None,
+            private_key_path: None,
         }
     }
 }
@@ -80,6 +91,8 @@ impl ServerEndpoint {
             security_level: Self::security_level(security_policy, security_mode),
             password_security_policy: None,
             user_token_ids: user_token_ids.iter().cloned().collect(),
+            certificate_path: None,
+            private_key_path: None,
         }
     }
 
@@ -322,6 +335,8 @@ mod tests {
             security_level: 0,
             password_security_policy: None,
             user_token_ids: BTreeSet::new(),
+            certificate_path: None,
+            private_key_path: None,
         };
 
         let errors = endpoint
@@ -347,6 +362,8 @@ mod tests {
             security_level: 0,
             password_security_policy: Some("InvalidPolicy".to_string()),
             user_token_ids: BTreeSet::new(),
+            certificate_path: None,
+            private_key_path: None,
         };
         assert_eq!(endpoint.password_security_policy(), SecurityPolicy::None);
     }
@@ -361,6 +378,8 @@ mod tests {
             security_level: 0,
             password_security_policy: None,
             user_token_ids: BTreeSet::new(),
+            certificate_path: None,
+            private_key_path: None,
         };
 
         let errors = endpoint
@@ -387,6 +406,8 @@ mod tests {
             security_level: 0,
             password_security_policy: None,
             user_token_ids: BTreeSet::new(),
+            certificate_path: None,
+            private_key_path: None,
         };
 
         assert!(endpoint.validate("legacy", &user_tokens, true).is_ok());

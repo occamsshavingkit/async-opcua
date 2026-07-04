@@ -527,24 +527,6 @@ impl SubscriptionCache {
             .map(SessionEntry::handle)
     }
 
-    /// Run `f` against the owned `SessionSubscriptions` for `session_id` inside its actor and return
-    /// the result. Returns `None` if there is no such session. Primarily for tests/introspection.
-    pub async fn with_session_subscriptions<R: Send + 'static>(
-        &self,
-        session_id: u32,
-        f: impl FnOnce(&SessionSubscriptions) -> R + Send + 'static,
-    ) -> Option<R> {
-        let cache = {
-            let inner = trace_read_lock!(self.inner);
-            inner
-                .session_subscriptions
-                .get(&session_id)
-                .map(SessionEntry::handle)
-        }?;
-
-        cache.legacy(move |subs| f(subs)).await.ok()
-    }
-
     #[cfg(all(feature = "generated-address-space", feature = "diagnostics"))] // consumed only by the core node manager
     pub(crate) async fn subscription_diagnostics(&self) -> Vec<SubscriptionDiagnosticsDataType> {
         let handles = {
@@ -558,9 +540,7 @@ impl SubscriptionCache {
 
         let mut diagnostics = Vec::new();
         for handle in handles {
-            if let Ok(mut session_diagnostics) =
-                handle.legacy(session_subscription_diagnostics).await
-            {
+            if let Ok(mut session_diagnostics) = handle.subscription_diagnostics().await {
                 diagnostics.append(&mut session_diagnostics);
             }
         }
@@ -582,11 +562,14 @@ impl SubscriptionCache {
 
         let mut summaries = HashMap::with_capacity(handles.len());
         for (session_id, handle) in handles {
-            if let Ok(summary) = handle
-                .legacy(session_subscription_diagnostics_summary)
-                .await
-            {
-                summaries.insert(session_id, summary);
+            if let Ok((sub_ids, items)) = handle.subscription_and_item_data().await {
+                summaries.insert(
+                    session_id,
+                    SessionSubscriptionDiagnosticsSummary {
+                        subscription_count: usize_to_u32_saturating(sub_ids.len()),
+                        monitored_item_count: usize_to_u32_saturating(items.len()),
+                    },
+                );
             }
         }
         summaries
@@ -614,9 +597,7 @@ impl SubscriptionCache {
 
         let key = Self::get_key(&context.session);
         let type_tree_for_user = context.info.type_tree_getter.get_type_tree_static(context);
-        let _ = cache
-            .legacy(move |subs| subs.update_owner(key, type_tree_for_user))
-            .await;
+        let _ = cache.update_owner(key, type_tree_for_user).await;
     }
 
     pub(crate) async fn get_session_monitored_items(
@@ -633,7 +614,7 @@ impl SubscriptionCache {
         };
 
         cache
-            .legacy(|subs| subs.monitored_item_refs())
+            .monitored_item_refs()
             .await
             .unwrap_or_default()
     }
@@ -656,9 +637,7 @@ impl SubscriptionCache {
             return;
         };
 
-        let _ = cache
-            .legacy(move |subs| subs.apply_revalidated_values(values))
-            .await;
+        let _ = cache.apply_revalidated_values(values).await;
     }
 
     pub(crate) async fn delete_monitored_item_refs(
@@ -686,7 +665,7 @@ impl SubscriptionCache {
         let mut results = Vec::with_capacity(items.len());
         for (subscription_id, item_ids) in ids_by_subscription {
             let deleted = cache
-                .legacy(move |subs| subs.delete_monitored_items(subscription_id, &item_ids))
+                .delete_monitored_items(subscription_id, item_ids)
                 .await
                 .map_err(|_| StatusCode::BadNoSubscription)??;
             for (status, rf) in &deleted {
@@ -878,7 +857,7 @@ impl SubscriptionCache {
                 .map(SessionEntry::handle)
         })?;
         cache
-            .legacy(move |subs| subs.get_monitored_item_count(subscription_id))
+            .monitored_item_count(subscription_id)
             .await
             .ok()
             .flatten()
@@ -914,7 +893,7 @@ impl SubscriptionCache {
         let request = request.clone();
         let info = context.info.clone();
         let res = cache
-            .legacy(move |subs| subs.create_subscription(&request, &info))
+            .create_subscription(request, info)
             .await
             .map_err(|_| StatusCode::BadNoSubscription)??;
         let mut lck = trace_write_lock!(self.inner);
@@ -974,7 +953,7 @@ impl SubscriptionCache {
         };
         let request = request.clone();
         cache
-            .legacy(move |subs| subs.modify_subscription(&request, &info))
+            .modify_subscription(request, info)
             .await
             .map_err(|_| StatusCode::BadNoSubscription)?
     }
@@ -994,7 +973,7 @@ impl SubscriptionCache {
         };
         let request = request.clone();
         cache
-            .legacy(move |subs| subs.set_publishing_mode(&request))
+            .set_publishing_mode(request)
             .await
             .map_err(|_| StatusCode::BadNoSubscription)?
     }
@@ -1014,7 +993,7 @@ impl SubscriptionCache {
         };
         let request = request.clone();
         cache
-            .legacy(move |subs| subs.republish(&request))
+            .republish(request)
             .await
             .map_err(|_| StatusCode::BadNoSubscription)?
     }
@@ -1330,7 +1309,7 @@ impl SubscriptionCache {
 
         let requests_for_index = requests.clone();
         let result = cache
-            .legacy(move |subs| subs.create_monitored_items(subscription_id, &requests))
+            .create_monitored_items(subscription_id, requests)
             .await
             .map_err(|_| StatusCode::BadNoSubscription)?;
         if let Ok(res) = &result {
@@ -1390,20 +1369,15 @@ impl SubscriptionCache {
         };
 
         let result = cache
-            .legacy(move |subs| {
-                let type_tree_for_user = subs.type_tree_for_user();
-                let type_tree = type_tree_for_user.get_type_tree();
-                subs.modify_monitored_items(
-                    subscription_id,
-                    &info,
-                    timestamps_to_return,
-                    requests,
-                    #[cfg(feature = "subscriptions-standard")]
-                    eu_ranges,
-                    type_tree.get(),
-                    diagnostic_bits,
-                )
-            })
+            .modify_monitored_items(
+                subscription_id,
+                info,
+                timestamps_to_return,
+                requests,
+                #[cfg(feature = "subscriptions-standard")]
+                eu_ranges.into_iter().collect(),
+                diagnostic_bits,
+            )
             .await
             .map_err(|_| StatusCode::BadNoSubscription)??;
 
@@ -1441,10 +1415,12 @@ impl SubscriptionCache {
             return Err(StatusCode::BadNoSubscription);
         };
 
-        cache
-            .legacy(move |subs| subs.monitored_item_node_ids(subscription_id, &monitored_item_ids))
+        Ok(cache
+            .monitored_item_node_ids(subscription_id, monitored_item_ids)
             .await
-            .map_err(|_| StatusCode::BadNoSubscription)?
+            .map_err(|_| StatusCode::BadNoSubscription)??
+            .into_iter()
+            .collect())
     }
 
     fn get_key(session: &RwLock<Session>) -> PersistentSessionKey {
@@ -1472,7 +1448,7 @@ impl SubscriptionCache {
         .ok_or(StatusCode::BadNoSubscription)?;
 
         let result = cache
-            .legacy(move |subs| subs.set_monitoring_mode(subscription_id, monitoring_mode, items))
+            .set_monitoring_mode(subscription_id, monitoring_mode, items)
             .await
             .map_err(|_| StatusCode::BadNoSubscription)?;
 
@@ -1516,14 +1492,12 @@ impl SubscriptionCache {
         };
 
         cache
-            .legacy(move |subs| {
-                subs.set_triggering(
-                    subscription_id,
-                    triggering_item_id,
-                    links_to_add,
-                    links_to_remove,
-                )
-            })
+            .set_triggering(
+                subscription_id,
+                triggering_item_id,
+                links_to_add,
+                links_to_remove,
+            )
             .await
             .map_err(|_| StatusCode::BadNoSubscription)?
     }
@@ -1544,7 +1518,7 @@ impl SubscriptionCache {
 
         let items = items.to_vec();
         let result = cache
-            .legacy(move |subs| subs.delete_monitored_items(subscription_id, &items))
+            .delete_monitored_items(subscription_id, items)
             .await
             .map_err(|_| StatusCode::BadNoSubscription)?;
         if let Ok(res) = &result {
@@ -1574,7 +1548,7 @@ impl SubscriptionCache {
         let ids = ids.to_vec();
         let ids_for_cleanup = ids.clone();
         let result = cache
-            .legacy(move |subs| subs.delete_subscriptions(&ids))
+            .delete_subscriptions(ids)
             .await
             .map_err(|_| StatusCode::BadNoSubscription)?;
         let removed_subscriptions = result
@@ -1606,7 +1580,7 @@ impl SubscriptionCache {
         };
 
         cache
-            .legacy(|subs| subs.subscription_ids())
+            .subscription_ids()
             .await
             .unwrap_or_default()
     }
@@ -1626,7 +1600,7 @@ impl SubscriptionCache {
 
         let (subscription_ids, monitored_items) = entry
             .handle
-            .legacy(|subs| (subs.subscription_ids(), subs.monitored_item_refs()))
+            .subscription_and_item_data()
             .await
             .unwrap_or_default();
 
@@ -1695,10 +1669,7 @@ impl SubscriptionCache {
             if context.session_id == current_owner_session_id {
                 res.status_code = StatusCode::Good;
                 res.available_sequence_numbers = dest_handle
-                    .legacy({
-                        let sub_id = *sub_id;
-                        move |subs| subs.available_sequence_numbers(sub_id)
-                    })
+                    .available_sequence_numbers(*sub_id)
                     .await
                     .ok()
                     .flatten();
@@ -1706,10 +1677,7 @@ impl SubscriptionCache {
             }
 
             let user_matches = source_handle
-                .legacy({
-                    let key = key.clone();
-                    move |subs| subs.user_token().is_equivalent_for_transfer(&key)
-                })
+                .user_token_matches(key.clone())
                 .await
                 .unwrap_or(false);
             if !user_matches {
@@ -1717,12 +1685,7 @@ impl SubscriptionCache {
                 continue;
             }
 
-            let staged = source_handle
-                .legacy({
-                    let sub_id = *sub_id;
-                    move |subs| subs.clone_for_transfer(sub_id)
-                })
-                .await;
+            let staged = source_handle.clone_for_transfer(*sub_id).await;
             let Ok(Some((sub, notifs))) = staged else {
                 continue;
             };
@@ -1732,7 +1695,7 @@ impl SubscriptionCache {
                 sub.id(),
                 context.session_id
             );
-            let next_seq = sub.peek_next_sequence_number();
+            let _next_seq = sub.peek_next_sequence_number();
             let available_sequence_numbers = Some(
                 notifs
                     .iter()
@@ -1741,21 +1704,7 @@ impl SubscriptionCache {
             );
 
             let inserted = dest_handle
-                .legacy({
-                    let send_initial_values = req.send_initial_values;
-                    let sub_id = *sub_id;
-                    move |subs| {
-                        if let Err((e, _, _)) = subs.insert(sub, notifs) {
-                            return Err(e);
-                        }
-                        if send_initial_values {
-                            if let Some(sub) = subs.get_mut(sub_id) {
-                                sub.set_resend_data();
-                            }
-                        }
-                        Ok::<(), StatusCode>(())
-                    }
-                })
+                .insert_for_transfer(sub, notifs, req.send_initial_values, *sub_id)
                 .await;
 
             match inserted {
@@ -1771,10 +1720,7 @@ impl SubscriptionCache {
             }
 
             if source_handle
-                .legacy({
-                    let sub_id = *sub_id;
-                    move |subs| subs.mark_transferring(sub_id)
-                })
+                .mark_transferring(*sub_id)
                 .await
                 .map_err(|_| StatusCode::BadNoSubscription)
                 .and_then(|r| r)
@@ -1789,21 +1735,6 @@ impl SubscriptionCache {
                 lck.subscription_to_session
                     .insert(*sub_id, context.session_id);
             }
-
-            let _ = source_handle
-                .legacy({
-                    let sub_id = *sub_id;
-                    move |subs| {
-                        let _ = subs.remove(sub_id);
-                        subs.queue_status_change(
-                            sub_id,
-                            next_seq,
-                            DateTime::now(),
-                            StatusCode::GoodSubscriptionTransferred,
-                        );
-                    }
-                })
-                .await;
 
             res.status_code = StatusCode::Good;
             res.available_sequence_numbers = available_sequence_numbers;

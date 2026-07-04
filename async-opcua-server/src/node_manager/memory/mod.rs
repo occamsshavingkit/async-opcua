@@ -978,9 +978,17 @@ impl<TImpl: InMemoryNodeManagerImpl> ViewProvider for InMemoryNodeManager<TImpl>
         context: &RequestContext,
         nodes: &mut [&mut BrowsePathItem],
     ) -> Result<(), StatusCode> {
-        let mut address_space = trace_write_lock!(self.address_space);
+        {
+            let address_space = trace_read_lock!(self.address_space);
+            if !address_space.browse_name_index_is_built() {
+                drop(address_space);
+                let mut address_space = trace_write_lock!(self.address_space);
+                let type_tree = trace_read_lock!(context.type_tree);
+                address_space.ensure_browse_name_index(type_tree.deref());
+            }
+        }
+        let address_space = trace_read_lock!(self.address_space);
         let type_tree = trace_read_lock!(context.type_tree);
-        address_space.ensure_browse_name_index(type_tree.deref());
 
         for node in nodes {
             Self::translate_browse_paths(

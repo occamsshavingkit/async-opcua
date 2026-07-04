@@ -3,6 +3,8 @@ use std::{
     collections::{HashMap, HashSet},
 };
 
+use moka::sync::Cache;
+
 use crate::NamespaceMap;
 use opcua_types::{
     DataTypeId, NodeClass, NodeId, ObjectTypeId, QualifiedName, ReferenceTypeId, VariableTypeId,
@@ -44,7 +46,7 @@ pub struct TypePropertyInverseRef {
 ///
 /// Each node manager is responsible for populating the type tree with
 /// its types.
-#[derive(Default, Clone)]
+#[derive(Clone)]
 pub struct DefaultTypeTree {
     nodes: HashMap<NodeId, NodeClass>,
     /// Type node ids whose `IsAbstract` attribute is `true`. A type present in
@@ -57,6 +59,7 @@ pub struct DefaultTypeTree {
     property_to_type: HashMap<NodeId, TypePropertyInverseRef>,
     type_properties: HashMap<NodeId, HashMap<TypePropertyKey, TypeProperty>>,
     namespaces: NamespaceMap,
+    subtype_cache: Cache<(NodeId, NodeId), bool>,
 }
 
 #[derive(Clone, Debug)]
@@ -106,8 +109,12 @@ impl TypeTree for DefaultTypeTree {
     /// Return `true` if `child` is a subtype of `ancestor`, or if `child` and
     /// `ancestor` is the same node, i.e. subtype in the OPC-UA sense.
     fn is_subtype_of(&self, child: &NodeId, ancestor: &NodeId) -> bool {
+        let key = (child.clone(), ancestor.clone());
+        if let Some(cached) = self.subtype_cache.get(&key) {
+            return cached;
+        }
         let mut node = child;
-        loop {
+        let result = loop {
             if node == ancestor {
                 break true;
             }
@@ -130,7 +137,9 @@ impl TypeTree for DefaultTypeTree {
                 Some(n) => node = n,
                 None => break false,
             }
-        }
+        };
+        self.subtype_cache.insert(key, result);
+        result
     }
 
     /// Get a reference to a node in the type tree.
@@ -174,6 +183,12 @@ impl TypeTree for DefaultTypeTree {
     }
 }
 
+impl Default for DefaultTypeTree {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DefaultTypeTree {
     /// Create a new type tree with just the root nodes added.
     pub fn new() -> Self {
@@ -185,6 +200,7 @@ impl DefaultTypeTree {
             type_properties: HashMap::new(),
             property_to_type: HashMap::new(),
             namespaces: NamespaceMap::new(),
+            subtype_cache: Cache::new(2048),
         };
         type_tree
             .namespaces

@@ -130,6 +130,10 @@ pub struct SessionSubscriptions {
     /// Whether unconfigured RolePermissions fail closed for this session's event delivery.
     #[cfg(feature = "events")]
     enforce_role_based_access: bool,
+    /// Cached subscription IDs sorted by priority per OPC 10000-4 §5.14.2.2.
+    cached_priority_order: Vec<u32>,
+    /// Set to true when subscriptions are created, deleted, or have priority changed.
+    priority_cache_dirty: bool,
 }
 
 impl SessionSubscriptions {
@@ -156,6 +160,8 @@ impl SessionSubscriptions {
             node_managers,
             #[cfg(feature = "events")]
             enforce_role_based_access,
+            cached_priority_order: Vec::new(),
+            priority_cache_dirty: true,
         }
     }
 
@@ -183,6 +189,7 @@ impl SessionSubscriptions {
         }
         self.transferring.remove(&subscription.id());
         self.subscriptions.insert(subscription.id(), subscription);
+        self.priority_cache_dirty = true;
         for notif in notifs {
             self.retransmission_queue.push_existing(notif);
         }
@@ -234,6 +241,7 @@ impl SessionSubscriptions {
         subscription_id: u32,
     ) -> (Option<Subscription>, Vec<NonAckedPublish>) {
         self.transferring.remove(&subscription_id);
+        self.priority_cache_dirty = true;
         let notifs = self
             .retransmission_queue
             .remove_subscription(subscription_id);
@@ -298,6 +306,7 @@ impl SessionSubscriptions {
             self.revise_max_notifications_per_publish(request.max_notifications_per_publish),
         );
         self.subscriptions.insert(subscription.id(), subscription);
+        self.priority_cache_dirty = true;
         Ok(CreateSubscriptionResponse {
             response_header: ResponseHeader::new_good(&request.request_header),
             subscription_id,
@@ -332,6 +341,7 @@ impl SessionSubscriptions {
         subscription.set_max_keep_alive_counter(revised_max_keep_alive_count);
         subscription.set_max_lifetime_counter(revised_lifetime_count);
         subscription.set_priority(request.priority);
+        self.priority_cache_dirty = true;
         subscription.reset_lifetime_counter();
         subscription.reset_keep_alive_counter();
         subscription.set_max_notifications_per_publish(max_notifications_per_publish);
@@ -645,6 +655,7 @@ impl SessionSubscriptions {
     ) -> Vec<(StatusCode, Vec<MonitoredItemRef>)> {
         let mut result = Vec::with_capacity(ids.len());
         for id in ids {
+            self.priority_cache_dirty = true;
             let Some(mut sub) = self.subscriptions.remove(id) else {
                 result.push((StatusCode::BadSubscriptionIdInvalid, Vec::new()));
                 continue;
@@ -1026,17 +1037,22 @@ impl SessionSubscriptions {
         (removed_subscription, more_notifications)
     }
 
-    fn subscription_ids_by_priority(&self) -> Vec<u32> {
-        let mut subscription_priority: Vec<(u32, u8)> = self
-            .subscriptions
-            .values()
-            .map(|v| (v.id(), v.priority()))
-            .collect();
-        subscription_priority.sort_by_key(|s1| std::cmp::Reverse(s1.1));
-        subscription_priority.into_iter().map(|s| s.0).collect()
+    fn subscription_ids_by_priority(&mut self) -> Vec<u32> {
+        if self.priority_cache_dirty {
+            let mut order: Vec<(u32, u8)> = self
+                .subscriptions
+                .values()
+                .map(|v| (v.id(), v.priority()))
+                .collect();
+            order.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+            self.cached_priority_order = order.into_iter().map(|(id, _)| id).collect();
+            self.priority_cache_dirty = false;
+        }
+        self.cached_priority_order.clone()
     }
 
     fn remove_ready_subscriptions(&mut self, to_remove: Vec<u32>) {
+        self.priority_cache_dirty = true;
         for sub_id in to_remove {
             self.transferring.remove(&sub_id);
             self.subscriptions.remove(&sub_id);
@@ -1495,6 +1511,8 @@ mod tests {
             type_tree_for_user: info.type_tree.clone(),
             node_managers: NodeManagersRef::new_empty(),
             enforce_role_based_access: false,
+            cached_priority_order: Vec::new(),
+            priority_cache_dirty: true,
         }
     }
 

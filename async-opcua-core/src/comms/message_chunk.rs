@@ -5,7 +5,10 @@
 //! A message chunk is a message or a portion of a message, optionally encrypted & signed, which
 //! has been split for transmission.
 
-use std::io::{Cursor, Read, Write};
+use std::{
+    io::{Cursor, Read, Write},
+    sync::Mutex,
+};
 
 use opcua_types::{
     process_decode_io_result, process_encode_io_result, read_u32, read_u8, status_code::StatusCode,
@@ -139,10 +142,22 @@ impl MessageChunkHeader {}
 /// A chunk holds a message or a portion of a message, if the message has been split into multiple chunks.
 /// The chunk's data may be signed and encrypted. To extract the message requires all the chunks
 /// to be available in sequence so they can be formed back into the message.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct MessageChunk {
     /// All of the chunk's data including headers, payload, padding, signature
     pub data: bytes::Bytes,
+    /// Chunk metadata parsed once and reused across validate and decode passes
+    /// per OPC 10000-6 §6.7.2.2.
+    pub cached_chunk_info: Mutex<Option<ChunkInfo>>,
+}
+
+impl Clone for MessageChunk {
+    fn clone(&self) -> Self {
+        MessageChunk {
+            data: self.data.clone(),
+            cached_chunk_info: Mutex::new(None),
+        }
+    }
 }
 
 impl SimpleBinaryEncodable for MessageChunk {
@@ -199,6 +214,7 @@ impl SimpleBinaryDecodable for MessageChunk {
 
             Ok(MessageChunk {
                 data: bytes::Bytes::from(data),
+                cached_chunk_info: Mutex::new(None),
             })
         }
     }
@@ -253,6 +269,7 @@ impl MessageChunk {
 
         Ok(MessageChunk {
             data: src.split_to(message_size),
+            cached_chunk_info: Mutex::new(None),
         })
     }
 
@@ -304,6 +321,7 @@ impl MessageChunk {
 
         Ok(MessageChunk {
             data: bytes::Bytes::from(buf),
+            cached_chunk_info: Mutex::new(None),
         })
     }
 
@@ -412,9 +430,18 @@ impl MessageChunk {
         }
     }
 
-    /// Decode info about this chunk.
+    /// Decode info about this chunk. Parsed once and cached per OPC 10000-6 §6.7.2.2.
     pub fn chunk_info(&self, secure_channel: &SecureChannel) -> EncodingResult<ChunkInfo> {
-        ChunkInfo::new(self, secure_channel)
+        let mut cache = self
+            .cached_chunk_info
+            .lock()
+            .map_err(|_| Error::decoding("Mutex poisoned while reading chunk info cache"))?;
+        if let Some(ref info) = *cache {
+            return Ok(info.clone());
+        }
+        let info = ChunkInfo::new(self, secure_channel)?;
+        *cache = Some(info.clone());
+        Ok(info)
     }
 
     /// Decode the body of this message as a `MessageFinalError`.

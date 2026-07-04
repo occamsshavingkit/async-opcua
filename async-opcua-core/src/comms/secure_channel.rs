@@ -981,7 +981,13 @@ impl SecureChannel {
             }
             SecurityPolicy::None => {
                 // Nothing to do
-                return Ok((MessageChunk { data: src }, security_policy));
+                return Ok((
+                    MessageChunk {
+                        data: src,
+                        cached_chunk_info: Mutex::new(None),
+                    },
+                    security_policy,
+                ));
             }
             _ => {}
         }
@@ -1058,7 +1064,13 @@ impl SecureChannel {
 
         let msg = Self::update_message_size_and_truncate(decrypted_data, decrypted_size)?;
 
-        Ok((MessageChunk { data: msg.into() }, security_policy))
+        Ok((
+            MessageChunk {
+                data: msg.into(),
+                cached_chunk_info: Mutex::new(None),
+            },
+            security_policy,
+        ))
     }
 
     fn decrypt_chunk(
@@ -1097,7 +1109,10 @@ impl SecureChannel {
         Self::update_message_size(&mut decrypted_data[..], decrypted_size)?;
         let data = decrypted_data.split_to(decrypted_size).freeze();
         decrypted_data.reserve(src.len());
-        Ok(MessageChunk { data })
+        Ok(MessageChunk {
+            data,
+            cached_chunk_info: Mutex::new(None),
+        })
     }
 
     fn secure_message_ranges(
@@ -1167,7 +1182,10 @@ impl SecureChannel {
                 decrypted_data,
             )
         } else {
-            Ok(MessageChunk { data: src })
+            Ok(MessageChunk {
+                data: src,
+                cached_chunk_info: Mutex::new(None),
+            })
         }
     }
 
@@ -1213,7 +1231,10 @@ impl SecureChannel {
                 decrypted_data,
             )
         } else {
-            Ok(MessageChunk { data: src })
+            Ok(MessageChunk {
+                data: src,
+                cached_chunk_info: Mutex::new(None),
+            })
         }
     }
 

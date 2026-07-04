@@ -1,1 +1,3 @@
-{"feature_directory": "specs/055-optional-deps-security"}
+{
+  "feature_directory": "specs/056-complexity-cuts"
+}

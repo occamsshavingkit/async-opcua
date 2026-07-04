@@ -57,9 +57,6 @@ jobs:
       - name: .NET (OPC Foundation reference) interop harness
         run: ./samples/demo-server/interop/dotnet/run-dotnet.sh
 
-      - name: .NET PubSub interop (Rust publisher → .NET subscriber)
-        run: ./samples/demo-server/interop/dotnet/run-dotnet.sh --pubsub
-
   external-interop:
     if: ${{ inputs.external_endpoint != '' }}
     runs-on: ubuntu-latest

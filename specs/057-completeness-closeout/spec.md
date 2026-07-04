@@ -5,6 +5,13 @@
 **Status**: Draft  
 **Input**: User description: "close out the remaining completeness backlog items: OCSP live fetching, multi-cert mixed server, async-delivery actor phases 2 & 4, bad ideas example servers"
 
+## Clarifications
+
+### Session 2026-07-04
+
+- Q: Multi-cert configuration API shape — how does the operator specify multiple certificates and their policy bindings? → A: Per-endpoint (Option C). Per OPC UA Part 4 §5.5.4.1, the Application Instance Certificate is a component of each endpoint's security configuration — it is a per-endpoint property, not a server-global setting. Each endpoint in the config specifies its own certificate (and private key). A top-level certificate path serves as a default for endpoints that don't specify their own.
+- Q: "Bad ideas" server scope — which examples? → A: Four servers: chaos server (error-handling exercise), filesystem bridge (real-system mirroring), reverse bridge (subscribe to another OPC UA server and mirror its data), and an OPC UA chat server implementing the `cactuaroid/OpcUaChatServer` information model for interop testing. Chat model: ChatLogs object (ChatLogsType, under ObjectsFolder, HasNotifier → Server, SupportsEvents), Post Method (inputs: Name/String, Content/String; AlwaysGeneratesEvent → ChatLogEventType), PostCount Variable (UInt32), ChatLogEventType (extends BaseEventType) with ChatLog Property (ChatLogType of DataType ChatLog, a Structure: At/DateTime, Name/String, Content/String). Clients post by calling Post, receive by subscribing to ChatLogEventType events.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Live OCSP Revocation (Priority: P1)
@@ -99,7 +106,9 @@ demonstrates.
 
 1. **Given** the "chaos server" example, **When** a client browses its address space, **Then** it shows nodes that randomly change type, value, or status to exercise client error-handling paths.
 2. **Given** the "filesystem bridge" example, **When** a client browses its address space, **Then** it mirrors the local filesystem as an OPC UA hierarchy — directories as folders, files as variables with contents as values.
-3. **Given** any "bad ideas" example server, **When** `cargo run` is executed in its directory, **Then** the server starts and logs binding information without panicking.
+3. **Given** the "reverse bridge" example, **When** a client browses its address space, **Then** it mirrors the data from another OPC UA server — subscribing to monitored items on the source and publishing the values to corresponding nodes in its own address space.
+4. **Given** the "chat server" example implementing the `cactuaroid/OpcUaChatServer` model, **When** a client calls ChatLogs.Post("Alice", "Hello"), **Then** PostCount increments, a ChatLogEventType event fires with ChatLog{At, Name="Alice", Content="Hello"}, and subscribed clients receive the event.
+5. **Given** any "bad ideas" example server, **When** `cargo run` is executed in its directory, **Then** the server starts and logs binding information without panicking.
 
 ---
 
@@ -108,7 +117,7 @@ demonstrates.
 - **OCSP**: What happens when the OCSP responder returns a response signed by a certificate not in the trust chain? What about OCSP responses that are valid but stale (thisUpdate/nectUpdate outside window)? What if the certificate has no AIA OCSP extension?
 - **Multi-cert**: What if the server has TLS (opc.wss) endpoints alongside TCP endpoints — does cert selection work for both transports? What about wildcard or SAN-based cert matching?
 - **LegacyCall removal**: Are there any management operations that fundamentally cannot be expressed as enum variants due to borrow/lifetime constraints? What about operations that need access to non-Send types?
-- **Bad ideas servers**: How do they behave when the underlying system state changes (files deleted, network lost, etc.)? Do they need their own CI to prevent bit-rot?
+- **Bad ideas servers**: How do they behave when the underlying system state changes (files deleted, network lost, source server unreachable, etc.)? Do they need their own CI to prevent bit-rot? For the chat server: what happens when no client is subscribed to ChatLogEventType — are events still generated? What is the maximum message history retained?
 
 ## Requirements *(mandatory)*
 
@@ -125,7 +134,7 @@ demonstrates.
 
 #### US2 — Multi-Cert Mixed Server
 
-- **FR-007**: System MUST accept multiple certificates in server configuration, each associated with one or more security policies (e.g., one RSA cert for Basic256Sha256, one ECC cert for EccNistP256).
+- **FR-007**: System MUST allow each endpoint in the server configuration to specify its own certificate and private key. A top-level certificate path MAY serve as a default for endpoints that do not specify their own, preserving backward compatibility with existing single-cert configurations.
 - **FR-008**: System MUST select the appropriate certificate for each endpoint based on the endpoint's security policy at connection time.
 - **FR-009**: System MUST validate at startup that every security-policy endpoint has at least one compatible certificate configured; if not, it MUST fail with a clear diagnostic message naming the policy and the missing certificate type.
 - **FR-010**: System MUST continue to support single-certificate configuration (the current model) as a valid subset of multi-cert configuration, with no change in behavior for single-cert deployments.
@@ -142,14 +151,16 @@ demonstrates.
 
 - **FR-016**: System MUST include a "chaos server" example that exposes an address space where node types, values, and status codes change unpredictably to exercise client error-handling.
 - **FR-017**: System MUST include a "filesystem bridge" example that mirrors the local filesystem as an OPC UA address space (directories as Object nodes, files as Variable nodes with contents as values).
-- **FR-018**: Each example server MUST compile and start without panicking when `cargo run` is invoked in its directory.
-- **FR-019**: Each example server MUST include a README.md explaining what it demonstrates and how to run it.
-- **FR-020**: Each example server MUST be discoverable via standard OPC UA Browse — a client connecting to the server can see and navigate the full address space.
+- **FR-018**: System MUST include a "reverse bridge" example that subscribes to monitored items on another OPC UA server and exposes the mirrored values as Variables in its own address space.
+- **FR-019**: System MUST include a "chat server" example implementing the `cactuaroid/OpcUaChatServer` information model: ChatLogs object (type ChatLogsType, SupportsEvents, HasNotifier→Server), Post Method (inputs: Name/String, Content/String; fires ChatLogEventType events), PostCount Variable (UInt32), and ChatLogEventType (extends BaseEventType) with ChatLog Property using the ChatLog Structure (At/DateTime, Name/String, Content/String).
+- **FR-020**: Each example server MUST compile and start without panicking when `cargo run` is invoked in its directory.
+- **FR-021**: Each example server MUST include a README.md explaining what it demonstrates and how to run it.
+- **FR-022**: Each example server MUST be discoverable via standard OPC UA Browse — a client connecting to the server can see and navigate the full address space.
 
 ### Key Entities
 
 - **OCSP Fetch Policy**: Configuration setting with three modes — Off (no live fetching, current behavior), Soft (fall back to CRL when unreachable), Strict (reject on unreachable) — governing how the server performs online certificate revocation checks.
-- **Certificate-to-Policy Association**: Mapping that links a certificate (identified by its key type, e.g., RSA or ECC) to the OPC UA security policies it can serve, enabling the server to select the correct certificate for each endpoint.
+- **Per-Endpoint Certificate**: Each endpoint in the server configuration carries its own Application Instance Certificate and private key, matching the OPC UA model where the certificate is part of the endpoint's security configuration (Part 4 §5.5.4.1). Endpoints without an explicit certificate inherit the server-level default, if one is set.
 - **Subscription Management Operation**: A structured command — such as create, modify, or delete — sent to the subscription subsystem, carrying the operation's input data and a mechanism to return the result.
 - **Example Server**: Standalone runnable program in the examples directory that demonstrates a specific library capability through a documented, browsable OPC UA address space.
 

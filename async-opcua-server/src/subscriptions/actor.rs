@@ -37,6 +37,7 @@ use opcua_core::RepublishResponseShared;
 use std::time::{Duration, Instant};
 
 /// Commands accepted by the per-session subscription actor.
+#[allow(clippy::type_complexity)]
 pub(crate) enum SubscriptionCommand {
     EnqueuePublish {
         now: DateTimeUtc,
@@ -121,6 +122,7 @@ pub(crate) enum SubscriptionCommand {
         sub_id: u32,
         response: oneshot::Sender<Option<usize>>,
     },
+    #[cfg(feature = "subscriptions-standard")]
     MonitoredItemNodeIds {
         sub_id: u32,
         ids: Vec<u32>,
@@ -176,6 +178,20 @@ pub(crate) enum SubscriptionCommand {
     ResendData {
         sub_id: u32,
         response: oneshot::Sender<Result<(), StatusCode>>,
+    },
+    CompleteTransfer {
+        sub_id: u32,
+        next_seq: u32,
+        timestamp: opcua_types::DateTime,
+        response: oneshot::Sender<()>,
+    },
+    /// Run an arbitrary read against a session's subscriptions.
+    /// Exists for integration tests that need deep access to
+    /// subscription internals.
+    WithSessionSubscriptions {
+        session_id: u32,
+        f: Box<dyn FnOnce(&mut SessionSubscriptions) + Send>,
+        response: oneshot::Sender<()>,
     },
 }
 
@@ -419,6 +435,7 @@ impl SubscriptionActorHandle {
         recv.await.map_err(|_| ())
     }
 
+    #[cfg(feature = "subscriptions-standard")]
     pub(crate) async fn monitored_item_node_ids(
         &self,
         sub_id: u32,
@@ -554,6 +571,39 @@ impl SubscriptionActorHandle {
             .map_err(|_| ())?;
         recv.await.map_err(|_| ())
     }
+
+    pub(crate) async fn complete_transfer(
+        &self,
+        sub_id: u32,
+        next_seq: u32,
+        timestamp: opcua_types::DateTime,
+    ) -> Result<(), ()> {
+        let (response, recv) = oneshot::channel();
+        self.commands
+            .send(SubscriptionCommand::CompleteTransfer {
+                sub_id,
+                next_seq,
+                timestamp,
+                response,
+            })
+            .map_err(|_| ())?;
+        recv.await.map_err(|_| ())
+    }
+
+    pub(crate) async fn with_session_subscriptions<F>(&self, f: F) -> Result<(), ()>
+    where
+        F: FnOnce(&mut SessionSubscriptions) + Send + 'static,
+    {
+        let (response, recv) = oneshot::channel();
+        self.commands
+            .send(SubscriptionCommand::WithSessionSubscriptions {
+                session_id: 0,
+                f: Box::new(f),
+                response,
+            })
+            .map_err(|_| ())?;
+        recv.await.map_err(|_| ())
+    }
 }
 
 pub(crate) struct SubscriptionActor {
@@ -682,6 +732,7 @@ impl SubscriptionActor {
                             let result = self.subs.get_monitored_item_count(sub_id);
                             let _ = response.send(result);
                         }
+                        #[cfg(feature = "subscriptions-standard")]
                         Some(SubscriptionCommand::MonitoredItemNodeIds { sub_id, ids, response }) => {
                             self.drain_ring().await;
                             let result: Result<_, StatusCode> = self.subs.monitored_item_node_ids(sub_id, &ids).map(|m| m.into_iter().collect());
@@ -698,6 +749,7 @@ impl SubscriptionActor {
                             let result = crate::subscriptions::session_subscription_diagnostics(&mut self.subs);
                             let _ = response.send(result);
                         }
+                        #[cfg(all(feature = "generated-address-space", feature = "diagnostics"))]
                         Some(SubscriptionCommand::SessionDiagnosticsSummary { response }) => {
                             self.drain_ring().await;
                             let result = crate::subscriptions::session_subscription_diagnostics_summary(&mut self.subs);
@@ -768,6 +820,17 @@ impl SubscriptionActor {
                                 .unwrap_or(Err(StatusCode::BadSubscriptionIdInvalid));
                             let _ = response.send(result);
                         }
+                        Some(SubscriptionCommand::CompleteTransfer { sub_id, next_seq, timestamp, response }) => {
+                            self.drain_ring().await;
+                            let _ = self.subs.remove(sub_id);
+                            self.subs.queue_status_change(
+                                sub_id,
+                                next_seq,
+                                timestamp,
+                                StatusCode::GoodSubscriptionTransferred,
+                            );
+                            let _ = response.send(());
+                        }
 
                         Some(SubscriptionCommand::EnqueuePublish { now, now_instant, request, response }) => {
                             self.drain_ring().await;
@@ -786,6 +849,11 @@ impl SubscriptionActor {
                                     &mut buffer,
                                 );
                             }
+                            let _ = response.send(());
+                        }
+                        Some(SubscriptionCommand::WithSessionSubscriptions { f, response, .. }) => {
+                            self.drain_ring().await;
+                            f(&mut self.subs);
                             let _ = response.send(());
                         }
                         Some(SubscriptionCommand::Stop) | None => break,

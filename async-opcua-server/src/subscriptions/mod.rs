@@ -22,6 +22,7 @@ use session_subscriptions::RemovedSubscription;
 pub use session_subscriptions::SessionSubscriptions;
 pub use subscription::{MonitoredItemHandle, Subscription, SubscriptionState};
 use tokio::sync::mpsc;
+use tokio::sync::oneshot;
 use tracing::error;
 
 use actor::SubscriptionActorHandle;
@@ -525,6 +526,29 @@ impl SubscriptionCache {
             .session_subscriptions
             .get(&session_id)
             .map(SessionEntry::handle)
+    }
+
+    /// Run a closure against a session's subscriptions. Used by integration tests.
+    pub async fn with_session_subscriptions<R: Send + 'static>(
+        &self,
+        session_id: u32,
+        f: impl FnOnce(&mut SessionSubscriptions) -> R + Send + 'static,
+    ) -> Option<R> {
+        let handle = {
+            let inner = trace_read_lock!(self.inner);
+            inner
+                .session_subscriptions
+                .get(&session_id)
+                .map(SessionEntry::handle)
+        }?;
+        let (reply_tx, reply_rx) = oneshot::channel();
+        handle
+            .with_session_subscriptions(move |subs| {
+                let _ = reply_tx.send(f(subs));
+            })
+            .await
+            .ok()?;
+        reply_rx.await.ok()
     }
 
     #[cfg(all(feature = "generated-address-space", feature = "diagnostics"))] // consumed only by the core node manager
@@ -1689,7 +1713,7 @@ impl SubscriptionCache {
                 sub.id(),
                 context.session_id
             );
-            let _next_seq = sub.peek_next_sequence_number();
+            let next_seq = sub.peek_next_sequence_number();
             let available_sequence_numbers = Some(
                 notifs
                     .iter()
@@ -1729,6 +1753,10 @@ impl SubscriptionCache {
                 lck.subscription_to_session
                     .insert(*sub_id, context.session_id);
             }
+
+            let _ = source_handle
+                .complete_transfer(*sub_id, next_seq, DateTime::now())
+                .await;
 
             res.status_code = StatusCode::Good;
             res.available_sequence_numbers = available_sequence_numbers;

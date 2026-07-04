@@ -363,19 +363,11 @@ impl CreateSessionActorConstruction {
         let authentication_token = NodeId::new(0, random::byte_string(32));
         let server_nonce = random::byte_string(info.config.session_nonce_length);
         let server_certificate = {
-            let path = request
-                .endpoint_url
-                .as_ref()
-                .trim_end_matches('/')
-                .rsplit_once('/')
-                .map(|(_, path)| path)
-                .unwrap_or("");
-            let endpoint_id = crate::config::EndpointIdentifier {
-                path: path.to_string(),
-                security_policy: channel.security_policy().to_string(),
-                security_mode: channel.security_mode().to_string(),
-            };
-            info.server_certificate_as_byte_string(&endpoint_id)
+            let certs = info.endpoint_certificates.read();
+            certs
+                .values()
+                .find_map(|v| v.as_ref().map(|(cert, _)| cert.as_byte_string()))
+                .unwrap_or_default()
         };
         let session_timeout = info
             .config

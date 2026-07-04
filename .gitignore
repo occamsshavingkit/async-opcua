@@ -50,3 +50,4 @@ Thumbs.db
 # Local working artifacts that must never be committed (e.g. patches staged for private disclosure)
 *.patch
 persistent-store.json
+ci-logs/

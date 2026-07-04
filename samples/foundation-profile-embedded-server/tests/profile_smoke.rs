@@ -26,7 +26,7 @@ use opcua::types::{
 /// TODO: the client needs a two-phase connect (GetEndpoints over policy None to
 /// extract the server cert, then reconnect with Sign&Encrypt). The single-call
 /// `connect_to_matching_endpoint` doesn't pre-fetch the server cert. The server
-/// DOES generate and serve its cert (verified via `handle.info().server_certificate`),
+/// DOES generate and serve its cert (verified via `handle.info().endpoint_certificates`),
 /// so this is a test-harness gap, not a profile gate gap.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "secure-channel test needs two-phase client connect; server cert IS generated"]
@@ -39,8 +39,9 @@ async fn secure_channel_basic256sha256_sign_encrypt() {
 
     // Debug: check if server cert is loaded
     {
-        let cert = tester.handle.info().server_certificate.read();
-        eprintln!("[embedded-debug] server cert loaded: {}", cert.is_some());
+        let cert_map = tester.handle.info().endpoint_certificates.read();
+        let cert_loaded = cert_map.values().any(|v| v.is_some());
+        eprintln!("[embedded-debug] server cert loaded: {}", cert_loaded);
     }
 
     let session = connect_secure(&tester).await;

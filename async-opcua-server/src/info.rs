@@ -930,7 +930,6 @@ impl ServerInfo {
                 .find_map(|v| v.as_ref().map(|(cert, _)| cert.as_byte_string()))
                 .unwrap_or_default()
         }
-        }
     }
 
     /// Get a representation of this server as a `RegisteredServer` object.

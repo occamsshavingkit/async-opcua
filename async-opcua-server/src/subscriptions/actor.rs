@@ -1,11 +1,10 @@
 #![allow(dead_code)]
 
-use std::{
-    collections::HashMap,
-    sync::{
-        atomic::{AtomicU64, Ordering},
-        Arc,
-    },
+#[cfg(feature = "subscriptions-standard")]
+use std::collections::HashMap;
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc,
 };
 
 use crossbeam_queue::ArrayQueue;

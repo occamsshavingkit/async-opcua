@@ -613,10 +613,7 @@ impl SubscriptionCache {
             return Vec::new();
         };
 
-        cache
-            .monitored_item_refs()
-            .await
-            .unwrap_or_default()
+        cache.monitored_item_refs().await.unwrap_or_default()
     }
 
     pub(crate) async fn apply_revalidated_values(
@@ -1579,10 +1576,7 @@ impl SubscriptionCache {
             return Vec::new();
         };
 
-        cache
-            .subscription_ids()
-            .await
-            .unwrap_or_default()
+        cache.subscription_ids().await.unwrap_or_default()
     }
 
     pub(crate) async fn teardown_session(
@@ -1760,13 +1754,13 @@ pub(crate) struct PendingPublish {
 }
 
 #[derive(Clone)]
-struct NonAckedPublish {
+pub(crate) struct NonAckedPublish {
     message: Arc<NotificationMessage>,
     subscription_id: u32,
 }
 
 #[derive(Debug, Clone)]
-struct PersistentSessionKey {
+pub(crate) struct PersistentSessionKey {
     token: UserToken,
     security_mode: MessageSecurityMode,
     application_uri: String,

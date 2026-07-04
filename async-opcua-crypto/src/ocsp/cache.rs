@@ -16,7 +16,8 @@ impl OcspCache {
 
     pub fn get(&mut self, key: &CacheKey) -> Option<Vec<u8>> {
         let now = SystemTime::now();
-        self.entries.retain(|_, (_, next_update)| now < *next_update);
+        self.entries
+            .retain(|_, (_, next_update)| now < *next_update);
         self.entries.get(key).map(|(response, _)| response.clone())
     }
 

@@ -40,9 +40,7 @@ pub fn fetch_ocsp_response(
         .as_reader()
         .take(max_size as u64 + 1)
         .read_to_end(&mut body)
-        .map_err(|e| {
-            OcspError::FetchFailed(format!("failed to read OCSP response body: {e}"))
-        })?;
+        .map_err(|e| OcspError::FetchFailed(format!("failed to read OCSP response body: {e}")))?;
 
     if body.len() > max_size {
         return Err(OcspError::FetchFailed(format!(

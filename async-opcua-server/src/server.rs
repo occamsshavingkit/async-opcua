@@ -349,23 +349,25 @@ impl Server {
 
             let cert_entry = match (cert_path, key_path) {
                 (Some(cp), Some(kp)) => {
-                    let cert = match CertificateStore::read_cert(cp) {
+                    let full_cert_path = config.pki_dir.join(cp);
+                    let full_key_path = config.pki_dir.join(kp);
+                    let cert = match CertificateStore::read_cert(&full_cert_path) {
                         Ok(cert) => cert,
                         Err(e) => {
                             warn!(
                                 "Endpoint '{}': failed to load certificate from {:?}: {e}",
-                                endpoint_id.path, cp
+                                endpoint_id.path, full_cert_path
                             );
                             endpoint_certificates.insert(endpoint_id, None);
                             continue;
                         }
                     };
-                    let key = match CertificateStore::read_pkey(kp) {
+                    let key = match CertificateStore::read_pkey(&full_key_path) {
                         Ok(key) => key,
                         Err(e) => {
                             warn!(
                                 "Endpoint '{}': failed to load private key from {:?}: {e}",
-                                endpoint_id.path, kp
+                                endpoint_id.path, full_key_path
                             );
                             endpoint_certificates.insert(endpoint_id, None);
                             continue;

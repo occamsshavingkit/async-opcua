@@ -5,7 +5,6 @@
 //! The secure channel handles security on an OPC-UA connection.
 
 use std::sync::Arc;
-#[cfg(feature = "ecc")]
 use std::sync::Mutex;
 use std::{
     collections::HashMap,

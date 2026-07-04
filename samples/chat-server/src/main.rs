@@ -87,7 +87,8 @@ impl ChatLogEventType {
     }
 }
 
-#[allow(dead_code)] static CHAT_LOG_TYPE_LOADER: std::sync::LazyLock<opcua::types::TypeLoaderInstance> =
+#[allow(dead_code)]
+static CHAT_LOG_TYPE_LOADER: std::sync::LazyLock<opcua::types::TypeLoaderInstance> =
     std::sync::LazyLock::new(|| {
         let mut inst = opcua::types::TypeLoaderInstance::new();
         inst.add_binary_type(
@@ -99,7 +100,8 @@ impl ChatLogEventType {
     });
 
 #[derive(Debug, Clone, Copy)]
-#[allow(dead_code)] struct ChatTypeLoader;
+#[allow(dead_code)]
+struct ChatTypeLoader;
 
 impl opcua::types::StaticTypeLoader for ChatTypeLoader {
     fn instance() -> &'static opcua::types::TypeLoaderInstance {

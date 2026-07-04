@@ -585,12 +585,12 @@ impl SubscriptionActor {
                         Some(SubscriptionCommand::CreateSubscription { request, info, response }) => {
                             self.drain_ring().await;
                             let result = self.subs.create_subscription(&request, &info);
-                            let _ = response.send(result.map_err(|s| s));
+                            let _ = response.send(result);
                         }
                         Some(SubscriptionCommand::ModifySubscription { request, info, response }) => {
                             self.drain_ring().await;
                             let result = self.subs.modify_subscription(&request, &info);
-                            let _ = response.send(result.map_err(|s| s));
+                            let _ = response.send(result);
                         }
                         Some(SubscriptionCommand::DeleteSubscriptions { ids, response }) => {
                             self.drain_ring().await;
@@ -600,19 +600,19 @@ impl SubscriptionActor {
                         Some(SubscriptionCommand::SetPublishingModeRq { request, response }) => {
                             self.drain_ring().await;
                             let result = self.subs.set_publishing_mode(&request);
-                            let _ = response.send(result.map_err(|s| s));
+                            let _ = response.send(result);
                         }
                         Some(SubscriptionCommand::RepublishRq { request, response }) => {
                             self.drain_ring().await;
                             let result = self.subs.republish(&request);
-                            let _ = response.send(result.map_err(|s| s));
+                            let _ = response.send(result);
                         }
 
                         // --- Monitored item operations ---
                         Some(SubscriptionCommand::CreateMonitoredItems { sub_id, requests, response }) => {
                             self.drain_ring().await;
                             let result = self.subs.create_monitored_items(sub_id, &requests);
-                            let _ = response.send(result.map_err(|s| s));
+                            let _ = response.send(result);
                         }
                         Some(SubscriptionCommand::ModifyMonitoredItems {
                             sub_id,
@@ -637,17 +637,17 @@ impl SubscriptionActor {
                                 type_tree.get(),
                                 diagnostic_bits,
                             );
-                            let _ = response.send(result.map_err(|s| s));
+                            let _ = response.send(result);
                         }
                         Some(SubscriptionCommand::DeleteMonitoredItems { sub_id, items, response }) => {
                             self.drain_ring().await;
                             let result = self.subs.delete_monitored_items(sub_id, &items);
-                            let _ = response.send(result.map_err(|s| s));
+                            let _ = response.send(result);
                         }
                         Some(SubscriptionCommand::SetMonitoringMode { sub_id, mode, items, response }) => {
                             self.drain_ring().await;
                             let result = self.subs.set_monitoring_mode(sub_id, mode, items);
-                            let _ = response.send(result.map_err(|s| s));
+                            let _ = response.send(result);
                         }
                         #[cfg(feature = "subscriptions-standard")]
                         Some(SubscriptionCommand::SetTriggering { sub_id, triggering_item_id, links_to_add, links_to_remove, response }) => {
@@ -658,7 +658,7 @@ impl SubscriptionActor {
                                 links_to_add,
                                 links_to_remove,
                             );
-                            let _ = response.send(result.map_err(|s| s));
+                            let _ = response.send(result);
                         }
 
                         // --- Read-only queries ---
@@ -685,7 +685,7 @@ impl SubscriptionActor {
                         Some(SubscriptionCommand::MonitoredItemNodeIds { sub_id, ids, response }) => {
                             self.drain_ring().await;
                             let result: Result<_, StatusCode> = self.subs.monitored_item_node_ids(sub_id, &ids).map(|m| m.into_iter().collect());
-                            let _ = response.send(result.map_err(|s| s));
+                            let _ = response.send(result);
                         }
                         Some(SubscriptionCommand::AvailableSequenceNumbers { sub_id, response }) => {
                             self.drain_ring().await;
@@ -718,7 +718,7 @@ impl SubscriptionActor {
                         Some(SubscriptionCommand::MarkTransferring { sub_id, response }) => {
                             self.drain_ring().await;
                             let result = self.subs.mark_transferring(sub_id);
-                            let _ = response.send(result.map_err(|s| s));
+                            let _ = response.send(result);
                         }
                         Some(SubscriptionCommand::CloneForTransfer { sub_id, response }) => {
                             self.drain_ring().await;
@@ -738,7 +738,7 @@ impl SubscriptionActor {
                                 }
                                 Ok(())
                             })();
-                            let _ = response.send(result.map_err(|s| s));
+                            let _ = response.send(result);
                         }
                         Some(SubscriptionCommand::UserTokenMatches { key, response }) => {
                             self.drain_ring().await;

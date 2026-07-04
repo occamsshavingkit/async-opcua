@@ -21,6 +21,8 @@ use super::{session_subscriptions::PendingRefreshDrain, RING_DRAIN_EVENT_CHUNK};
 use crate::node_manager::MonitoredItemUpdateRef;
 use crate::subscriptions::subscription::TickReason;
 use crate::subscriptions::NonAckedPublish;
+#[cfg(feature = "subscriptions-standard")]
+use opcua_types::NodeId;
 #[cfg(all(feature = "generated-address-space", feature = "diagnostics"))]
 use opcua_types::SubscriptionDiagnosticsDataType;
 use opcua_types::{
@@ -28,8 +30,6 @@ use opcua_types::{
     MonitoredItemModifyRequest, MonitoringMode, RepublishRequest, SetPublishingModeRequest,
     StatusCode, TimestampsToReturn,
 };
-#[cfg(feature = "subscriptions-standard")]
-use opcua_types::NodeId;
 
 use crate::{
     info::ServerInfo, node_manager::MonitoredItemRef, subscriptions::subscription::Subscription,

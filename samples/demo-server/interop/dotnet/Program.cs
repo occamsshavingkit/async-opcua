@@ -43,6 +43,7 @@ namespace DotnetInterop
             public SecurityPreference Security = SecurityPreference.Auto;
             public bool ShowHelp = false;
             public bool PubSubOnly = false;
+            public bool PubSubPublish = false;
 
             public static Options Parse(string[] args)
             {
@@ -57,6 +58,10 @@ namespace DotnetInterop
                     else if (arg == "--pubsub-only")
                     {
                         options.PubSubOnly = true;
+                    }
+                    else if (arg == "--pubsub-publish")
+                    {
+                        options.PubSubPublish = true;
                     }
                     else if (arg == "--url")
                     {
@@ -154,6 +159,16 @@ namespace DotnetInterop
             {
 #if HAS_PUBSUB
                 return await PubSubInterop.RunChecks();
+#else
+                Console.Error.WriteLine("PubSub interop requires OPCFoundation.NetStandard.Opc.Ua.PubSub NuGet package");
+                return 1;
+#endif
+            }
+
+            if (options.PubSubPublish)
+            {
+#if HAS_PUBSUB
+                return await PubSubInterop.RunPublishChecks();
 #else
                 Console.Error.WriteLine("PubSub interop requires OPCFoundation.NetStandard.Opc.Ua.PubSub NuGet package");
                 return 1;
@@ -919,6 +934,91 @@ static class PubSubInterop
         catch (Exception ex)
         {
             Console.WriteLine($"  \u001b[31mFAIL\u001b[0m  PubSub: {ex.GetType().Name}: {ex.Message}");
+            failures++;
+        }
+
+        return failures;
+    }
+
+    /// Direction 2: .NET publishes → Rust subscribes.
+    public static async Task<int> RunPublishChecks()
+    {
+        int failures = 0;
+        Console.WriteLine("-- PubSub interop: .NET publishes, Rust subscribes on udp://239.0.0.1:4840");
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+
+            var builder = new PubSubApplicationBuilder();
+
+            builder.RegisterCustomEncoder(new UadpNetworkMessageEncoder());
+            builder.RegisterTransportFactory(new UdpPubSubTransportFactory());
+
+            var conn = new PubSubConnectionDataType
+            {
+                Name = "UdpConnection",
+                Enabled = true,
+                TransportProfileUri = UdpPubSubTransportFactory.UdpUadpTransportProfileUri,
+                Address = new NetworkAddressUrlDataType
+                {
+                    NetworkInterface = "eth0",
+                    Url = "opc.udp://239.0.0.1:4840"
+                },
+                PublisherId = PublisherId.FromString("DotnetPublisher1"),
+                WriterGroups = new WriterGroupDataTypeCollection()
+            };
+
+            var wg = new WriterGroupDataType
+            {
+                Name = "WG-1",
+                Enabled = true,
+                WriterGroupId = 1,
+                PublishingInterval = 50,
+                DataSetWriters = new DataSetWriterDataTypeCollection()
+            };
+
+            var dsw = new DataSetWriterDataType
+            {
+                Name = "Writer-1",
+                Enabled = true,
+                DataSetWriterId = 201,
+                DataSetFieldContentMask = (uint)(DataSetFieldContentMask.RawData),
+                DataSetName = "DotnetDataSet",
+                DataSet = new PublishedDataSetDataType
+                {
+                    Name = "DotnetDataSet",
+                    DataSetSource = new PublishedDataItemsDataType
+                    {
+                        PublishedData = new PublishedVariableDataTypeCollection
+                        {
+                            new PublishedVariableDataType
+                            {
+                                PublishedVariable = new NodeId("DotnetVar", 1),
+                                AttributeId = Attributes.Value,
+                            }
+                        }
+                    }
+                }
+            };
+
+            wg.DataSetWriters.Add(dsw);
+            conn.WriterGroups.Add(wg);
+
+            // Supply the value via a source
+            builder.AddConnection(conn);
+
+            Console.WriteLine("  Starting .NET publisher...");
+            await using var app = await builder.BuildAndStartAsync(cts.Token);
+
+            Console.WriteLine("  Publishing for 5 seconds...");
+            await Task.Delay(TimeSpan.FromSeconds(5), cts.Token);
+
+            await app.StopAsync();
+            Console.WriteLine("  ok  PubSub publisher: sent UADP messages");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"  \u001b[31mFAIL\u001b[0m  PubSub publisher: {ex.GetType().Name}: {ex.Message}");
             failures++;
         }
 

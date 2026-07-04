@@ -107,7 +107,27 @@ if [ "$launch_server" = "pubsub" ]; then
 
   echo "==> stopping Rust publisher"
   kill "$pub_pid" 2>/dev/null || true
-  exit "$rc"
+  sleep 1
+
+  # Direction 2: .NET publishes, Rust subscribes
+  echo "==> starting Rust UADP subscriber (background)"
+  cargo run -q --manifest-path "$PUBLISHER/Cargo.toml" --bin subscriber &
+  sub_pid=$!
+  trap "kill ${sub_pid} 2>/dev/null || true" INT TERM EXIT
+  sleep 1
+
+  echo "==> running .NET UADP publisher"
+  set +e
+  "$DOTNET" run -c Release --no-build --project "$here/interop.csproj" -- --pubsub-publish
+  rc2=$?
+  set -e
+
+  echo "==> stopping Rust subscriber"
+  kill "$sub_pid" 2>/dev/null || true
+  wait "$sub_pid" 2>/dev/null || true
+
+  if [ $rc -ne 0 ]; then exit $rc; fi
+  exit $rc2
 fi
 
 if [ "$launch_server" = "0" ]; then

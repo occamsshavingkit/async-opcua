@@ -25,9 +25,11 @@ use crate::subscriptions::NonAckedPublish;
 use opcua_types::SubscriptionDiagnosticsDataType;
 use opcua_types::{
     CreateSubscriptionRequest, DataValue, DateTimeUtc, DiagnosticBits, MonitoredItemCreateResult,
-    MonitoredItemModifyRequest, MonitoringMode, NodeId, RepublishRequest, SetPublishingModeRequest,
+    MonitoredItemModifyRequest, MonitoringMode, RepublishRequest, SetPublishingModeRequest,
     StatusCode, TimestampsToReturn,
 };
+#[cfg(feature = "subscriptions-standard")]
+use opcua_types::NodeId;
 
 use crate::{
     info::ServerInfo, node_manager::MonitoredItemRef, subscriptions::subscription::Subscription,

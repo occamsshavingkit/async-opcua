@@ -925,7 +925,11 @@ impl ServerInfo {
         if let Some(Some((ref server_certificate, _))) = certs.get(endpoint_id) {
             server_certificate.as_byte_string()
         } else {
-            ByteString::null()
+            certs
+                .values()
+                .find_map(|v| v.as_ref().map(|(cert, _)| cert.as_byte_string()))
+                .unwrap_or_default()
+        }
         }
     }
 

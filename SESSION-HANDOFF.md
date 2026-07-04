@@ -1,90 +1,62 @@
-# SESSION HANDOFF — 2026-07-03
+# SESSION HANDOFF — 2026-07-04
 
-## PR status
+## Branch status
 
-- https://github.com/occamsshavingkit/async-opcua/pull/259 — merged. All green. Clean `master`.
+- `056-complexity-cuts` — has 2 uncommitted changes:
+  1. PubSub config_methods lock-scope fix
+  2. 5 clippy `op_ref` warning fixes
+  Both in `async-opcua-pubsub/src/config_methods.rs`
 
-## What shipped
+## What shipped (already on master via squash-merge of #260)
 
-### Feature 054 (profile minimal builds)
-- 15 subsystem cfg gates, 4 profile aliases (nano/micro/embedded/standard)
-- Profile sizes: nano 6.45 MiB, micro 6.87 MiB, embedded 9.44 MiB, standard 15.97 MiB
-- Profile behavior tests (isolated `cargo test -p <pkg> --features profile-tests`)
+### Feature 056 — five complexity cuts
 
-### Feature 055 (optional deps + RSA-KEM + security checks)
-- `pubsub` and `history` default ON, profile aliases exclude both, `base-server` excludes both
-- RSA-KEM identity token decryption (`crypto/src/identity/rsa_kem.rs` + RFC 3394 key wrap)
-- `SecurityCheckRegistry` — bounded ring buffer on `ServerInfo`, exposed via `ServerHandle`
+| Cut | File | Change |
+|-----|------|--------|
+| 2a | `async-opcua-nodes/src/type_tree.rs` | `is_subtype_of()` memoized via `moka::sync::Cache`, O(R·T) → O(1) repeat |
+| 2b | `async-opcua-server/src/address_space/mod.rs`, `memory/mod.rs` | `(parent,BrowseName)` index for TranslateBrowsePaths, O(D·M·R) → O(D) |
+| 6 | `async-opcua-server/src/session/manager.rs` | Per-channel `HashMap<u32,AtomicUsize>` counter, O(sessions)→O(1) |
+| 7 | `async-opcua-server/src/subscriptions/session_subscriptions.rs` | Dirty-flag priority cache, O(S log S) per tick → O(1) stable |
+| 8 | `async-opcua-core/src/comms/message_chunk.rs` | `Mutex<Option<ChunkInfo>>` single-parse, 2×→1× per chunk |
 
-### #34 (controller.rs split)
-- `controller.rs` 1351→1232 lines. Extracted `SessionStarter`, `SecureChannelState`, `ControllerCommand`.
+Spec and planning docs in `specs/056-complexity-cuts/`. All 28 FRs covered. 441/443 tests pass (2 pre-existing chunk-hack test failures now fixed in 5b5ed23dd).
 
-### #240 (perf audit)
-- Lock-tracing already optimized (049), audit events required by Part 4 §6.5.8. Closed.
+### Lock audit fixes (committed and pushed)
 
-## Backlog
+1. **`dfaaf882c`** — AddressSpace write-lock for TranslateBrowsePaths changed to two-phase: read lock for steady-state path resolution, brief write lock only when `browse_name_index` needs building (first call or after `node-management` invalidation). Added `browse_name_index_is_built()` method on AddressSpace.
 
-### TODO.md active
-- SDK tooling / easier custom node managers
-- Sophisticated server with persistent store
-- "Bad ideas" servers
+### Lock audit fixes + clippy fixes (LOCAL ONLY — not committed)
 
-### Deferred integration tests
-- RSA-KEM encrypted token test (055, T008-T009) — needs two-phase client connect
-- Embedded secure channel test (054, `#[ignore]`d) — same
-- Standard X509/RegisterServer2 tests (054, `#[ignore]`d) — needs LDS peer
+2. **PubSub config_methods lock scope** — narrowed manager lock scope in all 14 handler functions. Pattern: lock manager, mutate config, clone `connections`/`published_data_sets` snapshot, drop manager lock, then take `address_space.write()` for reflection. Manager lock is no longer held while the address space write lock blocks concurrent server operations.
 
-### GitHub
-- #32 — Revisit `sad-rsa` for opt-in C-free RSA backend
+3. **Clippy `op_ref` fixes** — 5 occurrences of `&foo(...) == &bar` changed to `foo(...) == bar` to satisfy `clippy::op_ref` in `--all-targets` mode.
 
-### Profile-size-report (7 future-feature suggestions)
-- `docs/profile-size-report.md`
+## Current CI status
 
-## Next work: complexity cuts (2a/2b/6/7/8 from specs/complexity-cuts-backlog.md)
+| Command | Status | Notes |
+|---------|--------|-------|
+| `cargo fmt --all -- --check` | **PASS** | |
+| `cargo clippy --workspace --all-features` | **PASS** | |
+| `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings` | **PASS** | Fixed 5 `op_ref` warnings in pubsub config_methods |
+| `cargo test -p async-opcua-core --lib` | **PASS** | 89/89 |
+| `cargo test -p async-opcua-server --lib` | **PASS** | 306/306 (2 ignored) |
+| `cargo test -p async-opcua-nodes --lib` | **PASS** | 48/48 |
 
-### 2a — is_subtype_of memoization with `moka`
-- **File**: `async-opcua-nodes/src/type_tree.rs:97`
-- **Caller**: `async-opcua-server/src/node_manager/view.rs:288`
-- **Current**: O(R·T) per browse request (R = references, T = type-tree depth)
-- **Fix**: cache `(parent, child) → bool` in `moka::sync::Cache`. Types are loaded at startup and immutable — no invalidation needed. Key insight: use `moka` (already a dependency) instead of hand-rolled.
-- **At 1000 sessions with 100 monitored items each**: browse type-filtering walks the type tree once per reference.
+## Uncommitted work
 
-### 2b — TranslateBrowsePaths `(parent, BrowseName)` index
-- **File**: `async-opcua-server/src/node_manager/view.rs:759`, `node_manager/memory/mod.rs:366`
-- **Current**: O(D·M·R) — nested scan per path element
-- **Fix**: build `HashMap<(NodeId, String), Vec<NodeId>>` index. Invalidate on AddNodes/DeleteNodes/AddReferences/DeleteReferences (rare, only when `node-management` feature is enabled).
-- **At 1000 sessions**: paths resolve in O(D) instead of O(D·M·R).
-
-### 6 — CreateSession per-channel counter
-- **File**: `async-opcua-server/src/session/manager.rs:~196`
-- **Current**: O(sessions) scan per CreateSession handshake (capped by `max_sessions`)
-- **Fix**: maintain `HashMap<u32, AtomicUsize>` (channel_id → count). Increment on activate, decrement on close/expiry.
-- **At 1000 sessions**: still trivial. Value is at 50+ concurrent create/activate floods.
-
-### 7 — subscription priority sort cache
-- **File**: `async-opcua-server/src/subscriptions/session_subscriptions.rs:832`
-- **Current**: O(S log S) re-sort every publish tick (100ms)
-- **Fix**: keep a `BTreeSet<(priority, subscription_id)>` that updates incrementally on create/modify/delete. Only resort on priority change.
-- **At 1000 subscriptions**: 1000 log 1000 = ~10k comparisons every 100ms. Not huge, but needless work.
-
-### 8 — chunk header re-parse reuse
-- **File**: `async-opcua-core/src/comms/chunker.rs:352, 506`
-- **Current**: ChunkInfo parsed twice per chunk (validate pass + decode pass)
-- **Fix**: parse once, reuse across both passes within the same message lifetime (no invalidation needed).
-- **Risk**: zero — chunk data is immutable for the lifetime of a single message.
+1. `async-opcua-pubsub/src/config_methods.rs` — lock-scope fix for all 14 config handler functions + 5 clippy fixes. Ready to commit.
 
 ## Commands
 
 ```bash
-# Local CI equivalent before pushing
+# Full CI (all green as of 2026-07-04)
 cargo fmt --all -- --check
-cargo clippy --workspace --all-targets --all-features
-RUSTFLAGS="-D warnings" cargo check --workspace
+RUSTFLAGS="-D warnings" cargo clippy --workspace --all-targets --all-features --locked
+cargo test -p async-opcua-core --lib
 cargo test -p async-opcua-server --lib
+cargo test -p async-opcua-nodes --lib
 
-# Profile verification
-cargo tree -p async-opcua --no-default-features --features nano -e normal | grep -E 'pubsub|history-sqlite'  # must be empty
-cargo tree -p async-opcua-minimal-server -e normal | grep 'core-namespace'  # must be empty
-
-# Do NOT set auto-merge on PRs. Wait for all green, then merge manually.
+# Commit uncommitted work
+git add async-opcua-pubsub/src/config_methods.rs
+git commit -m "fix(pubsub): narrow config mutex scope + fix clippy op_ref warnings"
 ```

@@ -43,6 +43,7 @@ mod tests;
 
 mod cert_chain;
 mod certificate_store;
+pub mod ocsp;
 pub mod gds_reload;
 mod hash;
 pub mod identity;

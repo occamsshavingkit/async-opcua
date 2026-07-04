@@ -1,0 +1,15 @@
+[package]
+name = "samples-filesystem-bridge"
+version = "0.13.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+env_logger = { workspace = true }
+log = { workspace = true }
+tokio = { workspace = true }
+notify = { version = "8", default-features = false, features = ["macos_kqueue"] }
+
+[dependencies.async-opcua]
+path = "../../async-opcua"
+features = ["server"]

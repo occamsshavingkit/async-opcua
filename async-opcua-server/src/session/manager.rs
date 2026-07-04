@@ -362,7 +362,19 @@ impl CreateSessionActorConstruction {
         // spawn its actor.
         let authentication_token = NodeId::new(0, random::byte_string(32));
         let server_nonce = random::byte_string(info.config.session_nonce_length);
-        let server_certificate = info.server_certificate_as_byte_string();
+        let server_certificate = {
+            let path = request.endpoint_url.as_ref()
+                .trim_end_matches('/')
+                .rsplit_once('/')
+                .map(|(_, path)| path)
+                .unwrap_or("");
+            let endpoint_id = crate::config::EndpointIdentifier {
+                path: path.to_string(),
+                security_policy: channel.security_policy().to_string(),
+                security_mode: channel.security_mode().to_string(),
+            };
+            info.server_certificate_as_byte_string(&endpoint_id)
+        };
         let session_timeout = info
             .config
             .max_session_timeout_ms
@@ -773,8 +785,11 @@ impl SessionManager {
         client_signature: &SignatureData,
     ) -> Result<(), Error> {
         if let Some(client_certificate) = session.client_certificate() {
-            let server_cert = info.server_certificate.read();
-            if let Some(ref server_certificate) = *server_cert {
+            let server_cert = {
+                let certs = info.endpoint_certificates.read();
+                certs.values().find_map(|v| v.as_ref().map(|(cert, _)| cert.clone()))
+            };
+            if let Some(ref server_certificate) = server_cert {
                 opcua_crypto::verify_signature_data(
                     client_signature,
                     security_policy,
@@ -1966,8 +1981,11 @@ mod tests {
                 .build()
                 .expect("test server should build");
             let (server_cert, server_key) = make_cert_and_key("x509-state-cleanup-server");
-            *handle.info().server_certificate.write() = Some(server_cert);
-            *handle.info().server_pkey.write() = Some(server_key);
+            {
+                let mut certs = handle.info().endpoint_certificates.write();
+                let ep = crate::config::EndpointIdentifier { path: "/".into(), security_policy: "None".into(), security_mode: "None".into() };
+                certs.insert(ep, Some((server_cert, server_key)));
+            }
 
             let mut fixture = Self::from_handle(handle);
             fixture._temp_path = Some(pki);
@@ -2026,8 +2044,11 @@ mod tests {
                 .build()
                 .expect("test server should build");
             let (server_cert, server_key) = make_cert_and_key("security-mode-server");
-            *handle.info().server_certificate.write() = Some(server_cert);
-            *handle.info().server_pkey.write() = Some(server_key);
+            {
+                let mut certs = handle.info().endpoint_certificates.write();
+                let ep = crate::config::EndpointIdentifier { path: "/".into(), security_policy: "None".into(), security_mode: "None".into() };
+                certs.insert(ep, Some((server_cert, server_key)));
+            }
 
             Self::from_handle_with_session_binding(
                 handle,
@@ -2125,9 +2146,10 @@ mod tests {
 
             let server_certificate = self
                 .info
-                .server_certificate
+                .endpoint_certificates
                 .read()
-                .as_ref()
+                .values()
+                .find_map(|v| v.as_ref().map(|(cert, _)| cert))
                 .expect("X.509 activation test must configure a server certificate")
                 .clone();
             let request = x509_activate_request(
@@ -2191,9 +2213,10 @@ mod tests {
         ) -> SignatureData {
             let server_certificate = self
                 .info
-                .server_certificate
+                .endpoint_certificates
                 .read()
-                .as_ref()
+                .values()
+                .find_map(|v| v.as_ref().map(|(cert, _)| cert))
                 .expect("secured activation test must configure a server certificate")
                 .as_byte_string();
             opcua_crypto::create_signature_data(

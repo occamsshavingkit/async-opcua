@@ -50,7 +50,7 @@
 
 - [ ] T008 [US1] Implement OCSP response decoding in `async-opcua-crypto/src/ocsp/codec.rs`: decode DER-encoded OCSPResponse, extract responseStatus, producedAt, thisUpdate/nextUpdate, and the certStatus (good/revoked/unknown) per RFC 6960 §4.2. Same file as T007 — sequential.
 
-- [ ] T009 [P] [US1] Extract OCSP responder URL from a certificate's Authority Information Access (AIA) extension in `async-opcua-crypto/src/ocsp/aia.rs`. Parse the AIA extension (OID 1.3.6.1.5.5.7.1.1), find the first entry with accessMethod = id-ad-ocsp (1.3.6.1.5.5.7.48.1), and return the URI. Per FR-001 and RFC 5280 §4.2.2.1.
+- [ ] T009 [P] [US1] Extract OCSP responder URL from a certificate's Authority Information Access (AIA) extension in `async-opcua-crypto/src/ocsp/aia.rs`. Parse the AIA extension (OID 1.3.6.1.5.5.7.1.1), find the first entry with accessMethod = id-ad-ocsp (1.3.6.1.5.5.7.48.1), and return the URI. Per OPC UA Part 4 §6.1.3 (certificate validation requires OCSP responder discovery). FR-001, RFC 5280 §4.2.2.1.
 
 - [ ] T010 [US1] Implement OCSP HTTP fetch in `async-opcua-crypto/src/ocsp/fetch.rs`: using `ureq`, POST the DER-encoded OCSPRequest (from T007) to the responder URL (from T009), enforce `OcspFetchConfig.timeout` and `max_response_size`, return raw bytes or `OcspError::FetchFailed`. Per FR-005 (timeout and max response size enforcement). Depends on T007 and T009.
 
@@ -58,7 +58,7 @@
 
 - [ ] T012 [US1] Implement OCSP response cache in `async-opcua-crypto/src/ocsp/cache.rs`: `HashMap` keyed by `(issuer_name_hash: Vec<u8>, issuer_key_hash: Vec<u8>, serial_number: Vec<u8>)` with each entry storing the DER response and `next_update` timestamp. On lookup, if `now < next_update` return cached; otherwise evict. Per research decision (RFC 6960 §2.2 validity window), FR-002.
 
-- [ ] T013 [P] [US1] Add `ocsp_fetch_config: Option<OcspFetchConfig>` field to `CertificateStore` in `async-opcua-crypto/src/certificate_store.rs` and public setter `pub fn set_ocsp_fetch_config(&mut self, config: OcspFetchConfig)`. When config is Some and policy != Off, OCSP is active. Default-construct as None (backward compatible). Per FR-003, FR-006.
+- [ ] T013 [P] [US1] Add `ocsp_fetch_config: Option<OcspFetchConfig>` field to `CertificateStore` in `async-opcua-crypto/src/certificate_store.rs` and public setter `pub fn set_ocsp_fetch_config(&mut self, config: OcspFetchConfig)`. When config is Some and policy != Off, OCSP is active. Default-construct as None (backward compatible). Per OPC UA Part 4 §6.1.3 (online revocation checking, default-off). FR-003, FR-006.
 
 - [ ] T014 [US1] Wire OCSP fetch into `CertificateStore::validate_certificate_chain` in `async-opcua-crypto/src/certificate_store.rs`. After the existing CRL check, if `ocsp_fetch_config` is Some and policy != Off: for each certificate in the chain, extract AIA URL (T009), check cache (T012), on miss fetch (T010), validate response (T011), cache result. On Strict: fail on error/unknown/revoked. On Soft: fail only on revoked, else fall through to CRL. Per FR-003, FR-004 and OPC UA Part 4 §6.1.3. Depends on T010, T011, T012, T013.
 
@@ -79,15 +79,15 @@
 
 - [ ] T017 [P] [US2] Add `certificate_path: Option<PathBuf>` and `private_key_path: Option<PathBuf>` fields (both `#[serde(default)]`) to `ServerEndpoint` struct in `async-opcua-server/src/config/endpoint.rs`. Per OPC UA Part 4 §5.5.4.1 and contract `contracts/endpoint-cert-config.md`.
 
-- [ ] T018 [US2] Replace `server_certificate: RwLock<Option<X509>>` with `endpoint_certificates: RwLock<HashMap<EndpointIdentifier, Option<(X509, PrivateKey)>>>` in `ServerInfo` in `async-opcua-server/src/info.rs`. The map key is `EndpointIdentifier` (path, security_policy, security_mode); the value stores both the X509 cert and its private key. Per FR-007. Depends on T017.
+- [ ] T018 [US2] Replace `server_certificate: RwLock<Option<X509>>` with `endpoint_certificates: RwLock<HashMap<EndpointIdentifier, Option<(X509, PrivateKey)>>>` in `ServerInfo` in `async-opcua-server/src/info.rs`. The map key is `EndpointIdentifier` (path, security_policy, security_mode); the value stores both the X509 cert and its private key. Per OPC UA Part 4 §5.5.4.1 (Application Instance Certificate is per-endpoint security configuration component). FR-007. Depends on T017.
 
-- [ ] T019 [US2] Implement per-endpoint cert loading at server startup in `async-opcua-server/src/server.rs`: for each endpoint in config, resolve cert_path (endpoint override else server default), load X509 DER and private key, insert into `endpoint_certificates` map keyed by the endpoint identifier. Per FR-007, FR-010. Depends on T018.
+- [ ] T019 [US2] Implement per-endpoint cert loading at server startup in `async-opcua-server/src/server.rs`: for each endpoint in config, resolve cert_path (endpoint override else server default), load X509 DER and private key, insert into `endpoint_certificates` map keyed by the endpoint identifier. Per OPC UA Part 4 §5.5.4.1. FR-007, FR-010. Depends on T018.
 
 - [ ] T020 [US2] Implement startup validation in `async-opcua-server/src/server.rs`: after loading certs, iterate all security-policy endpoints (security_policy != "None"). If any such endpoint has no cert in the map, or the cert's key type (RSA/EC) is incompatible with the endpoint's security policy, return an error with a diagnostic message: `"Endpoint {path} uses security policy {policy} but no compatible certificate is configured."` Per FR-009 and OPC UA Part 4 §5.5.4.1. Depends on T019.
 
 - [ ] T021 [US2] Update secure channel creation in `async-opcua-server/src/session/manager.rs`: replace `info.server_certificate.read()` calls with constructing the `EndpointIdentifier` for the current connection and looking up in `info.endpoint_certificates`. Update the `server_certificate` variable bindings in functions: `create_secure_channel_impl` (line ~345), `activate_session` (line ~440), and test helper functions. Per FR-008 and OPC UA Part 4 §5.5.4.1. Depends on T019.
 
-- [ ] T022 [US2] Update `ServerInfo::server_certificate_as_byte_string()` in `async-opcua-server/src/info.rs` to accept an `EndpointIdentifier` parameter. Look up in `endpoint_certificates` map instead of reading the old single-cert field. Update all callers (in `info.rs` line ~915, `server.rs` line ~824, `manager.rs` lines ~365, ~776). Remove the old `server_certificate` field. Depends on T018.
+- [ ] T022 [US2] Update `ServerInfo::server_certificate_as_byte_string()` in `async-opcua-server/src/info.rs` to accept an `EndpointIdentifier` parameter. Look up in `endpoint_certificates` map instead of reading the old single-cert field. Update all callers (in `info.rs` line ~915, `server.rs` line ~824, `manager.rs` lines ~365, ~776). Remove the old `server_certificate` field. Per OPC UA Part 4 §5.5.4.1 (certificate is per-endpoint security configuration component). FR-008. Depends on T018.
 
 - [ ] T023 [P] [US2] Update test fixtures in `async-opcua-server/src/session/manager.rs` tests module (~8 fixture sites at lines ~1968, ~2028, ~2126, ~2192, ~2433): replace `*handle.info().server_certificate.write() = Some(cert)` with inserting into `info.endpoint_certificates.write()[endpoint_id] = Some((cert, key))`. Add the appropriate endpoint identifier for each test.
 
@@ -95,7 +95,7 @@
 
 - [ ] T025 [P] [US2] Update `ServerHandle::set_certificate` in `async-opcua-server/src/server_handle.rs` (line ~152): replace `self.info.server_certificate.write()` with inserting into `self.info.endpoint_certificates`. Accept an optional endpoint identifier parameter; if None, insert for all existing endpoint keys.
 
-- [ ] T026 [US2] Update WSS (opc.wss) transport in `async-opcua-server/src/transport/tcp.rs` (or equivalent WSS path): ensure the per-endpoint certificate resolution works identically for WebSocket connections. The transport layer reads the `EndpointIdentifier` and looks up in `endpoint_certificates` — same as opc.tcp. Per FR-011. Depends on T021, T022.
+- [ ] T026 [US2] Update WSS (opc.wss) transport in `async-opcua-server/src/transport/tcp.rs` (or equivalent WSS path): ensure the per-endpoint certificate resolution works identically for WebSocket connections. The transport layer reads the `EndpointIdentifier` and looks up in `endpoint_certificates` — same as opc.tcp. Per OPC UA Part 4 §5.5.4.1 (cert selection is per-endpoint, transport-agnostic). FR-011. Depends on T021, T022.
 
 - [ ] T027 [US2] Verify `cargo test -p async-opcua-server --lib` — all 306 tests pass
 - [ ] T028 [US2] Verify `cargo test -p async-opcua-core --lib` — core tests unaffected

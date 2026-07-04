@@ -1,1 +1,3 @@
-fn main() { println!("distributed-test placeholder"); }
+fn main() {
+    println!("distributed-test placeholder");
+}

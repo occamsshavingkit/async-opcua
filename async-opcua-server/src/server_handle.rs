@@ -150,7 +150,7 @@ impl ServerHandle {
         let (cert, pkey) = opcua_crypto::gds_reload::reload_store_from_disk(&store)?;
 
         let mut endpoint_certs = self.info.endpoint_certificates.write();
-        let mut server_pkey = self.info.server_pkey.write();
+        let _server_pkey = self.info.server_pkey.write();
 
         // Update all existing endpoint entries with the reloaded certificate
         for (_id, entry) in endpoint_certs.iter_mut() {

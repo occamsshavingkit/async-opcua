@@ -3,19 +3,19 @@ use std::sync::Arc;
 
 use log::info;
 use opcua::crypto::random;
+use opcua::crypto::SecurityPolicy;
 use opcua::nodes::{
-    BaseEventType, DataTypeBuilder, Event, EventField, ObjectBuilder, ObjectTypeBuilder,
-    ReferenceDirection, VariableBuilder, VariableTypeBuilder,
+    BaseEventType, DataTypeBuilder, Event, ObjectBuilder, ObjectTypeBuilder, ReferenceDirection,
+    VariableBuilder, VariableTypeBuilder,
 };
-use opcua::server::address_space::{EventNotifier, MethodBuilder};
+use opcua::server::address_space::{AddressSpace, EventNotifier, MethodBuilder};
 use opcua::server::diagnostics::NamespaceMetadata;
 use opcua::server::node_manager::memory::{simple_node_manager, SimpleNodeManager};
-use opcua::server::{ServerBuilder, ServerEndpoint, SubscriptionCache, ANONYMOUS_USER_TOKEN_ID};
+use opcua::server::{ServerBuilder, ServerEndpoint, ANONYMOUS_USER_TOKEN_ID};
 use opcua::types::{
     ua_encodable, DataTypeDefinition, DataTypeId, DataValue, DateTime, ExpandedMessageInfo,
     ExpandedNodeId, MessageSecurityMode, NodeId, ObjectId, ObjectTypeId, ReferenceTypeId,
-    SecurityPolicy, StatusCode, StructureDefinition, StructureField, StructureType, UAString,
-    VariableTypeId,
+    StatusCode, StructureDefinition, StructureField, StructureType, UAString, VariableTypeId,
 };
 
 const NAMESPACE_URI: &str = "https://github.com/cactuaroid/OpcUaChatServer";
@@ -24,7 +24,7 @@ const CHAT_LOG_DATA_TYPE_ID: u32 = 100;
 const CHAT_LOG_ENC_TYPE_ID: u32 = 101;
 
 #[ua_encodable]
-#[derive(Debug, Clone, Default, EventField)]
+#[derive(Debug, Clone, Default, PartialEq)]
 struct ChatLog {
     at: DateTime,
     name: UAString,
@@ -87,7 +87,7 @@ impl ChatLogEventType {
     }
 }
 
-static CHAT_LOG_TYPE_LOADER: std::sync::LazyLock<opcua::types::TypeLoaderInstance> =
+#[allow(dead_code)] static CHAT_LOG_TYPE_LOADER: std::sync::LazyLock<opcua::types::TypeLoaderInstance> =
     std::sync::LazyLock::new(|| {
         let mut inst = opcua::types::TypeLoaderInstance::new();
         inst.add_binary_type(
@@ -99,7 +99,7 @@ static CHAT_LOG_TYPE_LOADER: std::sync::LazyLock<opcua::types::TypeLoaderInstanc
     });
 
 #[derive(Debug, Clone, Copy)]
-struct ChatTypeLoader;
+#[allow(dead_code)] struct ChatTypeLoader;
 
 impl opcua::types::StaticTypeLoader for ChatTypeLoader {
     fn instance() -> &'static opcua::types::TypeLoaderInstance {
@@ -111,7 +111,7 @@ impl opcua::types::StaticTypeLoader for ChatTypeLoader {
     }
 }
 
-fn register_chat_log_data_type(addr: &mut opcua::nodes::AddressSpace, ns: u16) {
+fn register_chat_log_data_type(addr: &mut AddressSpace, ns: u16) {
     let struct_id = NodeId::new(ns, CHAT_LOG_DATA_TYPE_ID);
     let enc_id = NodeId::new(ns, CHAT_LOG_ENC_TYPE_ID);
 
@@ -125,7 +125,7 @@ fn register_chat_log_data_type(addr: &mut opcua::nodes::AddressSpace, ns: u16) {
         .insert(addr);
 
     let type_def = DataTypeDefinition::Structure(StructureDefinition {
-        default_encoding_id: enc_id,
+        default_encoding_id: enc_id.clone(),
         base_data_type: DataTypeId::Structure.into(),
         structure_type: StructureType::Structure,
         fields: Some(vec![
@@ -161,7 +161,7 @@ fn register_chat_log_data_type(addr: &mut opcua::nodes::AddressSpace, ns: u16) {
         .insert(addr);
 }
 
-fn register_chat_types(addr: &mut opcua::nodes::AddressSpace, ns: u16) {
+fn register_chat_types(addr: &mut AddressSpace, ns: u16) {
     register_chat_log_data_type(addr, ns);
 
     let chat_log_type_id = NodeId::new(ns, 18u32);
@@ -183,7 +183,7 @@ fn register_chat_types(addr: &mut opcua::nodes::AddressSpace, ns: u16) {
     .insert(addr);
 
     VariableBuilder::new(&chat_log_prop_id, "ChatLog", "ChatLog")
-        .property_of(chat_log_event_type_id)
+        .property_of(chat_log_event_type_id.clone())
         .data_type(NodeId::new(ns, CHAT_LOG_DATA_TYPE_ID))
         .has_type_definition(chat_log_type_id)
         .has_modelling_rule(ObjectId::ModellingRule_Mandatory)
@@ -253,19 +253,19 @@ async fn main() {
             .event_notifier(EventNotifier::SUBSCRIBE_TO_EVENTS)
             .organized_by(ObjectId::ObjectsFolder)
             .has_type_definition(NodeId::new(ns, 1u32))
-            .insert(&mut address_space);
+            .insert(&mut *address_space);
 
         VariableBuilder::new(&post_count_id, "PostCount", "PostCount")
             .property_of(chat_logs_id.clone())
             .data_type(DataTypeId::UInt32)
             .has_type_definition(VariableTypeId::PropertyType)
             .value(0u32)
-            .insert(&mut address_space);
+            .insert(&mut *address_space);
 
         MethodBuilder::new(&post_method_id, "Post", "Post")
             .component_of(chat_logs_id.clone())
             .input_args(
-                &mut address_space,
+                &mut *address_space,
                 &input_args_id,
                 &[
                     ("Name", DataTypeId::String).into(),
@@ -273,19 +273,18 @@ async fn main() {
                 ],
             )
             .generates_event(NodeId::new(ns, 7u32))
-            .insert(&mut address_space);
+            .insert(&mut *address_space);
     }
 
-    node_manager.inner().add_read_callback(
-        post_count_id.clone(),
-        {
+    node_manager
+        .inner()
+        .add_read_callback(post_count_id.clone(), {
             let pc = post_count.clone();
             move |_, _, _| {
                 let value = pc.load(Ordering::Relaxed);
                 Ok(DataValue::new_now(value))
             }
-        },
-    );
+        });
 
     {
         let nm = node_manager.clone();
@@ -293,9 +292,9 @@ async fn main() {
         let pc = post_count.clone();
         let pc_id = post_count_id.clone();
 
-        node_manager.inner().add_method_callback(
-            post_method_id,
-            move |args| {
+        node_manager
+            .inner()
+            .add_method_callback(post_method_id, move |args| {
                 let name = match args.first() {
                     Some(opcua::types::Variant::String(s)) => s.to_string(),
                     _ => return Err(StatusCode::BadInvalidArgument),
@@ -315,11 +314,7 @@ async fn main() {
                 let new_count = pc.fetch_add(1, Ordering::Relaxed) + 1;
                 let _ = nm.set_values(
                     &subs,
-                    [(
-                        &pc_id,
-                        None,
-                        DataValue::new_now(new_count),
-                    )].into_iter(),
+                    [(&pc_id, None, DataValue::new_now(new_count))].into_iter(),
                 );
 
                 let event = ChatLogEventType::new(
@@ -331,17 +326,12 @@ async fn main() {
                 );
 
                 subs.notify_events(
-                    [(
-                        &event as &dyn opcua::nodes::Event,
-                        &ObjectId::Server.into(),
-                    )]
-                    .into_iter(),
+                    [(&event as &dyn opcua::nodes::Event, &ObjectId::Server.into())].into_iter(),
                 );
 
                 info!("Post: name={name}, content={content}");
                 Ok(Vec::new())
-            },
-        );
+            });
     }
 
     info!("chat-server listening on opc.tcp://localhost:4856/");

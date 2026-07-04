@@ -1,8 +1,8 @@
 use const_oid::ObjectIdentifier;
+use der::{Decode, Encode};
 use sha1::{Digest, Sha1};
 use tracing::trace;
 use x509_cert::certificate::Certificate;
-use der::{Decode, Encode};
 use x509_cert::der::{
     asn1::{Null, OctetString},
     Sequence,

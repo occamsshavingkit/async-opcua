@@ -190,15 +190,15 @@
 
 - [x] T044 [US4] Implement chat server Post method handler in `samples/chat-server/src/main.rs`: register `Post` method on ChatLogs object with inputs (Name: String, Content: String). Handler creates ChatLog { At: now(), Name, Content }, increments PostCount, fires ChatLogEventType event with the ChatLog property set. Returns Good status code. Per contract §Runtime Behavior. Depends on T043.
 
-- [ ] T045 [P] [US4] Create `samples/chaos-server/` crate: `Cargo.toml` depending on `async-opcua`, `src/main.rs` with an address space where nodes randomly change type, value, or status code at runtime. Use `tokio::spawn` background task to periodically select random nodes (from a pre-built list) and mutate them. Per FR-016.
+- [x] T045 [P] [US4] Create `samples/chaos-server/` crate: `Cargo.toml` depending on `async-opcua`, `src/main.rs` with an address space where nodes randomly change type, value, or status code at runtime. Use `tokio::spawn` background task to periodically select random nodes (from a pre-built list) and mutate them. Per FR-016.
 
-- [ ] T046 [P] [US4] Create `samples/filesystem-bridge/` crate: `Cargo.toml` depending on `async-opcua` + `notify` (for live filesystem watching), `src/main.rs` mirroring the filesystem as an OPC UA hierarchy. Directories → Object nodes, files → Variable nodes (data type ByteString for binary, String for text). Accept `--root <path>` CLI argument. Use `notify::Watcher` to update nodes on filesystem changes. Per FR-017.
+- [x] T046 [P] [US4] Create `samples/filesystem-bridge/` crate: `Cargo.toml` depending on `async-opcua` + `notify` (for live filesystem watching), `src/main.rs` mirroring the filesystem as an OPC UA hierarchy. Directories → Object nodes, files → Variable nodes (data type ByteString for binary, String for text). Accept `--root <path>` CLI argument. Use `notify::Watcher` to update nodes on filesystem changes. Per FR-017.
 
-- [ ] T047 [P] [US4] Create `samples/reverse-bridge/` crate: `Cargo.toml` depending on `async-opcua` (both server and client sides), `src/main.rs` connecting to a source OPC UA server via `Client`, browsing all variables, creating monitored items for each, and exposing mirrored values as Variables in its own address space. Accept `--source <url>` CLI argument. Per FR-018.
+- [x] T047 [P] [US4] Create `samples/reverse-bridge/` crate: `Cargo.toml` depending on `async-opcua` (both server and client sides), `src/main.rs` connecting to a source OPC UA server via `Client`, browsing all variables, creating monitored items for each, and exposing mirrored values as Variables in its own address space. Accept `--source <url>` CLI argument. Per FR-018.
 
-- [ ] T048 [US4] Add `README.md` to each of the four example server crates. Include: what the example demonstrates, how to run it (`cargo run`), expected browse output, and any CLI arguments. Per FR-021. Depends on T043–T047.
+- [x] T048 [US4] Add `README.md` to each of the four example server crates. Include: what the example demonstrates, how to run it (`cargo run`), expected browse output, and any CLI arguments. Per FR-021. Depends on T043–T047.
 
-- [ ] T049 [US4] Verify all example crates compile: `cargo check -p samples-chat-server -p samples-chaos-server -p samples-filesystem-bridge -p samples-reverse-bridge`. Then, for each server, start it (`cargo run &`), verify it binds and logs, and confirm the address space is browsable via at least the root Objects folder. Per FR-020, FR-022, SC-005. Depends on T048.
+- [x] T049 [US4] Verify all example crates compile: `cargo check -p samples-chat-server -p samples-chaos-server -p samples-filesystem-bridge -p samples-reverse-bridge`. Then, for each server, start it (`cargo run &`), verify it binds and logs, and confirm the address space is browsable via at least the root Objects folder. Per FR-020, FR-022, SC-005. Depends on T048.
 
 **Checkpoint**: US4 complete — four bad ideas servers compile, start, and demonstrate SDK flexibility.
 
@@ -208,11 +208,11 @@
 
 **Purpose**: Full workspace verification. Update completeness-backlog.md.
 
-- [ ] T050 Run `cargo fmt --all -- --check` to verify formatting across workspace
-- [ ] T051 Run `cargo clippy --workspace --all-targets --all-features` to verify no new lint warnings
-- [ ] T052 Run `RUSTFLAGS="-D warnings" cargo check --workspace` to verify all crates compile warning-free
-- [ ] T053 Run full test suite: `cargo test -p async-opcua-crypto --lib && cargo test -p async-opcua-server --lib && cargo test -p async-opcua-core --lib && cargo test -p async-opcua-nodes --lib` — all 443+ tests pass
-- [ ] T054 Update `specs/completeness-backlog.md`: move OCSP live fetching, multi-cert mixed server, LegacyCall removal, and bad ideas servers to the "Done" section. Add entry for feature 057. Per SC-006.
+- [x] T050 Run `cargo fmt --all -- --check` to verify formatting across workspace
+- [x] T051 Run `cargo clippy --workspace --all-targets --all-features` to verify no new lint warnings
+- [x] T052 Run `RUSTFLAGS="-D warnings" cargo check --workspace` to verify all crates compile warning-free
+- [x] T053 Run full test suite: `cargo test -p async-opcua-crypto --lib && cargo test -p async-opcua-server --lib && cargo test -p async-opcua-core --lib && cargo test -p async-opcua-nodes --lib` — all 443+ tests pass
+- [x] T054 Update `specs/completeness-backlog.md`: move OCSP live fetching, multi-cert mixed server, LegacyCall removal, and bad ideas servers to the "Done" section. Add entry for feature 057. Per SC-006.
 
 ---
 

@@ -8,7 +8,7 @@ publish = false
 env_logger = { workspace = true }
 log = { workspace = true }
 tokio = { workspace = true }
-notify = { version = "8", default-features = false, features = ["macos_kqueue"] }
+notify = { version = "8", default-features = false }
 
 [dependencies.async-opcua]
 path = "../../async-opcua"

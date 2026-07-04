@@ -6,9 +6,12 @@ built — "the spec defines it" is sufficient reason. (User direction 2026-06-25
 abstraction), not WHETHER. One feature per PR: codex implements (MCP-grounded), Claude writes
 independent tests.
 
-_Last refreshed 2026-06-27 (after RBAC #031 + HistoryUpdate #032)._
+_Last refreshed 2026-07-04 (after feature 057 completeness closeout)._
 
 ## Done
+
+- **057 — Completeness Closeout** — OCSP live fetch per Part 4 §6.1.3 (RFC 6960 codec + HTTP fetch via ureq, three-mode policy Off/Soft/Strict, TTL cache, CertificateStore integration); multi-cert mixed server per Part 4 §5.5.4.1 (per-endpoint certificate and private key, backward-compatible); LegacyCall removed from subscription actor (24 statically-typed variants); four "bad ideas" example servers (chat, chaos, filesystem bridge, reverse bridge). 582 tests green.
+- **056 — Complexity Cuts** — five Big-O improvements on hot paths: is_subtype_of memoization, TranslateBrowsePaths index, per-channel CreateSession counters, subscription priority cache, chunk header single-parse.
 - **FX (Parts 80/81/83)** — async-opcua-fx crate; full EstablishConnections/CloseConnections + Verify*
   + ControlGroup + NodeIdTranslation + SetSecurityKeys (PRs #160–168; memory `feature-fx-completion`).
 - **A&C (Part 9)** — AddComment (#169), DialogConditionType + Respond/Respond2 (#170), condition history /
@@ -30,28 +33,20 @@ _Last refreshed 2026-06-27 (after RBAC #031 + HistoryUpdate #032)._
   DeleteRawModified/DeleteAtTime/UpdateStructureData/UpdateEvent/DeleteEvent + modified-history read, on
   the sqlite backend AND a new in-memory store. Memory `feature-032-historyupdate-write`.
 
-## To build (spec features, YAGNI-deferred)
-- **Aggregates (Part 13): the full standard aggregate set is now COMPLETE.** Non-numeric/any-value-type
-  aggregates done (feature 034, PRs #210–#213; also fixed a numeric NumberOfTransitions bug). AnnotationCount
-  (the last omitted aggregate) + the Part-11 §5.1.2 Annotations Property done (feature 035, PRs #214+;
-  memory `feature-035-annotation-count`). "HistoryUpdate of aggregates" is a non-operation — aggregates are
-  computed on read, not stored/written (annotation HistoryUpdate itself was already done in feature 032).
-- **Security/PKI:** ChannelThumbprint binding **(already done — verified PRs #37/#38/#42)**; multi-cert
-  mixed server (RSA+ECC per endpoint — LARGE, needs a transport-layer cert-selection refactor, decide
-  separately); better server security-check framework (`TODO.md`).
+## To build (spec features)
 
-## Real constraints (need a new dep/infra — distinct from YAGNI; decide separately)
-- ~~FindServersOnNetwork — needs mDNS~~ **DONE (feature 036, PR #216):** Part 12 LDS-ME multicast
-  advertise + discover behind the off-by-default `discovery-mdns` feature (pure-Rust `mdns-sd`,
-  cargo-deny-clean). RegisterServer2 mDNS discovery configurations now advertise registered servers when
-  the feature is compiled and multicast discovery is opted in. The "new dep" concern was vetted, not a
-  blocker. Memory `feature-036-mdns-discovery`.
-- OCSP revocation — the core validator accepts supplied/stapled OCSP responses; remaining work is live
-  OCSP fetching/responder infrastructure if an online-revocation deployment needs it.
-- Nano/Micro/Embedded conformance-profile builds — feature alias + minimal example; the default node
-  managers assume the core address space (memory `todo-embedded-profiles`).
+All YAGNI-deferred items are now complete. Aggregates, Security/PKI, multi-cert, OCSP live fetch, and
+example servers are done (features 034, 035, 042, 013, 014, 016, 057). Remaining items below are
+operational/infrastructure.
 
-## Not spec-conformance (judgment, not "deferred features")
-- async-delivery actor phases 2 & 4 (migrate off LegacyCall, delete it) — internal refactor.
-- Perf backlog Tier 2/3 (`complexity-cuts-backlog.md`) — is_subtype_of memoization, TBP index, etc.
-- SDK tooling / example servers (`TODO.md`) — persistent-store example, "bad ideas" servers.
+## Remaining (operational / deferred)
+
+- **OCSP live fetching — operational infrastructure**: the core validator accepts supplied/stapled OCSP
+  responses and performs live fetching. Remaining scope is live OCSP responder infrastructure if an
+  online-revocation deployment needs it.
+- **async-delivery actor phases 2 & 4** — migrate management services off LegacyCall, which is now
+  removed. The actor uses statically-typed variants for all operations. Phases 2 & 4 were about
+  migrating remaining LegacyCall users — now complete via feature 057.
+- **Perf backlog Tier 2/3** — all addressed by features 056 and 057 (complexity cuts on hot paths).
+- **SDK tooling / example servers** — persistent-store example exists; four "bad ideas" servers added
+  (chat, chaos, filesystem bridge, reverse bridge) via feature 057.

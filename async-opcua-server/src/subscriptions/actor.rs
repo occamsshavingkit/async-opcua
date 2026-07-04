@@ -19,21 +19,19 @@ use super::{
 };
 #[cfg(feature = "events")]
 use super::{session_subscriptions::PendingRefreshDrain, RING_DRAIN_EVENT_CHUNK};
+use crate::node_manager::MonitoredItemUpdateRef;
 use crate::subscriptions::subscription::TickReason;
 use crate::subscriptions::NonAckedPublish;
+#[cfg(all(feature = "generated-address-space", feature = "diagnostics"))]
+use opcua_types::SubscriptionDiagnosticsDataType;
 use opcua_types::{
-    CreateSubscriptionRequest, DateTimeUtc, DataValue, DiagnosticBits, MonitoredItemCreateResult,
+    CreateSubscriptionRequest, DataValue, DateTimeUtc, DiagnosticBits, MonitoredItemCreateResult,
     MonitoredItemModifyRequest, MonitoringMode, NodeId, RepublishRequest, SetPublishingModeRequest,
     StatusCode, TimestampsToReturn,
 };
-use crate::node_manager::MonitoredItemUpdateRef;
-#[cfg(all(feature = "generated-address-space", feature = "diagnostics"))]
-use opcua_types::SubscriptionDiagnosticsDataType;
 
 use crate::{
-    info::ServerInfo,
-    node_manager::MonitoredItemRef,
-    subscriptions::subscription::Subscription,
+    info::ServerInfo, node_manager::MonitoredItemRef, subscriptions::subscription::Subscription,
 };
 use opcua_core::RepublishResponseShared;
 use std::time::{Duration, Instant};
@@ -106,9 +104,7 @@ pub(crate) enum SubscriptionCommand {
         triggering_item_id: u32,
         links_to_add: Vec<u32>,
         links_to_remove: Vec<u32>,
-        response: oneshot::Sender<
-            Result<(Vec<StatusCode>, Vec<StatusCode>), StatusCode>,
-        >,
+        response: oneshot::Sender<Result<(Vec<StatusCode>, Vec<StatusCode>), StatusCode>>,
     },
 
     // Read-only queries
@@ -273,10 +269,7 @@ impl SubscriptionActorHandle {
     ) -> Result<Result<opcua_types::SetPublishingModeResponse, StatusCode>, ()> {
         let (response, recv) = oneshot::channel();
         self.commands
-            .send(SubscriptionCommand::SetPublishingModeRq {
-                request,
-                response,
-            })
+            .send(SubscriptionCommand::SetPublishingModeRq { request, response })
             .map_err(|_| ())?;
         recv.await.map_err(|_| ())
     }
@@ -287,10 +280,7 @@ impl SubscriptionActorHandle {
     ) -> Result<Result<RepublishResponseShared, StatusCode>, ()> {
         let (response, recv) = oneshot::channel();
         self.commands
-            .send(SubscriptionCommand::RepublishRq {
-                request,
-                response,
-            })
+            .send(SubscriptionCommand::RepublishRq { request, response })
             .map_err(|_| ())?;
         recv.await.map_err(|_| ())
     }
@@ -421,16 +411,10 @@ impl SubscriptionActorHandle {
         recv.await.map_err(|_| ())
     }
 
-    pub(crate) async fn monitored_item_count(
-        &self,
-        sub_id: u32,
-    ) -> Result<Option<usize>, ()> {
+    pub(crate) async fn monitored_item_count(&self, sub_id: u32) -> Result<Option<usize>, ()> {
         let (response, recv) = oneshot::channel();
         self.commands
-            .send(SubscriptionCommand::MonitoredItemCount {
-                sub_id,
-                response,
-            })
+            .send(SubscriptionCommand::MonitoredItemCount { sub_id, response })
             .map_err(|_| ())?;
         recv.await.map_err(|_| ())
     }
@@ -457,10 +441,7 @@ impl SubscriptionActorHandle {
     ) -> Result<Option<Vec<u32>>, ()> {
         let (response, recv) = oneshot::channel();
         self.commands
-            .send(SubscriptionCommand::AvailableSequenceNumbers {
-                sub_id,
-                response,
-            })
+            .send(SubscriptionCommand::AvailableSequenceNumbers { sub_id, response })
             .map_err(|_| ())?;
         recv.await.map_err(|_| ())
     }
@@ -500,10 +481,7 @@ impl SubscriptionActorHandle {
     ) -> Result<(), ()> {
         let (response, recv) = oneshot::channel();
         self.commands
-            .send(SubscriptionCommand::ApplyRevalidatedValues {
-                values,
-                response,
-            })
+            .send(SubscriptionCommand::ApplyRevalidatedValues { values, response })
             .map_err(|_| ())?;
         recv.await.map_err(|_| ())
     }
@@ -514,10 +492,7 @@ impl SubscriptionActorHandle {
     ) -> Result<Result<(), StatusCode>, ()> {
         let (response, recv) = oneshot::channel();
         self.commands
-            .send(SubscriptionCommand::MarkTransferring {
-                sub_id,
-                response,
-            })
+            .send(SubscriptionCommand::MarkTransferring { sub_id, response })
             .map_err(|_| ())?;
         recv.await.map_err(|_| ())
     }
@@ -528,10 +503,7 @@ impl SubscriptionActorHandle {
     ) -> Result<Option<(Subscription, Vec<NonAckedPublish>)>, ()> {
         let (response, recv) = oneshot::channel();
         self.commands
-            .send(SubscriptionCommand::CloneForTransfer {
-                sub_id,
-                response,
-            })
+            .send(SubscriptionCommand::CloneForTransfer { sub_id, response })
             .map_err(|_| ())?;
         recv.await.map_err(|_| ())
     }
@@ -556,10 +528,7 @@ impl SubscriptionActorHandle {
         recv.await.map_err(|_| ())
     }
 
-    pub(crate) async fn user_token_matches(
-        &self,
-        key: PersistentSessionKey,
-    ) -> Result<bool, ()> {
+    pub(crate) async fn user_token_matches(&self, key: PersistentSessionKey) -> Result<bool, ()> {
         let (response, recv) = oneshot::channel();
         self.commands
             .send(SubscriptionCommand::UserTokenMatches { key, response })
@@ -578,10 +547,7 @@ impl SubscriptionActorHandle {
         recv.await.map_err(|_| ())
     }
 
-    pub(crate) async fn resend_data(
-        &self,
-        sub_id: u32,
-    ) -> Result<Result<(), StatusCode>, ()> {
+    pub(crate) async fn resend_data(&self, sub_id: u32) -> Result<Result<(), StatusCode>, ()> {
         let (response, recv) = oneshot::channel();
         self.commands
             .send(SubscriptionCommand::ResendData { sub_id, response })

@@ -236,7 +236,7 @@ impl SessionSubscriptions {
         }
     }
 
-    pub(super) fn remove(
+    #[allow(dead_code)] pub(super) fn remove(
         &mut self,
         subscription_id: u32,
     ) -> (Option<Subscription>, Vec<NonAckedPublish>) {
@@ -824,7 +824,7 @@ impl SessionSubscriptions {
     /// Queue a StatusChangeNotification to be delivered to this session on the next
     /// available publish request. Used when a subscription is transferred away
     /// (Part 4 §5.14.7.1).
-    pub(super) fn queue_status_change(
+    #[allow(dead_code)] pub(super) fn queue_status_change(
         &mut self,
         subscription_id: u32,
         sequence_number: u32,

@@ -747,7 +747,9 @@ impl ServerInfo {
         {
             let certs = self.endpoint_certificates.read();
             let any_cert_valid = certs.values().any(|entry| {
-                entry.as_ref().is_some_and(|(cert, _)| cert.is_hostname_valid(&hostname).is_ok())
+                entry
+                    .as_ref()
+                    .is_some_and(|(cert, _)| cert.is_hostname_valid(&hostname).is_ok())
             });
             if any_cert_valid {
                 return Ok(());
@@ -915,7 +917,10 @@ impl ServerInfo {
     }
 
     /// Get the server certificate for a specific endpoint as a byte string.
-    pub fn server_certificate_as_byte_string(&self, endpoint_id: &EndpointIdentifier) -> ByteString {
+    pub fn server_certificate_as_byte_string(
+        &self,
+        endpoint_id: &EndpointIdentifier,
+    ) -> ByteString {
         let certs = self.endpoint_certificates.read();
         if let Some(Some((ref server_certificate, _))) = certs.get(endpoint_id) {
             server_certificate.as_byte_string()
@@ -1024,7 +1029,11 @@ impl ServerInfo {
                     // across the await below.
                     let server_cert = {
                         let certs = self.endpoint_certificates.read();
-                        certs.get(&EndpointIdentifier::from(endpoint)).cloned().flatten().map(|(cert, _)| cert)
+                        certs
+                            .get(&EndpointIdentifier::from(endpoint))
+                            .cloned()
+                            .flatten()
+                            .map(|(cert, _)| cert)
                     };
                     self.authenticate_x509_identity_token(
                         endpoint,
@@ -1690,7 +1699,11 @@ mod tests {
         .expect("test certificate should be generated");
         {
             let mut certs = handle.info().endpoint_certificates.write();
-            let ep = crate::config::EndpointIdentifier { path: "/".into(), security_policy: "None".into(), security_mode: "None".into() };
+            let ep = crate::config::EndpointIdentifier {
+                path: "/".into(),
+                security_policy: "None".into(),
+                security_mode: "None".into(),
+            };
             certs.insert(ep, Some(cert));
         }
 

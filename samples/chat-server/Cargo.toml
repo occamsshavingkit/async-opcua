@@ -12,3 +12,8 @@ tokio = { workspace = true }
 [dependencies.async-opcua]
 path = "../../async-opcua"
 features = ["server"]
+
+[features]
+default = ["json", "xml"]
+json = ["async-opcua/json"]
+xml = ["async-opcua/xml"]

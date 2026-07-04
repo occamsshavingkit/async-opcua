@@ -31,9 +31,7 @@ use super::{
     x509::{X509Data, X509},
 };
 
-use super::ocsp::{
-    self, CertStatusResult, CacheKey, OcspError, OcspFetchConfig, OcspFetchPolicy,
-};
+use super::ocsp::{self, CacheKey, OcspError, OcspFetchConfig, OcspFetchPolicy};
 
 /// Default path to the applications own certificate
 const OWN_CERTIFICATE_PATH: &str = "own/cert.der";
@@ -523,8 +521,7 @@ impl CertificateStore {
         let mut fetched_ocsp = Vec::new();
         if let Some(ref config) = self.ocsp_fetch_config {
             if config.policy != OcspFetchPolicy::Off {
-                let result =
-                    self.fetch_ocsp_for_cert(cert, config, &trusted, &issuers, &now);
+                let result = self.fetch_ocsp_for_cert(cert, config, &trusted, &issuers, &now);
                 match (&config.policy, result) {
                     (OcspFetchPolicy::Strict, Err(e)) => {
                         warn!(
@@ -534,10 +531,7 @@ impl CertificateStore {
                         let _ = self.store_rejected_cert(cert);
                         return Err(Error::new(
                             StatusCode::BadCertificateRevoked,
-                            format!(
-                                "Certificate {} OCSP check failed: {e}",
-                                cert_file_name
-                            ),
+                            format!("Certificate {} OCSP check failed: {e}", cert_file_name),
                         ));
                     }
                     (_, Ok(Some(ocsp_der))) => {
@@ -588,8 +582,7 @@ impl CertificateStore {
         }
 
         let request_der = ocsp::codec::build_ocsp_request(cert, issuer)?;
-        let response_der =
-            ocsp::fetch::fetch_ocsp_response(&url, &request_der, config)?;
+        let response_der = ocsp::fetch::fetch_ocsp_response(&url, &request_der, config)?;
 
         let issuer_pk = issuer
             .public_key()
@@ -1107,10 +1100,7 @@ fn find_issuer_for_cert<'a>(
         .find(|candidate| candidate.subject_name() == cert.issuer_name())
 }
 
-fn compute_next_update(
-    response_der: &[u8],
-    now: &chrono::DateTime<chrono::Utc>,
-) -> SystemTime {
+fn compute_next_update(response_der: &[u8], now: &chrono::DateTime<chrono::Utc>) -> SystemTime {
     use x509_ocsp::{BasicOcspResponse, OcspResponse, OcspResponseStatus};
 
     let now_sys: SystemTime = (*now).into();

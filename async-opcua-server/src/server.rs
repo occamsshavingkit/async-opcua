@@ -22,7 +22,9 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 
 use opcua_core::{config::Config, handle::AtomicHandle};
-use opcua_crypto::{CertificateStore, PrivateKey, RevocationMode, SecurityPolicy, ValidationOptions, X509};
+use opcua_crypto::{
+    CertificateStore, PrivateKey, RevocationMode, SecurityPolicy, ValidationOptions, X509,
+};
 
 #[cfg(feature = "diagnostics")]
 use crate::diagnostics::ServerDiagnostics;
@@ -47,7 +49,7 @@ use super::subscriptions::SubscriptionCache;
 use super::{
     authenticator::DefaultAuthenticator,
     builder::ServerBuilder,
-    config::{EndpointIdentifier, ServerConfig, ServerEndpoint, TcpKeepaliveConfig},
+    config::{EndpointIdentifier, ServerConfig, TcpKeepaliveConfig},
     info::ServerInfo,
     node_manager::{NodeManagers, NodeManagersRef},
     server_handle::ServerHandle,
@@ -385,7 +387,7 @@ impl Server {
         // compatible certificates
         for (_name, endpoint) in &config.endpoints {
             let security_policy = endpoint.security_policy();
-            let security_mode = endpoint.message_security_mode();
+            let _security_mode = endpoint.message_security_mode();
 
             if security_policy == SecurityPolicy::None {
                 continue;

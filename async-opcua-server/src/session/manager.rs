@@ -363,7 +363,9 @@ impl CreateSessionActorConstruction {
         let authentication_token = NodeId::new(0, random::byte_string(32));
         let server_nonce = random::byte_string(info.config.session_nonce_length);
         let server_certificate = {
-            let path = request.endpoint_url.as_ref()
+            let path = request
+                .endpoint_url
+                .as_ref()
                 .trim_end_matches('/')
                 .rsplit_once('/')
                 .map(|(_, path)| path)
@@ -787,7 +789,9 @@ impl SessionManager {
         if let Some(client_certificate) = session.client_certificate() {
             let server_cert = {
                 let certs = info.endpoint_certificates.read();
-                certs.values().find_map(|v| v.as_ref().map(|(cert, _)| cert.clone()))
+                certs
+                    .values()
+                    .find_map(|v| v.as_ref().map(|(cert, _)| cert.clone()))
             };
             if let Some(ref server_certificate) = server_cert {
                 opcua_crypto::verify_signature_data(
@@ -1983,7 +1987,11 @@ mod tests {
             let (server_cert, server_key) = make_cert_and_key("x509-state-cleanup-server");
             {
                 let mut certs = handle.info().endpoint_certificates.write();
-                let ep = crate::config::EndpointIdentifier { path: "/".into(), security_policy: "None".into(), security_mode: "None".into() };
+                let ep = crate::config::EndpointIdentifier {
+                    path: "/".into(),
+                    security_policy: "None".into(),
+                    security_mode: "None".into(),
+                };
                 certs.insert(ep, Some((server_cert, server_key)));
             }
 
@@ -2046,7 +2054,11 @@ mod tests {
             let (server_cert, server_key) = make_cert_and_key("security-mode-server");
             {
                 let mut certs = handle.info().endpoint_certificates.write();
-                let ep = crate::config::EndpointIdentifier { path: "/".into(), security_policy: "None".into(), security_mode: "None".into() };
+                let ep = crate::config::EndpointIdentifier {
+                    path: "/".into(),
+                    security_policy: "None".into(),
+                    security_mode: "None".into(),
+                };
                 certs.insert(ep, Some((server_cert, server_key)));
             }
 

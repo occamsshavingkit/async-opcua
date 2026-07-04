@@ -3,7 +3,6 @@ use der::{Decode, Encode};
 use tracing::trace;
 use x509_ocsp::{BasicOcspResponse, CertStatus, OcspResponse, OcspResponseStatus};
 
-use crate::x509::X509;
 use crate::PublicKey;
 
 use super::config::{CertStatusResult, OcspError};
@@ -24,9 +23,9 @@ pub fn validate_ocsp_response(
         )));
     }
 
-    let response_bytes = response.response_bytes.ok_or_else(|| {
-        OcspError::InvalidResponse("OCSP response has no responseBytes".into())
-    })?;
+    let response_bytes = response
+        .response_bytes
+        .ok_or_else(|| OcspError::InvalidResponse("OCSP response has no responseBytes".into()))?;
 
     if response_bytes.response_type != const_oid::db::rfc6960::ID_PKIX_OCSP_BASIC {
         return Err(OcspError::InvalidResponse(
@@ -78,9 +77,7 @@ fn verify_ocsp_signature(
 
     let algorithm_oid = basic.signature_algorithm.oid;
 
-    let verified = if algorithm_oid
-        == const_oid::db::rfc5912::SHA_256_WITH_RSA_ENCRYPTION
-    {
+    let verified = if algorithm_oid == const_oid::db::rfc5912::SHA_256_WITH_RSA_ENCRYPTION {
         issuer_public_key
             .verify_sha256(&tbs, signature)
             .is_ok_and(|ok| ok)
@@ -97,11 +94,9 @@ fn verify_ocsp_signature(
     {
         #[cfg(feature = "ecc")]
         {
-            issuer_public_key
-                .ecc_key()
-                .is_some_and(|ecc_key| {
-                    crate::ecc::ecdsa_verify_der(ecc_key, &tbs, signature).is_ok()
-                })
+            issuer_public_key.ecc_key().is_some_and(|ecc_key| {
+                crate::ecc::ecdsa_verify_der(ecc_key, &tbs, signature).is_ok()
+            })
         }
         #[cfg(not(feature = "ecc"))]
         {

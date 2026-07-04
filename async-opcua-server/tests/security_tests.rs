@@ -1293,9 +1293,11 @@ impl X509UserFixture {
         let server_cert = self
             .handle
             .info()
-            .server_certificate
+            .endpoint_certificates
             .read()
-            .clone()
+            .values()
+            .find_map(|v| v.as_ref().map(|(cert, _)| cert))
+            .cloned()
             .expect("test server should have a certificate");
         let signature = create_signature_data(
             private_key,

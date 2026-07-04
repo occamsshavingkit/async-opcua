@@ -332,7 +332,7 @@ impl Server {
             HashMap::new();
         let server_pkey = RwLock::new(global_pkey.clone());
 
-        for (_name, endpoint) in &config.endpoints {
+        for endpoint in config.endpoints.values() {
             let endpoint_id = EndpointIdentifier::from(endpoint);
             if endpoint_certificates.contains_key(&endpoint_id) {
                 continue;
@@ -374,9 +374,13 @@ impl Server {
                     Some((cert, key))
                 }
                 _ => {
-                    // No certificate configured for this endpoint — will be
-                    // caught by startup validation below if the policy needs one
-                    None
+                    // No endpoint-specific certificate configured — fall back
+                    // to server-level global cert (auto-generated when
+                    // create_sample_keypair is true).
+                    match (global_cert.as_ref(), global_pkey.as_ref()) {
+                        (Some(cert), Some(key)) => Some((cert.clone(), key.clone())),
+                        _ => None,
+                    }
                 }
             };
 
@@ -385,7 +389,7 @@ impl Server {
 
         // T020: Startup validation — ensure all security-policy endpoints have
         // compatible certificates
-        for (_name, endpoint) in &config.endpoints {
+        for endpoint in config.endpoints.values() {
             let security_policy = endpoint.security_policy();
             let _security_mode = endpoint.message_security_mode();
 
@@ -406,22 +410,21 @@ impl Server {
                         endpoint.security_policy
                     );
                 }
+                #[allow(unused_variables)]
                 Some((cert, _key)) => {
-                    // Validate cert key type is compatible with the policy
-                    let cert_is_ecc = cert
-                        .public_key()
-                        .ok()
-                        .and_then(|pk| {
-                            #[cfg(feature = "ecc")]
-                            {
-                                pk.ecc_curve()
-                            }
-                            #[cfg(not(feature = "ecc"))]
-                            {
-                                None
-                            }
-                        })
-                        .is_some();
+                    let cert_is_ecc = {
+                        #[cfg(feature = "ecc")]
+                        {
+                            cert.public_key()
+                                .ok()
+                                .and_then(|pk| pk.ecc_curve())
+                                .is_some()
+                        }
+                        #[cfg(not(feature = "ecc"))]
+                        {
+                            false
+                        }
+                    };
                     let policy_is_ecc = security_policy.is_ecc();
                     if cert_is_ecc != policy_is_ecc {
                         let cert_type = if cert_is_ecc { "EC" } else { "RSA" };

@@ -258,9 +258,11 @@ async fn x509_identity_rejected_when_endpoint_does_not_support_x509() {
     let server_cert = tester
         .handle
         .info()
-        .server_certificate
+        .endpoint_certificates
         .read()
-        .clone()
+        .values()
+        .find_map(|v| v.as_ref().map(|(cert, _)| cert))
+        .cloned()
         .expect("test server should have a certificate");
     let nonce = ByteString::from(b"unsupported-x509-endpoint".as_slice());
     let user_token_signature = create_signature_data(

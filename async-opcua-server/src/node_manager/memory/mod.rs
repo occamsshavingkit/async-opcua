@@ -18,6 +18,7 @@ use tracing::warn;
 
 use std::{
     collections::{HashSet, VecDeque},
+    ops::Deref,
     sync::Arc,
 };
 
@@ -46,8 +47,8 @@ use opcua_types::argument::Argument;
 use opcua_types::DataEncoding;
 use opcua_types::{
     AccessRestrictionType, AttributeId, BrowseDescriptionResultMask, BrowseDirection,
-    ExpandedNodeId, NodeClass, NodeId, PermissionType, ReferenceDescription, ReferenceTypeId,
-    RolePermissionType, StatusCode, TimestampsToReturn,
+    ExpandedNodeId, NodeClass, NodeId, PermissionType, QualifiedName, ReferenceDescription,
+    ReferenceTypeId, RolePermissionType, StatusCode, TimestampsToReturn,
 };
 #[cfg(feature = "subscriptions")]
 use opcua_types::{DataValue, DateTime, MonitoringMode};
@@ -467,6 +468,8 @@ impl<TImpl: InMemoryNodeManagerImpl> InMemoryNodeManager<TImpl> {
         let mut next_matching_nodes = HashSet::new();
         let mut results = Vec::new();
 
+        let index = address_space.browse_name_index();
+
         let mut depth = 0;
         for element in item.path() {
             depth += 1;
@@ -479,33 +482,71 @@ impl<TImpl: InMemoryNodeManagerImpl> InMemoryNodeManager<TImpl> {
                     }
                 };
 
-                for rf in address_space.find_references(
-                    node_id,
-                    reference_filter,
-                    type_tree,
-                    if element.is_inverse {
-                        BrowseDirection::Inverse
-                    } else {
-                        BrowseDirection::Forward
-                    },
-                ) {
-                    if !next_matching_nodes.contains(rf.target_node) {
-                        let Some(node) = address_space.find_node(rf.target_node) else {
-                            if !namespaces.contains_key(&rf.target_node.namespace) {
-                                results.push((
-                                    rf.target_node,
-                                    depth,
-                                    Some(element.target_name.clone()),
-                                ));
-                            }
-                            continue;
-                        };
-
-                        if element.target_name.is_null()
-                            || node.as_node().browse_name() == &element.target_name
-                        {
+                if element.target_name.is_null() {
+                    for rf in address_space.find_references(
+                        node_id,
+                        reference_filter,
+                        type_tree,
+                        if element.is_inverse {
+                            BrowseDirection::Inverse
+                        } else {
+                            BrowseDirection::Forward
+                        },
+                    ) {
+                        if !next_matching_nodes.contains(rf.target_node) {
+                            let Some(_node) = address_space.find_node(rf.target_node) else {
+                                if !namespaces.contains_key(&rf.target_node.namespace) {
+                                    results.push((
+                                        rf.target_node,
+                                        depth,
+                                        Some(QualifiedName::null()),
+                                    ));
+                                }
+                                continue;
+                            };
                             next_matching_nodes.insert(rf.target_node);
                             results.push((rf.target_node, depth, None));
+                        }
+                    }
+                    continue;
+                }
+
+                if element.is_inverse || reference_filter.is_some() {
+                    for rf in address_space.find_references(
+                        node_id,
+                        reference_filter,
+                        type_tree,
+                        if element.is_inverse {
+                            BrowseDirection::Inverse
+                        } else {
+                            BrowseDirection::Forward
+                        },
+                    ) {
+                        if !next_matching_nodes.contains(rf.target_node) {
+                            let Some(node) = address_space.find_node(rf.target_node) else {
+                                if !namespaces.contains_key(&rf.target_node.namespace) {
+                                    results.push((
+                                        rf.target_node,
+                                        depth,
+                                        Some(element.target_name.clone()),
+                                    ));
+                                }
+                                continue;
+                            };
+
+                            if node.as_node().browse_name() == &element.target_name {
+                                next_matching_nodes.insert(rf.target_node);
+                                results.push((rf.target_node, depth, None));
+                            }
+                        }
+                    }
+                } else if let Some(candidates) =
+                    index.get(&(node_id.clone(), element.target_name.clone()))
+                {
+                    for target_id in candidates {
+                        if !next_matching_nodes.contains(target_id) {
+                            next_matching_nodes.insert(target_id);
+                            results.push((target_id, depth, None));
                         }
                     }
                 }
@@ -689,7 +730,7 @@ impl<TImpl: InMemoryNodeManagerImpl> InMemoryNodeManager<TImpl> {
             let input_arguments = address_space.find_node_by_browse_name(
                 method.method_id(),
                 Some((ReferenceTypeId::HasProperty, false)),
-                &*type_tree,
+                type_tree.deref(),
                 BrowseDirection::Forward,
                 "InputArguments",
             );
@@ -793,6 +834,7 @@ impl<TImpl: InMemoryNodeManagerImpl> NodeManagerCore for InMemoryNodeManager<TIm
         self.inner.init(&mut address_space, context).await;
 
         address_space.load_into_type_tree(type_tree);
+        address_space.ensure_browse_name_index(type_tree);
         info.publish_type_tree_snapshot(type_tree);
     }
 
@@ -887,7 +929,7 @@ impl<TImpl: InMemoryNodeManagerImpl> ViewProvider for InMemoryNodeManager<TImpl>
 
             item.set(Self::get_reference(
                 &address_space,
-                &type_tree,
+                type_tree.deref(),
                 &target_node,
                 item.result_mask(),
             ));
@@ -936,13 +978,14 @@ impl<TImpl: InMemoryNodeManagerImpl> ViewProvider for InMemoryNodeManager<TImpl>
         context: &RequestContext,
         nodes: &mut [&mut BrowsePathItem],
     ) -> Result<(), StatusCode> {
-        let address_space = trace_read_lock!(self.address_space);
+        let mut address_space = trace_write_lock!(self.address_space);
         let type_tree = trace_read_lock!(context.type_tree);
+        address_space.ensure_browse_name_index(type_tree.deref());
 
         for node in nodes {
             Self::translate_browse_paths(
                 &address_space,
-                &type_tree,
+                type_tree.deref(),
                 context,
                 &self.namespaces,
                 node,
@@ -1307,9 +1350,14 @@ impl<TImpl: InMemoryNodeManagerImpl> NodeMutator for InMemoryNodeManager<TImpl> 
         context: &RequestContext,
         nodes_to_add: &mut [&mut AddNodeItem],
     ) -> Result<(), StatusCode> {
-        self.inner
+        let res = self
+            .inner
             .add_nodes(context, &self.address_space, nodes_to_add)
-            .await
+            .await;
+        if res.is_ok() {
+            trace_write_lock!(self.address_space).invalidate_browse_name_index();
+        }
+        res
     }
 
     #[cfg(feature = "node-management")]
@@ -1318,9 +1366,14 @@ impl<TImpl: InMemoryNodeManagerImpl> NodeMutator for InMemoryNodeManager<TImpl> 
         context: &RequestContext,
         references_to_add: &mut [&mut AddReferenceItem],
     ) -> Result<(), StatusCode> {
-        self.inner
+        let res = self
+            .inner
             .add_references(context, &self.address_space, references_to_add)
-            .await
+            .await;
+        if res.is_ok() {
+            trace_write_lock!(self.address_space).invalidate_browse_name_index();
+        }
+        res
     }
 
     #[cfg(feature = "node-management")]
@@ -1329,9 +1382,14 @@ impl<TImpl: InMemoryNodeManagerImpl> NodeMutator for InMemoryNodeManager<TImpl> 
         context: &RequestContext,
         nodes_to_delete: &mut [&mut DeleteNodeItem],
     ) -> Result<(), StatusCode> {
-        self.inner
+        let res = self
+            .inner
             .delete_nodes(context, &self.address_space, nodes_to_delete)
-            .await
+            .await;
+        if res.is_ok() {
+            trace_write_lock!(self.address_space).invalidate_browse_name_index();
+        }
+        res
     }
 
     #[cfg(feature = "node-management")]
@@ -1342,7 +1400,8 @@ impl<TImpl: InMemoryNodeManagerImpl> NodeMutator for InMemoryNodeManager<TImpl> 
     ) {
         self.inner
             .delete_node_references(context, &self.address_space, to_delete)
-            .await
+            .await;
+        trace_write_lock!(self.address_space).invalidate_browse_name_index();
     }
 
     #[cfg(feature = "node-management")]
@@ -1351,9 +1410,14 @@ impl<TImpl: InMemoryNodeManagerImpl> NodeMutator for InMemoryNodeManager<TImpl> 
         context: &RequestContext,
         references_to_delete: &mut [&mut DeleteReferenceItem],
     ) -> Result<(), StatusCode> {
-        self.inner
+        let res = self
+            .inner
             .delete_references(context, &self.address_space, references_to_delete)
-            .await
+            .await;
+        if res.is_ok() {
+            trace_write_lock!(self.address_space).invalidate_browse_name_index();
+        }
+        res
     }
 }
 

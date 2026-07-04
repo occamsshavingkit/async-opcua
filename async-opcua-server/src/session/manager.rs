@@ -1,6 +1,9 @@
 use std::{
     collections::HashMap,
-    sync::{atomic::Ordering, Arc},
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
     time::{Duration, Instant},
 };
 
@@ -515,6 +518,9 @@ pub struct SessionManager {
     closed_auth_tokens: Arc<DashMap<NodeId, Instant>>,
     info: Arc<ServerInfo>,
     notify: Arc<Notify>,
+    /// Per-secure-channel count of unactivated sessions (OPC 10000-4 §5.7.2).
+    /// Replaces the O(sessions) linear scan in CreateSession.
+    unactivated_by_channel: HashMap<u32, AtomicUsize>,
 }
 
 impl SessionManager {
@@ -525,6 +531,7 @@ impl SessionManager {
             auth_tokens: Default::default(),
             actor_senders: Default::default(),
             closed_auth_tokens: Default::default(),
+            unactivated_by_channel: HashMap::new(),
             info,
             notify,
         }
@@ -700,13 +707,10 @@ impl SessionManager {
             return Err(StatusCode::BadTooManySessions);
         }
         let unactivated_count = self
-            .sessions
-            .values()
-            .filter(|session| {
-                let session = trace_read_lock!(session);
-                session.secure_channel_id() == draft.secure_channel_id && !session.is_activated()
-            })
-            .count();
+            .unactivated_by_channel
+            .entry(draft.secure_channel_id)
+            .or_default()
+            .load(Ordering::Acquire);
         if unactivated_count >= self.info.config.limits.max_unactivated_sessions_per_channel {
             return Err(StatusCode::BadTooManySessions);
         }
@@ -734,6 +738,10 @@ impl SessionManager {
 
         info!("Created new session with ID {}", session_id);
         self.sessions.insert(session_id, Arc::clone(&session_arc));
+        self.unactivated_by_channel
+            .entry(draft.secure_channel_id)
+            .or_default()
+            .fetch_add(1, Ordering::Release);
         self.register_token(authentication_token.clone(), Arc::clone(&session_arc));
         self.spawn_session_actor(
             authentication_token,
@@ -793,6 +801,17 @@ impl SessionManager {
         let Some(session) = self.sessions.remove(id) else {
             return;
         };
+        {
+            let session = trace_read_lock!(&session);
+            if !session.is_activated() {
+                if let Some(counter) = self
+                    .unactivated_by_channel
+                    .get(&session.secure_channel_id())
+                {
+                    counter.fetch_sub(1, Ordering::Release);
+                }
+            }
+        }
         #[cfg(feature = "diagnostics")]
         {
             self.info
@@ -917,6 +936,15 @@ pub(crate) async fn close_session(
         .map_err(|_| StatusCode::BadSessionClosed)?;
     {
         let mut mgr = trace_write_lock!(mgr_lck);
+        {
+            let session = trace_read_lock!(&session);
+            if !session.is_activated() {
+                if let Some(counter) = mgr.unactivated_by_channel.get(&session.secure_channel_id())
+                {
+                    counter.fetch_sub(1, Ordering::Release);
+                }
+            }
+        }
         mgr.sessions.remove(&terminated.session_id);
         clear_session_locale_ids(&mgr.info, id);
         #[cfg(feature = "diagnostics")]
@@ -1194,6 +1222,7 @@ pub(crate) async fn activate_session(
             "session-activation",
         );
         let locale_ids = request.locale_ids.clone();
+        let was_unactivated = !session.is_activated();
         session.activate(
             secure_channel_id,
             server_nonce,
@@ -1203,6 +1232,12 @@ pub(crate) async fn activate_session(
             claims,
             roles,
         );
+        if was_unactivated {
+            let mgr = trace_read_lock!(mgr_lck);
+            if let Some(counter) = mgr.unactivated_by_channel.get(&previous_secure_channel_id) {
+                counter.fetch_sub(1, Ordering::Release);
+            }
+        }
         set_session_locale_ids(&info, session.session_id_numeric(), &locale_ids);
         (
             session.session_nonce().clone(),

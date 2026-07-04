@@ -32,6 +32,7 @@ pub struct AddressSpace {
     node_map: NodeMap,
     namespaces: HashMap<u16, String>,
     references: References,
+    browse_name_index: Option<HashMap<(NodeId, QualifiedName), Vec<NodeId>>>,
 }
 
 impl AddressSpace {
@@ -41,6 +42,7 @@ impl AddressSpace {
             node_map: NodeMap::new(),
             namespaces: HashMap::new(),
             references: References::new(),
+            browse_name_index: None,
         }
     }
 
@@ -301,6 +303,54 @@ impl AddressSpace {
     ) -> impl Iterator<Item = ReferenceRef<'a>> + 'b {
         self.references
             .find_references(source_node, filter, type_tree, direction)
+    }
+
+    /// Build or rebuild the `(parent NodeId, BrowseName) → [child NodeId]` index
+    /// for O(1) TranslateBrowsePathsToNodeIds resolution per OPC 10000-3 §5.2.4.
+    pub fn build_browse_name_index(&mut self, type_tree: &dyn TypeTree) {
+        let mut index: HashMap<(NodeId, QualifiedName), Vec<NodeId>> = HashMap::new();
+        for node_ref in self.node_map.iter() {
+            let source_id = node_ref.key().clone();
+            for rf in self.references.find_references(
+                &source_id,
+                None::<(ReferenceTypeId, bool)>,
+                type_tree,
+                BrowseDirection::Forward,
+            ) {
+                if rf.target_node.is_null() {
+                    continue;
+                }
+                let target_browse_name = if let Some(target) = self.node_map.get(rf.target_node) {
+                    target.as_node().browse_name().clone()
+                } else {
+                    continue;
+                };
+                index
+                    .entry((source_id.clone(), target_browse_name))
+                    .or_default()
+                    .push(rf.target_node.clone());
+            }
+        }
+        self.browse_name_index = Some(index);
+    }
+
+    /// Return a reference to the browse-name index, building it first if needed.
+    pub fn ensure_browse_name_index(&mut self, type_tree: &dyn TypeTree) {
+        if self.browse_name_index.is_none() {
+            self.build_browse_name_index(type_tree);
+        }
+    }
+
+    /// Return a reference to the browse-name index. Panics if not yet built.
+    pub fn browse_name_index(&self) -> &HashMap<(NodeId, QualifiedName), Vec<NodeId>> {
+        self.browse_name_index
+            .as_ref()
+            .expect("browse_name_index not built")
+    }
+
+    /// Invalidate the browse-name index so it is rebuilt on next access.
+    pub fn invalidate_browse_name_index(&mut self) {
+        self.browse_name_index = None;
     }
 
     /// Find a child of `source_node` matching the given `filter` with

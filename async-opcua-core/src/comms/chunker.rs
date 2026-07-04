@@ -4,7 +4,10 @@
 
 //! Contains code for turning messages into chunks and chunks into messages.
 
-use std::io::{Read, Write};
+use std::{
+    io::{Read, Write},
+    sync::Mutex,
+};
 
 use crate::{
     comms::{
@@ -258,7 +261,10 @@ impl<'a, 'b> ChunkingStream<'a, 'b> {
     fn emit_chunk(&mut self) {
         let chunk_len = self.header_size + self.current_body_target;
         let data = self.storage.split_to(chunk_len).freeze();
-        self.out.push(MessageChunk { data });
+        self.out.push(MessageChunk {
+            data,
+            cached_chunk_info: Mutex::new(None),
+        });
         self.chunks_emitted += 1;
         self.chunk_started = false;
         if self.chunks_emitted == self.expected_chunk_count {

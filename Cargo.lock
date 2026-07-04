@@ -639,6 +639,7 @@ dependencies = [
  "async-opcua-xml",
  "bitflags 2.11.0",
  "hashbrown 0.15.5",
+ "moka",
  "regex",
  "thiserror 2.0.18",
  "tracing",

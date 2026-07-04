@@ -63,7 +63,7 @@
 - [ ] T014 [US1] Wire OCSP fetch into `CertificateStore::validate_certificate_chain` in `async-opcua-crypto/src/certificate_store.rs`. After the existing CRL check, if `ocsp_fetch_config` is Some and policy != Off: for each certificate in the chain, extract AIA URL (T009), check cache (T012), on miss fetch (T010), validate response (T011), cache result. On Strict: fail on error/unknown/revoked. On Soft: fail only on revoked, else fall through to CRL. Per FR-003, FR-004 and OPC UA Part 4 §6.1.3. Depends on T010, T011, T012, T013.
 
 - [ ] T015 [US1] Verify `cargo test -p async-opcua-crypto --lib` — all crypto tests pass with OCSP integration
-- [ ] T016 [US1] Verify `cargo test -p async-opcua-server --lib` — OCSP integration does not break existing cert validation tests
+- [ ] T016 [US1] Verify `cargo test -p async-opcua-server --lib` — OCSP integration does not break existing cert validation tests. Per SC-001.
 
 **Checkpoint**: US1 complete — live OCSP fetching with three-mode policy, backward compatible default.
 
@@ -97,7 +97,7 @@
 
 - [ ] T026 [US2] Update WSS (opc.wss) transport in `async-opcua-server/src/transport/tcp.rs` (or equivalent WSS path): ensure the per-endpoint certificate resolution works identically for WebSocket connections. The transport layer reads the `EndpointIdentifier` and looks up in `endpoint_certificates` — same as opc.tcp. Per OPC UA Part 4 §5.5.4.1 (cert selection is per-endpoint, transport-agnostic). FR-011. Depends on T021, T022.
 
-- [ ] T027 [US2] Verify `cargo test -p async-opcua-server --lib` — all 306 tests pass
+- [ ] T027 [US2] Verify `cargo test -p async-opcua-server --lib` — all 306 tests pass. Per SC-002.
 - [ ] T028 [US2] Verify `cargo test -p async-opcua-core --lib` — core tests unaffected
 
 **Checkpoint**: US2 complete — multi-cert mixed server with per-endpoint certs, backward compatible, WSS parity.
@@ -171,7 +171,7 @@
 
 - [ ] T040 [US3] Delete the `LegacyCall` variant from `SubscriptionCommand` enum, delete the `legacy()` method from `SubscriptionActorHandle`, and remove the `LegacyCall` match arm from `run()` — all in `async-opcua-server/src/subscriptions/actor.rs`. Depends on T035–T039 (all call sites migrated).
 
-- [ ] T041 [US3] Verify `cargo test -p async-opcua-server --lib` — all 306 tests pass with identical behavior (FR-015, SC-004)
+- [ ] T041 [US3] Verify `cargo test -p async-opcua-server --lib` — all 306 tests pass with identical behavior (FR-014, FR-015, SC-004)
 - [ ] T042 [US3] Verify `rgrep LegacyCall async-opcua-server/src/` returns zero results (FR-013, SC-003)
 
 **Checkpoint**: US3 complete — LegacyCall removed, all subscription operations statically-typed.
@@ -198,7 +198,7 @@
 
 - [ ] T048 [US4] Add `README.md` to each of the four example server crates. Include: what the example demonstrates, how to run it (`cargo run`), expected browse output, and any CLI arguments. Per FR-021. Depends on T043–T047.
 
-- [ ] T049 [US4] Verify all example crates compile: `cargo check -p samples-chat-server -p samples-chaos-server -p samples-filesystem-bridge -p samples-reverse-bridge`. Then, for each server, start it (`cargo run &`), verify it binds and logs, and confirm the address space is browsable via at least the root Objects folder. Per FR-020, FR-022. Depends on T048.
+- [ ] T049 [US4] Verify all example crates compile: `cargo check -p samples-chat-server -p samples-chaos-server -p samples-filesystem-bridge -p samples-reverse-bridge`. Then, for each server, start it (`cargo run &`), verify it binds and logs, and confirm the address space is browsable via at least the root Objects folder. Per FR-020, FR-022, SC-005. Depends on T048.
 
 **Checkpoint**: US4 complete — four bad ideas servers compile, start, and demonstrate SDK flexibility.
 

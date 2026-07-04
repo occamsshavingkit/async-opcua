@@ -103,12 +103,12 @@
 
 ### Implementation for User Story 4
 
-- [ ] T022 [US4] Add `cached_priority_order: Vec<u32>` and `priority_cache_dirty: bool` fields to the session subscriptions struct in `async-opcua-server/src/subscriptions/session_subscriptions.rs`
-- [ ] T023 [US4] Modify `subscription_ids_by_priority()` in `async-opcua-server/src/subscriptions/session_subscriptions.rs` to: if `priority_cache_dirty`, rebuild by collecting `(id, priority)` from active subscriptions only (exclude `transferring`), sort by `(priority descending, id ascending)` per OPC 10000-4 §5.14.2.2 round-robin requirement, store in `cached_priority_order`, clear dirty flag. On clean cache, return clone of `cached_priority_order`
-- [ ] T024 [P] [US4] Set `priority_cache_dirty = true` in the subscription creation handler in `async-opcua-server/src/subscriptions/session_subscriptions.rs`
-- [ ] T025 [P] [US4] Set `priority_cache_dirty = true` in the subscription deletion handler in `async-opcua-server/src/subscriptions/session_subscriptions.rs`
-- [ ] T026 [P] [US4] Set `priority_cache_dirty = true` in the ModifySubscription handler (when the priority field is present in the request) in `async-opcua-server/src/subscriptions/session_subscriptions.rs`
-- [ ] T027 [US4] Run `cargo test -p async-opcua-server --lib` to verify all subscription and publish tests pass
+- [x] T022 [US4] Add `cached_priority_order: Vec<u32>` and `priority_cache_dirty: bool` fields to the session subscriptions struct in `async-opcua-server/src/subscriptions/session_subscriptions.rs`
+- [x] T023 [US4] Modify `subscription_ids_by_priority()` in `async-opcua-server/src/subscriptions/session_subscriptions.rs` to: if `priority_cache_dirty`, rebuild by collecting `(id, priority)` from active subscriptions only (exclude `transferring`), sort by `(priority descending, id ascending)` per OPC 10000-4 §5.14.2.2 round-robin requirement, store in `cached_priority_order`, clear dirty flag. On clean cache, return clone of `cached_priority_order`
+- [x] T024 [P] [US4] Set `priority_cache_dirty = true` in the subscription creation handler in `async-opcua-server/src/subscriptions/session_subscriptions.rs`
+- [x] T025 [P] [US4] Set `priority_cache_dirty = true` in the subscription deletion handler in `async-opcua-server/src/subscriptions/session_subscriptions.rs`
+- [x] T026 [P] [US4] Set `priority_cache_dirty = true` in the ModifySubscription handler (when the priority field is present in the request) in `async-opcua-server/src/subscriptions/session_subscriptions.rs`
+- [x] T027 [US4] Run `cargo test -p async-opcua-server --lib` to verify all subscription and publish tests pass
 
 **Checkpoint**: Cut 7 complete — subscription priority cached, all subscription tests green.
 
@@ -122,10 +122,10 @@
 
 ### Implementation for User Story 5
 
-- [ ] T028 [US5] Add `cached_chunk_info: Option<ChunkInfo>` field to `MessageChunk` struct in `async-opcua-core/src/comms/message_chunk.rs`
-- [ ] T029 [US5] Modify `chunk_info()` in `async-opcua-core/src/comms/message_chunk.rs` to accept `&mut self` instead of `&self`. On call: if `cached_chunk_info` is `None`, compute and store; return `Ok(cached_chunk_info.as_ref().unwrap())`. Chunk data (self.data) is immutable per OPC 10000-6 §6.7.2.2 header format
-- [ ] T030 [US5] Update callers in `async-opcua-core/src/comms/chunker.rs`: in `validate_chunk_sequence` (line ~353) and `decode<T>` (line ~507), change `chunk.chunk_info(secure_channel)?` calls to use `&mut chunk` access pattern (iterate with mutable reference or index)
-- [ ] T031 [US5] Run `cargo test -p async-opcua-core --lib` to verify all chunker and message decode tests pass
+- [x] T028 [US5] Add `cached_chunk_info: Option<ChunkInfo>` field to `MessageChunk` struct in `async-opcua-core/src/comms/message_chunk.rs`
+- [x] T029 [US5] Modify `chunk_info()` in `async-opcua-core/src/comms/message_chunk.rs` to accept `&mut self` instead of `&self`. On call: if `cached_chunk_info` is `None`, compute and store; return `Ok(cached_chunk_info.as_ref().unwrap())`. Chunk data (self.data) is immutable per OPC 10000-6 §6.7.2.2 header format
+- [x] T030 [US5] Update callers in `async-opcua-core/src/comms/chunker.rs`: in `validate_chunk_sequence` (line ~353) and `decode<T>` (line ~507), change `chunk.chunk_info(secure_channel)?` calls to use `&mut chunk` access pattern (iterate with mutable reference or index)
+- [x] T031 [US5] Run `cargo test -p async-opcua-core --lib` to verify all chunker and message decode tests pass
 
 **Checkpoint**: Cut 8 complete — ChunkInfo parsed once per message, all core tests green.
 
@@ -135,10 +135,10 @@
 
 **Purpose**: Full workspace verification — all five cuts integrated. No new heap allocations on hot path (SC-007) is verified implicitly by existing tests passing without allocation regressions.
 
-- [ ] T032 Run `cargo fmt --all -- --check` to verify formatting across workspace
-- [ ] T033 Run `cargo clippy --workspace --all-targets --all-features` to verify no new lint warnings
-- [ ] T034 Run `RUSTFLAGS="-D warnings" cargo check --workspace` to verify all crates compile warning-free
-- [ ] T035 Run `cargo test -p async-opcua-nodes --lib && cargo test -p async-opcua-server --lib && cargo test -p async-opcua-core --lib` to verify all existing tests pass for all five cuts (SC-006, SC-007)
+- [x] T032 Run `cargo fmt --all -- --check` to verify formatting across workspace
+- [x] T033 Run `cargo clippy --workspace --all-targets --all-features` to verify no new lint warnings
+- [x] T034 Run `RUSTFLAGS="-D warnings" cargo check --workspace` to verify all crates compile warning-free
+- [x] T035 Run `cargo test -p async-opcua-nodes --lib && cargo test -p async-opcua-server --lib && cargo test -p async-opcua-core --lib` to verify all existing tests pass for all five cuts (SC-006, SC-007)
 
 ---
 

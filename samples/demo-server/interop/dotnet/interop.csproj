@@ -7,8 +7,10 @@
     <AssemblyName>interop</AssemblyName>
     <RootNamespace>DotnetInterop</RootNamespace>
     <InvariantGlobalization>true</InvariantGlobalization>
+    <DefineConstants>HAS_PUBSUB</DefineConstants>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="OPCFoundation.NetStandard.Opc.Ua.Client" Version="1.5.378.145" />
+    <PackageReference Include="OPCFoundation.NetStandard.Opc.Ua.PubSub" Version="1.5.378.152" />
   </ItemGroup>
 </Project>

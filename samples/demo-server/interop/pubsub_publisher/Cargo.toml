@@ -1,0 +1,10 @@
+[package]
+name = "pubsub-publisher"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+async-opcua = { path = "../../../../async-opcua", features = ["pubsub", "server"] }
+async-opcua-pubsub = { path = "../../../../async-opcua-pubsub" }
+tokio = { version = "1", features = ["rt", "macros", "time"] }
+tokio-util = { version = "0.7", features = ["rt"] }

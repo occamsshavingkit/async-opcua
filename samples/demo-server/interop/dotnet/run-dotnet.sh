@@ -32,7 +32,7 @@ USAGE
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    --external)
+  --external)
       if [ "$#" -lt 2 ]; then
         echo "--external requires an endpoint URL" >&2
         exit 2
@@ -44,7 +44,11 @@ while [ "$#" -gt 0 ]; do
       fi
       shift 2
       ;;
-    --profile)
+  --pubsub)
+      launch_server="pubsub"
+      shift
+      ;;
+  --profile)
       if [ "$#" -lt 2 ]; then
         echo "--profile requires a value" >&2
         exit 2
@@ -83,6 +87,28 @@ fi
 
 echo "==> building .NET interop client"
 "$DOTNET" build -c Release -v q "$here/interop.csproj" >/dev/null
+
+if [ "$launch_server" = "pubsub" ]; then
+  PUBLISHER="samples/demo-server/interop/pubsub_publisher"
+  echo "==> building Rust UADP publisher"
+  cargo build -q --manifest-path "$PUBLISHER/Cargo.toml"
+
+  echo "==> starting Rust UADP publisher (background)"
+  cargo run -q --manifest-path "$PUBLISHER/Cargo.toml" &
+  pub_pid=$!
+  trap "kill ${pub_pid} 2>/dev/null || true" INT TERM EXIT
+  sleep 2
+
+  echo "==> running .NET UADP subscriber"
+  set +e
+  "$DOTNET" run -c Release --no-build --project "$here/interop.csproj" -- --pubsub-only
+  rc=$?
+  set -e
+
+  echo "==> stopping Rust publisher"
+  kill "$pub_pid" 2>/dev/null || true
+  exit "$rc"
+fi
 
 if [ "$launch_server" = "0" ]; then
   echo "==> running .NET (OPC Foundation reference) interop client against external endpoint ${endpoint}"

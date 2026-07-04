@@ -3063,6 +3063,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "pubsub-publisher"
+version = "0.1.0"
+dependencies = [
+ "async-opcua",
+ "async-opcua-pubsub",
+ "tokio",
+ "tokio-util",
+]
+
+[[package]]
 name = "quick-xml"
 version = "0.41.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4101,6 +4111,7 @@ dependencies = [
  "bytes",
  "futures-core",
  "futures-sink",
+ "futures-util",
  "pin-project-lite",
  "tokio",
 ]

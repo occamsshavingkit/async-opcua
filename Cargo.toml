@@ -10,6 +10,7 @@ members = [
   "tools/certificate-creator",
   "tools/opcua-localhost-bench",
   "dotnet-tests/external-tests",
+  "samples/demo-server/interop/pubsub_publisher",
   "fuzz", "codegen-tests",
 ]
 # samples/profiles holds deployment config files (*.conf), not a crate; keep the

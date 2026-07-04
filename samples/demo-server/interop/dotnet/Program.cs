@@ -42,6 +42,7 @@ namespace DotnetInterop
             public InteropProfile Profile = InteropProfile.AsyncOpcuaDemo;
             public SecurityPreference Security = SecurityPreference.Auto;
             public bool ShowHelp = false;
+            public bool PubSubOnly = false;
 
             public static Options Parse(string[] args)
             {
@@ -52,6 +53,10 @@ namespace DotnetInterop
                     if (arg == "-h" || arg == "--help")
                     {
                         options.ShowHelp = true;
+                    }
+                    else if (arg == "--pubsub-only")
+                    {
+                        options.PubSubOnly = true;
                     }
                     else if (arg == "--url")
                     {
@@ -143,6 +148,16 @@ namespace DotnetInterop
             {
                 PrintUsage();
                 return 0;
+            }
+
+            if (options.PubSubOnly)
+            {
+#if HAS_PUBSUB
+                return await PubSubInterop.RunChecks();
+#else
+                Console.Error.WriteLine("PubSub interop requires OPCFoundation.NetStandard.Opc.Ua.PubSub NuGet package");
+                return 1;
+#endif
             }
 
             var config = await BuildConfig();
@@ -773,3 +788,152 @@ Examples:
         }
     }
 }
+
+// PubSub interop checks — live UADP PubSub with async-opcua Rust publisher.
+// Compiled conditionally when the OPCFoundation.NetStandard.Opc.Ua.PubSub
+// NuGet package is present.
+#if HAS_PUBSUB
+
+using Opc.Ua.PubSub;
+using Opc.Ua.PubSub.Transport;
+using Opc.Ua.PubSub.Configuration;
+
+static class PubSubInterop
+{
+    public static async Task<int> RunChecks()
+    {
+        int failures = 0;
+
+        // Direction 1: Rust publishes, .NET subscribes
+        Console.WriteLine("-- PubSub interop: subscribing to Rust publisher on udp://239.0.0.1:4840");
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            var tcs = new TaskCompletionSource<DataSetMessage>();
+
+            Console.WriteLine("  Building PubSub subscriber...");
+
+            // Configure a minimal UADP subscriber
+            var builder = new PubSubApplicationBuilder();
+
+            // Register UADP + JSON binary encoders/decoders
+            builder.RegisterCustomEncoder(new UadpNetworkMessageEncoder());
+            builder.RegisterCustomEncoder(new JsonNetworkMessageEncoder());
+
+            // UDP transport
+            builder.RegisterTransportFactory(new UdpPubSubTransportFactory());
+
+            // Connection: UDP multicast
+            var conn = new PubSubConnectionDataType
+            {
+                Name = "UdpConnection",
+                Enabled = true,
+                TransportProfileUri = UdpPubSubTransportFactory.UdpUadpTransportProfileUri,
+                Address = new NetworkAddressUrlDataType
+                {
+                    NetworkInterface = "eth0",
+                    Url = "opc.udp://239.0.0.1:4840"
+                },
+                PublisherId = PublisherId.FromString("UdpPublisher1"),
+                ConnectionProperties = null,
+                ReaderGroups = new ReaderGroupDataTypeCollection()
+            };
+
+            // Reader group
+            var rg = new ReaderGroupDataType
+            {
+                Name = "RG-1",
+                Enabled = true,
+                DataSetReaders = new DataSetReaderDataTypeCollection()
+            };
+
+            // DataSet reader — matches Rust publisher config
+            var dsr = new DataSetReaderDataType
+            {
+                Name = "Reader-1",
+                Enabled = true,
+                PublisherId = PublisherId.FromString("UdpPublisher1"),
+                WriterGroupId = 1,
+                DataSetWriterId = 101,
+                DataSetFieldContentMask = (uint)(DataSetFieldContentMask.StatusCode
+                    | DataSetFieldContentMask.SourceTimestamp
+                    | DataSetFieldContentMask.RawData),
+                MessageReceiveTimeout = 5000,
+            };
+            rg.DataSetReaders.Add(dsr);
+            conn.ReaderGroups.Add(rg);
+
+            // Sink to capture the first message
+            builder.AddDataSetSink("InteropSink", new ActionDataSetSink(msg =>
+            {
+                Console.WriteLine($"  Received DataSetMessage: publisher={msg.PublisherId}, " +
+                    $"writerGroup={msg.WriterGroupId}, writer={msg.DataSetWriterId}, " +
+                    $"sequence={msg.SequenceNumber}, fields={msg.DataSet.Fields.Length}");
+
+                foreach (var field in msg.DataSet.Fields)
+                {
+                    Console.WriteLine($"    field: {field.Name} = {field.Value}");
+                }
+
+                tcs.TrySetResult(msg);
+            }));
+
+            builder.AddConnection(conn);
+
+            Console.WriteLine("  Starting PubSub application...");
+            await using var app = await builder.BuildAndStartAsync(cts.Token);
+
+            Console.WriteLine("  Waiting for first message (timeout 15s)...");
+            var msg = await tcs.Task;
+
+            // Verify the known test value
+            if (msg.DataSet.Fields.Length > 0)
+            {
+                var value = msg.DataSet.Fields[0].Value;
+                if (value is double d && Math.Abs(d - 72.5) < 0.01
+                    || value is float f && Math.Abs(f - 72.5f) < 0.01f
+                    || value is int i && i == 72
+                    || value is short s && s == 72)
+                {
+                    Console.WriteLine($"  \u001b[32mok\u001b[0m  PubSub: received expected value {value}");
+                }
+                else
+                {
+                    Console.WriteLine($"  \u001b[31mFAIL\u001b[0m  PubSub: unexpected value {value} (expected ~72.5)");
+                    failures++;
+                }
+            }
+            else
+            {
+                Console.WriteLine("  \u001b[31mFAIL\u001b[0m  PubSub: no fields in DataSet");
+                failures++;
+            }
+
+            await app.StopAsync();
+        }
+        catch (OperationCanceledException)
+        {
+            Console.WriteLine("  \u001b[31mFAIL\u001b[0m  PubSub: timed out waiting for message");
+            failures++;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"  \u001b[31mFAIL\u001b[0m  PubSub: {ex.GetType().Name}: {ex.Message}");
+            failures++;
+        }
+
+        return failures;
+    }
+
+    sealed class ActionDataSetSink : IDataSetSink
+    {
+        readonly Action<DataSetMessage> _onMessage;
+        public ActionDataSetSink(Action<DataSetMessage> onMessage) => _onMessage = onMessage;
+        public Task OnDataSetMessageAsync(DataSetMessage msg, CancellationToken ct)
+        {
+            _onMessage(msg);
+            return Task.CompletedTask;
+        }
+    }
+}
+#endif

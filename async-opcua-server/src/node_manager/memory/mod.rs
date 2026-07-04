@@ -18,6 +18,7 @@ use tracing::warn;
 
 use std::{
     collections::{HashSet, VecDeque},
+    ops::Deref,
     sync::Arc,
 };
 
@@ -729,7 +730,7 @@ impl<TImpl: InMemoryNodeManagerImpl> InMemoryNodeManager<TImpl> {
             let input_arguments = address_space.find_node_by_browse_name(
                 method.method_id(),
                 Some((ReferenceTypeId::HasProperty, false)),
-                &*type_tree,
+                type_tree.deref(),
                 BrowseDirection::Forward,
                 "InputArguments",
             );
@@ -928,7 +929,7 @@ impl<TImpl: InMemoryNodeManagerImpl> ViewProvider for InMemoryNodeManager<TImpl>
 
             item.set(Self::get_reference(
                 &address_space,
-                &*type_tree,
+                type_tree.deref(),
                 &target_node,
                 item.result_mask(),
             ));
@@ -979,12 +980,12 @@ impl<TImpl: InMemoryNodeManagerImpl> ViewProvider for InMemoryNodeManager<TImpl>
     ) -> Result<(), StatusCode> {
         let mut address_space = trace_write_lock!(self.address_space);
         let type_tree = trace_read_lock!(context.type_tree);
-        address_space.ensure_browse_name_index(&*type_tree);
+        address_space.ensure_browse_name_index(type_tree.deref());
 
         for node in nodes {
             Self::translate_browse_paths(
                 &address_space,
-                &*type_tree,
+                type_tree.deref(),
                 context,
                 &self.namespaces,
                 node,

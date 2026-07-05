@@ -176,8 +176,9 @@ impl<'a, 'ctx> QueryFirstHandler<'a, 'ctx> {
                 self.type_tree,
                 BrowseDirection::Inverse,
             )
-            .filter(|reference| self.address_space.node_exists(reference.target_node))
-            .map(|reference| reference.target_node.clone());
+            .into_iter()
+            .filter(|reference| self.address_space.node_exists(&reference.target_id))
+            .map(|reference| reference.target_id.clone());
 
         Some(QueryGraphTraversal::with_typed_candidates(
             self.address_space,
@@ -231,8 +232,8 @@ impl<'a, 'ctx> QueryFirstHandler<'a, 'ctx> {
             self.type_tree,
             BrowseDirection::Inverse,
         ) {
-            if self.address_space.node_exists(reference.target_node) {
-                candidates.push(reference.target_node.clone());
+            if self.address_space.node_exists(&reference.target_id) {
+                candidates.push(reference.target_id.clone());
             }
         }
 
@@ -397,7 +398,8 @@ impl<'a, 'ctx> QueryFirstHandler<'a, 'ctx> {
                     self.type_tree,
                     direction,
                 )
-                .filter_map(|reference| self.address_space.find(reference.target_node))
+                .into_iter()
+                .filter_map(|reference| self.address_space.find(&reference.target_id))
                 .find(|candidate| candidate.as_node().browse_name() == &element.target_name)?;
 
             current_node_id = next.as_node().node_id().clone();

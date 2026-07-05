@@ -6,6 +6,7 @@
 )]
 
 use std::{
+    collections::{BTreeMap, HashMap, HashSet},
     pin::Pin,
     sync::Arc,
     time::{Duration, Instant},
@@ -124,6 +125,9 @@ pub(crate) struct SessionController<T: ConnectionTransport> {
     max_inflight: usize,
     info: Arc<ServerInfo>,
     deadline: Instant,
+    cached_session: Option<(NodeId, Arc<RwLock<Session>>)>,
+    deadline_queue: DeadlineQueue,
+    deadline_signals: HashMap<u32, tokio::sync::oneshot::Sender<()>>,
 }
 
 enum RequestProcessResult {
@@ -142,6 +146,53 @@ struct SessionDispatchLookup {
 /// handler can hold an in-flight slot. Publish requests use a separate path and
 /// are unaffected; clients needing longer should set `request_header.timeout_hint`.
 pub(crate) const DEFAULT_REQUEST_TIMEOUT_BACKSTOP_MS: u32 = 600_000;
+
+/// Shared deadline queue replacing per-request `tokio::time::sleep_until` futures.
+/// Each entry maps a deadline to the set of request IDs expiring at that instant,
+/// with lazy cleanup via a `completed` set.
+struct DeadlineQueue {
+    entries: BTreeMap<Instant, Vec<u32>>,
+    completed: HashSet<u32>,
+}
+
+impl DeadlineQueue {
+    fn new() -> Self {
+        Self {
+            entries: BTreeMap::new(),
+            completed: HashSet::new(),
+        }
+    }
+
+    fn push(&mut self, deadline: Instant, request_id: u32) {
+        self.completed.remove(&request_id);
+        self.entries.entry(deadline).or_default().push(request_id);
+    }
+
+    fn pop_expired(&mut self, now: Instant) -> Vec<u32> {
+        let mut expired = Vec::new();
+        while let Some((&deadline, _)) = self.entries.first_key_value() {
+            if deadline > now {
+                break;
+            }
+            let ids = self.entries.pop_first().map(|(_, v)| v).unwrap_or_default();
+            for id in ids {
+                if self.completed.remove(&id) {
+                    continue;
+                }
+                expired.push(id);
+            }
+        }
+        expired
+    }
+
+    fn mark_completed(&mut self, request_id: u32) {
+        self.completed.insert(request_id);
+    }
+
+    fn earliest_deadline(&self) -> Option<Instant> {
+        self.entries.first_key_value().map(|(&t, _)| t)
+    }
+}
 
 fn effective_request_timeout(timeout_hint: u32, max_timeout_ms: u32) -> u32 {
     let timeout = if max_timeout_ms == 0 {
@@ -219,6 +270,9 @@ impl<T: ConnectionTransport> SessionController<T> {
             max_inflight: info.config.limits.max_inflight_requests_per_connection,
             info,
             pending_messages: FuturesUnordered::new(),
+            cached_session: None,
+            deadline_queue: DeadlineQueue::new(),
+            deadline_signals: HashMap::new(),
         }
     }
 
@@ -230,6 +284,13 @@ impl<T: ConnectionTransport> SessionController<T> {
                 Either::Left(futures::future::pending::<Option<Result<Response, String>>>())
             } else {
                 Either::Right(self.pending_messages.next())
+            };
+
+            let deadline_sleep = match self.deadline_queue.earliest_deadline() {
+                Some(t) => {
+                    Either::Left(tokio::time::sleep_until(tokio::time::Instant::from_std(t)))
+                }
+                None => Either::Right(futures::future::pending::<()>()),
             };
 
             tokio::select! {
@@ -244,6 +305,12 @@ impl<T: ConnectionTransport> SessionController<T> {
                         }
                     }
                 }
+                _ = deadline_sleep => {
+                    let now = Instant::now();
+                    for request_id in self.deadline_queue.pop_expired(now) {
+                        self.deadline_signals.remove(&request_id);
+                    }
+                }
                 msg = resp_fut => {
                     let msg = match msg {
                         Some(Ok(x)) => x,
@@ -255,6 +322,8 @@ impl<T: ConnectionTransport> SessionController<T> {
                         // Cannot happen, pending_messages is non-empty or this future never returns.
                         None => unreachable!(),
                     };
+                    self.deadline_queue.mark_completed(msg.request_id);
+                    self.deadline_signals.remove(&msg.request_id);
                     self.response_metrics(&msg);
 
                     self.transport.enqueue_response(
@@ -317,8 +386,17 @@ impl<T: ConnectionTransport> SessionController<T> {
     }
 
     fn session_id_for_token(&self, authentication_token: &NodeId) -> Option<NodeId> {
-        let mgr = trace_read_lock!(self.session_manager);
-        let session = mgr.find_by_token(authentication_token)?;
+        let session = if let Some((tok, s)) = &self.cached_session {
+            if tok == authentication_token {
+                Some(Arc::clone(s))
+            } else {
+                let mgr = trace_read_lock!(self.session_manager);
+                mgr.find_by_token(authentication_token)
+            }
+        } else {
+            let mgr = trace_read_lock!(self.session_manager);
+            mgr.find_by_token(authentication_token)
+        }?;
         let session = trace_read_lock!(session);
         Some(session.session_id().clone())
     }
@@ -580,6 +658,7 @@ impl<T: ConnectionTransport> SessionController<T> {
             }
 
             RequestMessage::CloseSession(request) => {
+                self.cached_session = None;
                 let res = close_session(
                     &self.session_manager,
                     &mut self.channel,
@@ -792,14 +871,38 @@ impl<T: ConnectionTransport> SessionController<T> {
                 );
                 let return_diagnostics = message.request_header().return_diagnostics;
                 let authentication_token = &message.request_header().authentication_token;
+
+                let cached = self.cached_session.as_ref().and_then(|(tok, s)| {
+                    if tok == authentication_token {
+                        Some((Arc::clone(s), tok.clone()))
+                    } else {
+                        None
+                    }
+                });
+
                 let SessionDispatchLookup {
                     session,
                     actor_sender,
                     session_was_closed,
-                } = {
-                    let mgr = trace_read_lock!(self.session_manager);
+                } = if let Some((s, _tok)) = cached {
+                    let mut mgr = trace_read_lock!(self.session_manager);
+                    let _lookup = SessionDispatchLookup {
+                        session: Some(s),
+                        actor_sender: mgr.actor_sender(authentication_token),
+                        session_was_closed: mgr.is_closed_token(authentication_token),
+                    };
+                    _lookup
+                } else {
+                    let mut mgr = trace_read_lock!(self.session_manager);
+                    let s = mgr.find_by_token(authentication_token);
+                    if let Some(ref session) = s {
+                        self.cached_session =
+                            Some((authentication_token.clone(), Arc::clone(session)));
+                    } else {
+                        self.cached_session = None;
+                    }
                     SessionDispatchLookup {
-                        session: mgr.find_by_token(authentication_token),
+                        session: s,
                         actor_sender: mgr.actor_sender(authentication_token),
                         session_was_closed: mgr.is_closed_token(authentication_token),
                     }
@@ -868,11 +971,11 @@ impl<T: ConnectionTransport> SessionController<T> {
                         let info = self.info.clone();
                         #[cfg(feature = "events")]
                         let subscriptions = self.subscriptions.clone();
+                        self.deadline_queue.push(deadline, id);
+                        let (abort_sender, abort_receiver) = tokio::sync::oneshot::channel::<()>();
+                        self.deadline_signals.insert(id, abort_sender);
                         self.pending_messages
                             .push(Box::pin(async move {
-                                // Select biased because if for some reason there's a long time between polls,
-                                // we want to return the response even if the timeout expired. We only want to send a timeout
-                                // if the call has not been finished yet.
                                 let mut response = tokio::select! {
                                     biased;
                                     r = &mut handle => {
@@ -890,9 +993,9 @@ impl<T: ConnectionTransport> SessionController<T> {
                                             }
                                         }
                                     }
-                                    _ = tokio::time::sleep_until(deadline.into()) => {
+                                    _ = abort_receiver => {
                                         handle.abort();
-                                                Ok(Response { message: ServiceFault::new(request_handle, StatusCode::BadTimeout).into(), request_id: id })
+                                        Ok(Response { message: ServiceFault::new(request_handle, StatusCode::BadTimeout).into(), request_id: id })
                                     }
                                 };
                                 if let Ok(response) = &mut response {

@@ -166,9 +166,10 @@ impl<'a> QueryGraphTraversal<'a> {
                     self.type_tree,
                     BrowseDirection::Forward,
                 )
+                .into_iter()
                 .any(|reference| {
                     self.node_matches_related_operand(
-                        reference.target_node,
+                        &reference.target_id,
                         filter.target,
                         filter.include_type_subtypes,
                     )
@@ -235,9 +236,10 @@ impl<'a> QueryGraphTraversal<'a> {
                     self.type_tree,
                     BrowseDirection::Forward,
                 )
+                .into_iter()
                 .any(|reference| {
                     self.node_matches_related_operand(
-                        reference.target_node,
+                        &reference.target_id,
                         target,
                         include_type_subtypes,
                     )
@@ -396,7 +398,7 @@ impl Iterator for RelatedNodes<'_> {
                 self.type_tree,
                 BrowseDirection::Forward,
             ) {
-                let target = reference.target_node.clone();
+                let target = reference.target_id.clone();
                 if self.visited.insert(target.clone()) {
                     let next_depth = depth + 1;
                     self.queue.push_back((target.clone(), next_depth));

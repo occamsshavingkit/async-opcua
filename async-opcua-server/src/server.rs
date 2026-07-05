@@ -8,7 +8,6 @@ use std::{
     time::Duration,
 };
 
-use arc_swap::ArcSwap;
 use futures::{future::Either, never::Never, stream::FuturesUnordered, FutureExt, StreamExt};
 use opcua_core::{sync::RwLock, trace_read_lock, trace_write_lock};
 use opcua_nodes::DefaultTypeTree;
@@ -546,7 +545,7 @@ impl Server {
                 locale: UAString::null(),
                 text: UAString::from(application_name),
             },
-            start_time: ArcSwap::new(Arc::new(opcua_types::DateTime::now())),
+            start_time: Arc::new(opcua_types::DateTime::now()),
             servers,
             config: config.clone(),
             endpoint_certificates: RwLock::new(endpoint_certificates),
@@ -556,11 +555,11 @@ impl Server {
                 config.security_check_max_entries,
             )),
             operational_limits: config.limits.operational.clone(),
-            state: ArcSwap::new(Arc::new(ServerState::Shutdown)),
+            state: Arc::new(ServerState::Shutdown),
             send_buffer_size,
             receive_buffer_size,
             type_tree: type_tree.clone(),
-            type_tree_snapshot: ArcSwap::new(Arc::new(None)),
+            type_tree_snapshot: Arc::new(None),
             subscription_id_handle: AtomicHandle::new(1),
             monitored_item_id_handle: AtomicHandle::new(1),
             secure_channel_id_handle: Arc::new(AtomicHandle::new(1)),
@@ -745,7 +744,13 @@ impl Server {
         self.initialize_node_managers(context).await?;
 
         self.status.set_server_started();
-        self.info.start_time.store(Arc::new(DateTime::now()));
+        // SAFETY: Only called during server start-up before start_time is read
+        unsafe {
+            std::ptr::write(
+                Arc::as_ptr(&self.info.start_time) as *mut DateTime,
+                DateTime::now(),
+            );
+        }
         Ok(())
     }
 

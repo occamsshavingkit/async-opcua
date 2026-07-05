@@ -126,7 +126,7 @@ impl<T: InMemoryNodeManagerImplBuilder> NodeManagerBuilder for InMemoryNodeManag
 impl<TImpl: InMemoryNodeManagerImpl> InMemoryNodeManager<TImpl> {
     pub(crate) fn new(inner: TImpl, address_space: AddressSpace) -> Self {
         Self {
-            namespaces: address_space.namespaces().clone(),
+            namespaces: address_space.namespaces(),
             address_space: Arc::new(RwLock::new(address_space)),
             inner,
         }
@@ -162,8 +162,9 @@ impl<TImpl: InMemoryNodeManagerImpl> InMemoryNodeManager<TImpl> {
                 type_tree,
                 BrowseDirection::Forward,
             )
-            .find(|r| r.target_node == method.method_id())
-            .map(|r| r.target_node.clone())
+            .into_iter()
+            .find(|r| r.target_id == *method.method_id())
+            .map(|r| r.target_id.clone())
             .or_else(|| {
                 self.inner
                     .accepts_method_without_object_component(method.method_id())
@@ -318,14 +319,14 @@ impl<TImpl: InMemoryNodeManagerImpl> InMemoryNodeManager<TImpl> {
                 // shall be returned.
                 match node_ref.node_class() {
                     NodeClass::Object | NodeClass::Variable => {
-                        let mut type_defs = address_space.find_references(
+                        let type_defs = address_space.find_references(
                             &target_node_id,
                             Some((ReferenceTypeId::HasTypeDefinition, false)),
                             type_tree,
                             BrowseDirection::Forward,
                         );
-                        if let Some(type_def) = type_defs.next() {
-                            ExpandedNodeId::new(type_def.target_node.clone())
+                        if let Some(type_def) = type_defs.first() {
+                            ExpandedNodeId::new(type_def.target_id.clone())
                         } else {
                             ExpandedNodeId::null()
                         }
@@ -390,28 +391,32 @@ impl<TImpl: InMemoryNodeManagerImpl> InMemoryNodeManager<TImpl> {
             type_tree,
             node.browse_direction(),
         ) {
-            if reference.target_node.is_null() {
+            if reference.target_id.is_null() {
                 warn!(
                     "Target node in reference from {} of type {} is null",
                     node.node_id(),
-                    reference.reference_type
+                    reference.type_id
                 );
                 continue;
             }
-            let target_node = address_space.find_node(reference.target_node);
+            let target_node = address_space.find_node(&reference.target_id);
             let Some(target_node) = target_node else {
-                if namespaces.contains_key(&reference.target_node.namespace) {
+                if namespaces.contains_key(&reference.target_id.namespace) {
                     warn!(
                         "Target node {} in reference from {} of type {} does not exist",
-                        reference.target_node,
+                        reference.target_id,
                         node.node_id(),
-                        reference.reference_type
+                        reference.type_id
                     );
                 } else {
                     node.push_external_reference(ExternalReference::new(
-                        reference.target_node.into(),
-                        reference.reference_type.clone(),
-                        reference.direction,
+                        reference.target_id.into(),
+                        reference.type_id.clone(),
+                        if reference.is_forward {
+                            ReferenceDirection::Forward
+                        } else {
+                            ReferenceDirection::Inverse
+                        },
                     ))
                 }
 
@@ -426,8 +431,8 @@ impl<TImpl: InMemoryNodeManagerImpl> InMemoryNodeManager<TImpl> {
                 Self::get_reference(address_space, type_tree, &target_node, node.result_mask());
 
             let ref_desc = ReferenceDescription {
-                reference_type_id: reference.reference_type.clone(),
-                is_forward: matches!(reference.direction, ReferenceDirection::Forward),
+                reference_type_id: reference.type_id.clone(),
+                is_forward: reference.is_forward,
                 node_id: r_node.node_id,
                 browse_name: r_node.browse_name,
                 display_name: r_node.display_name,
@@ -464,7 +469,7 @@ impl<TImpl: InMemoryNodeManagerImpl> InMemoryNodeManager<TImpl> {
         }
 
         let mut matching_nodes = HashSet::new();
-        matching_nodes.insert(item.node_id());
+        matching_nodes.insert(item.node_id().clone());
         let mut next_matching_nodes = HashSet::new();
         let mut results = Vec::new();
 
@@ -484,7 +489,7 @@ impl<TImpl: InMemoryNodeManagerImpl> InMemoryNodeManager<TImpl> {
 
                 if element.target_name.is_null() {
                     for rf in address_space.find_references(
-                        node_id,
+                        &node_id,
                         reference_filter,
                         type_tree,
                         if element.is_inverse {
@@ -493,19 +498,16 @@ impl<TImpl: InMemoryNodeManagerImpl> InMemoryNodeManager<TImpl> {
                             BrowseDirection::Forward
                         },
                     ) {
-                        if !next_matching_nodes.contains(rf.target_node) {
-                            let Some(_node) = address_space.find_node(rf.target_node) else {
-                                if !namespaces.contains_key(&rf.target_node.namespace) {
-                                    results.push((
-                                        rf.target_node,
-                                        depth,
-                                        Some(QualifiedName::null()),
-                                    ));
+                        if !next_matching_nodes.contains(&rf.target_id) {
+                            let target_id = rf.target_id;
+                            if address_space.find_node(&target_id).is_none() {
+                                if !namespaces.contains_key(&target_id.namespace) {
+                                    results.push((target_id, depth, Some(QualifiedName::null())));
                                 }
                                 continue;
                             };
-                            next_matching_nodes.insert(rf.target_node);
-                            results.push((rf.target_node, depth, None));
+                            next_matching_nodes.insert(target_id.clone());
+                            results.push((target_id, depth, None));
                         }
                     }
                     continue;
@@ -513,7 +515,7 @@ impl<TImpl: InMemoryNodeManagerImpl> InMemoryNodeManager<TImpl> {
 
                 if element.is_inverse || reference_filter.is_some() {
                     for rf in address_space.find_references(
-                        node_id,
+                        &node_id,
                         reference_filter,
                         type_tree,
                         if element.is_inverse {
@@ -522,11 +524,12 @@ impl<TImpl: InMemoryNodeManagerImpl> InMemoryNodeManager<TImpl> {
                             BrowseDirection::Forward
                         },
                     ) {
-                        if !next_matching_nodes.contains(rf.target_node) {
-                            let Some(node) = address_space.find_node(rf.target_node) else {
-                                if !namespaces.contains_key(&rf.target_node.namespace) {
+                        if !next_matching_nodes.contains(&rf.target_id) {
+                            let target_id = rf.target_id;
+                            let Some(node) = address_space.find_node(&target_id) else {
+                                if !namespaces.contains_key(&target_id.namespace) {
                                     results.push((
-                                        rf.target_node,
+                                        target_id,
                                         depth,
                                         Some(element.target_name.clone()),
                                     ));
@@ -535,8 +538,8 @@ impl<TImpl: InMemoryNodeManagerImpl> InMemoryNodeManager<TImpl> {
                             };
 
                             if node.as_node().browse_name() == &element.target_name {
-                                next_matching_nodes.insert(rf.target_node);
-                                results.push((rf.target_node, depth, None));
+                                next_matching_nodes.insert(target_id.clone());
+                                results.push((target_id, depth, None));
                             }
                         }
                     }
@@ -545,8 +548,8 @@ impl<TImpl: InMemoryNodeManagerImpl> InMemoryNodeManager<TImpl> {
                 {
                     for target_id in candidates {
                         if !next_matching_nodes.contains(target_id) {
-                            next_matching_nodes.insert(target_id);
-                            results.push((target_id, depth, None));
+                            next_matching_nodes.insert(target_id.clone());
+                            results.push((target_id.clone(), depth, None));
                         }
                     }
                 }
@@ -981,7 +984,7 @@ impl<TImpl: InMemoryNodeManagerImpl> ViewProvider for InMemoryNodeManager<TImpl>
             let address_space = trace_read_lock!(self.address_space);
             if !address_space.browse_name_index_is_built() {
                 drop(address_space);
-                let mut address_space = trace_write_lock!(self.address_space);
+                let address_space = trace_write_lock!(self.address_space);
                 let type_tree = trace_read_lock!(context.type_tree);
                 address_space.ensure_browse_name_index(type_tree.deref());
             }

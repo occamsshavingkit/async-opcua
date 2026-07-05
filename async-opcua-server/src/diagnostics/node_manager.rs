@@ -726,7 +726,7 @@ impl AttributeProvider for DiagnosticsNodeManager {
         nodes_to_read: &mut [&mut ReadNode],
     ) -> Result<(), StatusCode> {
         let mut lazy_namespaces = None::<BTreeMap<String, NamespaceMetadata>>;
-        let start_time = **context.info.start_time.load();
+        let start_time = *context.info.start_time;
 
         for node in nodes_to_read {
             let Some(node_desc) = from_opaque_node_id::<DiagnosticsNode>(&node.node().node_id)

@@ -135,7 +135,7 @@ fn loader_registers_namespaces_and_imports_cross_namespace_nodes(
             &type_tree,
             BrowseDirection::Forward,
         )
-        .count();
+        .len();
     assert_eq!(subtype_refs, 1);
 
     fs::remove_dir_all(dir)?;

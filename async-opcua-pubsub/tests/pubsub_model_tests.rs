@@ -64,11 +64,12 @@ fn reflect_pubsub_config_materializes_referenceable_instances() {
             &tt,
             BrowseDirection::Forward,
         )
+        .into_iter()
         .next()
         .expect("DataSetWriter HasTypeDefinition");
     assert_eq!(
-        type_def.target_node,
-        &NodeId::from(ObjectTypeId::DataSetWriterType)
+        type_def.target_id,
+        NodeId::from(ObjectTypeId::DataSetWriterType)
     );
 
     // It carries the DataSetWriterId identity property = 7.
@@ -101,11 +102,12 @@ fn reflect_pubsub_config_materializes_referenceable_instances() {
             &tt,
             BrowseDirection::Forward,
         )
+        .into_iter()
         .next()
         .expect("Connection HasWriterGroup");
     let wg_prop = space
         .find_node_by_browse_name(
-            group.target_node,
+            &group.target_id,
             Some((ReferenceTypeId::HasProperty, false)),
             &tt,
             BrowseDirection::Forward,
@@ -168,11 +170,12 @@ fn reflect_pubsub_config_materializes_reader_side_instances() {
             &tt,
             BrowseDirection::Forward,
         )
+        .into_iter()
         .next()
         .expect("DataSetReader HasTypeDefinition");
     assert_eq!(
-        type_def.target_node,
-        &NodeId::from(ObjectTypeId::DataSetReaderType)
+        type_def.target_id,
+        NodeId::from(ObjectTypeId::DataSetReaderType)
     );
 
     let id_prop = space
@@ -204,11 +207,12 @@ fn reflect_pubsub_config_materializes_reader_side_instances() {
             &tt,
             BrowseDirection::Forward,
         )
+        .into_iter()
         .next()
         .expect("Connection HasReaderGroup");
     let wg = space
         .find_node_by_browse_name(
-            group.target_node,
+            &group.target_id,
             Some((ReferenceTypeId::HasProperty, false)),
             &tt,
             BrowseDirection::Forward,

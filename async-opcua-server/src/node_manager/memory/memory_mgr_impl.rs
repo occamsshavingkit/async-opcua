@@ -468,7 +468,7 @@ fn add_references_impl(
                         &*type_tree,
                         BrowseDirection::Forward,
                     )
-                    .next()
+                    .first()
                     .is_some()
             {
                 if source_ready {

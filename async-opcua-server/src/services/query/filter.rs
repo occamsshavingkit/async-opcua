@@ -96,8 +96,8 @@ impl<'a> QueryNodeFilter<'a> {
                 self.type_tree,
                 BrowseDirection::Forward,
             )
-            .next()
-            .map(|reference| reference.target_node.clone())
+            .first()
+            .map(|reference| reference.target_id.clone())
     }
 
     fn node_attribute(

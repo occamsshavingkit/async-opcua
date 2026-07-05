@@ -1208,7 +1208,8 @@ mod tests {
                 &type_tree,
                 BrowseDirection::Forward,
             )
-            .filter(|reference| reference.target_node == &condition_id)
+            .into_iter()
+            .filter(|reference| reference.target_id == condition_id)
             .count();
 
         assert_eq!(reference_count, 1);

@@ -10,10 +10,11 @@ pub use write_validation::*;
 #[cfg(feature = "generated-address-space")]
 pub use opcua_core_namespace::CoreNamespace;
 
-use std::collections::VecDeque;
+use std::{collections::VecDeque, sync::Arc};
 
 use dashmap::DashMap;
 use hashbrown::{HashMap, HashSet};
+use parking_lot::RwLock;
 use tracing::{debug, error, info, warn};
 
 use crate::node_manager::{ParsedReadValueId, ParsedWriteValue, RequestContext};
@@ -24,45 +25,56 @@ use opcua_types::{
 };
 
 /// Type alias for the concurrent node map using DashMap.
-pub type NodeMap = DashMap<NodeId, NodeType>;
+pub type NodeMap = Arc<DashMap<NodeId, NodeType>>;
+
+/// Cold (infrequently written) fields of the address space.
+pub struct AddressSpaceCold {
+    pub references: References,
+    pub browse_name_index: Option<HashMap<(NodeId, QualifiedName), Vec<NodeId>>>,
+    pub namespaces: HashMap<u16, String>,
+}
 
 /// Represents an in-memory address space.
-#[derive(Default)]
+///
+/// Hot fields (`node_map`) are directly accessible without locking.
+/// Cold fields (`references`, `browse_name_index`, `namespaces`) are behind `RwLock<AddressSpaceCold>`.
 pub struct AddressSpace {
-    node_map: NodeMap,
-    namespaces: HashMap<u16, String>,
-    references: References,
-    browse_name_index: Option<HashMap<(NodeId, QualifiedName), Vec<NodeId>>>,
+    pub node_map: NodeMap,
+    pub cold: RwLock<AddressSpaceCold>,
 }
 
 impl AddressSpace {
     /// Create a new empty address space.
     pub fn new() -> Self {
         Self {
-            node_map: NodeMap::new(),
-            namespaces: HashMap::new(),
-            references: References::new(),
-            browse_name_index: None,
+            node_map: Arc::new(DashMap::new()),
+            cold: RwLock::new(AddressSpaceCold {
+                references: References::new(),
+                browse_name_index: None,
+                namespaces: HashMap::new(),
+            }),
         }
     }
 
     /// Import a node set into this address space.
     /// This will register namespaces from the node set import.
     pub fn import_node_set<T: NodeSetImport + ?Sized>(
-        &mut self,
+        &self,
         import: &T,
         namespaces: &mut NamespaceMap,
     ) {
         let mut map = NodeSetNamespaceMapper::new(namespaces);
         import.register_namespaces(&mut map);
         let owned_namespaces = import.get_own_namespaces();
-        for ns in owned_namespaces {
-            let idx = map
-                .namespaces()
-                .known_namespaces()
-                .get(&ns)
-                .expect("Node import returned owned namespace not added to the namespace map");
-            self.add_namespace(&ns, *idx);
+        {
+            let mut cold = self.cold.write();
+            for ns in owned_namespaces {
+                let idx =
+                    map.namespaces().known_namespaces().get(&ns).expect(
+                        "Node import returned owned namespace not added to the namespace map",
+                    );
+                cold.namespaces.insert(*idx, ns.to_string());
+            }
         }
         let mut count = 0;
         for item in import.load(&map) {
@@ -75,6 +87,7 @@ impl AddressSpace {
     /// Load types from this address space into the given type tree.
     pub fn load_into_type_tree(&self, type_tree: &mut DefaultTypeTree) {
         let mut found_ids = VecDeque::new();
+        let cold = self.cold.read();
         // Populate types first so that we have reference types to browse in the next stage.
         for entry in self.node_map.iter() {
             let node = entry.value();
@@ -91,7 +104,7 @@ impl AddressSpace {
 
             let node_id = node.node_id();
 
-            let parent = self
+            let parent = cold
                 .references
                 .find_references(
                     node_id,
@@ -112,6 +125,7 @@ impl AddressSpace {
             found_ids.push_back((node_id.clone(), node_id.clone(), Vec::new(), nc));
         }
 
+        drop(cold);
         let mut seen_nodes = HashSet::new();
 
         // Recursively browse each discovered type for non-type children
@@ -123,13 +137,13 @@ impl AddressSpace {
                 BrowseDirection::Forward,
             ) {
                 if child
-                    .reference_type
+                    .type_id
                     .as_reference_type_id()
                     .is_ok_and(|r| r == ReferenceTypeId::HasSubtype)
                 {
                     continue;
                 }
-                let Some(node_type) = self.node_map.get(child.target_node) else {
+                let Some(node_type) = self.node_map.get(&child.target_id) else {
                     continue;
                 };
 
@@ -147,16 +161,16 @@ impl AddressSpace {
                 let mut path = path.clone();
                 path.push(node_type.as_node().browse_name().clone());
 
-                if !seen_nodes.insert(child.target_node.clone()) {
+                if !seen_nodes.insert(child.target_id.clone()) {
                     warn!(
                         "Found node {} more than once when browsing hierarchically",
-                        child.target_node
+                        child.target_id
                     );
                     continue;
                 }
 
-                // Clone the target_node because `push_back` expects an owned NodeId
-                found_ids.push_back((child.target_node.clone(), root_type.clone(), path, nc));
+                // Clone the target_id because `push_back` expects an owned NodeId
+                found_ids.push_back((child.target_id.clone(), root_type.clone(), path, nc));
             }
 
             if !path.is_empty() {
@@ -168,13 +182,16 @@ impl AddressSpace {
     }
 
     /// Add a namespace to this address space.
-    pub fn add_namespace(&mut self, namespace: &str, index: u16) {
-        self.namespaces.insert(index, namespace.to_string());
+    pub fn add_namespace(&self, namespace: &str, index: u16) {
+        self.cold
+            .write()
+            .namespaces
+            .insert(index, namespace.to_string());
     }
 
     /// Insert a node and a list of references from/to that node.
     pub fn insert<'a, T, S>(
-        &mut self,
+        &self,
         node: T,
         references: Option<&'a [(&'a NodeId, &'a S, ReferenceDirection)]>,
     ) -> bool
@@ -189,9 +206,11 @@ impl AddressSpace {
 
         use dashmap::mapref::entry::Entry;
         if let Entry::Vacant(entry) = self.node_map.entry(node_id.clone()) {
-            // If references are supplied, add them now
             if let Some(references) = references {
-                self.references.insert::<S>(&node_id, references);
+                self.cold
+                    .write()
+                    .references
+                    .insert::<S>(&node_id, references);
             }
             entry.insert(node_type);
             true
@@ -202,7 +221,7 @@ impl AddressSpace {
     }
 
     /// Import a node from an [ImportedItem].
-    pub fn import_node(&mut self, node: ImportedItem) -> bool {
+    pub fn import_node(&self, node: ImportedItem) -> bool {
         let node_id = node.node.node_id().clone();
 
         self.assert_namespace(&node_id);
@@ -210,8 +229,11 @@ impl AddressSpace {
         use dashmap::mapref::entry::Entry;
         if let Entry::Vacant(entry) = self.node_map.entry(node_id.clone()) {
             entry.insert(node.node);
-            for r in node.references {
-                self.references.import_reference(node_id.clone(), r);
+            {
+                let mut cold = self.cold.write();
+                for r in node.references {
+                    cold.references.import_reference(node_id.clone(), r);
+                }
             }
             true
         } else {
@@ -222,14 +244,16 @@ impl AddressSpace {
 
     /// Get the namespace index of the given namespace URI.
     pub fn namespace_index(&self, namespace: &str) -> Option<u16> {
-        self.namespaces
+        self.cold
+            .read()
+            .namespaces
             .iter()
             .find(|(_, ns)| namespace == ns.as_str())
             .map(|(i, _)| *i)
     }
 
     fn assert_namespace(&self, node_id: &NodeId) {
-        if !self.namespaces.contains_key(&node_id.namespace) {
+        if !self.cold.read().namespaces.contains_key(&node_id.namespace) {
             panic!("Namespace index {} not in address space", node_id.namespace);
         }
     }
@@ -242,41 +266,47 @@ impl AddressSpace {
     /// Insert a references from `source_node` to `target_node` with
     /// the given reference type.
     pub fn insert_reference(
-        &mut self,
+        &self,
         source_node: &NodeId,
         target_node: &NodeId,
         reference_type: impl Into<NodeId>,
     ) {
-        self.references
+        self.cold
+            .write()
+            .references
             .insert_reference(source_node, target_node, reference_type)
     }
 
     /// Insert a list of references.
     pub fn insert_references<'a>(
-        &mut self,
+        &self,
         references: impl Iterator<Item = (&'a NodeId, &'a NodeId, impl Into<NodeId>)>,
     ) {
-        self.references.insert_references(references)
+        self.cold.write().references.insert_references(references)
     }
 
     /// Delete a reference.
     pub fn delete_reference<'a>(
-        &mut self,
+        &self,
         source_node: impl IntoNodeIdRef<'a>,
         target_node: impl IntoNodeIdRef<'a>,
         reference_type: impl IntoNodeIdRef<'a>,
     ) -> bool {
-        self.references
+        self.cold
+            .write()
+            .references
             .delete_reference(source_node, target_node, reference_type)
     }
 
     /// Delete references starting at or pointing to the given node.
     pub fn delete_node_references(
-        &mut self,
+        &self,
         source_node: &NodeId,
         delete_target_references: bool,
     ) -> bool {
-        self.references
+        self.cold
+            .write()
+            .references
             .delete_node_references(source_node, delete_target_references)
     }
 
@@ -288,30 +318,41 @@ impl AddressSpace {
         target_node: impl IntoNodeIdRef<'a>,
         reference_type: impl IntoNodeIdRef<'a>,
     ) -> bool {
-        self.references
+        self.cold
+            .read()
+            .references
             .has_reference(source_node, target_node, reference_type)
     }
 
-    /// Return a lazy iterator over references starting at `source_node`
-    /// that match `filter`.
-    pub fn find_references<'a: 'b, 'b>(
-        &'a self,
+    /// Return references starting at `source_node` that match `filter`.
+    pub fn find_references<'b>(
+        &self,
         source_node: impl IntoNodeIdRef<'b>,
         filter: Option<(impl Into<NodeId>, bool)>,
-        type_tree: &'b dyn TypeTree,
+        type_tree: &dyn TypeTree,
         direction: BrowseDirection,
-    ) -> impl Iterator<Item = ReferenceRef<'a>> + 'b {
-        self.references
-            .find_references(source_node, filter, type_tree, direction)
+    ) -> Vec<ImportedReference> {
+        let source = source_node.into_node_id_ref().into_node_id();
+        let filter: Option<(NodeId, bool)> = filter.map(|(id, include)| (id.into(), include));
+        let cold = self.cold.read();
+        cold.references
+            .find_references(&source, filter, type_tree, direction)
+            .map(|r| ImportedReference {
+                type_id: r.reference_type.clone(),
+                target_id: r.target_node.clone(),
+                is_forward: matches!(r.direction, ReferenceDirection::Forward),
+            })
+            .collect()
     }
 
     /// Build or rebuild the `(parent NodeId, BrowseName) → [child NodeId]` index
     /// for O(1) TranslateBrowsePathsToNodeIds resolution per OPC 10000-3 §5.2.4.
-    pub fn build_browse_name_index(&mut self, type_tree: &dyn TypeTree) {
+    pub fn build_browse_name_index(&self, type_tree: &dyn TypeTree) {
+        let mut cold = self.cold.write();
         let mut index: HashMap<(NodeId, QualifiedName), Vec<NodeId>> = HashMap::new();
         for node_ref in self.node_map.iter() {
             let source_id = node_ref.key().clone();
-            for rf in self.references.find_references(
+            for rf in cold.references.find_references(
                 &source_id,
                 None::<(ReferenceTypeId, bool)>,
                 type_tree,
@@ -331,32 +372,35 @@ impl AddressSpace {
                     .push(rf.target_node.clone());
             }
         }
-        self.browse_name_index = Some(index);
+        cold.browse_name_index = Some(index);
     }
 
     /// Return a reference to the browse-name index, building it first if needed.
     /// Ensure the browse-name index is built, building it if necessary.
-    pub fn ensure_browse_name_index(&mut self, type_tree: &dyn TypeTree) {
-        if self.browse_name_index.is_none() {
+    pub fn ensure_browse_name_index(&self, type_tree: &dyn TypeTree) {
+        if self.cold.read().browse_name_index.is_none() {
             self.build_browse_name_index(type_tree);
         }
     }
 
     /// Return `true` if the browse-name index has already been built.
     pub fn browse_name_index_is_built(&self) -> bool {
-        self.browse_name_index.is_some()
+        self.cold.read().browse_name_index.is_some()
     }
 
     /// Return a reference to the browse-name index. Panics if not yet built.
-    pub fn browse_name_index(&self) -> &HashMap<(NodeId, QualifiedName), Vec<NodeId>> {
-        self.browse_name_index
+    pub fn browse_name_index(&self) -> HashMap<(NodeId, QualifiedName), Vec<NodeId>> {
+        self.cold
+            .read()
+            .browse_name_index
             .as_ref()
             .expect("browse_name_index not built")
+            .clone()
     }
 
     /// Invalidate the browse-name index so it is rebuilt on next access.
-    pub fn invalidate_browse_name_index(&mut self) {
-        self.browse_name_index = None;
+    pub fn invalidate_browse_name_index(&self) {
+        self.cold.write().browse_name_index = None;
     }
 
     /// Find a child of `source_node` matching the given `filter` with
@@ -371,7 +415,7 @@ impl AddressSpace {
     ) -> Option<dashmap::mapref::one::Ref<'a, NodeId, NodeType>> {
         let name = browse_name.into();
         for rf in self.find_references(source_node, filter, type_tree, direction) {
-            let node = self.find_node(rf.target_node);
+            let node = self.find_node(&rf.target_id);
             if let Some(node) = node {
                 if node.as_node().browse_name() == &name {
                     return Some(node);
@@ -397,7 +441,7 @@ impl AddressSpace {
         for path_elem in browse_path {
             let mut found = None;
             for rf in self.find_references(&current_node_id, filter.clone(), type_tree, direction) {
-                let child = self.find_node(rf.target_node);
+                let child = self.find_node(&rf.target_id);
                 if let Some(child) = child {
                     if child.as_node().browse_name() == path_elem {
                         let next_node_id = child.as_node().node_id().clone();
@@ -417,8 +461,13 @@ impl AddressSpace {
     }
 
     /// Get the inner namespace map.
-    pub fn namespaces(&self) -> &HashMap<u16, String> {
-        &self.namespaces
+    pub fn namespaces(&self) -> HashMap<u16, String> {
+        self.cold.read().namespaces.clone()
+    }
+
+    /// Return true if the namespace index exists in this address space.
+    pub fn namespace_exists(&self, index: u16) -> bool {
+        self.cold.read().namespaces.contains_key(&index)
     }
 
     /// Find node by something that can be turned into a node id and return a reference to it.
@@ -559,9 +608,11 @@ impl AddressSpace {
     }
 
     /// Remove a node from the address space.
-    pub fn delete(&mut self, node_id: &NodeId, delete_target_references: bool) -> Option<NodeType> {
+    pub fn delete(&self, node_id: &NodeId, delete_target_references: bool) -> Option<NodeType> {
         let n = self.node_map.remove(node_id).map(|(_, v)| v);
-        self.references
+        self.cold
+            .write()
+            .references
             .delete_node_references(node_id, delete_target_references);
 
         n
@@ -569,7 +620,7 @@ impl AddressSpace {
 
     /// Add a `FolderType` node.
     pub fn add_folder(
-        &mut self,
+        &self,
         node_id: &NodeId,
         browse_name: impl Into<QualifiedName>,
         display_name: impl Into<LocalizedText>,
@@ -583,11 +634,7 @@ impl AddressSpace {
     }
 
     /// Add a list of variables to the address space.
-    pub fn add_variables(
-        &mut self,
-        variables: Vec<Variable>,
-        parent_node_id: &NodeId,
-    ) -> Vec<bool> {
+    pub fn add_variables(&self, variables: Vec<Variable>, parent_node_id: &NodeId) -> Vec<bool> {
         variables
             .into_iter()
             .map(|v| {
@@ -606,7 +653,7 @@ impl AddressSpace {
 
 impl NodeInsertTarget for AddressSpace {
     fn insert<'a>(
-        &mut self,
+        &self,
         node: impl Into<NodeType>,
         references: Option<&'a [(&'a NodeId, &NodeId, opcua_nodes::ReferenceDirection)]>,
     ) -> bool {
@@ -617,9 +664,8 @@ impl NodeInsertTarget for AddressSpace {
 
         use dashmap::mapref::entry::Entry;
         if let Entry::Vacant(entry) = self.node_map.entry(node_id.clone()) {
-            // If references are supplied, add them now
             if let Some(references) = references {
-                self.references.insert(&node_id, references);
+                self.cold.write().references.insert(&node_id, references);
             }
             entry.insert(node_type);
             true
@@ -798,39 +844,33 @@ mod tests {
     fn find_references() {
         let address_space = make_sample_address_space();
 
-        let references: Vec<_> = address_space
-            .find_references(
-                &NodeId::root_folder_id(),
-                Some((ReferenceTypeId::Organizes, false)),
-                &DefaultTypeTree::new(),
-                BrowseDirection::Forward,
-            )
-            .collect();
+        let references: Vec<_> = address_space.find_references(
+            &NodeId::root_folder_id(),
+            Some((ReferenceTypeId::Organizes, false)),
+            &DefaultTypeTree::new(),
+            BrowseDirection::Forward,
+        );
         assert_eq!(references.len(), 3);
 
-        let references: Vec<_> = address_space
-            .find_references(
-                &NodeId::root_folder_id(),
-                None::<(NodeId, bool)>,
-                &DefaultTypeTree::new(),
-                BrowseDirection::Forward,
-            )
-            .collect();
+        let references: Vec<_> = address_space.find_references(
+            &NodeId::root_folder_id(),
+            None::<(NodeId, bool)>,
+            &DefaultTypeTree::new(),
+            BrowseDirection::Forward,
+        );
         assert_eq!(references.len(), 4);
 
-        let references: Vec<_> = address_space
-            .find_references(
-                &NodeId::objects_folder_id(),
-                Some((ReferenceTypeId::Organizes, false)),
-                &DefaultTypeTree::new(),
-                BrowseDirection::Forward,
-            )
-            .collect();
+        let references: Vec<_> = address_space.find_references(
+            &NodeId::objects_folder_id(),
+            Some((ReferenceTypeId::Organizes, false)),
+            &DefaultTypeTree::new(),
+            BrowseDirection::Forward,
+        );
         assert_eq!(references.len(), 4);
 
         let r1 = &references[0];
-        assert_eq!(r1.reference_type, &ReferenceTypeId::Organizes);
-        let child_node_id = r1.target_node.clone();
+        assert_eq!(r1.type_id, NodeId::from(ReferenceTypeId::Organizes));
+        let child_node_id = r1.target_id.clone();
 
         let child = address_space.find_node(&child_node_id);
         assert!(child.is_some());
@@ -841,24 +881,20 @@ mod tests {
         let address_space = make_sample_address_space();
 
         //println!("{:#?}", address_space);
-        let references: Vec<_> = address_space
-            .find_references(
-                &NodeId::root_folder_id(),
-                Some((ReferenceTypeId::Organizes, false)),
-                &DefaultTypeTree::new(),
-                BrowseDirection::Inverse,
-            )
-            .collect();
+        let references: Vec<_> = address_space.find_references(
+            &NodeId::root_folder_id(),
+            Some((ReferenceTypeId::Organizes, false)),
+            &DefaultTypeTree::new(),
+            BrowseDirection::Inverse,
+        );
         assert!(references.is_empty());
 
-        let references: Vec<_> = address_space
-            .find_references(
-                &NodeId::objects_folder_id(),
-                Some((ReferenceTypeId::Organizes, false)),
-                &DefaultTypeTree::new(),
-                BrowseDirection::Inverse,
-            )
-            .collect();
+        let references: Vec<_> = address_space.find_references(
+            &NodeId::objects_folder_id(),
+            Some((ReferenceTypeId::Organizes, false)),
+            &DefaultTypeTree::new(),
+            BrowseDirection::Inverse,
+        );
         assert_eq!(references.len(), 1);
     }
 
@@ -1251,18 +1287,16 @@ mod tests {
             Some(NodeType::Method(_))
         ));
 
-        let refs: Vec<_> = address_space
-            .find_references(
-                &fn_node_id,
-                Some((ReferenceTypeId::HasProperty, false)),
-                &DefaultTypeTree::new(),
-                BrowseDirection::Forward,
-            )
-            .collect();
+        let refs: Vec<_> = address_space.find_references(
+            &fn_node_id,
+            Some((ReferenceTypeId::HasProperty, false)),
+            &DefaultTypeTree::new(),
+            BrowseDirection::Forward,
+        );
         assert_eq!(refs.len(), 1);
 
         let child = address_space
-            .find_node(refs.first().unwrap().target_node)
+            .find_node(&refs.first().unwrap().target_id)
             .unwrap();
         if let NodeType::Variable(v) = &*child {
             // verify OutputArguments

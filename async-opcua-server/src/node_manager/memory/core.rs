@@ -1094,8 +1094,8 @@ impl CoreNodeManagerImpl {
         Some(DataValue {
             value: Some(v),
             status: Some(StatusCode::Good),
-            source_timestamp: Some(**context.info.start_time.load()),
-            server_timestamp: Some(**context.info.start_time.load()),
+            source_timestamp: Some(*context.info.start_time),
+            server_timestamp: Some(*context.info.start_time),
             ..Default::default()
         })
     }

@@ -379,6 +379,7 @@ impl<T: ConnectionTransport> SessionController<T> {
         }
     }
 
+    #[inline]
     async fn process_request(&mut self, req: Request) -> RequestProcessResult {
         let span = debug_span!(
             "Incoming request",
@@ -992,6 +993,7 @@ impl<T: ConnectionTransport> SessionController<T> {
         }
     }
 
+    #[inline]
     fn validate_request(
         message: &RequestMessage,
         session: Option<Arc<RwLock<Session>>>,

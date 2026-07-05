@@ -21,6 +21,7 @@ mod query;
 mod rbac;
 mod read;
 mod reverse_connect;
+mod rsa_kem;
 mod sampling_transition;
 mod session_audit;
 mod subscriptions;

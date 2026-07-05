@@ -9,7 +9,7 @@ publish = false
 # Enables the profile behavior tests (tests/). NOT in default: under a unified
 # multi-package build feature unification inverts rejection semantics.
 # Run: cargo test -p async-opcua-foundation-profile-standard-server --features profile-tests
-profile-tests = []
+profile-tests = ["async-opcua/lds"]
 
 [dependencies]
 tokio = { version = "^1", default-features = false, features = ["macros", "rt", "signal"] }

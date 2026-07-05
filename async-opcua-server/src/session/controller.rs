@@ -257,20 +257,24 @@ impl<T: ConnectionTransport> SessionController<T> {
                     };
                     self.response_metrics(&msg);
 
-                    if let Err(e) = self.transport.enqueue_message_for_send(
-                        &mut self.channel,
+                    self.transport.enqueue_response(
                         msg.message,
-                        msg.request_id
-                    ) {
-                        error!("Failed to send response: {e}");
-                        self.fatal_error(e, "Encoding error");
-                    }
+                        msg.request_id,
+                    );
                 }
                 res = self.transport.poll(&mut self.channel), if can_poll_transport => {
                     match res {
-                        TransportPollResult::IncomingMessage(req) => {
-                            if matches!(self.process_request(req).await, RequestProcessResult::Close) {
-                                self.transport.set_closing();
+                        TransportPollResult::IncomingMessages(requests) => {
+                            for req in requests {
+                                if self.max_inflight > 0
+                                    && self.pending_messages.len() >= self.max_inflight
+                                {
+                                    break;
+                                }
+                                if matches!(self.process_request(req).await, RequestProcessResult::Close) {
+                                    self.transport.set_closing();
+                                    break;
+                                }
                             }
                         }
                         TransportPollResult::RecoverableError(status, request_id, request_handle) => {

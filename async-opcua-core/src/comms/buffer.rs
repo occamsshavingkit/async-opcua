@@ -215,6 +215,18 @@ impl SendBuffer {
         self.chunks.push_back(PendingPayload::Ack(ack));
     }
 
+    /// Push pre-encoded chunks into the send buffer without re-encoding.
+    ///
+    /// OPC-10000-6 §6.7.2: sequence numbers must be monotonic per chunk.
+    /// The caller is responsible for having already assigned sequence numbers
+    /// during encoding; this method only increments the handle by `chunk_count`
+    /// to keep the connection's counter in sync.
+    pub fn push_encoded_chunks(&mut self, chunks: Vec<MessageChunk>, chunk_count: u32) {
+        self.sequence_numbers.increment(chunk_count);
+        self.chunks
+            .extend(chunks.into_iter().map(PendingPayload::Chunk));
+    }
+
     /// Encode a message to chunks, then write them to the pending message queue.
     ///
     /// The messages are encrypted as they are sent.

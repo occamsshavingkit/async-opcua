@@ -12,10 +12,11 @@ use crate::{
     session::{controller::Response, message_handler::Request},
 };
 use opcua_types::{
-    BrowseNextRequest, BrowseNextResponse, BrowsePathResult, BrowsePathTarget, BrowseRequest,
-    BrowseResponse, BrowseResult, ByteString, DiagnosticInfo, NodeClass, RegisterNodesRequest,
-    RegisterNodesResponse, ResponseHeader, StatusCode, TranslateBrowsePathsToNodeIdsRequest,
-    TranslateBrowsePathsToNodeIdsResponse, UnregisterNodesRequest, UnregisterNodesResponse,
+    BrowseDirection, BrowseNextRequest, BrowseNextResponse, BrowsePathResult, BrowsePathTarget,
+    BrowseRequest, BrowseResponse, BrowseResult, ByteString, DiagnosticInfo, NodeClass,
+    RegisterNodesRequest, RegisterNodesResponse, ResponseHeader, StatusCode,
+    TranslateBrowsePathsToNodeIdsRequest, TranslateBrowsePathsToNodeIdsResponse,
+    UnregisterNodesRequest, UnregisterNodesResponse,
 };
 
 pub(crate) async fn browse(
@@ -58,7 +59,19 @@ pub(crate) async fn browse(
     {
         let type_tree = context.get_type_tree_for_user();
         for (idx, r) in nodes_to_browse.into_iter().enumerate() {
-            if !r.reference_type_id.is_null()
+            // Part 4 §5.9.2 Table 36 and §7.5 Table 112: BrowseDirection value 3 (Invalid)
+            // must be rejected with BadBrowseDirectionInvalid rather than silently returning
+            // empty results.
+            if matches!(r.browse_direction, BrowseDirection::Invalid) {
+                results.push(Some((
+                    BrowseResult {
+                        status_code: StatusCode::BadBrowseDirectionInvalid,
+                        continuation_point: ByteString::null(),
+                        references: None,
+                    },
+                    None,
+                )));
+            } else if !r.reference_type_id.is_null()
                 && !matches!(
                     type_tree.get().get(&r.reference_type_id),
                     Some(NodeClass::ReferenceType)

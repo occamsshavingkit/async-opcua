@@ -13,7 +13,7 @@ use opcua_core::{comms::secure_channel::SecureChannel, trace_read_lock, trace_wr
 use opcua_crypto::{random, CertificateStore, SecurityPolicy, X509};
 use parking_lot::RwLock;
 use tokio::sync::{mpsc, Notify};
-use tracing::{error, info};
+use tracing::{debug, error, info};
 
 #[cfg(feature = "fota")]
 use crate::fota::cleanup::cleanup_session;
@@ -356,12 +356,16 @@ impl CreateSessionActorConstruction {
         endpoint_selection: &CreateSessionEndpointSelection,
         certificate_validation: &CreateSessionCertificateValidation,
         server_signature: &mut CreateSessionServerSignature,
-    ) -> (Self, Session) {
+    ) -> Result<(Self, Session), StatusCode> {
         // OPC-10000-4 5.7.2: these values are part of the session returned by
         // CreateSession, but preparing them does not publish the Session or
         // spawn its actor.
+        let nonce_len = info.config.session_nonce_length;
+        if !(32..=128).contains(&nonce_len) {
+            return Err(StatusCode::BadConfigurationError);
+        }
         let authentication_token = NodeId::new(0, random::byte_string(32));
-        let server_nonce = random::byte_string(info.config.session_nonce_length);
+        let server_nonce = random::byte_string(nonce_len);
         let server_certificate = {
             let certs = info.endpoint_certificates.read();
             certs
@@ -377,6 +381,14 @@ impl CreateSessionActorConstruction {
         let server_endpoints = Some(endpoint_selection.server_endpoints.clone());
         let security_policy = channel.security_policy();
 
+        let session_name = {
+            let name = request.session_name.clone();
+            if name.is_empty() {
+                UAString::from("UnnamedSession")
+            } else {
+                name
+            }
+        };
         let session = Session::create(
             info,
             authentication_token.clone(),
@@ -389,7 +401,7 @@ impl CreateSessionActorConstruction {
             IdentityToken::None,
             certificate_validation.client_certificate.clone(),
             server_nonce.clone(),
-            request.session_name.clone(),
+            session_name,
             request.client_description.clone(),
             channel.security_mode(),
         );
@@ -408,7 +420,7 @@ impl CreateSessionActorConstruction {
         let session_id = session.session_id().clone();
         let session_id_numeric = session.session_id_numeric();
 
-        (
+        Ok((
             Self {
                 authentication_token,
                 server_nonce,
@@ -420,7 +432,7 @@ impl CreateSessionActorConstruction {
                 session_id_numeric,
             },
             session,
-        )
+        ))
     }
 }
 
@@ -470,10 +482,22 @@ impl CreateSessionDraft {
         request: &CreateSessionRequest,
     ) -> Result<Self, StatusCode> {
         let endpoint_selection = CreateSessionEndpointSelection::preflight(info, request)?;
+        if !request.request_header.authentication_token.is_null() {
+            debug!("CreateSession received non-null authenticationToken; ignoring per spec");
+        }
         let security_policy = channel.security_policy();
-        if request.client_nonce.len() < info.config.session_nonce_length {
-            error!("Create session was passed a client nonce that is too short",);
-            return Err(StatusCode::BadNonceInvalid);
+        {
+            let min_nonce_len = std::cmp::max(info.config.session_nonce_length, 32usize);
+            let max_nonce_len = 128usize;
+            if request.client_nonce.len() < min_nonce_len
+                || request.client_nonce.len() > max_nonce_len
+            {
+                error!(
+                    "Create session was passed a client nonce of invalid length {} (allowed range [{}, {}])",
+                    request.client_nonce.len(), min_nonce_len, max_nonce_len,
+                );
+                return Err(StatusCode::BadNonceInvalid);
+            }
         }
         let certificate_validation = CreateSessionCertificateValidation::preflight(
             certificate_store,
@@ -490,7 +514,7 @@ impl CreateSessionDraft {
             &endpoint_selection,
             &certificate_validation,
             &mut server_signature,
-        );
+        )?;
         let session_allocation = CreateSessionAllocation::prepare(
             session,
             request,
@@ -704,7 +728,41 @@ impl SessionManager {
         // authentication token, so the global session limit must be checked
         // immediately before those identifiers become visible.
         if self.sessions.len() >= self.info.config.limits.max_sessions {
-            return Err(StatusCode::BadTooManySessions);
+            let eviction_candidate: Option<NodeId> = {
+                let mut oldest: Option<(NodeId, Instant)> = None;
+                for session_arc in self.sessions.values() {
+                    let arc = session_arc.clone();
+                    let session = trace_read_lock!(arc);
+                    if !session.is_activated() {
+                        let created = session.created_at();
+                        if oldest.as_ref().is_none_or(|(_, t)| created < *t) {
+                            oldest = Some((session.session_id().clone(), created));
+                        }
+                    }
+                }
+                oldest.map(|(id, _)| id)
+            };
+            if let Some(evicted_id) = eviction_candidate {
+                if let Some(evicted_arc) = self.sessions.remove(&evicted_id) {
+                    let (auth_token, channel_id) = {
+                        let arc = evicted_arc.clone();
+                        let mut evicted = trace_write_lock!(arc);
+                        let auth_token = evicted.authentication_token.clone();
+                        let channel_id = evicted.secure_channel_id();
+                        evicted.close();
+                        (auth_token, channel_id)
+                    };
+                    self.auth_tokens.remove(&auth_token);
+                    self.actor_senders.remove(&auth_token);
+                    self.closed_auth_tokens.insert(auth_token, Instant::now());
+                    clear_session_locale_ids_for_node_id(&self.info, &evicted_id);
+                    if let Some(counter) = self.unactivated_by_channel.get(&channel_id) {
+                        counter.fetch_sub(1, Ordering::Release);
+                    }
+                }
+            } else {
+                return Err(StatusCode::BadTooManySessions);
+            }
         }
         let unactivated_count = self
             .unactivated_by_channel
@@ -1044,6 +1102,12 @@ pub(crate) async fn activate_session(
             }
 
             let requested_identity = IdentityToken::new(request.user_identity_token.clone());
+            if matches!(requested_identity, IdentityToken::X509(_))
+                && request.user_token_signature.signature.is_null()
+            {
+                error!("activate_session rejected: X509 identity token requires a non-null user_token_signature");
+                return Err(StatusCode::BadUserSignatureInvalid);
+            }
             let session_identity_is_non_anonymous = !matches!(
                 session.user_identity(),
                 IdentityToken::Anonymous(_) | IdentityToken::None
@@ -1226,7 +1290,10 @@ pub(crate) async fn activate_session(
             crate::security_checks::SecurityCheckCategory::RbacDecision,
             "session-activation",
         );
-        let locale_ids = request.locale_ids.clone();
+        let locale_ids = match request.locale_ids {
+            Some(ref ids) if !ids.is_empty() => request.locale_ids.clone(),
+            _ => session.locale_ids().clone(),
+        };
         let was_unactivated = !session.is_activated();
         session.activate(
             secure_channel_id,

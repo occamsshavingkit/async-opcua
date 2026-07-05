@@ -101,6 +101,8 @@ impl ServerEndpoint {
         let security_level = match security_policy {
             SecurityPolicy::Aes128Sha256RsaOaep => 2,
             SecurityPolicy::Basic256Sha256 => 4,
+            SecurityPolicy::EccNistP256 => 4,
+            SecurityPolicy::EccNistP384 => 5,
             SecurityPolicy::Aes256Sha256RsaPss => 5,
             _ => 0,
         };

@@ -523,8 +523,8 @@ impl ServerInfo {
             servers
                 .into_iter()
                 .enumerate()
-                .map(|(i, server)| (i as u32, server))
-                .filter(|(record_id, _)| *record_id >= starting_record_id)
+                .map(|(i, server)| ((i + 1) as u32, server))
+                .filter(|(record_id, _)| *record_id > starting_record_id)
                 // We do not track per-server capabilities, so we can only satisfy an empty filter.
                 .filter(|_| !want_caps)
                 .map(|(record_id, server)| opcua_types::ServerOnNetwork {
@@ -607,8 +607,8 @@ impl ServerInfo {
             candidates
                 .into_iter()
                 .enumerate()
-                .map(|(i, server)| (i as u32, server))
-                .filter(|(record_id, _)| *record_id >= starting_record_id)
+                .map(|(i, server)| ((i + 1) as u32, server))
+                .filter(|(record_id, _)| *record_id > starting_record_id)
                 .filter(|(_, server)| {
                     !want_caps
                         || server.caps.as_ref().is_some_and(|caps| {
@@ -647,15 +647,23 @@ impl ServerInfo {
     }
 
     /// Returns registered servers as application descriptions for FindServers.
+    /// OPC-10000-12 §5.1: LDS filters by endpoint URL.
     #[cfg(feature = "lds")]
     pub(crate) fn registered_application_descriptions(
         &self,
-        _endpoint_url: &UAString,
+        endpoint_url: &UAString,
         locale_ids: &Option<Vec<UAString>>,
     ) -> Vec<ApplicationDescription> {
         self.registered_servers
             .read()
             .values()
+            .filter(|server| {
+                endpoint_url.is_empty()
+                    || server.discovery_urls.as_ref().is_some_and(|urls| {
+                        urls.iter()
+                            .any(|url| url_matches_except_host(url.as_ref(), endpoint_url.as_ref()))
+                    })
+            })
             .map(|server| ApplicationDescription {
                 application_uri: server.server_uri.clone(),
                 product_uri: server.product_uri.clone(),
@@ -672,10 +680,22 @@ impl ServerInfo {
     pub(crate) fn find_servers_application_description(
         &self,
         endpoint_url: &UAString,
+        locale_ids: &Option<Vec<UAString>>,
     ) -> ApplicationDescription {
         let mut description = self.config.application_description();
         if !endpoint_url.is_empty() {
             description.discovery_urls = Some(vec![endpoint_url.clone()]);
+        }
+        if let Some(locale_ids) = locale_ids {
+            for requested in locale_ids {
+                if locale_id_matches(
+                    description.application_name.locale.as_ref(),
+                    requested.as_ref(),
+                ) {
+                    return description;
+                }
+            }
+            description.application_name = LocalizedText::null();
         }
         description
     }

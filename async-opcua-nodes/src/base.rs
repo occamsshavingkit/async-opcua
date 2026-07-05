@@ -264,7 +264,7 @@ impl Base {
     }
 
     /// Set the browse name of this node.
-    pub fn set_browse_name(&mut self, browse_name: impl Into<QualifiedName>) {
+    pub(crate) fn set_browse_name(&mut self, browse_name: impl Into<QualifiedName>) {
         self.browse_name = browse_name.into();
     }
 }

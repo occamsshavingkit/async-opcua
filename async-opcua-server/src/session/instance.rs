@@ -174,10 +174,14 @@ impl Session {
             #[cfg(feature = "ecc")]
             ecdh_key_consumed: false,
             session_name,
-            session_timeout: if session_timeout == 0 {
-                Duration::from_millis(info.config.max_session_timeout_ms)
-            } else {
-                Duration::from_millis(session_timeout)
+            session_timeout: {
+                let base = if session_timeout == 0 {
+                    info.config.max_session_timeout_ms
+                } else {
+                    session_timeout
+                };
+                // OPC-10000-4 §5.7.2.2 Table 15
+                Duration::from_millis(base.max(info.config.min_session_timeout_ms))
             },
             created_at: now,
             last_service_request: ArcSwap::new(Arc::new(now)),
@@ -485,6 +489,11 @@ impl Session {
     /// Get the name of this session as set by the client.
     pub fn session_name(&self) -> &str {
         self.session_name.as_ref()
+    }
+
+    /// Get the session's preferred locale IDs.
+    pub fn locale_ids(&self) -> &Option<Vec<UAString>> {
+        &self.locale_ids
     }
 
     /// Get the security policy URI of this session.

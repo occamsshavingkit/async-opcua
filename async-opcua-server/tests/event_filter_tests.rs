@@ -372,7 +372,9 @@ async fn failed_username_activation_dispatches_audit_event() {
     // the ActivateSession failure; skip non-activate audit events and assert on the activation one.
     let activate_type = Variant::from(NodeId::from(ObjectTypeId::AuditActivateSessionEventType));
     let mut fields = None;
-    for _ in 0..4 {
+    // The CloseSecureChannel added by SC-01 dispatches an extra AuditChannelEventType;
+    // extend the poll window to accommodate it before reaching ActivateSession audit.
+    for _ in 0..6 {
         let Ok(Some(received)) =
             tokio::time::timeout(Duration::from_secs(5), event_rx.recv()).await
         else {

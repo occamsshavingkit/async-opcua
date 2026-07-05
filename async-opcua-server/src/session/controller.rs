@@ -18,10 +18,8 @@ use tracing::{debug, debug_span, error, trace, warn};
 
 use opcua_core::{
     comms::{
-        message_chunk::MessageChunkType,
-        secure_channel::{Role, SecureChannel},
-        security_header::SecurityHeader,
-        tcp_types::ErrorMessage,
+        message_chunk::MessageChunkType, secure_channel::SecureChannel,
+        security_header::SecurityHeader, tcp_types::ErrorMessage,
     },
     sync::RwLock,
 };
@@ -52,10 +50,10 @@ use crate::{
 use super::{
     actor::SessionMessage,
     audit::{
-        dispatch_activate_session, dispatch_certificate_audit, dispatch_create_session,
-        dispatch_open_secure_channel, dispatch_open_secure_channel_certificate_audit,
-        dispatch_response_failure, dispatch_service_failure,
-        dispatch_suppressed_certificate_audit_success, AuditEventContext,
+        dispatch_activate_session, dispatch_certificate_audit, dispatch_close_secure_channel,
+        dispatch_create_session, dispatch_open_secure_channel,
+        dispatch_open_secure_channel_certificate_audit, dispatch_response_failure,
+        dispatch_service_failure, dispatch_suppressed_certificate_audit_success, AuditEventContext,
     },
     controller_command::ControllerCommand,
     instance::Session,
@@ -459,7 +457,25 @@ impl<T: ConnectionTransport> SessionController<T> {
                 }
             }
 
-            RequestMessage::CloseSecureChannel(_r) => RequestProcessResult::Close,
+            RequestMessage::CloseSecureChannel(r) => {
+                // Emit the close audit while the subscription infrastructure
+                // is still alive; the actual TCP teardown is asynchronous
+                // (the transport drops after we return Close).
+                let client_certificate = self
+                    .channel
+                    .remote_cert()
+                    .map(|cert| cert.as_byte_string())
+                    .unwrap_or_default();
+                dispatch_close_secure_channel(
+                    #[cfg(feature = "events")]
+                    &self.subscriptions,
+                    &self.info,
+                    &r.request_header,
+                    self.channel.secure_channel_id(),
+                    client_certificate,
+                );
+                RequestProcessResult::Close
+            }
 
             RequestMessage::CreateSession(request) => {
                 let _h = span.enter();
@@ -600,9 +616,10 @@ impl<T: ConnectionTransport> SessionController<T> {
                     .info
                     .matches_find_servers_filters(&request.endpoint_url, &request.locale_ids)
                 {
-                    vec![self
-                        .info
-                        .find_servers_application_description(&request.endpoint_url)]
+                    vec![self.info.find_servers_application_description(
+                        &request.endpoint_url,
+                        &request.locale_ids,
+                    )]
                 } else {
                     Vec::new()
                 };
@@ -1162,7 +1179,6 @@ impl<T: ConnectionTransport> SessionController<T> {
             .validate_secure_channel_nonce_length(&request.client_nonce)?;
         self.channel
             .set_remote_nonce_from_byte_string(&request.client_nonce)?;
-        self.channel.set_role(Role::Server);
         #[cfg(feature = "ecc")]
         if self.channel.security_policy().is_ecc() {
             self.channel.set_apply_channel_thumbprint(

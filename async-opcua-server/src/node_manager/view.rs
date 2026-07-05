@@ -305,7 +305,8 @@ impl BrowseNode {
     /// Add a reference to the results list, without verifying that it is valid.
     /// If you do this, you are responsible for validating filters,
     /// and requested fields on each reference.
-    pub fn add_unchecked(&mut self, reference: ReferenceDescription) {
+    pub fn add_unchecked(&mut self, mut reference: ReferenceDescription) {
+        self.strip_result_mask_fields(&mut reference);
         self.references.push(reference);
     }
 
@@ -409,6 +410,17 @@ impl BrowseNode {
             return AddReferenceResult::Rejected;
         }
 
+        self.strip_result_mask_fields(&mut reference);
+
+        if self.remaining() > 0 {
+            self.references.push(reference);
+            AddReferenceResult::Added
+        } else {
+            AddReferenceResult::Full(reference)
+        }
+    }
+
+    fn strip_result_mask_fields(&self, reference: &mut ReferenceDescription) {
         if !self
             .result_mask
             .contains(BrowseDescriptionResultMask::RESULT_MASK_BROWSE_NAME)
@@ -442,13 +454,6 @@ impl BrowseNode {
             .contains(BrowseDescriptionResultMask::RESULT_MASK_TYPE_DEFINITION)
         {
             reference.type_definition = ExpandedNodeId::null();
-        }
-
-        if self.remaining() > 0 {
-            self.references.push(reference);
-            AddReferenceResult::Added
-        } else {
-            AddReferenceResult::Full(reference)
         }
     }
 

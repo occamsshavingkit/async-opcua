@@ -299,7 +299,7 @@ impl SessionSubscriptions {
         let subscription = Subscription::new(
             subscription_id,
             request.publishing_enabled,
-            Duration::from_millis(revised_publishing_interval as u64),
+            Duration::from_micros((revised_publishing_interval * 1000.0) as u64),
             revised_lifetime_count,
             revised_max_keep_alive_count,
             request.priority,

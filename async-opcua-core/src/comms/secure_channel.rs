@@ -2103,6 +2103,11 @@ impl SecureChannel {
     pub fn set_token_lifetime(&mut self, token_lifetime: u32) {
         self.token_lifetime = token_lifetime;
     }
+
+    /// Set the token creation time.
+    pub fn set_token_created_at(&mut self, created_at: DateTime) {
+        self.token_created_at = created_at;
+    }
 }
 
 #[cfg(test)]

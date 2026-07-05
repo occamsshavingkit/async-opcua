@@ -583,6 +583,13 @@ pub struct ServerConfig {
     /// we will instantly time out.
     #[serde(default = "defaults::max_session_timeout_ms")]
     pub max_session_timeout_ms: u64,
+    /// Minimum session timeout in milliseconds.
+    ///
+    /// OPC-10000-4 §5.7.2.2 Table 15: the server shall have a minimum session
+    /// timeout to prevent resource exhaustion by clients requesting an
+    /// unreasonably short timeout.
+    #[serde(default = "defaults::min_session_timeout_ms")]
+    pub min_session_timeout_ms: u64,
     /// Enable server diagnostics.
     #[serde(default)]
     pub diagnostics: bool,
@@ -650,6 +657,10 @@ mod defaults {
 
     pub(super) fn max_session_timeout_ms() -> u64 {
         constants::MAX_SESSION_TIMEOUT
+    }
+
+    pub(super) fn min_session_timeout_ms() -> u64 {
+        500
     }
 
     pub(super) fn session_nonce_length() -> usize {
@@ -819,6 +830,7 @@ impl Default for ServerConfig {
             max_timeout_ms: defaults::max_timeout_ms(),
             max_secure_channel_token_lifetime_ms: defaults::max_secure_channel_token_lifetime_ms(),
             max_session_timeout_ms: defaults::max_session_timeout_ms(),
+            min_session_timeout_ms: defaults::min_session_timeout_ms(),
             diagnostics: false,
             session_nonce_length: defaults::session_nonce_length(),
             reverse_connect_failure_delay_ms: defaults::reverse_connect_failure_delay_ms(),

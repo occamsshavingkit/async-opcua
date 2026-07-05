@@ -752,6 +752,27 @@ pub(crate) fn dispatch_open_secure_channel(
     dispatch_audit_event_if_enabled!(subscriptions, &event);
 }
 
+pub(crate) fn dispatch_close_secure_channel(
+    #[cfg(feature = "events")] subscriptions: &Arc<SubscriptionCache>,
+    info: &ServerInfo,
+    request_header: &RequestHeader,
+    secure_channel_id: u32,
+    client_certificate: ByteString,
+) {
+    let event = ServerAuditEvent::outcome(
+        ObjectTypeId::AuditChannelEventType,
+        info.application_uri.clone(),
+        "CloseSecureChannel",
+        request_header.audit_entry_id.clone(),
+        UAString::null(),
+        StatusCode::Good,
+        None,
+    )
+    .with_secure_channel_id(secure_channel_id)
+    .with_client_certificate(client_certificate);
+    dispatch_audit_event_if_enabled!(subscriptions, &event);
+}
+
 pub(crate) fn dispatch_service_failure(
     #[cfg(feature = "events")] subscriptions: &Arc<SubscriptionCache>,
     info: &ServerInfo,

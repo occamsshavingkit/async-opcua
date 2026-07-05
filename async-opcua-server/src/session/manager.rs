@@ -471,14 +471,8 @@ impl CreateSessionDraft {
     ) -> Result<Self, StatusCode> {
         let endpoint_selection = CreateSessionEndpointSelection::preflight(info, request)?;
         let security_policy = channel.security_policy();
-        if !matches!(security_policy, SecurityPolicy::None)
-            && request.client_nonce.len() < info.config.session_nonce_length
-        {
-            error!(
-                "Create session was passed a client nonce that is too short, expected at least {} bytes, got {}",
-                info.config.session_nonce_length,
-                request.client_nonce.len()
-            );
+        if request.client_nonce.len() < info.config.session_nonce_length {
+            error!("Create session was passed a client nonce that is too short",);
             return Err(StatusCode::BadNonceInvalid);
         }
         let certificate_validation = CreateSessionCertificateValidation::preflight(

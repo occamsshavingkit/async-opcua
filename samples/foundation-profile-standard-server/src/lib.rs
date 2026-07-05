@@ -79,6 +79,7 @@ pub fn build_server(pki_dir: impl Into<PathBuf>) -> ServerBuilder {
         .create_sample_keypair(true)
         .certificate_path("own/cert.der")
         .private_key_path("private/private.pem")
+        .trust_client_certs(true)
         .discovery_urls(vec!["/".to_owned()])
 }
 

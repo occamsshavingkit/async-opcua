@@ -4,12 +4,20 @@
 //! valid ONLY under an isolated
 //! `cargo test -p async-opcua-foundation-profile-embedded-server --features profile-tests`.
 
-use std::{env, path::PathBuf, sync::Arc, time::SystemTime};
+use std::{
+    env,
+    path::PathBuf,
+    sync::atomic::{AtomicU64, Ordering},
+    sync::Arc,
+    time::SystemTime,
+};
 
 use async_opcua_foundation_profile_embedded_server as embedded;
 use opcua::client::{ClientBuilder, IdentityToken, Session};
 use opcua::server::ServerHandle;
 use tokio::net::TcpListener;
+
+static SPAWN_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 pub struct EmbeddedTester {
     #[allow(dead_code)]
@@ -22,8 +30,9 @@ fn unique_dir(tag: &str) -> PathBuf {
         .duration_since(SystemTime::UNIX_EPOCH)
         .expect("system clock should be after unix epoch")
         .as_nanos();
+    let count = SPAWN_COUNTER.fetch_add(1, Ordering::Relaxed);
     env::temp_dir().join(format!(
-        "embedded-profile-test-{tag}-{}-{nonce}",
+        "embedded-profile-test-{tag}-{}-{nonce}-{count}",
         std::process::id()
     ))
 }
@@ -35,11 +44,13 @@ pub async fn spawn_embedded() -> EmbeddedTester {
     let addr = listener.local_addr().expect("local addr");
     let url = format!("opc.tcp://127.0.0.1:{}/", addr.port());
 
-    // Use a stable relative PKI dir for cert generation (same pattern as the
-    // integration test suite). The create_sample_keypair(true) flag regenerates
-    // if missing.
-    let pki_dir = format!("./pki-embedded-test-{}", std::process::id());
-    let builder = embedded::build_server(&pki_dir).discovery_urls(vec![url.clone()]);
+    // Use a unique temp PKI dir so each server invocation gets a fresh cert,
+    // avoiding stale-cert / signature mismatch errors when multiple tests run
+    // in the same process.
+    let pki_dir = unique_dir("pki-server");
+    let builder = embedded::build_server(&pki_dir)
+        .discovery_urls(vec![url.clone()])
+        .trust_client_certs(true);
     let (server, handle) = builder
         .build()
         .expect("embedded benchmark server should build");

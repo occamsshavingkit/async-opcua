@@ -99,6 +99,59 @@ For simple synchrnous sampling you can use the `SyncSampler` utility from the se
 
 For an example of how to use the `InMemoryNodeManager`, have a look at the [`CoreNodeManager`](../async-opcua-server/src/node_manager/memory/core.rs), which implements a node manager for the core namespace, including method calls, different sources for data being Read, and more.
 
+## QuickNodeManager
+
+For simple custom node managers with a handful of Variables and optional read/write callbacks, the `QuickNodeManager` builder reduces boilerplate compared to implementing the full `InMemoryNodeManagerImpl` trait.
+
+```rust
+use opcua_types::{DataValue, Variant};
+use async_opcua_server::node_manager::builder::QuickNodeManager;
+use async_opcua_server::node_manager::NodeManagerBuilder;
+
+let qnm = QuickNodeManager::new("urn:my-namespace")
+    .variable("Status", "OK")
+        .read_callback(|_ctx| {
+            Ok(DataValue::new_now(Variant::String("RUNNING".into())))
+        })
+        .add()
+    .variable("Count", 0u32)
+        .writable()
+        .add();
+
+let server = ServerBuilder::new()
+    .with_node_manager(qnm)
+    .application_name("my-server")
+    .build()?;
+```
+
+Variables are placed under the server's `ObjectsFolder`. Read and write callbacks receive a [`ReadContext`] or [`WriteContext`] argument that carries the index range, timestamps, and max-age from the client request:
+
+```rust
+use async_opcua_server::node_manager::builder::{ReadContext, WriteContext};
+
+.variable("DynamicCounter", 0i32)
+    .writable()
+    .read_callback(|ctx: &ReadContext| {
+        Ok(DataValue::new_now(compute_value(&ctx.index_range)))
+    })
+    .write_callback(|ctx: &WriteContext, val: Variant| {
+        apply_value(val)?;
+        Ok(())
+    })
+    .add()
+```
+
+You can also group variables into objects using `.object("name")` / `.add_variable(...)` / `.add()`:
+
+```rust
+QuickNodeManager::new("urn:my-namespace")
+    .object("Device")
+        .add_variable("Power", false).add()
+        .add()
+```
+
+For advanced use cases (methods, events, history, dynamic address spaces), implement the `NodeManagerBuilder` trait directly as described in the sections below.
+
 ## NodeManager trait
 
 The next step up when it comes to customizability is implemening the `NodeManager` trait directly. This lets you present a _dynamic_ set of nodes that are not stored in memory. This is required if you, for example, want to create an OPC-UA server that keeps its nodes in a local database.

@@ -28,6 +28,7 @@ mod attributes;
 #[cfg(feature = "node-management")]
 mod audit_events;
 mod build;
+pub mod builder;
 mod context;
 #[cfg(feature = "history")]
 mod history;

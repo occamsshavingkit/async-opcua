@@ -25,5 +25,4 @@ _Last refreshed 2026-07-04 (after feature 057 completeness closeout)._
 
 ## Remaining
 
-- **OCSP operational infrastructure**: the core validator handles supplied/stapled OCSP and live fetching; remaining scope is operating as an OCSP responder if a deployment needs it.
 - **CTT certification run**: run the demo server against the OPC Foundation Compliance Test Tool for behavioral gap discovery.

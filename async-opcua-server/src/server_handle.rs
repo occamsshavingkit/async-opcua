@@ -8,6 +8,8 @@ use tokio_util::sync::CancellationToken;
 use tracing::info;
 
 use opcua_core::sync::RwLock;
+#[cfg(feature = "lds")]
+use opcua_types::{ApplicationDescription, UAString};
 #[cfg(feature = "subscriptions")]
 use opcua_types::{AttributeId, DataValue, VariableId};
 use opcua_types::{LocalizedText, ServerState};
@@ -186,6 +188,18 @@ impl ServerHandle {
             tokio::time::sleep_until(deadline.into()).await;
             token.cancel();
         });
+    }
+
+    /// Returns application descriptions for servers registered with this server
+    /// when it is acting as a Local Discovery Server (LDS).
+    #[cfg(feature = "lds")]
+    pub fn registered_application_descriptions(
+        &self,
+        endpoint_url: &UAString,
+        locale_ids: &Option<Vec<UAString>>,
+    ) -> Vec<ApplicationDescription> {
+        self.info
+            .registered_application_descriptions(endpoint_url, locale_ids)
     }
 
     /// Add a reverse connect target to the server.

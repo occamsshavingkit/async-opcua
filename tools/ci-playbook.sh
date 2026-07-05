@@ -43,6 +43,7 @@ step()  { echo -e "\n${YELLOW}[$(date +%H:%M:%S)] $*${NC}"; }
 pass()  { echo -e "  $PASS"; }
 fail()  { echo -e "  $FAIL"; }
 skip_msg() { echo -e "  $SKIP — $*"; }
+fail_msg() { echo -e "  $FAIL — $*"; }
 maybe_skip() { [[ "$FAST" == "true" ]] && { skip_msg "fast mode"; return 0; }; return 1; }
 
 # ────────────────────────────────────────────────────────────────────
@@ -170,29 +171,53 @@ job_verify_codegen() {
     maybe_skip && return 0
     step "verify-codegen: types"
     cargo run --locked --bin async-opcua-codegen code_gen_config.yml \
-        && cargo fmt -- async-opcua-types/src/generated/ \
-        && git diff --exit-code -- async-opcua-types/src/generated/ \
+        && cargo fmt -p async-opcua-types -p async-opcua-core-namespace \
+        && git diff --exit-code -- async-opcua-types/src/generated/ async-opcua-core-namespace/src/ \
         && pass || fail
 
     step "verify-codegen: custom-codegen"
     cargo run --locked --bin async-opcua-codegen samples/custom-codegen/code_gen_config.yml \
-        && cargo fmt -- samples/custom-codegen/src/generated/ \
+        && cargo fmt -p custom-codegen \
         && git diff --exit-code -- samples/custom-codegen/src/generated/ \
         && pass || fail
 
     step "verify-codegen: FX data"
     cargo run --locked --bin async-opcua-codegen async-opcua-fx/code_gen_config.yml \
-        && cargo fmt -- async-opcua-fx/src/generated/ \
+        && cargo fmt -p async-opcua-fx \
         && git diff --exit-code -- async-opcua-fx/src/generated/ \
         && pass || fail
 }
 
 # ────────────────────────────────────────────────────────────────────
-# 10. interop — skipped (external deps)
+# 10. interop — cross-stack conformance harnesses
 # ────────────────────────────────────────────────────────────────────
 job_interop() {
-    step "interop"
-    skip_msg "requires .NET 8, Node.js, Python venv, open62541 build deps"
+    maybe_skip && return 0
+
+    local missing=""
+    command -v node    &>/dev/null  || missing+=" node.js (node)"
+    command -v dotnet  &>/dev/null  || missing+=" .NET 8 SDK (dotnet)"
+    command -v python3 &>/dev/null  || missing+=" python3"
+    command -v cmake   &>/dev/null  || missing+=" cmake"
+    command -v gcc     &>/dev/null  || missing+=" build-essential (gcc)"
+    dpkg -l libssl-dev  &>/dev/null || missing+=" libssl-dev"
+
+    if [[ -n "$missing" ]]; then
+        fail_msg "MISSING DEPS:$missing"
+        return 1
+    fi
+
+    step "interop: node-opcua"
+    ./samples/demo-server/interop/run-interop.sh && pass || fail
+
+    step "interop: open62541"
+    ./samples/demo-server/interop/open62541/run-open62541.sh && pass || fail
+
+    step "interop: asyncua"
+    ./samples/demo-server/interop/asyncua/run-asyncua.sh && pass || fail
+
+    step "interop: .NET (OPC Foundation reference)"
+    ./samples/demo-server/interop/dotnet/run-dotnet.sh && pass || fail
 }
 
 # ════════════════════════════════════════════════════════════════════
@@ -211,6 +236,7 @@ if [[ "$CI_ONLY" == "true" ]]; then
     job_footprint
     job_feature_lattice
     job_verify_codegen
+    job_interop
     echo -e "\n${GREEN}CI gate complete.${NC}"
     exit 0
 fi

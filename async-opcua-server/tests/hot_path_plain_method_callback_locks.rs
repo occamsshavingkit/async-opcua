@@ -225,7 +225,7 @@ fn insert_plain_method_nodes(node_manager: &SimpleNodeManager, namespace_index: 
 
     ObjectBuilder::new(&object_id, "CallbackObject", "CallbackObject")
         .organized_by(ObjectId::ObjectsFolder)
-        .insert(&mut *address_space);
+        .insert(&*address_space);
 
     MethodBuilder::new(&method_id, "PlainEcho", "PlainEcho")
         .component_of(object_id)
@@ -239,7 +239,7 @@ fn insert_plain_method_nodes(node_manager: &SimpleNodeManager, namespace_index: 
             &NodeId::new(namespace_index, "PlainEchoOutputArguments"),
             &[("Value", DataTypeId::String).into()],
         )
-        .insert(&mut *address_space);
+        .insert(&*address_space);
 }
 
 struct TempDir {

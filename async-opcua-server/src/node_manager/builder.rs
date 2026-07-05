@@ -206,7 +206,7 @@ fn build_quick_node_manager(
 
     // 2. Build a fresh address space, register the namespace, and add all the
     //    pending variables and objects.
-    let mut address_space = AddressSpace::new();
+    let address_space = AddressSpace::new();
     address_space.add_namespace(&manager.namespace_uri, ns_index);
 
     let objects_folder: NodeId = ObjectId::ObjectsFolder.into();
@@ -218,7 +218,7 @@ fn build_quick_node_manager(
 
     for var in manager.variables {
         let node_id = NodeId::new(ns_index, var.name.clone());
-        insert_variable(&mut address_space, &node_id, &var, &objects_folder, false);
+        insert_variable(&address_space, &node_id, &var, &objects_folder, false);
         if var.read_cb.is_some() || var.write_cb.is_some() {
             callbacks.push((node_id, var.read_cb, var.write_cb));
         }
@@ -233,13 +233,13 @@ fn build_quick_node_manager(
                 ReferenceTypeId::HasTypeDefinition,
                 opcua_nodes::ReferenceDirection::Forward,
             )
-            .insert(&mut address_space);
+            .insert(&address_space);
 
         for child in object.children {
             // Hierarchical child id so two objects can have a child with the
             // same name without colliding.
             let child_id = NodeId::new(ns_index, format!("{}.{}", object.name, child.name));
-            insert_variable(&mut address_space, &child_id, &child, &object_id, true);
+            insert_variable(&address_space, &child_id, &child, &object_id, true);
             if child.read_cb.is_some() || child.write_cb.is_some() {
                 callbacks.push((child_id, child.read_cb, child.write_cb));
             }
@@ -296,7 +296,7 @@ fn build_quick_node_manager(
 /// Otherwise it is added as an `Organizes` child of `parent` (the convention
 /// for nodes organized by a folder such as `ObjectsFolder`).
 fn insert_variable(
-    address_space: &mut AddressSpace,
+    address_space: &AddressSpace,
     node_id: &NodeId,
     var: &PendingVariable,
     parent: &NodeId,

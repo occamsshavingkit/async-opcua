@@ -461,15 +461,14 @@ fn add_references_impl(
             // exactly one HasTypeDefinition Reference. Reject a second one (the
             // duplicate-to-same-target case is handled below).
             if item.reference_type_id() == &NodeId::from(ReferenceTypeId::HasTypeDefinition)
-                && address_space
+                && !address_space
                     .find_references(
                         source_node,
                         Some((ReferenceTypeId::HasTypeDefinition, false)),
                         &*type_tree,
                         BrowseDirection::Forward,
                     )
-                    .first()
-                    .is_some()
+                    .is_empty()
             {
                 if source_ready {
                     item.set_source_result(StatusCode::BadReferenceNotAllowed);

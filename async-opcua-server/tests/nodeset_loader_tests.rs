@@ -91,7 +91,7 @@ fn loader_registers_namespaces_and_imports_cross_namespace_nodes(
         ]
     );
 
-    let mut address_space = AddressSpace::new();
+    let address_space = AddressSpace::new();
     let mut type_tree = DefaultTypeTree::new();
     for import in loaded.imports() {
         address_space.import_node_set(import.as_ref(), type_tree.namespaces_mut());

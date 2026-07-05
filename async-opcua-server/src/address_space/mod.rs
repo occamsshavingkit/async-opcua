@@ -48,6 +48,12 @@ pub struct AddressSpace {
     pub cold: RwLock<AddressSpaceCold>,
 }
 
+impl Default for AddressSpace {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AddressSpace {
     /// Create a new empty address space.
     pub fn new() -> Self {

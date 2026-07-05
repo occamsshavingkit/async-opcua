@@ -886,12 +886,11 @@ impl<T: ConnectionTransport> SessionController<T> {
                     session_was_closed,
                 } = if let Some((s, _tok)) = cached {
                     let mgr = trace_read_lock!(self.session_manager);
-                    let _lookup = SessionDispatchLookup {
+                    SessionDispatchLookup {
                         session: Some(s),
                         actor_sender: mgr.actor_sender(authentication_token),
                         session_was_closed: mgr.is_closed_token(authentication_token),
-                    };
-                    _lookup
+                    }
                 } else {
                     let mgr = trace_read_lock!(self.session_manager);
                     let s = mgr.find_by_token(authentication_token);

@@ -416,7 +416,7 @@ fn add_role(
         let inserted = ObjectBuilder::new(&role_node_id, browse_name, role_name.as_str())
             .has_type_definition(ObjectTypeId::RoleType)
             .component_of(role_set)
-            .insert(&mut *space);
+            .insert(&*space);
         if !inserted {
             return Err(StatusCode::BadNodeIdExists);
         }

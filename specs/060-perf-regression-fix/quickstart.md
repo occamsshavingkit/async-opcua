@@ -28,12 +28,12 @@ tools/ci-playbook.sh --ci
 # Build release for both baseline and HEAD (need to git checkout each)
 cargo build --release --bin async-opcua-localhost-bench
 
-# Profile with perf stat
-perf stat -e instructions,cycles,cache-misses,branch-misses,L1-icache-load-misses \
+# Profile with perf stat (CPU pinning eliminates scheduler noise)
+taskset -c 11 perf stat -e instructions,cycles,cache-misses,branch-misses,L1-icache-load-misses \
   ./target/release/async-opcua-localhost-bench run --op read --warmup 3 --measure 5
 
-# Also profile write path
-perf stat -e instructions,cycles,cache-misses,branch-misses \
+# Profile write path (same event set for comparability)
+taskset -c 11 perf stat -e instructions,cycles,cache-misses,branch-misses,L1-icache-load-misses \
   ./target/release/async-opcua-localhost-bench run --op write --warmup 3 --measure 5
 ```
 

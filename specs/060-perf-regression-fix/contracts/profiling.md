@@ -17,7 +17,7 @@ Define a repeatable profiling methodology for measuring the localhost benchmark 
 ## Test Command
 
 ```bash
-perf stat -e instructions,cycles,cache-misses,branch-misses,L1-icache-load-misses \
+taskset -c 11 perf stat -e instructions,cycles,cache-misses,branch-misses,L1-icache-load-misses \
   ./target/release/async-opcua-localhost-bench run --op <read|write> --warmup 3 --measure 5
 ```
 

@@ -41,7 +41,7 @@ The `strip_result_mask_fields()` method was extracted from being inline in `Brow
 
 ### User Story 3 - Add #[inline] on Hot-Path Functions (Priority: P1)
 
-LLVM uses code-size heuristics to decide whether to inline functions at call sites. The added ~1,100 lines from feature 059 increase the crate code size, which can push hot-path functions past LLVM's inlining cost threshold — turning previously-inlined code into function calls. Adding `#[inline]` to key hot-path functions in `controller.rs` and `message_handler.rs` instructs LLVM to prioritize inlining these functions regardless of code-size heuristics.
+LLVM uses code-size heuristics to decide whether to inline functions at call sites. The added ~1,100 lines from feature 059 increase the crate code size, which can push hot-path functions past LLVM's inlining cost threshold — turning previously-inlined code into function calls. Adding `#[inline]` to key hot-path functions in `controller.rs` and `instance.rs` instructs LLVM to prioritize inlining these functions regardless of code-size heuristics.
 
 **Why this priority**: This is the lowest-risk, highest-expected-impact fix after profiling confirms that added function calls (increased instructions-per-request) or i-cache misses are the bottleneck. It does not change any behavior.
 
@@ -49,7 +49,7 @@ LLVM uses code-size heuristics to decide whether to inline functions at call sit
 
 **Acceptance Scenarios**:
 
-1. **Given** `#[inline]` annotations are added to the hot-path message dispatch and related functions in `controller.rs` and `message_handler.rs`, **When** the code compiles in release mode, **Then** compilation succeeds without errors or new warnings.
+1. **Given** `#[inline]` annotations are added to `process_request` and `validate_request` in `controller.rs` and `validate_timed_out`/`validate_activated` in `instance.rs`, **When** the code compiles in release mode, **Then** compilation succeeds without errors or new warnings.
 2. **Given** the annotations are applied, **When** `cargo test --locked --all-features` runs, **Then** all tests pass.
 3. **Given** the annotations are applied, **When** the localhost benchmark runs, **Then** throughput is measured and compared against the pre-fix baseline.
 
@@ -97,7 +97,7 @@ The workspace `Cargo.toml` has no `[profile.release]` override, relying on Cargo
 #### US3 — Add #[inline] on Hot-Path Functions
 
 - **FR-007**: `#[inline]` annotations MUST be added to the message dispatch handler in `async-opcua-server/src/session/controller.rs` (the `process_request` method and its match arm for `RequestMessage` dispatch).
-- **FR-008**: `#[inline]` annotations MUST be added to session validation functions (`validate_timed_out`, `validate_activated`) if they exist in the controller or message handler modules.
+- **FR-008**: `#[inline]` annotations MUST be added to session validation functions `validate_timed_out` and `validate_activated` in `async-opcua-server/src/session/instance.rs`.
 - **FR-009**: Annotations MUST NOT change any behavior or API — they are purely optimization hints to LLVM.
 
 #### US4 — Tune Release Profile

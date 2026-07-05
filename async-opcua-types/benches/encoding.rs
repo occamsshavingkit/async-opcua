@@ -6,6 +6,7 @@
 #![allow(missing_docs)] // bench harness (criterion_main!) generates undocumented items
 
 use std::io::Cursor;
+use std::sync::Arc;
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use opcua_types::{
@@ -23,7 +24,7 @@ fn permissive_context() -> ContextOwned {
         max_string_length: 8 * 1024 * 1024,
         ..Default::default()
     };
-    ContextOwned::new_default(NamespaceMap::new(), options)
+    ContextOwned::new_default(NamespaceMap::new(), Arc::new(options))
 }
 
 fn small_read_request() -> ReadRequest {

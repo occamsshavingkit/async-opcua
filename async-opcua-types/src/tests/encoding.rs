@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::{
     alloc::{GlobalAlloc, Layout, System},
     io::{Cursor, Write},
@@ -641,7 +642,7 @@ fn argument_decode_rejects_value_rank_above_array_limit() {
         max_array_length: 2,
         ..Default::default()
     };
-    let ctx_f = ContextOwned::new_default(NamespaceMap::new(), decoding_options);
+    let ctx_f = ContextOwned::new_default(NamespaceMap::new(), Arc::new(decoding_options));
     let ctx = ctx_f.context();
     let mut stream = Cursor::new(encode_argument_payload(3, Some(Vec::new())));
 
@@ -805,7 +806,7 @@ fn deep_encoding() {
     let d3 = Variant::Variant(Box::new(d4));
     let d2 = Variant::Variant(Box::new(d3));
 
-    let ctx_f = ContextOwned::new_default(NamespaceMap::new(), decoding_options);
+    let ctx_f = ContextOwned::new_default(NamespaceMap::new(), Arc::new(decoding_options));
     let ctx = ctx_f.context();
 
     // This should decode

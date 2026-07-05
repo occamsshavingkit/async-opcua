@@ -778,7 +778,11 @@ pub(crate) mod tests {
         let loader = DynamicTypeLoader::new(Arc::new(type_tree));
         let mut loaders = TypeLoaderCollection::new_empty();
         loaders.add_type_loader(loader);
-        let ctx = ContextOwned::new(NamespaceMap::new(), loaders, DecodingOptions::test());
+        let ctx = ContextOwned::new(
+            NamespaceMap::new(),
+            loaders,
+            Arc::new(DecodingOptions::test()),
+        );
 
         let mut write_buf = Vec::<u8>::new();
         let mut cursor = Cursor::new(&mut write_buf);
@@ -815,7 +819,7 @@ pub(crate) mod tests {
         BinaryEncodable::encode(&obj2, &mut cursor, &ctx.context()).unwrap();
 
         // Make a new context, this time with the regular decoder for EUInformation
-        let ctx = ContextOwned::new_default(NamespaceMap::new(), DecodingOptions::test());
+        let ctx = ContextOwned::new_default(NamespaceMap::new(), Arc::new(DecodingOptions::test()));
         cursor.seek(std::io::SeekFrom::Start(0)).unwrap();
         let obj3: ExtensionObject = BinaryDecodable::decode(&mut cursor, &ctx.context()).unwrap();
 
@@ -880,7 +884,11 @@ pub(crate) mod tests {
         let loader = DynamicTypeLoader::new(type_tree.clone());
         let mut loaders = TypeLoaderCollection::new();
         loaders.add_type_loader(loader);
-        let ctx = ContextOwned::new(NamespaceMap::new(), loaders, DecodingOptions::test());
+        let ctx = ContextOwned::new(
+            NamespaceMap::new(),
+            loaders,
+            Arc::new(DecodingOptions::test()),
+        );
 
         let obj = DynamicStructure::new_struct(
             type_tree.get_struct_type(&type_node_id).unwrap().clone(),
@@ -970,7 +978,11 @@ pub(crate) mod tests {
         let loader = DynamicTypeLoader::new(Arc::new(type_tree));
         let mut loaders = TypeLoaderCollection::new_empty();
         loaders.add_type_loader(loader);
-        let ctx_owned = ContextOwned::new(NamespaceMap::new(), loaders, DecodingOptions::test());
+        let ctx_owned = ContextOwned::new(
+            NamespaceMap::new(),
+            loaders,
+            Arc::new(DecodingOptions::test()),
+        );
         let ctx = ctx_owned.context();
 
         let mut payload = Vec::new();
@@ -1039,7 +1051,7 @@ pub(crate) mod tests {
         let mut loaders = TypeLoaderCollection::new_empty();
         loaders.add_type_loader(loader);
 
-        ContextOwned::new(get_namespaces(), loaders, DecodingOptions::test())
+        ContextOwned::new(get_namespaces(), loaders, Arc::new(DecodingOptions::test()))
     }
 
     mod opcua {
@@ -1120,7 +1132,8 @@ pub(crate) mod tests {
         BinaryEncodable::encode(&obj2, &mut cursor, &ctx.context()).unwrap();
 
         // Make a new context, this time with the regular decoder for MyUnion
-        let mut ctx = ContextOwned::new_default(get_namespaces(), DecodingOptions::test());
+        let mut ctx =
+            ContextOwned::new_default(get_namespaces(), Arc::new(DecodingOptions::test()));
         ctx.loaders_mut().add_type_loader(MyUnionTypeLoader);
         cursor.seek(std::io::SeekFrom::Start(0)).unwrap();
         let obj3: ExtensionObject = BinaryDecodable::decode(&mut cursor, &ctx.context()).unwrap();
@@ -1152,7 +1165,8 @@ pub(crate) mod tests {
         BinaryEncodable::encode(&obj2, &mut cursor, &ctx.context()).unwrap();
 
         // Make a new context, this time with the regular decoder for MyUnion
-        let mut ctx = ContextOwned::new_default(get_namespaces(), DecodingOptions::test());
+        let mut ctx =
+            ContextOwned::new_default(get_namespaces(), Arc::new(DecodingOptions::test()));
         ctx.loaders_mut().add_type_loader(MyUnionTypeLoader);
         cursor.seek(std::io::SeekFrom::Start(0)).unwrap();
         let obj3: ExtensionObject = BinaryDecodable::decode(&mut cursor, &ctx.context()).unwrap();

@@ -466,7 +466,7 @@ where
     fn make_encoding_context(&self) -> ContextOwned {
         let mut encoding_context = ContextOwned::new_default(
             NamespaceMap::new(),
-            self.config.decoding_options.as_comms_decoding_options(),
+            Arc::new(self.config.decoding_options.as_comms_decoding_options()),
         );
 
         for loader in self.inner.type_loaders.iter().cloned() {

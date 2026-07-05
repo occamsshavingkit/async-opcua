@@ -601,7 +601,7 @@ impl NodeSetImport for NodeSet2Import {
         let mut ctx = Context::new(
             namespaces.namespaces(),
             &self.type_loaders,
-            DecodingOptions::default(),
+            Arc::new(DecodingOptions::default()),
         );
         ctx.set_aliases(&self.aliases);
         // Remap NodeSet-local namespace indexes to the registered address-space indexes.

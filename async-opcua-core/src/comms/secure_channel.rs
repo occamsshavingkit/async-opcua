@@ -140,6 +140,8 @@ pub struct SecureChannel {
     peer_max_response_body_size: Option<usize>,
     /// Decoding options
     encoding_context: Arc<RwLock<ContextOwned>>,
+    /// Whether the security policy has been pre-validated.
+    security_policy_valid: bool,
 }
 
 impl SecureChannel {
@@ -170,6 +172,7 @@ impl SecureChannel {
             peer_max_response_body_size: None,
             encoding_context: Default::default(),
             remote_keys: HashMap::new(),
+            security_policy_valid: false,
         }
     }
 
@@ -222,6 +225,7 @@ impl SecureChannel {
             peer_max_response_body_size: None,
             encoding_context,
             remote_keys: HashMap::new(),
+            security_policy_valid: false,
         }
     }
 
@@ -306,8 +310,27 @@ impl SecureChannel {
         self.security_policy
     }
 
+    /// Return the known security policy if already validated, `None` otherwise.
+    pub fn known_policy(&self) -> Option<SecurityPolicy> {
+        if self.security_policy_valid {
+            Some(self.security_policy)
+        } else {
+            None
+        }
+    }
+
     /// Set the application security policy.
     pub fn set_security_policy(&mut self, security_policy: SecurityPolicy) {
+        self.security_policy_valid = matches!(
+            security_policy,
+            SecurityPolicy::Basic128Rsa15
+                | SecurityPolicy::Basic256
+                | SecurityPolicy::Basic256Sha256
+                | SecurityPolicy::Aes128Sha256RsaOaep
+                | SecurityPolicy::Aes256Sha256RsaPss
+                | SecurityPolicy::EccNistP256
+                | SecurityPolicy::EccNistP384
+        );
         self.security_policy = security_policy;
     }
 
@@ -923,10 +946,11 @@ impl SecureChannel {
         let decoding_options = self.decoding_options();
         let mut stream = Cursor::new(&src);
         let message_header = MessageChunkHeader::decode(&mut stream, &decoding_options)?;
-        let security_header = SecurityHeader::decode_from_stream(
+        let security_header = SecurityHeader::decode_with_known_policy(
             &mut stream,
             message_header.message_type.is_open_secure_channel(),
             &decoding_options,
+            self.known_policy(),
         )?;
         let encrypted_data_offset = stream.position() as usize;
         if message_header.message_size as usize != src.len() {
@@ -1216,7 +1240,7 @@ impl SecureChannel {
                 Self::secure_message_ranges(message_size, encrypted_data_offset, 0)?;
             let (decrypted_chunk, security_policy) =
                 self.decrypt_open_secure_channel(src, security_header, encrypted_range)?;
-            self.security_policy = security_policy;
+            self.set_security_policy(security_policy);
             Ok(decrypted_chunk)
         } else if self.is_secure_connection() {
             let signature_size = self.security_policy.symmetric_signature_size();
@@ -2087,15 +2111,10 @@ impl SecureChannel {
     }
 
     fn expect_supported_security_policy(&self) -> Result<(), StatusCode> {
-        match self.security_policy {
-            SecurityPolicy::Basic128Rsa15
-            | SecurityPolicy::Basic256
-            | SecurityPolicy::Basic256Sha256
-            | SecurityPolicy::Aes128Sha256RsaOaep
-            | SecurityPolicy::Aes256Sha256RsaPss
-            | SecurityPolicy::EccNistP256
-            | SecurityPolicy::EccNistP384 => Ok(()),
-            _ => Err(StatusCode::BadSecurityPolicyRejected),
+        if self.security_policy_valid {
+            Ok(())
+        } else {
+            Err(StatusCode::BadSecurityPolicyRejected)
         }
     }
 
@@ -2151,7 +2170,7 @@ mod token_grace_tests {
     /// actually populates the per-token remote-keys map.
     fn channel() -> SecureChannel {
         let mut sc = SecureChannel::new_no_certificate_store();
-        sc.security_policy = SecurityPolicy::Basic256Sha256;
+        sc.set_security_policy(SecurityPolicy::Basic256Sha256);
         sc.local_nonce = vec![1u8; 32];
         sc.remote_nonce = vec![2u8; 32];
         sc

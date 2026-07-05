@@ -332,6 +332,12 @@ impl Server {
             HashMap::new();
         let server_pkey = RwLock::new(global_pkey.clone());
 
+        let mut endpoint_futs: Vec<(
+            EndpointIdentifier,
+            Option<std::path::PathBuf>,
+            Option<std::path::PathBuf>,
+        )> = Vec::new();
+
         for endpoint in config.endpoints.values() {
             let endpoint_id = EndpointIdentifier::from(endpoint);
             if endpoint_certificates.contains_key(&endpoint_id) {
@@ -341,51 +347,63 @@ impl Server {
             let cert_path = endpoint
                 .certificate_path
                 .as_deref()
-                .or(config.certificate_path.as_deref());
+                .or(config.certificate_path.as_deref())
+                .map(|cp| config.pki_dir.join(cp));
             let key_path = endpoint
                 .private_key_path
                 .as_deref()
-                .or(config.private_key_path.as_deref());
+                .or(config.private_key_path.as_deref())
+                .map(|kp| config.pki_dir.join(kp));
 
-            let cert_entry = match (cert_path, key_path) {
-                (Some(cp), Some(kp)) => {
-                    let full_cert_path = config.pki_dir.join(cp);
-                    let full_key_path = config.pki_dir.join(kp);
-                    let cert = match CertificateStore::read_cert(&full_cert_path) {
-                        Ok(cert) => cert,
-                        Err(e) => {
-                            warn!(
-                                "Endpoint '{}': failed to load certificate from {:?}: {e}",
-                                endpoint_id.path, full_cert_path
-                            );
-                            endpoint_certificates.insert(endpoint_id, None);
-                            continue;
-                        }
-                    };
-                    let key = match CertificateStore::read_pkey(&full_key_path) {
-                        Ok(key) => key,
-                        Err(e) => {
-                            warn!(
-                                "Endpoint '{}': failed to load private key from {:?}: {e}",
-                                endpoint_id.path, full_key_path
-                            );
-                            endpoint_certificates.insert(endpoint_id, None);
-                            continue;
-                        }
-                    };
-                    Some((cert, key))
-                }
-                _ => {
-                    // No endpoint-specific certificate configured — fall back
-                    // to server-level global cert (auto-generated when
-                    // create_sample_keypair is true).
-                    match (global_cert.as_ref(), global_pkey.as_ref()) {
-                        (Some(cert), Some(key)) => Some((cert.clone(), key.clone())),
-                        _ => None,
-                    }
-                }
-            };
+            endpoint_futs.push((endpoint_id, cert_path, key_path));
+        }
 
+        // Parallelize cert + key file I/O across all endpoints.
+        let results: Vec<(EndpointIdentifier, Option<(X509, PrivateKey)>)> = std::thread::scope(
+            |s| {
+                let mut handles = Vec::new();
+                for (endpoint_id, cert_path, key_path) in endpoint_futs {
+                    handles.push(s.spawn(move || {
+                        let cert_entry = match (cert_path.as_deref(), key_path.as_deref()) {
+                            (Some(cp), Some(kp)) => {
+                                let cert = match CertificateStore::read_cert(cp) {
+                                    Ok(cert) => cert,
+                                    Err(e) => {
+                                        warn!(
+                                            "Endpoint '{}': failed to load certificate from {:?}: {e}",
+                                            endpoint_id.path, cp
+                                        );
+                                        return (endpoint_id, None);
+                                    }
+                                };
+                                let key = match CertificateStore::read_pkey(kp) {
+                                    Ok(key) => key,
+                                    Err(e) => {
+                                        warn!(
+                                            "Endpoint '{}': failed to load private key from {:?}: {e}",
+                                            endpoint_id.path, kp
+                                        );
+                                        return (endpoint_id, None);
+                                    }
+                                };
+                                (endpoint_id, Some((cert, key)))
+                            }
+                            _ => (endpoint_id, None),
+                        };
+                        cert_entry
+                    }));
+                }
+                handles.into_iter().map(|h| h.join().unwrap()).collect()
+            },
+        );
+
+        for (endpoint_id, cert_entry) in results {
+            let cert_entry = cert_entry.or_else(|| {
+                global_cert
+                    .as_ref()
+                    .zip(global_pkey.as_ref())
+                    .map(|(c, k)| (c.clone(), k.clone()))
+            });
             endpoint_certificates.insert(endpoint_id, cert_entry);
         }
 

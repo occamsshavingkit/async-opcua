@@ -78,7 +78,7 @@ fn assert_malformed_uadp_datagram_decode_rejected(
     options: DecodingOptions,
     expected_error_fragments: &[&str],
 ) {
-    let ctx_owned = ContextOwned::new_default(NamespaceMap::new(), options);
+    let ctx_owned = ContextOwned::new_default(NamespaceMap::new(), Arc::new(options));
     let ctx = ctx_owned.context();
 
     let err = UadpNetworkMessage::decode(&mut &payload[..], &ctx)
@@ -101,7 +101,7 @@ fn assert_malformed_uadp_datagram_subscriber_state_unchanged(
 ) {
     const READER_ID: u16 = 1;
 
-    let ctx_owned = ContextOwned::new_default(NamespaceMap::new(), options);
+    let ctx_owned = ContextOwned::new_default(NamespaceMap::new(), Arc::new(options));
     let ctx = ctx_owned.context();
     let mut runtime = SubscriberRuntime::with_connections(
         address_space(),

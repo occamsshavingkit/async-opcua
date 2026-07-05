@@ -2,6 +2,7 @@ use std::io::Cursor;
 use std::io::Read;
 use std::io::Write;
 use std::path::Path;
+use std::sync::Arc;
 
 use opcua::types::BinaryDecodable;
 use opcua::types::BinaryEncodable;
@@ -41,7 +42,7 @@ fn ctx() -> ContextOwned {
     loaders.add_type_loader(crate::generated::di::GeneratedTypeLoader);
     loaders.add_type_loader(crate::generated::plcopen::GeneratedTypeLoader);
 
-    ContextOwned::new(namespaces, loaders, DecodingOptions::default())
+    ContextOwned::new(namespaces, loaders, Arc::new(DecodingOptions::default()))
 }
 
 fn all_encoding_roundtrip<

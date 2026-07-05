@@ -95,13 +95,32 @@ impl SecurityHeader {
         is_open_secure_channel: bool,
         decoding_options: &DecodingOptions,
     ) -> EncodingResult<Self> {
+        Self::decode_with_known_policy(stream, is_open_secure_channel, decoding_options, None)
+    }
+
+    /// Decode a security header with a known policy for the channel.
+    /// When `known_policy` is `Some`, the decoded URI is validated against
+    /// `known_policy.to_uri()` instead of calling the expensive
+    /// `SecurityPolicy::from_uri()` conversion.
+    pub fn decode_with_known_policy<S: Read + ?Sized>(
+        stream: &mut S,
+        is_open_secure_channel: bool,
+        decoding_options: &DecodingOptions,
+        known_policy: Option<SecurityPolicy>,
+    ) -> EncodingResult<Self> {
         if is_open_secure_channel {
             let security_header = AsymmetricSecurityHeader::decode(stream, decoding_options)?;
 
-            let security_policy = if security_header.security_policy_uri.is_empty() {
-                SecurityPolicy::None
-            } else {
-                SecurityPolicy::from_uri(security_header.security_policy_uri.as_ref())
+            let security_policy = match known_policy {
+                Some(ref known) if !security_header.security_policy_uri.is_empty() => {
+                    if security_header.security_policy_uri.as_ref() == known.to_uri() {
+                        *known
+                    } else {
+                        SecurityPolicy::Unknown
+                    }
+                }
+                _ if security_header.security_policy_uri.is_empty() => SecurityPolicy::None,
+                _ => SecurityPolicy::from_uri(security_header.security_policy_uri.as_ref()),
             };
 
             if security_policy == SecurityPolicy::Unknown {

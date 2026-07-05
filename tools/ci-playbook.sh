@@ -171,21 +171,28 @@ job_verify_codegen() {
     maybe_skip && return 0
     step "verify-codegen: types"
     cargo run --locked --bin async-opcua-codegen code_gen_config.yml \
-        && cargo fmt -p async-opcua-types -p async-opcua-core-namespace \
-        && git diff --exit-code -- async-opcua-types/src/generated/ async-opcua-core-namespace/src/ \
-        && pass || fail
+        || { fail; return; }
 
     step "verify-codegen: custom-codegen"
     cargo run --locked --bin async-opcua-codegen samples/custom-codegen/code_gen_config.yml \
-        && cargo fmt -p custom-codegen \
-        && git diff --exit-code -- samples/custom-codegen/src/generated/ \
-        && pass || fail
+        || { fail; return; }
 
     step "verify-codegen: FX data"
     cargo run --locked --bin async-opcua-codegen async-opcua-fx/code_gen_config.yml \
-        && cargo fmt -p async-opcua-fx \
-        && git diff --exit-code -- async-opcua-fx/src/generated/ \
-        && pass || fail
+        || { fail; return; }
+
+    step "verify-codegen: format"
+    cargo fmt --all
+
+    step "verify-codegen: check clean"
+    if [[ -n $(git status --porcelain) ]]; then
+        echo "Workspace is not clean — generated code differs from committed code:"
+        git status --porcelain
+        git diff --stat
+        fail
+    else
+        pass
+    fi
 }
 
 # ────────────────────────────────────────────────────────────────────

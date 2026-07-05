@@ -1,3 +1,47 @@
+# Session handoff — hot path audit fixes (feature 061, 2026-07-05)
+
+**State:** branch `061-hot-path-audit-fixes` on `master` (fork). Features 060 + 061
+stacked in one branch. All CI green.
+
+## Delivered this session (feature 061)
+
+### Fixes applied (5 user stories + 1 bug fix)
+
+| Story | Severity | Fix | Impact |
+|-------|----------|-----|--------|
+| US1 | CRITICAL | `DecodingOptions` → `Arc<DecodingOptions>` | Eliminates 104-byte struct clone on every encode/decode |
+| US2 | CRITICAL | Type tree `publish_type_tree_snapshot` once | Snapshot published once, not N times per init |
+| US3 | HIGH | `RequestContext` cached on `SessionActor` | Per-Read/Write: `Arc::clone` when token unchanged |
+| US4 | MEDIUM | `SecurityPolicy` validated once | 7-arm match per encrypt/decrypt → bool flag |
+| US5 | MEDIUM | Parallel cert+key file I/O | `std::thread::scope` across endpoints |
+| Bug | HIGH | Restore `SecurityPolicy::None` guard on clientNonce | Open62541 interoperability (zero-length nonce for None) |
+
+### One task deferred per research decision
+
+- **T013**: Per-chunk `SecurityPolicy::from_uri()` in `security_header.rs` — left for future
+  optimization. Requires threading the cached policy through the chunk decoding pipeline.
+
+### Changes: 29 files, +709/-118 lines (source across 7 crates + tests)
+
+### Benchmark (combined 060 + 061, CPU 11, taskset -c 11)
+
+| Metric | Pre-060 baseline | 060 alone | 060+061 combined |
+|--------|-----------------|-----------|-----------------|
+| Read (req/s) | 98,605 | 110,081 | 108,785 |
+
+061 adds no throughput regression; the allocation/caching/validation fixes complement the
+compilation-level optimizations from 060.
+
+### CI gates (all green at PR #266)
+
+- `cargo fmt --check` — PASS
+- `cargo clippy --workspace --all-targets --all-features --locked -- -Dwarnings` — PASS
+- `cargo test --locked --all-features` — PASS (0 failures)
+- `tools/ci-playbook.sh --ci` — 23 PASS, 0 FAIL
+- `--no-default-features` builds — PASS
+
+---
+
 # Session handoff — perf regression fix (feature 060, 2026-07-05)
 
 **State:** branch `060-perf-regression-fix` on `master` (fork), all CI green. Feature 060

@@ -1,5 +1,6 @@
 //! Integration tests for signed and encrypted UADP PubSub messages.
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use opcua_crypto::SecurityPolicy;
@@ -115,7 +116,8 @@ fn secured_uadp_payload_limit_rejects_oversized_before_copy_or_decrypt() {
             max_secured_payload_len: 1,
             ..DecodingOptions::test()
         };
-        let limited_ctx_owned = ContextOwned::new_default(NamespaceMap::new(), limited_options);
+        let limited_ctx_owned =
+            ContextOwned::new_default(NamespaceMap::new(), Arc::new(limited_options));
         let limited_ctx = limited_ctx_owned.context();
         let subscriber_without_keys =
             UadpSecurityCodec::without_keys(security_mode, SecurityPolicy::PubSubAes256Ctr);

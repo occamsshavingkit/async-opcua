@@ -478,7 +478,11 @@ mod tests {
         let loader = DynamicTypeLoader::new(Arc::new(type_tree));
         let mut loaders = TypeLoaderCollection::new_empty();
         loaders.add_type_loader(loader);
-        let ctx = ContextOwned::new(NamespaceMap::new(), loaders, DecodingOptions::test());
+        let ctx = ContextOwned::new(
+            NamespaceMap::new(),
+            loaders,
+            Arc::new(DecodingOptions::test()),
+        );
 
         let mut write_buf = Vec::<u8>::new();
         let mut cursor = Cursor::new(&mut write_buf);
@@ -518,7 +522,7 @@ mod tests {
         XmlEncodable::encode(&obj2, &mut writer, &ctx.context()).unwrap();
 
         // Make a new context, this time with the regular decoder for EUInformation
-        let ctx = ContextOwned::new_default(NamespaceMap::new(), DecodingOptions::test());
+        let ctx = ContextOwned::new_default(NamespaceMap::new(), Arc::new(DecodingOptions::test()));
         cursor.seek(std::io::SeekFrom::Start(0)).unwrap();
         let mut reader = XmlStreamReader::new(&mut cursor as &mut dyn Read);
         let obj3: ExtensionObject = XmlDecodable::decode(&mut reader, &ctx.context()).unwrap();
@@ -584,7 +588,11 @@ mod tests {
         let loader = DynamicTypeLoader::new(type_tree.clone());
         let mut loaders = TypeLoaderCollection::new();
         loaders.add_type_loader(loader);
-        let ctx = ContextOwned::new(NamespaceMap::new(), loaders, DecodingOptions::test());
+        let ctx = ContextOwned::new(
+            NamespaceMap::new(),
+            loaders,
+            Arc::new(DecodingOptions::test()),
+        );
 
         let obj = DynamicStructure::new_struct(
             type_tree.get_struct_type(&type_node_id).unwrap().clone(),
@@ -674,7 +682,8 @@ mod tests {
         XmlEncodable::encode(&obj2, &mut writer, &ctx.context()).unwrap();
 
         // Make a new context, this time with the regular decoder for MyUnion
-        let mut ctx = ContextOwned::new_default(get_namespaces(), DecodingOptions::test());
+        let mut ctx =
+            ContextOwned::new_default(get_namespaces(), Arc::new(DecodingOptions::test()));
         ctx.loaders_mut().add_type_loader(MyUnionTypeLoader);
         cursor.seek(std::io::SeekFrom::Start(0)).unwrap();
         let mut reader = XmlStreamReader::new(&mut cursor as &mut dyn Read);

@@ -219,7 +219,7 @@ where
 pub struct ContextOwned {
     namespaces: NamespaceMap,
     loaders: TypeLoaderCollection,
-    options: DecodingOptions,
+    options: Arc<DecodingOptions>,
 }
 
 impl std::fmt::Debug for ContextOwned {
@@ -236,7 +236,7 @@ impl ContextOwned {
     pub fn new(
         namespaces: NamespaceMap,
         loaders: TypeLoaderCollection,
-        options: DecodingOptions,
+        options: Arc<DecodingOptions>,
     ) -> Self {
         Self {
             namespaces,
@@ -246,7 +246,7 @@ impl ContextOwned {
     }
 
     /// Create a new context, including the core type loader.
-    pub fn new_default(namespaces: NamespaceMap, options: DecodingOptions) -> Self {
+    pub fn new_default(namespaces: NamespaceMap, options: Arc<DecodingOptions>) -> Self {
         Self::new(namespaces, TypeLoaderCollection::new(), options)
     }
 
@@ -255,7 +255,7 @@ impl ContextOwned {
         Context {
             namespaces: &self.namespaces,
             loaders: &self.loaders,
-            options: self.options.clone(),
+            options: Arc::clone(&self.options),
             aliases: None,
             index_map: None,
         }
@@ -278,7 +278,7 @@ impl ContextOwned {
 
     /// Get the decoding options mutably.
     pub fn options_mut(&mut self) -> &mut DecodingOptions {
-        &mut self.options
+        Arc::make_mut(&mut self.options)
     }
 
     /// Get a mutable reference to the type loaders.
@@ -289,7 +289,7 @@ impl ContextOwned {
 
 impl Default for ContextOwned {
     fn default() -> Self {
-        Self::new_default(Default::default(), Default::default())
+        Self::new_default(Default::default(), Arc::new(Default::default()))
     }
 }
 
@@ -361,7 +361,7 @@ impl<'a> IntoIterator for &'a TypeLoaderCollection {
 pub struct Context<'a> {
     namespaces: &'a NamespaceMap,
     loaders: &'a TypeLoaderCollection,
-    options: DecodingOptions,
+    options: Arc<DecodingOptions>,
     aliases: Option<&'a HashMap<String, String>>,
     index_map: Option<&'a HashMap<u16, u16>>,
 }
@@ -456,7 +456,7 @@ impl<'a> Context<'a> {
     pub fn new(
         namespaces: &'a NamespaceMap,
         loaders: &'a TypeLoaderCollection,
-        options: DecodingOptions,
+        options: Arc<DecodingOptions>,
     ) -> Self {
         Self {
             namespaces,
@@ -618,10 +618,10 @@ impl<'a> Context<'a> {
             Cow::Owned(Self {
                 namespaces: self.namespaces,
                 loaders: self.loaders,
-                options: DecodingOptions {
+                options: Arc::new(DecodingOptions {
                     client_offset: TimeDelta::zero(),
-                    ..self.options.clone()
-                },
+                    ..self.options.as_ref().clone()
+                }),
                 aliases: self.aliases,
                 index_map: self.index_map,
             })

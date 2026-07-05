@@ -1366,7 +1366,7 @@ impl ServerInfo {
         ContextOwned::new(
             NamespaceMap::new(),
             self.type_loaders.read().clone(),
-            self.decoding_options(),
+            Arc::new(self.decoding_options()),
         )
     }
 

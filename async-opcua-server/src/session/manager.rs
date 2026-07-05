@@ -486,7 +486,7 @@ impl CreateSessionDraft {
             debug!("CreateSession received non-null authenticationToken; ignoring per spec");
         }
         let security_policy = channel.security_policy();
-        {
+        if !matches!(security_policy, SecurityPolicy::None) {
             let min_nonce_len = std::cmp::max(info.config.session_nonce_length, 32usize);
             let max_nonce_len = 128usize;
             if request.client_nonce.len() < min_nonce_len

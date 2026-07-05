@@ -826,16 +826,15 @@ impl<TImpl: InMemoryNodeManagerImpl> NodeManagerCore for InMemoryNodeManager<TIm
 
     #[allow(clippy::await_holding_lock)]
     async fn init(&self, type_tree: &mut DefaultTypeTree, context: ServerContext) {
-        let info = Arc::clone(&context.info);
-
         // During init we effectively own the address space, so this should be safe.
         let mut address_space = trace_write_lock!(self.address_space);
 
         self.inner.init(&mut address_space, context).await;
-
         address_space.load_into_type_tree(type_tree);
         address_space.ensure_browse_name_index(type_tree);
-        info.publish_type_tree_snapshot(type_tree);
+        // Type-tree snapshot is published exactly once in
+        // Server::initialize_node_managers() after all managers have completed.
+        drop(address_space);
     }
 
     fn namespaces_for_user(&self, _context: &RequestContext) -> Vec<NamespaceMetadata> {

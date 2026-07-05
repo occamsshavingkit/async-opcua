@@ -268,7 +268,7 @@ impl Client {
             // We should only ever need the default decoding context for temporary connections.
             Arc::new(RwLock::new(ContextOwned::new_default(
                 NamespaceMap::new(),
-                self.decoding_options(),
+                Arc::new(self.decoding_options()),
             ))),
         )
     }

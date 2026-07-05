@@ -308,7 +308,8 @@ fn oversized_secured_payload_is_rejected_before_replay_advances() {
         max_secured_payload_len: secured.len() - 1,
         ..DecodingOptions::test()
     };
-    let limited_ctx_owned = ContextOwned::new_default(NamespaceMap::new(), limited_options);
+    let limited_ctx_owned =
+        ContextOwned::new_default(NamespaceMap::new(), Arc::new(limited_options));
     let limited_ctx = limited_ctx_owned.context();
 
     let rejected = engine

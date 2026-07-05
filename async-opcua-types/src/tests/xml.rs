@@ -1,4 +1,5 @@
 use std::str::FromStr;
+use std::sync::Arc;
 
 use opcua_macros::{XmlDecodable, XmlEncodable, XmlType};
 
@@ -51,7 +52,7 @@ fn xml_round_trip<T: XmlDecodable + XmlEncodable + PartialEq + std::fmt::Debug>(
     cmp: &T,
     data: &str,
 ) {
-    let ctx = ContextOwned::new_default(namespaces(), DecodingOptions::default());
+    let ctx = ContextOwned::new_default(namespaces(), Arc::new(DecodingOptions::default()));
     let ctx_ref = ctx.context();
     xml_round_trip_ctx(cmp, data, &ctx_ref);
 }
@@ -137,7 +138,7 @@ fn from_xml_guid() {
 fn from_xml_node_id() {
     xml_round_trip(&NodeId::new(0, "test"), "<Identifier>s=test</Identifier>");
     let mut ns = namespaces();
-    let ctx_owned = ContextOwned::new_default(ns.clone(), DecodingOptions::default());
+    let ctx_owned = ContextOwned::new_default(ns.clone(), Arc::new(DecodingOptions::default()));
     ns.add_namespace("opc.tcp://my-server.server");
     let mut mp = mapper(&mut ns);
     mp.add_namespace("opc.tcp://my-server.server", 2);
@@ -231,7 +232,7 @@ fn from_xml_qualified_name() {
     );
     let mut ns = namespaces();
     ns.add_namespace("opc.tcp://my-server.server");
-    let ctx_owned = ContextOwned::new_default(ns.clone(), DecodingOptions::default());
+    let ctx_owned = ContextOwned::new_default(ns.clone(), Arc::new(DecodingOptions::default()));
     let mut mp = mapper(&mut ns);
     mp.add_namespace("opc.tcp://my-server.server", 2);
     let ctx = context(&mp, &ctx_owned);

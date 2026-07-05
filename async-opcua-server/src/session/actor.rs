@@ -95,6 +95,7 @@ pub struct SessionActor {
     context: Arc<RequestContextInner>,
     receiver: tokio::sync::mpsc::Receiver<SessionMessage>,
     termination_cleanup: Option<TerminationCleanup>,
+    cached_ctx: Option<Arc<RequestContextInner>>,
 }
 
 impl SessionActor {
@@ -108,6 +109,7 @@ impl SessionActor {
             context: context.inner,
             receiver,
             termination_cleanup: None,
+            cached_ctx: None,
         }
     }
 
@@ -220,7 +222,7 @@ impl SessionActor {
         }
     }
 
-    fn request_context(&self, current_node_manager_index: usize) -> RequestContext {
+    fn request_context(&mut self, current_node_manager_index: usize) -> RequestContext {
         let (token, user_roles) = {
             let session = self.session.read();
             (
@@ -232,28 +234,38 @@ impl SessionActor {
             )
         };
 
+        if let Some(ref ctx) = self.cached_ctx {
+            if ctx.token == token && Arc::ptr_eq(&ctx.user_roles, &user_roles) {
+                return RequestContext {
+                    current_node_manager_index,
+                    inner: Arc::clone(ctx),
+                };
+            }
+        }
+
+        let inner = Arc::new(RequestContextInner {
+            session: self.session.clone(),
+            session_id: self.context.session_id,
+            authenticator: self.context.authenticator.clone(),
+            token,
+            user_roles,
+            type_tree: self.context.type_tree.clone(),
+            type_tree_getter: self.context.type_tree_getter.clone(),
+            #[cfg(feature = "subscriptions")]
+            subscriptions: self.context.subscriptions.clone(),
+            info: self.context.info.clone(),
+        });
+
+        self.cached_ctx = Some(Arc::clone(&inner));
+
         RequestContext {
             current_node_manager_index,
-            inner: Arc::new(RequestContextInner {
-                session: self.session.clone(),
-                session_id: self.context.session_id,
-                authenticator: self.context.authenticator.clone(),
-                token,
-                user_roles,
-                // Preserve the TypeTree access trio from the actor's active
-                // context so default snapshot reads and custom getters observe
-                // the same server state.
-                type_tree: self.context.type_tree.clone(),
-                type_tree_getter: self.context.type_tree_getter.clone(),
-                #[cfg(feature = "subscriptions")]
-                subscriptions: self.context.subscriptions.clone(),
-                info: self.context.info.clone(),
-            }),
+            inner,
         }
     }
 
     async fn read(
-        &self,
+        &mut self,
         node_managers: NodeManagers,
         nodes: Vec<ReadValueId>,
         max_age: f64,
@@ -317,7 +329,7 @@ impl SessionActor {
     }
 
     async fn write(
-        &self,
+        &mut self,
         node_managers: NodeManagers,
         values: Vec<WriteValue>,
         return_diagnostics: DiagnosticBits,

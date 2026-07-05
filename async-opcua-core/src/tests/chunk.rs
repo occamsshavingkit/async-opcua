@@ -1,4 +1,5 @@
 use std::io::{Cursor, Write};
+use std::sync::Arc;
 
 use opcua_types::{
     BinaryDecodable, ByteString, DataValue, DateTime, DecodingOptions, DiagnosticBits,
@@ -244,7 +245,7 @@ fn oversized_tcp_message_chunk_returns_bad_tcp_message_too_large() {
 
     let mut options = ctx_r.options().clone();
     options.max_message_size = 64;
-    let ctx_r = ContextOwned::new_default(Default::default(), options);
+    let ctx_r = ContextOwned::new_default(Default::default(), Arc::new(options));
     let ctx = ctx_r.context();
     let err = MessageChunk::decode(&mut Cursor::new(data), &ctx).unwrap_err();
 

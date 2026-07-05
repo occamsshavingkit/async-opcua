@@ -5,30 +5,33 @@
 
 ## Summary
 
-Fix the 27% throughput regression (90k → 66k req/sec) in the localhost Read/Write benchmark. The regression is caused by indirect compilation effects from the ~1,100 lines added in feature 059 (spec-compliance-audit-fixes). The hot-path code (`process_request` in `controller.rs`) is byte-for-byte identical between base and HEAD — the fix is about LLVM optimization behavior, not algorithm changes.
+Fix a 27% throughput regression (90k → 66k req/sec) in the localhost read/write benchmark caused by indirect compilation effects from feature 059 spec-compliance-audit-fixes. The plan applies a layered approach: profile to confirm the regression mechanism, revert VIEW-03 refactoring that disrupted LLVM inlining heuristics, add `#[inline]` annotations to hot-path request dispatch and session validation functions, and optimize the release profile for maximum inlining visibility.
 
 ## Technical Context
 
-**Language/Version**: Rust 1.75+ (workspace, edition 2021)
-**Primary Dependencies**: tokio, async-opcua-server (the affected crate)
-**Testing**: `tools/opcua-localhost-bench`, `cargo test --locked --all-features`
-**Target Platform**: Linux (perf required for profiling)
-**Performance Goals**: Recover throughput to within 5% of pre-059 baseline (~85.5k req/sec when baseline is 90k)
-**Constraints**: No OPC UA compliance fix reverted; no behavioral changes to the server
+**Language/Version**: Rust (edition 2021, no MSRV pinned)
+**Primary Dependencies**: tokio (async runtime), opcua workspace crates (async-opcua-core, async-opcua-server, async-opcua-types, async-opcua-crypto)
+**Storage**: N/A (benchmark is in-memory, no persistence)
+**Testing**: cargo test --locked --all-features, cargo clippy --workspace --all-targets --all-features --locked -- -Dwarnings
+**Target Platform**: Linux (localhost benchmark using perf stat)
+**Project Type**: library (workspace of 15+ crates) + benchmark tool
+**Performance Goals**: >= 85,500 req/sec in localhost benchmark (within 5% of 90k baseline)
+**Constraints**: No OPC UA compliance regression; all 23 spec compliance findings from feature 059 remain addressed; benchmark reproducible within ~5% run-to-run variance
+**Scale/Scope**: Single-process localhost benchmark; four targeted code changes across view.rs, controller.rs, instance.rs, and Cargo.toml
 
 ## Constitution Check
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-| Principle | Assessment | Notes |
-|-----------|-----------|-------|
-| I. Correctness Over Completion | PASS | Profiling first confirms mechanism before applying fixes; each fix is independently measurable |
-| II. Do It Right Once | PASS | `#[inline]` annotations target specific hot-path functions; release profile changes apply to whole workspace uniformly |
-| III. Individual Task Discipline | PASS | Four independent USs, each measurable. Profiling (US1) gates the targeted fixes (US2, US3) |
-| IV. Security Is Paramount | PASS | No cryptographic or security-policy code changes; profiling collects only hardware counter data (no sensitive content) |
-| V. Leave It Better Than You Found It | PASS | Release profile tuning benefits all workspace crates; inline annotations prevent future regressions |
+| Principle | Assessment | Status |
+|-----------|-----------|--------|
+| I. Correctness Over Completion | All fixes are compiler optimization hints (inline, codegen-units, lto) or inlining reverts that preserve identical behavior. Tests must pass at each step. | PASS |
+| II. Do It Right Once | Profiling data (US1) must confirm the regression mechanism before fixes are applied. Targeted inlining avoids speculative annotations. | PASS |
+| III. Individual Task Discipline | Each user story maps to one independently verifiable task: profile (US1), revert VIEW-03 (US2), add #[inline] (US3), tune profile (US4). | PASS |
+| IV. Security Is Paramount | No changes touch decode/parse paths, cryptography, authentication, or network input. All changes are compiler optimization hints or method inlining. | PASS |
+| V. Leave It Better Than You Found It | Release profile tuning benefits all workspace crates, not just the benchmark. Inline annotations serve as self-documenting hot-path markers. | PASS |
 
-**Gate: ALL PASS** — no violations.
+**Gate Result**: All principles pass. No violations to justify.
 
 ## Project Structure
 
@@ -36,37 +39,32 @@ Fix the 27% throughput regression (90k → 66k req/sec) in the localhost Read/Wr
 
 ```text
 specs/060-perf-regression-fix/
-├── spec.md            # Feature specification
-├── plan.md            # This file
-├── research.md        # Phase 0 output
-├── data-model.md      # Phase 1 output (minimal — no new entities)
-├── quickstart.md      # Phase 1 output
-├── contracts/         # Phase 1 output
-│   └── profiling.md   # Profiling methodology contract
-└── tasks.md           # Phase 2 output (/speckit.tasks)
+├── plan.md              # This file (/speckit.plan command output)
+├── research.md          # Phase 0 output (/speckit.plan command)
+├── data-model.md        # Phase 1 output (/speckit.plan command)
+├── quickstart.md        # Phase 1 output (/speckit.plan command)
+├── contracts/           # Phase 1 output — N/A (no external interfaces)
+└── tasks.md             # Phase 2 output (/speckit.tasks command — NOT created by /speckit.plan)
 ```
 
 ### Source Code (repository root)
 
 ```text
-# US1 — Profiling (no code changes)
-# Output: docs/perf-analysis-{baseline,head}.md
+Cargo.toml                        # Workspace root — [profile.release] tuning target
+async-opcua-server/src/
+├── session/
+│   ├── controller.rs             # US3: #[inline] on process_request dispatch
+│   └── instance.rs               # US3: #[inline] on validate_timed_out, validate_activated
+└── node_manager/
+    └── view.rs                   # US2: Inline strip_result_mask_fields back into add()/add_unchecked()
 
-# US2 — VIEW-03 Revert
-async-opcua-server/src/node_manager/view.rs          # Inline strip_result_mask_fields back into add() and add_unchecked()
-
-# US3 — #[inline] Annotations
-async-opcua-server/src/session/controller.rs         # Add #[inline] to process_request and hot-path dispatch
-
-# US4 — Release Profile Tuning
-Cargo.toml                                           # Add [profile.release] with codegen-units = 1, lto = true
-
-# All: Verification
-tools/opcua-localhost-bench/                         # Run benchmark after each fix
+tools/opcua-localhost-bench/
+├── Cargo.toml                    # Benchmark dependencies
+└── src/main.rs                   # Localhost read/write benchmark
 ```
 
-**Structure Decision**: All changes are isolated to 3 files + 1 Cargo.toml section. No new modules or crates. The benchmark is re-run after each fix to measure incremental improvement.
+**Structure Decision**: Single workspace with library crates under `async-opcua/` and tools under `tools/`. No structural changes needed — modifications are localized to three source files and the workspace Cargo.toml.
 
 ## Complexity Tracking
 
-*No violations — this section intentionally empty.*
+No violations to justify. All constitution principles pass without exceptions.

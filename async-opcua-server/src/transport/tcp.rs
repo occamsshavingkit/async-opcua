@@ -23,7 +23,7 @@ use tracing_futures::Instrument;
 use crate::info::ServerInfo;
 use opcua_types::{DecodingOptions, Error, ResponseHeader, ServiceFault, StatusCode};
 
-use futures::StreamExt;
+use futures::{FutureExt, StreamExt};
 use tokio::{
     io::{AsyncRead, AsyncWrite, ReadHalf, WriteHalf},
     net::TcpStream,
@@ -51,6 +51,7 @@ pub(crate) trait ConnectionTransport: Send + 'static {
         request_id: u32,
         message_type: MessageChunkType,
     ) -> Result<(), StatusCode>;
+    fn enqueue_response(&mut self, message: ResponseMessage, request_id: u32);
     fn client_protocol_version(&self) -> u32;
     fn poll<'a>(
         &'a mut self,
@@ -72,6 +73,10 @@ pub(crate) struct Transport<R, W> {
     pub(crate) client_protocol_version: u32,
     /// Last decoded sequence number
     sequence_numbers: SequenceNumberHandle,
+    /// Responses queued by the event loop for encoding during poll().
+    /// OPC-10000-6 §6.7.2: encoding happens in the transport's poll context
+    /// where SecureChannel is available, not synchronously in the select! body.
+    pending_responses: Vec<(ResponseMessage, u32)>,
 }
 
 /// Transport implementation for opc.tcp.
@@ -104,7 +109,7 @@ pub(crate) struct Request {
 pub(crate) enum TransportPollResult {
     OutgoingMessageSent,
     IncomingChunk,
-    IncomingMessage(Request),
+    IncomingMessages(Vec<Request>),
     Error(StatusCode),
     RecoverableError(StatusCode, u32, u32),
     Closed,
@@ -337,6 +342,7 @@ where
             client_protocol_version: 0,
             send_buffer,
             decrypted_chunk_storage: DecryptedChunkStorage::new(),
+            pending_responses: Vec::new(),
         }
     }
 
@@ -414,6 +420,19 @@ where
     }
 
     async fn poll_inner(&mut self, channel: &mut SecureChannel) -> TransportPollResult {
+        // OPC-10000-6 §6.7.2: encode responses queued by the event loop.
+        // This moves Chunker::encode_into() from the synchronous select! body
+        // into the transport's poll context where SecureChannel is available.
+        if !self.pending_responses.is_empty() {
+            let responses: Vec<_> = self.pending_responses.drain(..).collect();
+            for (message, request_id) in responses {
+                if let Err(e) = self.enqueue_message_for_send_inner(channel, message, request_id) {
+                    error!("Failed to encode queued response: {e:?}");
+                    return TransportPollResult::Error(e);
+                }
+            }
+        }
+
         // Either we've got something in the send buffer, which we can send,
         // or we're waiting for more outgoing messages.
         // We won't wait for outgoing messages while sending, since that
@@ -430,7 +449,7 @@ where
         // If there is something in the send buffer, write to the stream.
         // If not, wait for outgoing messages.
         // Either way, listen to incoming messages while we do this.
-        if self.send_buffer.can_read() {
+        let first_result = if self.send_buffer.can_read() {
             tokio::select! {
                 r = self.send_buffer.read_into_async(&mut self.write) => {
                     match r {
@@ -454,6 +473,33 @@ where
             }
             let incoming = self.read.next().await;
             self.handle_incoming_message(incoming, channel)
+        };
+
+        // OPC-10000-6 §7.1: after receiving a complete message, drain all
+        // additional available messages without awaiting. This reduces tokio
+        // scheduler wake-ups per message at high throughput.
+        if let TransportPollResult::IncomingMessages(mut messages) = first_result {
+            while let Some(Some(incoming)) = self.read.next().now_or_never() {
+                match self.handle_incoming_message(Some(incoming), channel) {
+                    TransportPollResult::IncomingMessages(mut more) => {
+                        messages.append(&mut more);
+                    }
+                    TransportPollResult::IncomingChunk => {}
+                    TransportPollResult::Error(status) => {
+                        return TransportPollResult::Error(status);
+                    }
+                    TransportPollResult::RecoverableError(status, id, handle) => {
+                        return TransportPollResult::RecoverableError(status, id, handle);
+                    }
+                    TransportPollResult::Closed => {
+                        return TransportPollResult::Closed;
+                    }
+                    _ => {}
+                }
+            }
+            TransportPollResult::IncomingMessages(messages)
+        } else {
+            first_result
         }
     }
 
@@ -473,7 +519,7 @@ where
                     Ok(None) => TransportPollResult::IncomingChunk,
                     Ok(Some(message)) => {
                         self.pending_chunks.clear();
-                        TransportPollResult::IncomingMessage(message)
+                        TransportPollResult::IncomingMessages(vec![message])
                     }
                     Err(e) => {
                         self.pending_chunks.clear();
@@ -614,6 +660,10 @@ where
             request_id,
             Some(message_type),
         )
+    }
+
+    fn enqueue_response(&mut self, message: ResponseMessage, request_id: u32) {
+        self.pending_responses.push((message, request_id));
     }
 
     fn client_protocol_version(&self) -> u32 {

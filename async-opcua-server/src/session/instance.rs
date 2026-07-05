@@ -220,6 +220,7 @@ impl Session {
     }
 
     /// Check whether this session has timed out and return the appropriate error if it has.
+    #[inline]
     pub(crate) fn validate_timed_out(&self) -> Result<(), StatusCode> {
         let elapsed = Instant::now() - **self.last_service_request.load();
 
@@ -248,6 +249,7 @@ impl Session {
     }
 
     /// Check whether this session is validated and return the appropriate error if not.
+    #[inline]
     pub(crate) fn validate_activated(&self) -> Result<&UserToken, StatusCode> {
         // Unlikely, but this protects against race conditions where the
         // session is removed from the session cache after it has been retrieved for a service call,

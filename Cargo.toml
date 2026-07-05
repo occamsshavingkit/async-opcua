@@ -124,6 +124,14 @@ opt-level = 3
 opt-level = 3
 
 # Opt-in size-optimized profile for embedded-Linux deployments (Raspberry Pi class).
+
+# Release profile tuned for performance: codegen-units = 1 gives LLVM full visibility
+# of the crate for inlining decisions; lto = true enables cross-crate link-time optimization.
+[profile.release]
+codegen-units = 1
+lto = true
+
+# Opt-in size-optimized profile for embedded-Linux deployments (Raspberry Pi class).
 # Build with `cargo build --profile embedded ...`. Optimizes for binary size and a small
 # resident footprint. See docs/setup.md ("Embedded-Linux deployment") for the full rationale
 # and the recommended feature-minimal build line.

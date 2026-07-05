@@ -306,7 +306,36 @@ impl BrowseNode {
     /// If you do this, you are responsible for validating filters,
     /// and requested fields on each reference.
     pub fn add_unchecked(&mut self, mut reference: ReferenceDescription) {
-        self.strip_result_mask_fields(&mut reference);
+        if !self
+            .result_mask
+            .contains(BrowseDescriptionResultMask::RESULT_MASK_BROWSE_NAME)
+        {
+            reference.browse_name = QualifiedName::null();
+        }
+        if !self
+            .result_mask
+            .contains(BrowseDescriptionResultMask::RESULT_MASK_DISPLAY_NAME)
+        {
+            reference.display_name = LocalizedText::null();
+        }
+        if !self
+            .result_mask
+            .contains(BrowseDescriptionResultMask::RESULT_MASK_NODE_CLASS)
+        {
+            reference.node_class = NodeClass::Unspecified;
+        }
+        if !self
+            .result_mask
+            .contains(BrowseDescriptionResultMask::RESULT_MASK_REFERENCE_TYPE)
+        {
+            reference.reference_type_id = NodeId::null();
+        }
+        if !self
+            .result_mask
+            .contains(BrowseDescriptionResultMask::RESULT_MASK_TYPE_DEFINITION)
+        {
+            reference.type_definition = ExpandedNodeId::null();
+        }
         self.references.push(reference);
     }
 
@@ -405,55 +434,47 @@ impl BrowseNode {
         type_tree: &dyn TypeTree,
         mut reference: ReferenceDescription,
     ) -> AddReferenceResult {
-        // First, validate that the reference is valid at all.
         if !self.matches_filter(type_tree, &reference) {
             return AddReferenceResult::Rejected;
         }
 
-        self.strip_result_mask_fields(&mut reference);
-
-        if self.remaining() > 0 {
-            self.references.push(reference);
-            AddReferenceResult::Added
-        } else {
-            AddReferenceResult::Full(reference)
-        }
-    }
-
-    fn strip_result_mask_fields(&self, reference: &mut ReferenceDescription) {
+        // Clear fields not required by the result mask (VIEW-03 compliance).
         if !self
             .result_mask
             .contains(BrowseDescriptionResultMask::RESULT_MASK_BROWSE_NAME)
         {
             reference.browse_name = QualifiedName::null();
         }
-
         if !self
             .result_mask
             .contains(BrowseDescriptionResultMask::RESULT_MASK_DISPLAY_NAME)
         {
             reference.display_name = LocalizedText::null();
         }
-
         if !self
             .result_mask
             .contains(BrowseDescriptionResultMask::RESULT_MASK_NODE_CLASS)
         {
             reference.node_class = NodeClass::Unspecified;
         }
-
         if !self
             .result_mask
             .contains(BrowseDescriptionResultMask::RESULT_MASK_REFERENCE_TYPE)
         {
             reference.reference_type_id = NodeId::null();
         }
-
         if !self
             .result_mask
             .contains(BrowseDescriptionResultMask::RESULT_MASK_TYPE_DEFINITION)
         {
             reference.type_definition = ExpandedNodeId::null();
+        }
+
+        if self.remaining() > 0 {
+            self.references.push(reference);
+            AddReferenceResult::Added
+        } else {
+            AddReferenceResult::Full(reference)
         }
     }
 

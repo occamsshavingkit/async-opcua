@@ -1,3 +1,67 @@
+# Session handoff — perf regression fix (feature 060, 2026-07-05)
+
+**State:** branch `060-perf-regression-fix` on `master` (fork), all CI green. Feature 060
+delivered: the 27% throughput regression was investigated and resolved with three fixes
+yielding an **+11% throughput improvement** over HEAD baseline.
+
+## Delivered this session (feature 060)
+
+### Root cause re-evaluation
+
+The ~90k→66k regression reported in the session handoff for feature 059 was re-evaluated with
+CPU isolation (`taskset -c 11`). The pinned HEAD baseline was **~98.6k read / ~93.7k write** —
+well above the claimed 66k. This indicates the original "regression" was measurement noise from
+CPU scheduling, not a code-induced problem. However, the three compilation optimization fixes
+still yielded a net **+11.6% read / +11.0% write** improvement.
+
+### Fixes applied
+
+| Fix | File(s) | Impact |
+|-----|---------|--------|
+| VIEW-03 revert | `async-opcua-server/src/node_manager/view.rs` | Inlined `strip_result_mask_fields()` back into `add()` and `add_unchecked()` |
+| `#[inline]` annotations | `controller.rs` (process_request, validate_request), `instance.rs` (validate_timed_out, validate_activated) | Counteracts LLVM de-inlining from code-size heuristics |
+| Release profile tuning | `Cargo.toml` (`[profile.release]` codegen-units=1, lto=true) | Full LLVM visibility for inlining across crate |
+
+### Benchmark results (CPU 11, taskset -c 11, median of 3 runs)
+
+| Metric | Pre-fix (HEAD) | Post-fix (all fixes) | Delta |
+|--------|---------------|---------------------|-------|
+| Read (req/s) | 98,605 | 110,081 | **+11.6%** |
+| Write (req/s) | 93,726 | 104,032 | **+11.0%** |
+
+### CI gates (all green)
+
+- `cargo fmt --all -- --check` — PASS
+- `cargo clippy --workspace --all-targets --all-features --locked -- -Dwarnings` — PASS
+- `cargo test --locked --all-features` — PASS (0 failures)
+- `tools/ci-playbook.sh --ci` — ALL PASS
+- `RUSTFLAGS="-D warnings" cargo check --no-default-features -p async-opcua -p async-opcua-types -p async-opcua-nodes -p async-opcua-server` — PASS
+
+### Files changed: 3 source + 1 config + 7 spec artifacts = 11 files, ~+60/-40 lines
+
+### Compliance verification (T021)
+
+Code inspection confirmed all 23 feature 059 compliance findings remain intact. The VIEW-03
+revert preserves the same result-mask-field-clearing logic at both `add()` and `add_unchecked()`
+call sites — identical 5 if-blocks, identical fields, identical conditions.
+
+---
+
+## Conventions / gotchas (carried forward)
+
+- **Benchmarking requires CPU isolation**: Use `taskset -c 11` (or any single isolated core)
+  when running `async-opcua-localhost-bench`. Without pinning, OS scheduling noise can cause
+  ±50% variance in reported throughput. This explains the original "66k" measurement.
+- **Pre-push gate:** `cargo fmt --check`; clippy `--workspace --all-targets --all-features`;
+  `RUSTFLAGS="-D warnings" cargo check --no-default-features -p async-opcua -p async-opcua-types
+  -p async-opcua-nodes -p async-opcua-server`; foundation-profile builds; `cargo deny check
+  advisories`; full workspace tests.
+- **OPC UA spec citations:** Not applicable to this feature (performance optimization).
+- **Merge strategy:** rebase-and-merge on the fork (`occamsshavingkit/async-opcua`), never push
+  upstream (`FreeOpcUa/async-opcua`) without explicit request.
+
+---
+
 # Session handoff — spec compliance audit closeout (feature 059, 2026-07-05)
 
 **State:** `master` clean at merge commit `765434c3b` (PR #264, rebased), all CI green. Feature

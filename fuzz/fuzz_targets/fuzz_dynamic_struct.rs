@@ -80,7 +80,11 @@ libfuzzer_sys::fuzz_target!(|data: &[u8]| {
         let loader = DynamicTypeLoader::new(Arc::new(type_tree));
         let mut loaders = TypeLoaderCollection::new_empty();
         loaders.add_type_loader(loader);
-        ContextOwned::new(NamespaceMap::new(), loaders, Arc::new(DecodingOptions::default()))
+        ContextOwned::new(
+            NamespaceMap::new(),
+            loaders,
+            Arc::new(DecodingOptions::default()),
+        )
     }
 
     fn deserialize(data: &[u8], ctx: &ContextOwned) -> Result<ExtensionObject, Error> {

@@ -29,8 +29,11 @@ pub type NodeMap = Arc<DashMap<NodeId, NodeType>>;
 
 /// Cold (infrequently written) fields of the address space.
 pub struct AddressSpaceCold {
+    /// References between nodes.
     pub references: References,
+    /// Browse-name index for O(1) TranslateBrowsePathsToNodeIds.
     pub browse_name_index: Option<HashMap<(NodeId, QualifiedName), Vec<NodeId>>>,
+    /// Namespace URIs keyed by index.
     pub namespaces: HashMap<u16, String>,
 }
 
@@ -39,7 +42,9 @@ pub struct AddressSpaceCold {
 /// Hot fields (`node_map`) are directly accessible without locking.
 /// Cold fields (`references`, `browse_name_index`, `namespaces`) are behind `RwLock<AddressSpaceCold>`.
 pub struct AddressSpace {
+    /// Lock-free concurrent node map for the hot read path.
     pub node_map: NodeMap,
+    /// Cold fields behind an RwLock — acquired only for writes / browse.
     pub cold: RwLock<AddressSpaceCold>,
 }
 

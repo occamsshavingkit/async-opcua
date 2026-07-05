@@ -155,7 +155,7 @@ fn add_nodes_impl(
     let mut audit_items = Vec::new();
 
     {
-        let mut address_space = address_space.write();
+        let address_space = address_space.write();
 
         for item in nodes_to_add.iter_mut() {
             if item.status().is_bad() && item.status() != StatusCode::BadNotSupported {
@@ -285,7 +285,7 @@ fn delete_nodes_impl(
     let mut audit_items = Vec::new();
 
     {
-        let mut address_space = address_space.write();
+        let address_space = address_space.write();
 
         for item in nodes_to_delete.iter_mut() {
             if item.node_id().is_null() {
@@ -339,7 +339,7 @@ fn add_references_impl(
     let mut audit_items = Vec::new();
 
     {
-        let mut address_space = address_space.write();
+        let address_space = address_space.write();
         let type_tree = context.type_tree.read();
 
         for item in references_to_add.iter_mut() {
@@ -528,7 +528,7 @@ fn delete_references_impl(
     let mut audit_items = Vec::new();
 
     {
-        let mut address_space = address_space.write();
+        let address_space = address_space.write();
         let type_tree = context.type_tree.read();
 
         for item in references_to_delete.iter_mut() {
@@ -1666,7 +1666,7 @@ pub trait InMemoryNodeManagerImpl: Send + Sync + 'static {
         address_space: &RwLock<AddressSpace>,
         to_delete: &[&DeleteNodeItem],
     ) {
-        let mut address_space = address_space.write();
+        let address_space = address_space.write();
         for item in to_delete {
             if item.status().is_good() {
                 address_space

@@ -37,7 +37,7 @@ pub fn register_alarm_condition(
 
     // 2. Expose the standard shared Acknowledge/Confirm method declarations on the condition.
     {
-        let mut space = opcua_core::trace_write_lock!(address_space);
+        let space = opcua_core::trace_write_lock!(address_space);
         space.insert_reference(
             &state_machine.condition_id,
             &MethodId::AcknowledgeableConditionType_Acknowledge.into(),
@@ -88,7 +88,7 @@ pub fn register_limit_alarm(
     };
 
     {
-        let mut space = opcua_core::trace_write_lock!(address_space);
+        let space = opcua_core::trace_write_lock!(address_space);
         space.insert_reference(
             &alarm.condition.condition_id,
             &MethodId::AcknowledgeableConditionType_Acknowledge.into(),
@@ -162,7 +162,7 @@ pub fn register_discrete_alarm(
     };
 
     {
-        let mut space = opcua_core::trace_write_lock!(address_space);
+        let space = opcua_core::trace_write_lock!(address_space);
         space.insert_reference(
             &alarm.condition.condition_id,
             &MethodId::AcknowledgeableConditionType_Acknowledge.into(),

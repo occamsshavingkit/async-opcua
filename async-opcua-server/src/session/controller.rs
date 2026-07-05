@@ -885,7 +885,7 @@ impl<T: ConnectionTransport> SessionController<T> {
                     actor_sender,
                     session_was_closed,
                 } = if let Some((s, _tok)) = cached {
-                    let mut mgr = trace_read_lock!(self.session_manager);
+                    let mgr = trace_read_lock!(self.session_manager);
                     let _lookup = SessionDispatchLookup {
                         session: Some(s),
                         actor_sender: mgr.actor_sender(authentication_token),
@@ -893,7 +893,7 @@ impl<T: ConnectionTransport> SessionController<T> {
                     };
                     _lookup
                 } else {
-                    let mut mgr = trace_read_lock!(self.session_manager);
+                    let mgr = trace_read_lock!(self.session_manager);
                     let s = mgr.find_by_token(authentication_token);
                     if let Some(ref session) = s {
                         self.cached_session =

@@ -310,6 +310,15 @@ impl SecureChannel {
         self.security_policy
     }
 
+    /// Return the known security policy if already validated, `None` otherwise.
+    pub fn known_policy(&self) -> Option<SecurityPolicy> {
+        if self.security_policy_valid {
+            Some(self.security_policy)
+        } else {
+            None
+        }
+    }
+
     /// Set the application security policy.
     pub fn set_security_policy(&mut self, security_policy: SecurityPolicy) {
         self.security_policy_valid = matches!(
@@ -937,10 +946,11 @@ impl SecureChannel {
         let decoding_options = self.decoding_options();
         let mut stream = Cursor::new(&src);
         let message_header = MessageChunkHeader::decode(&mut stream, &decoding_options)?;
-        let security_header = SecurityHeader::decode_from_stream(
+        let security_header = SecurityHeader::decode_with_known_policy(
             &mut stream,
             message_header.message_type.is_open_secure_channel(),
             &decoding_options,
+            self.known_policy(),
         )?;
         let encrypted_data_offset = stream.position() as usize;
         if message_header.message_size as usize != src.len() {

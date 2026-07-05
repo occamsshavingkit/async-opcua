@@ -70,7 +70,7 @@
 ### Implementation
 
 - [x] T012 [US4] Add `validated_security_policy: Option<SecurityPolicy>` field to `SecureChannel` in `async-opcua-core/src/comms/secure_channel.rs`. Set it in `set_security_policy()` and validate once there (replacing `expect_supported_security_policy()`'s per-operation check with a one-time validation during assignment).
-- [~] T013 [P] [US4] In `async-opcua-core/src/comms/security_header.rs::SecurityHeader::decode_from_stream()`, use the cached `SecurityPolicy` from the `SecureChannel` for validation instead of calling `SecurityPolicy::from_uri()`. The cached value comparison replaces the URI string-to-enum conversion.
+- [x] T013 [P] [US4] In `async-opcua-core/src/comms/security_header.rs::SecurityHeader::decode_from_stream()`, use the cached `SecurityPolicy` from the `SecureChannel` for validation instead of calling `SecurityPolicy::from_uri()`. The cached value comparison replaces the URI string-to-enum conversion.
 - [x] T014 [US4] Remove `expect_supported_security_policy()` method from `SecureChannel` (lines ~2089-2098) and replace its call sites in `symmetric_sign_and_encrypt()` and `symmetric_decrypt_and_verify()` with a simple boolean flag check or `Option::is_some()` check on `validated_security_policy`.
 - [x] T015 [US4] Run `cargo test -p async-opcua-core` and `cargo test --locked --all-features`. Verify all secure channel and encryption tests pass.
 

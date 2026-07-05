@@ -48,10 +48,11 @@ impl ChunkInfo {
 
         // Read the security header
         let security_header_offset = stream.position() as usize;
-        let security_header = SecurityHeader::decode_from_stream(
+        let security_header = SecurityHeader::decode_with_known_policy(
             &mut stream,
             message_header.message_type.is_open_secure_channel(),
             &decoding_options,
+            secure_channel.known_policy(),
         )?;
 
         // Read the sequence header. Note that this is garbage if the chunk is encrypted.

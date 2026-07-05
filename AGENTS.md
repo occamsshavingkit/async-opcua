@@ -10,3 +10,5 @@ GitHub pull requests should be made on the occamsshavingkit/async-opcua fork, ne
 
 This is an asyncronous codebase. You MUST NOT implement any new locks, mutexes, semaphors or other blocking code UNLESS you have exhausted all other options. 
 If any new blocking code is implemented, you MUST run the skill audit-locks on the new code to assess its impact and get mitigation suggestions. 
+
+You MUST USE the tools/ci-playbook.sh to confirm that a pull request will pass CI before creating the pull request.

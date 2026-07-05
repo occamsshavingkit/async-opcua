@@ -21,7 +21,7 @@ pub fn add_scalar_variables(
     let dynamic_folder_id = NodeId::new(ns, "dynamic");
     {
         let address_space = manager.address_space();
-        let mut address_space = address_space.write();
+        let address_space = address_space.write();
         address_space.add_folder(
             &static_folder_id,
             "Static",

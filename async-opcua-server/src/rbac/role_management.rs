@@ -391,7 +391,7 @@ fn add_role(
     let namespace_uri = decode_string_argument(args, 1)?;
 
     let role_node_id = {
-    let mut space = address_space.write();
+        let mut space = address_space.write();
         let role_set = role_set_node_id();
         let namespace_index = namespace_index_for_role(&mut space, &namespace_uri);
         let browse_name = QualifiedName::new(namespace_index, role_name.as_str());

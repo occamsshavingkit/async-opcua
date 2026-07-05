@@ -142,7 +142,7 @@ async fn main() {
     let store = load_store();
     {
         let address_space = node_manager.address_space();
-        let mut address_space = address_space.write();
+        let address_space = address_space.write();
         let folder = NodeId::new(ns, "PersistentFolder");
         address_space.add_folder(
             &folder,

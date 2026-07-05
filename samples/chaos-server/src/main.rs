@@ -84,7 +84,7 @@ async fn main() {
 
     {
         let address_space = node_manager.address_space();
-        let mut address_space = address_space.write();
+        let address_space = address_space.write();
         let folder = NodeId::new(ns, "ChaosFolder");
         address_space.add_folder(&folder, "Chaos", "Chaos", &NodeId::objects_folder_id());
         address_space.add_variables(

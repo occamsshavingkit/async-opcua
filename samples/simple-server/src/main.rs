@@ -92,7 +92,7 @@ fn add_example_variables(
 
     // The address space is guarded so obtain a lock to change it
     {
-        let mut address_space = address_space.write();
+        let address_space = address_space.write();
 
         // Create a sample folder under objects folder
         let sample_folder_id = NodeId::new(ns, "folder");

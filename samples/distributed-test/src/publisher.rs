@@ -12,7 +12,7 @@ use tokio_util::sync::CancellationToken;
 async fn main() {
     println!("Starting PLC Publisher on PLC01...");
     let node_id = NodeId::new(1, "TemperatureSensor");
-    let mut space = AddressSpace::new();
+    let space = AddressSpace::new();
     space.add_namespace("http://opcfoundation.org/UA/", 0);
     space.add_namespace("urn:test", 1);
 

@@ -19,7 +19,7 @@ use tokio_util::sync::CancellationToken;
 #[tokio::main]
 async fn main() {
     let node_id = NodeId::new(1, "InteropTest");
-    let mut space = AddressSpace::new();
+    let space = AddressSpace::new();
     space.add_namespace("http://opcfoundation.org/UA/", 0);
     space.add_namespace("urn:interop", 1);
 

@@ -71,7 +71,7 @@ job_cargo_deny() {
 # ────────────────────────────────────────────────────────────────────
 job_build_linux() {
     step "build-linux: cargo check --locked"
-    cargo check --locked && pass || fail
+    env RUSTFLAGS="-D warnings" cargo check --locked && pass || fail
 
     step "build-linux: cargo test --verbose --locked --all-features"
     cargo test --verbose --locked --all-features && pass || fail

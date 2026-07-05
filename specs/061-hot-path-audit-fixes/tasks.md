@@ -19,10 +19,10 @@
 
 ### Implementation
 
-- [ ] T001 [P] [US1] Change `Context.options` field from `DecodingOptions` to `Arc<DecodingOptions>` in `async-opcua-types/src/encoding.rs` (~line 318 in `Context` struct definition). Update `Context::new()` to accept/construct `Arc<DecodingOptions>`.
-- [ ] T002 [US1] Update `ContextOwned::context()` in `async-opcua-types/src/type_loader/mod.rs` (line 254-261) to return `Arc::clone(&self.options)` instead of `self.options.clone()`.
-- [ ] T003 [US1] Update all call sites that construct `Context` directly — search for `Context {` or `Context::new(` across the workspace — to wrap `DecodingOptions` in `Arc::new()`.
-- [ ] T004 [US1] Run `cargo test -p async-opcua-types` and `cargo test --locked --all-features` to verify encoding/decoding produces identical output. Run `cargo clippy --workspace --all-targets --all-features --locked -- -Dwarnings`.
+- [x] T001 [P] [US1] Change `Context.options` field from `DecodingOptions` to `Arc<DecodingOptions>` in `async-opcua-types/src/encoding.rs` (~line 318 in `Context` struct definition). Update `Context::new()` to accept/construct `Arc<DecodingOptions>`.
+- [x] T002 [US1] Update `ContextOwned::context()` in `async-opcua-types/src/type_loader/mod.rs` (line 254-261) to return `Arc::clone(&self.options)` instead of `self.options.clone()`.
+- [x] T003 [US1] Update all call sites that construct `Context` directly — search for `Context {` or `Context::new(` across the workspace — to wrap `DecodingOptions` in `Arc::new()`.
+- [x] T004 [US1] Run `cargo test -p async-opcua-types` and `cargo test --locked --all-features` to verify encoding/decoding produces identical output. Run `cargo clippy --workspace --all-targets --all-features --locked -- -Dwarnings`.
 
 **Checkpoint**: `DecodingOptions` shared via `Arc`, not cloned. All encoding tests pass.
 
@@ -36,10 +36,10 @@
 
 ### Implementation
 
-- [ ] T005 [US2] In `async-opcua-server/src/node_manager/memory/mod.rs` (lines 828-839), remove `load_into_type_tree()`, `ensure_browse_name_index()`, and `publish_type_tree_snapshot()` calls from `InMemoryNodeManager::init()`. Keep the `self.inner.init()` call and namespace setup — only remove the three redundant rebuild calls.
-- [ ] T006 [P] [US2] In `async-opcua-server/src/node_manager/memory/core.rs`, remove any equivalent type-tree rebuild logic from `CoreNodeManagerImpl::init()` if present (check line ~171-189).
-- [ ] T007 [US2] In `async-opcua-server/src/server.rs::initialize_node_managers()` (lines 674-693), after the `for mgr in self.node_managers.iter()` loop completes: iterate all managers' address spaces, load into `type_tree`, build the browse name index once across all managers' aggregate nodes, and call `publish_type_tree_snapshot` exactly once.
-- [ ] T008 [US2] Run `cargo test -p async-opcua-server` and `cargo test --locked --all-features`. Verify no test regressions, especially browse and address-space tests.
+- [x] T005 [US2] In `async-opcua-server/src/node_manager/memory/mod.rs` (lines 828-839), remove `load_into_type_tree()`, `ensure_browse_name_index()`, and `publish_type_tree_snapshot()` calls from `InMemoryNodeManager::init()`. Keep the `self.inner.init()` call and namespace setup — only remove the three redundant rebuild calls.
+- [x] T006 [P] [US2] In `async-opcua-server/src/node_manager/memory/core.rs`, remove any equivalent type-tree rebuild logic from `CoreNodeManagerImpl::init()` if present (check line ~171-189).
+- [x] T007 [US2] In `async-opcua-server/src/server.rs::initialize_node_managers()` (lines 674-693), after the `for mgr in self.node_managers.iter()` loop completes: iterate all managers' address spaces, load into `type_tree`, build the browse name index once across all managers' aggregate nodes, and call `publish_type_tree_snapshot` exactly once.
+- [x] T008 [US2] Run `cargo test -p async-opcua-server` and `cargo test --locked --all-features`. Verify no test regressions, especially browse and address-space tests.
 
 **Checkpoint**: Type tree built once, not N times. All server init tests pass.
 
@@ -53,9 +53,9 @@
 
 ### Implementation
 
-- [ ] T009 [US3] Add `cached_context: Option<Arc<RequestContextInner>>` and a version counter (e.g., `context_version: u64`) to `SessionActor` in `async-opcua-server/src/session/actor.rs`.
-- [ ] T010 [US3] Refactor `SessionActor::request_context()` (~line 223-253) to: increment version on token change → if cached version matches, return `Arc::clone(&cached)` → otherwise build new context, cache it, and return.
-- [ ] T011 [US3] Run `cargo test -p async-opcua-server -- session` and `cargo test --locked --all-features`. Verify: (a) Read and Write tests pass with cached context, (b) session re-activation with a new user token correctly invalidates and rebuilds the cached context, and (c) the server rejects requests that arrive between the cache invalidation and rebuild.
+- [x] T009 [US3] Add `cached_context: Option<Arc<RequestContextInner>>` and a version counter (e.g., `context_version: u64`) to `SessionActor` in `async-opcua-server/src/session/actor.rs`.
+- [x] T010 [US3] Refactor `SessionActor::request_context()` (~line 223-253) to: increment version on token change → if cached version matches, return `Arc::clone(&cached)` → otherwise build new context, cache it, and return.
+- [x] T011 [US3] Run `cargo test -p async-opcua-server -- session` and `cargo test --locked --all-features`. Verify: (a) Read and Write tests pass with cached context, (b) session re-activation with a new user token correctly invalidates and rebuilds the cached context, and (c) the server rejects requests that arrive between the cache invalidation and rebuild.
 
 **Checkpoint**: Per-request `Arc<RequestContextInner>` allocation replaced with `Arc::clone()` of cached context.
 
@@ -69,10 +69,10 @@
 
 ### Implementation
 
-- [ ] T012 [US4] Add `validated_security_policy: Option<SecurityPolicy>` field to `SecureChannel` in `async-opcua-core/src/comms/secure_channel.rs`. Set it in `set_security_policy()` and validate once there (replacing `expect_supported_security_policy()`'s per-operation check with a one-time validation during assignment).
-- [ ] T013 [P] [US4] In `async-opcua-core/src/comms/security_header.rs::SecurityHeader::decode_from_stream()`, use the cached `SecurityPolicy` from the `SecureChannel` for validation instead of calling `SecurityPolicy::from_uri()`. The cached value comparison replaces the URI string-to-enum conversion.
-- [ ] T014 [US4] Remove `expect_supported_security_policy()` method from `SecureChannel` (lines ~2089-2098) and replace its call sites in `symmetric_sign_and_encrypt()` and `symmetric_decrypt_and_verify()` with a simple boolean flag check or `Option::is_some()` check on `validated_security_policy`.
-- [ ] T015 [US4] Run `cargo test -p async-opcua-core` and `cargo test --locked --all-features`. Verify all secure channel and encryption tests pass.
+- [x] T012 [US4] Add `validated_security_policy: Option<SecurityPolicy>` field to `SecureChannel` in `async-opcua-core/src/comms/secure_channel.rs`. Set it in `set_security_policy()` and validate once there (replacing `expect_supported_security_policy()`'s per-operation check with a one-time validation during assignment).
+- [~] T013 [P] [US4] In `async-opcua-core/src/comms/security_header.rs::SecurityHeader::decode_from_stream()`, use the cached `SecurityPolicy` from the `SecureChannel` for validation instead of calling `SecurityPolicy::from_uri()`. The cached value comparison replaces the URI string-to-enum conversion.
+- [x] T014 [US4] Remove `expect_supported_security_policy()` method from `SecureChannel` (lines ~2089-2098) and replace its call sites in `symmetric_sign_and_encrypt()` and `symmetric_decrypt_and_verify()` with a simple boolean flag check or `Option::is_some()` check on `validated_security_policy`.
+- [x] T015 [US4] Run `cargo test -p async-opcua-core` and `cargo test --locked --all-features`. Verify all secure channel and encryption tests pass.
 
 **Checkpoint**: `SecurityPolicy::from_uri()` called at most once per channel. Per-chunk validation is a cached comparison.
 
@@ -86,9 +86,9 @@
 
 ### Implementation
 
-- [ ] T016 [US5] Add `read_cert_async(path: &Path) -> Result<X509>` and `read_pkey_async(path: &Path) -> Result<PrivateKey>` to `CertificateStore` in `async-opcua-crypto/src/certificate_store.rs` using `tokio::fs::read`. These are async wrappers around the existing sync read logic.
-- [ ] T017 [US5] In `async-opcua-server/src/server.rs` (~lines 335-390), collect cert+key read futures for all endpoints into a single `Vec`, pair each endpoint's cert and key into a `tokio::join!` future, and run all endpoint futures concurrently via `futures::future::join_all`. If the build path is synchronous, bridge with `tokio::runtime::Handle::current().block_on()`.
-- [ ] T018 [US5] Run `cargo test -p async-opcua-crypto` and `cargo test -p async-opcua-server`. Verify certificate loading works correctly for single and multiple endpoint configurations.
+- [x] T016 [US5] Add `read_cert_async(path: &Path) -> Result<X509>` and `read_pkey_async(path: &Path) -> Result<PrivateKey>` to `CertificateStore` in `async-opcua-crypto/src/certificate_store.rs` using `tokio::fs::read`. These are async wrappers around the existing sync read logic.
+- [x] T017 [US5] In `async-opcua-server/src/server.rs` (~lines 335-390), collect cert+key read futures for all endpoints into a single `Vec`, pair each endpoint's cert and key into a `tokio::join!` future, and run all endpoint futures concurrently via `futures::future::join_all`. If the build path is synchronous, bridge with `tokio::runtime::Handle::current().block_on()`.
+- [x] T018 [US5] Run `cargo test -p async-opcua-crypto` and `cargo test -p async-opcua-server`. Verify certificate loading works correctly for single and multiple endpoint configurations.
 
 **Checkpoint**: Certificate loading parallelized. Same certs loaded, same error handling.
 
@@ -96,10 +96,10 @@
 
 ## Phase 6: Polish & Verification
 
-- [ ] T019 Run full CI playbook via `tools/ci-playbook.sh --ci` — all gates must pass
-- [ ] T020 Run `RUSTFLAGS="-D warnings" cargo check --no-default-features -p async-opcua -p async-opcua-types -p async-opcua-nodes -p async-opcua-server` to verify no-default-features builds
-- [ ] T021 Run benchmark: `cargo build --release --bin async-opcua-localhost-bench && taskset -c 11 ./target/release/async-opcua-localhost-bench run --op read --warmup 3 --measure 5` (3 runs, report median) to measure throughput impact
-- [ ] T022 [P] Update `specs/SESSION-HANDOFF.md` with feature 061 summary
+- [x] T019 Run full CI playbook via `tools/ci-playbook.sh --ci` — all gates must pass
+- [x] T020 Run `RUSTFLAGS="-D warnings" cargo check --no-default-features -p async-opcua -p async-opcua-types -p async-opcua-nodes -p async-opcua-server` to verify no-default-features builds
+- [x] T021 Run benchmark: `cargo build --release --bin async-opcua-localhost-bench && taskset -c 11 ./target/release/async-opcua-localhost-bench run --op read --warmup 3 --measure 5` (3 runs, report median) to measure throughput impact
+- [x] T022 [P] Update `specs/SESSION-HANDOFF.md` with feature 061 summary
 
 ---
 

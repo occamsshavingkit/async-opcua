@@ -149,9 +149,9 @@ mod tests {
         let address_space = Arc::new(RwLock::new(AddressSpace::new()));
         let session_id = NodeId::new(0, "cleanup-session-1");
         let file_node = {
-            let mut address_space = address_space.write();
+            let address_space = address_space.write();
             TemporaryFileNode::create(
-                &mut address_space,
+                &address_space,
                 TemporaryFileNodeConfig::new(2, session_id.clone(), "firmware.bin"),
             )
             .expect("temporary file node should be created")

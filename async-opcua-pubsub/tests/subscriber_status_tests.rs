@@ -12,13 +12,13 @@ use opcua_server::address_space::{AddressSpace, VariableBuilder};
 use opcua_types::{DataTypeId, NodeId, PubSubState, StatusCode, Variant};
 
 fn target_space() -> (Arc<RwLock<AddressSpace>>, NodeId) {
-    let mut space = AddressSpace::new();
+    let space = AddressSpace::new();
     space.add_namespace("urn:test", 1);
     let target = NodeId::new(1, "Target");
     VariableBuilder::new(&target, "Target", "Target")
         .data_type(DataTypeId::Double)
         .value(Variant::Double(0.0))
-        .insert(&mut space);
+        .insert(&space);
     (Arc::new(RwLock::new(space)), target)
 }
 

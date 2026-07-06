@@ -113,7 +113,7 @@ impl opcua::types::StaticTypeLoader for ChatTypeLoader {
     }
 }
 
-fn register_chat_log_data_type(addr: &mut AddressSpace, ns: u16) {
+fn register_chat_log_data_type(addr: &AddressSpace, ns: u16) {
     let struct_id = NodeId::new(ns, CHAT_LOG_DATA_TYPE_ID);
     let enc_id = NodeId::new(ns, CHAT_LOG_ENC_TYPE_ID);
 
@@ -163,7 +163,7 @@ fn register_chat_log_data_type(addr: &mut AddressSpace, ns: u16) {
         .insert(addr);
 }
 
-fn register_chat_types(addr: &mut AddressSpace, ns: u16) {
+fn register_chat_types(addr: &AddressSpace, ns: u16) {
     register_chat_log_data_type(addr, ns);
 
     let chat_log_type_id = NodeId::new(ns, 18u32);
@@ -247,27 +247,27 @@ async fn main() {
 
     {
         let address_space = node_manager.address_space();
-        let mut address_space = address_space.write();
+        let address_space = address_space.write();
 
-        register_chat_types(&mut address_space, ns);
+        register_chat_types(&address_space, ns);
 
         ObjectBuilder::new(&chat_logs_id, "ChatLogs", "ChatLogs")
             .event_notifier(EventNotifier::SUBSCRIBE_TO_EVENTS)
             .organized_by(ObjectId::ObjectsFolder)
             .has_type_definition(NodeId::new(ns, 1u32))
-            .insert(&mut *address_space);
+            .insert(&*address_space);
 
         VariableBuilder::new(&post_count_id, "PostCount", "PostCount")
             .property_of(chat_logs_id.clone())
             .data_type(DataTypeId::UInt32)
             .has_type_definition(VariableTypeId::PropertyType)
             .value(0u32)
-            .insert(&mut *address_space);
+            .insert(&*address_space);
 
         MethodBuilder::new(&post_method_id, "Post", "Post")
             .component_of(chat_logs_id.clone())
             .input_args(
-                &mut *address_space,
+                &*address_space,
                 &input_args_id,
                 &[
                     ("Name", DataTypeId::String).into(),
@@ -275,7 +275,7 @@ async fn main() {
                 ],
             )
             .generates_event(NodeId::new(ns, 7u32))
-            .insert(&mut *address_space);
+            .insert(&*address_space);
     }
 
     node_manager

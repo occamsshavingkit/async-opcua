@@ -29,7 +29,7 @@ pub struct PubSubModelMap {
 /// nodes are reused and still returned in the map.
 #[must_use]
 pub fn reflect_pubsub_config(
-    address_space: &mut AddressSpace,
+    address_space: &AddressSpace,
     namespace: u16,
     configs: &[PubSubConnectionConfig],
 ) -> PubSubModelMap {
@@ -39,7 +39,7 @@ pub fn reflect_pubsub_config(
 /// Reflects PubSub configuration and supplied subscriber status snapshots into the AddressSpace.
 #[must_use]
 pub fn reflect_pubsub_config_with_status(
-    address_space: &mut AddressSpace,
+    address_space: &AddressSpace,
     namespace: u16,
     configs: &[PubSubConnectionConfig],
     reader_statuses: &[(u16, DataSetReaderStatus)],
@@ -184,7 +184,7 @@ pub fn reflect_pubsub_config_with_status(
 }
 
 fn reflect_dataset_reader(
-    address_space: &mut AddressSpace,
+    address_space: &AddressSpace,
     namespace: u16,
     connection_id: &str,
     reader_group_id: &NodeId,
@@ -243,7 +243,7 @@ fn reflect_dataset_reader(
 }
 
 fn reflect_dataset_reader_status(
-    address_space: &mut AddressSpace,
+    address_space: &AddressSpace,
     namespace: u16,
     connection_id: &str,
     dataset_reader_node_id: &NodeId,
@@ -295,7 +295,7 @@ fn reflect_dataset_reader_status(
 /// deterministic NodeIds it creates.
 #[must_use]
 pub fn reflect_published_data_sets(
-    address_space: &mut AddressSpace,
+    address_space: &AddressSpace,
     namespace: u16,
     configs: &[PublishedDataItemsConfig],
 ) -> Vec<(String, NodeId)> {
@@ -326,7 +326,7 @@ pub(crate) fn published_data_set_node_id(namespace: u16, name: &str) -> NodeId {
 }
 
 fn ensure_object(
-    address_space: &mut AddressSpace,
+    address_space: &AddressSpace,
     node_id: &NodeId,
     name: &str,
     object_type: ObjectTypeId,
@@ -341,7 +341,7 @@ fn ensure_object(
 }
 
 fn ensure_u16_property(
-    address_space: &mut AddressSpace,
+    address_space: &AddressSpace,
     node_id: &NodeId,
     parent_id: &NodeId,
     name: &str,
@@ -360,7 +360,7 @@ fn ensure_u16_property(
 }
 
 fn ensure_u32_property(
-    address_space: &mut AddressSpace,
+    address_space: &AddressSpace,
     node_id: &NodeId,
     parent_id: &NodeId,
     name: &str,
@@ -379,7 +379,7 @@ fn ensure_u32_property(
 }
 
 fn ensure_i32_property(
-    address_space: &mut AddressSpace,
+    address_space: &AddressSpace,
     node_id: &NodeId,
     parent_id: &NodeId,
     name: &str,
@@ -398,7 +398,7 @@ fn ensure_i32_property(
 }
 
 fn ensure_u64_property(
-    address_space: &mut AddressSpace,
+    address_space: &AddressSpace,
     node_id: &NodeId,
     parent_id: &NodeId,
     name: &str,

@@ -54,9 +54,9 @@ async fn cleanup_deletes_session_bound_temp_file_and_nodes() {
     std::fs::write(&temp_path, b"firmware").expect("temporary firmware file should be written");
 
     let file_node: TemporaryFileNode = {
-        let mut address_space = address_space.write();
+        let address_space = address_space.write();
         TemporaryFileNode::create(
-            &mut address_space,
+            &address_space,
             TemporaryFileNodeConfig::new(2, session_id.clone(), "firmware.bin"),
         )
         .expect("temporary FileType nodes should be created")

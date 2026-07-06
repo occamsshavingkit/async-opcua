@@ -233,7 +233,7 @@ mod tests {
             let matching_batch_id = NodeId::new(namespace_index, "Fermenter-101.BatchId");
             let nonmatching_batch_id = NodeId::new(namespace_index, "Pump-101.BatchId");
 
-            let mut address_space = AddressSpace::new();
+            let address_space = AddressSpace::new();
             address_space.add_namespace(TEST_NAMESPACE_URI, namespace_index);
 
             ObjectTypeBuilder::new(
@@ -242,7 +242,7 @@ mod tests {
                 "FermenterType",
             )
             .subtype_of(ObjectTypeId::BaseObjectType)
-            .insert(&mut address_space);
+            .insert(&address_space);
 
             ObjectTypeBuilder::new(
                 &subtype,
@@ -250,7 +250,7 @@ mod tests {
                 "CipFermenterType",
             )
             .subtype_of(base_type.clone())
-            .insert(&mut address_space);
+            .insert(&address_space);
 
             ObjectTypeBuilder::new(
                 &other_type,
@@ -258,7 +258,7 @@ mod tests {
                 "PumpType",
             )
             .subtype_of(ObjectTypeId::BaseObjectType)
-            .insert(&mut address_space);
+            .insert(&address_space);
 
             VariableBuilder::new(
                 &batch_id_type_property,
@@ -269,10 +269,10 @@ mod tests {
             .value("")
             .has_type_definition(VariableTypeId::PropertyType)
             .property_of(base_type.clone())
-            .insert(&mut address_space);
+            .insert(&address_space);
 
             add_instance(
-                &mut address_space,
+                &address_space,
                 namespace_index,
                 &matching_node,
                 &subtype,
@@ -280,7 +280,7 @@ mod tests {
                 "FV-101",
             );
             add_instance(
-                &mut address_space,
+                &address_space,
                 namespace_index,
                 &nonmatching_node,
                 &other_type,
@@ -382,7 +382,7 @@ mod tests {
     }
 
     fn add_instance(
-        address_space: &mut AddressSpace,
+        address_space: &AddressSpace,
         namespace_index: u16,
         node_id: &NodeId,
         type_id: &NodeId,

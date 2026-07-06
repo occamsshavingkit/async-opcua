@@ -26,7 +26,7 @@ pub async fn add_history(
     let node_id = NodeId::new(ns, "HistoricalDouble");
     {
         let address_space = manager.address_space();
-        let mut address_space = address_space.write();
+        let address_space = address_space.write();
         let access = AccessLevel::HISTORY_READ
             | AccessLevel::HISTORY_WRITE
             | AccessLevel::CURRENT_READ
@@ -38,7 +38,7 @@ pub async fn add_history(
             .access_level(access)
             .user_access_level(access)
             .organized_by(NodeId::objects_folder_id())
-            .insert(&mut *address_space);
+            .insert(&*address_space);
     }
 
     // Seed historical values so a HistoryRead returns data immediately (no need to wait for sampling).

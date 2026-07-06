@@ -16,19 +16,19 @@ use opcua::{
 
 pub fn add_methods(manager: Arc<SimpleNodeManager>, ns: u16) {
     let address_space = manager.address_space();
-    let mut address_space = address_space.write();
+    let address_space = address_space.write();
 
     let object_id = NodeId::new(ns, "Functions");
     ObjectBuilder::new(&object_id, "Functions", "Functions")
         .event_notifier(EventNotifier::SUBSCRIBE_TO_EVENTS)
         .organized_by(ObjectId::ObjectsFolder)
-        .insert(&mut *address_space);
+        .insert(&*address_space);
 
     // NoOp has 0 inputs and 0 outputs
     let fn_node_id = NodeId::new(ns, "NoOp");
     MethodBuilder::new(&fn_node_id, "NoOp", "NoOp")
         .component_of(object_id.clone())
-        .insert(&mut *address_space);
+        .insert(&*address_space);
     manager.inner().add_method_callback(fn_node_id, |_| {
         debug!("NoOp method called");
         Ok(Vec::new())
@@ -39,11 +39,11 @@ pub fn add_methods(manager: Arc<SimpleNodeManager>, ns: u16) {
     MethodBuilder::new(&fn_node_id, "HelloWorld", "HelloWorld")
         .component_of(object_id.clone())
         .output_args(
-            &mut *address_space,
+            &*address_space,
             &NodeId::new(ns, "HelloWorldOutput"),
             &[("Result", DataTypeId::String).into()],
         )
-        .insert(&mut *address_space);
+        .insert(&*address_space);
     manager.inner().add_method_callback(fn_node_id, |_| {
         debug!("HelloWorld method called");
         Ok(vec![Variant::from("Hello World!".to_owned())])
@@ -55,16 +55,16 @@ pub fn add_methods(manager: Arc<SimpleNodeManager>, ns: u16) {
     MethodBuilder::new(&fn_node_id, "HelloX", "HelloX")
         .component_of(object_id.clone())
         .input_args(
-            &mut *address_space,
+            &*address_space,
             &NodeId::new(ns, "HelloXInput"),
             &[("YourName", DataTypeId::String).into()],
         )
         .output_args(
-            &mut *address_space,
+            &*address_space,
             &NodeId::new(ns, "HelloXOutput"),
             &[("Result", DataTypeId::String).into()],
         )
-        .insert(&mut *address_space);
+        .insert(&*address_space);
     manager.inner().add_method_callback(
         fn_node_id,
         typed_method(|your_name: String| -> Result<(String,), StatusCode> {
@@ -77,7 +77,7 @@ pub fn add_methods(manager: Arc<SimpleNodeManager>, ns: u16) {
     MethodBuilder::new(&fn_node_id, "Add", "Add")
         .component_of(object_id.clone())
         .input_args(
-            &mut *address_space,
+            &*address_space,
             &NodeId::new(ns, "AddInput"),
             &[
                 ("Lhs", DataTypeId::Int64).into(),
@@ -85,11 +85,11 @@ pub fn add_methods(manager: Arc<SimpleNodeManager>, ns: u16) {
             ],
         )
         .output_args(
-            &mut *address_space,
+            &*address_space,
             &NodeId::new(ns, "AddOutput"),
             &[("Result", DataTypeId::Int64).into()],
         )
-        .insert(&mut *address_space);
+        .insert(&*address_space);
     manager.inner().add_method_callback(
         fn_node_id,
         typed_method(|lhs: i64, rhs: i64| -> Result<(i64,), StatusCode> { Ok((lhs + rhs,)) }),
@@ -100,11 +100,11 @@ pub fn add_methods(manager: Arc<SimpleNodeManager>, ns: u16) {
     MethodBuilder::new(&fn_node_id, "Boop", "Boop")
         .component_of(object_id.clone())
         .input_args(
-            &mut *address_space,
+            &*address_space,
             &NodeId::new(ns, "BoopInput"),
             &[("Ping", DataTypeId::String).into()],
         )
-        .insert(&mut *address_space);
+        .insert(&*address_space);
 
     manager.inner().add_method_callback(fn_node_id, |args| {
         let Some(Variant::String(_)) = args.first() else {

@@ -86,9 +86,9 @@ async fn main() {
 
     {
         let address_space = node_manager.address_space();
-        let mut address_space = address_space.write();
+        let address_space = address_space.write();
         build_tree(
-            &mut address_space,
+            &address_space,
             ns,
             &root,
             &ObjectId::ObjectsFolder.into(),
@@ -100,7 +100,7 @@ async fn main() {
 }
 
 /// Recursively add a directory and its contents to the address space under `parent_node_id`.
-fn build_tree(addr: &mut AddressSpace, ns: u16, path: &Path, parent_node_id: &NodeId) {
+fn build_tree(addr: &AddressSpace, ns: u16, path: &Path, parent_node_id: &NodeId) {
     let display_name = path
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
@@ -146,7 +146,7 @@ fn build_tree(addr: &mut AddressSpace, ns: u16, path: &Path, parent_node_id: &No
 }
 
 /// Add a single file as a Variable node. UTF-8 files become `String`, others `ByteString`.
-fn add_file_node(addr: &mut AddressSpace, ns: u16, path: &Path, parent_node_id: &NodeId) {
+fn add_file_node(addr: &AddressSpace, ns: u16, path: &Path, parent_node_id: &NodeId) {
     let browse_name = path
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())

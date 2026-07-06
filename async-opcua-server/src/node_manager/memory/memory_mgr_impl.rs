@@ -81,16 +81,16 @@ pub trait InMemoryNodeManagerImplBuilder {
     type Impl: InMemoryNodeManagerImpl;
 
     /// Build the node manager impl.
-    fn build(self, context: ServerContext, address_space: &mut AddressSpace) -> Self::Impl;
+    fn build(self, context: ServerContext, address_space: &AddressSpace) -> Self::Impl;
 }
 
 impl<T, R: InMemoryNodeManagerImpl> InMemoryNodeManagerImplBuilder for T
 where
-    T: FnOnce(ServerContext, &mut AddressSpace) -> R,
+    T: FnOnce(ServerContext, &AddressSpace) -> R,
 {
     type Impl = R;
 
-    fn build(self, context: ServerContext, address_space: &mut AddressSpace) -> Self::Impl {
+    fn build(self, context: ServerContext, address_space: &AddressSpace) -> Self::Impl {
         self(context, address_space)
     }
 }
@@ -1298,7 +1298,7 @@ fn apply_base_attributes<T: NodeBase>(
 /// Trait for user-provided implementation of the [InMemoryNodeManager](crate::node_manager::memory::InMemoryNodeManager)
 pub trait InMemoryNodeManagerImpl: Send + Sync + 'static {
     /// Populate the address space.
-    async fn init(&self, address_space: &mut AddressSpace, context: ServerContext);
+    async fn init(&self, address_space: &AddressSpace, context: ServerContext);
 
     /// Name of this node manager, for debug purposes.
     fn name(&self) -> &str;
@@ -1718,7 +1718,7 @@ mod tests {
 
     #[async_trait]
     impl InMemoryNodeManagerImpl for TestImpl {
-        async fn init(&self, _address_space: &mut AddressSpace, _context: ServerContext) {}
+        async fn init(&self, _address_space: &AddressSpace, _context: ServerContext) {}
 
         fn name(&self) -> &str {
             "test"
@@ -1915,7 +1915,7 @@ mod tests {
         let existing_child_id = NodeId::new(1, "existing-child");
         let duplicate_child_id = NodeId::new(1, "duplicate-child");
         let duplicate_browse_name = QualifiedName::new(1, "DuplicateName");
-        let mut address_space = AddressSpace::new();
+        let address_space = AddressSpace::new();
         address_space.add_namespace("urn:test", 1);
         address_space.insert::<_, NodeId>(object_node(&parent_id, "parent"), None);
         address_space.insert(
@@ -1956,7 +1956,7 @@ mod tests {
         let parent_id = NodeId::new(1, "parent");
         let new_node_id = NodeId::new(1, "child-with-invalid-type");
         let invalid_type_definition = NodeId::new(2, "missing-object-type");
-        let mut address_space = AddressSpace::new();
+        let address_space = AddressSpace::new();
         address_space.add_namespace("urn:test", 1);
         address_space.insert::<_, NodeId>(object_node(&parent_id, "parent"), None);
         let manager = super::super::InMemoryNodeManager::new(TestImpl, address_space);
@@ -1985,7 +1985,7 @@ mod tests {
         let context = request_context();
         let parent_id = NodeId::new(1, "parent");
         let new_node_id = NodeId::new(1, "object-with-variable-value-attribute");
-        let mut address_space = AddressSpace::new();
+        let address_space = AddressSpace::new();
         address_space.add_namespace("http://opcfoundation.org/UA/", 0);
         address_space.add_namespace("urn:test", 1);
         address_space.insert::<_, NodeId>(
@@ -2027,7 +2027,7 @@ mod tests {
         let source_id = NodeId::new(1, "source");
         let target_id = NodeId::new(1, "target");
         let abstract_reference_type = NodeId::from(ReferenceTypeId::References);
-        let mut address_space = AddressSpace::new();
+        let address_space = AddressSpace::new();
         address_space.add_namespace("http://opcfoundation.org/UA/", 0);
         address_space.add_namespace("urn:test", 1);
         address_space.insert::<_, NodeId>(object_node(&source_id, "source"), None);
@@ -2080,7 +2080,7 @@ mod tests {
         let source_id = NodeId::new(1, "source");
         let target_id = NodeId::new(1, "target");
         let abstract_reference_type = NodeId::from(ReferenceTypeId::References);
-        let mut address_space = AddressSpace::new();
+        let address_space = AddressSpace::new();
         address_space.add_namespace("urn:test", 1);
         address_space.insert::<_, NodeId>(object_node(&source_id, "source"), None);
         address_space.insert::<_, NodeId>(object_node(&target_id, "target"), None);
@@ -2132,7 +2132,7 @@ mod tests {
             false,
         );
         let build_manager = || {
-            let mut address_space = AddressSpace::new();
+            let address_space = AddressSpace::new();
             address_space.add_namespace("http://opcfoundation.org/UA/", 0);
             address_space.add_namespace("urn:test", 1);
             address_space.insert::<_, NodeId>(object_node(&parent_id, "parent"), None);
@@ -2192,7 +2192,7 @@ mod tests {
             false,
         );
         let build_manager = || {
-            let mut address_space = AddressSpace::new();
+            let address_space = AddressSpace::new();
             address_space.add_namespace("http://opcfoundation.org/UA/", 0);
             address_space.add_namespace("urn:test", 1);
             address_space.insert::<_, NodeId>(
@@ -2302,7 +2302,7 @@ mod tests {
         }
         // Supertype: DataType Int32, ValueRank Scalar (-1).
         let build_manager = || {
-            let mut address_space = AddressSpace::new();
+            let address_space = AddressSpace::new();
             address_space.add_namespace("http://opcfoundation.org/UA/", 0);
             address_space.add_namespace("urn:test", 1);
             address_space.insert::<_, NodeId>(
@@ -2391,7 +2391,7 @@ mod tests {
             false,
         );
         let build_manager = || {
-            let mut address_space = AddressSpace::new();
+            let address_space = AddressSpace::new();
             address_space.add_namespace("http://opcfoundation.org/UA/", 0);
             address_space.add_namespace("urn:test", 1);
             address_space.insert::<_, NodeId>(
@@ -2464,7 +2464,7 @@ mod tests {
             false,
         );
         let build_manager = |with_existing: bool| {
-            let mut address_space = AddressSpace::new();
+            let address_space = AddressSpace::new();
             address_space.add_namespace("http://opcfoundation.org/UA/", 0);
             address_space.add_namespace("urn:test", 1);
             address_space.insert::<_, NodeId>(
@@ -2528,7 +2528,7 @@ mod tests {
         let source_id = NodeId::new(1, "source");
         let target_id = NodeId::new(1, "target");
         let reference_type = NodeId::from(ReferenceTypeId::HasComponent);
-        let mut address_space = AddressSpace::new();
+        let address_space = AddressSpace::new();
         address_space.add_namespace("http://opcfoundation.org/UA/", 0);
         address_space.add_namespace("urn:test", 1);
         address_space.insert::<_, NodeId>(
@@ -2590,7 +2590,7 @@ mod tests {
         let source_id = NodeId::new(1, "source");
         let target_id = NodeId::new(1, "object-target");
         let reference_type = NodeId::from(ReferenceTypeId::HasProperty);
-        let mut address_space = AddressSpace::new();
+        let address_space = AddressSpace::new();
         address_space.add_namespace("http://opcfoundation.org/UA/", 0);
         address_space.add_namespace("urn:test", 1);
         address_space.insert::<_, NodeId>(
@@ -2646,7 +2646,7 @@ mod tests {
         let deleted_target_id = NodeId::new(2, "deleted-target");
         let unrelated_target_id = NodeId::new(2, "unrelated-target");
         let reference_type = NodeId::from(ReferenceTypeId::HasComponent);
-        let mut address_space = AddressSpace::new();
+        let address_space = AddressSpace::new();
         address_space.add_namespace("urn:test", 1);
         address_space.insert::<_, NodeId>(object_node(&local_source_id, "local-source"), None);
         address_space.insert::<_, NodeId>(object_node(&local_target_id, "local-target"), None);

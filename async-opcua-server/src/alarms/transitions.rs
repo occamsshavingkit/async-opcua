@@ -8,7 +8,7 @@ use opcua_types::{DateTime, LocalizedText, NodeId, StatusCode};
 /// Triggers a state transition of an Alarm (Active <-> Inactive) when monitored values change.
 /// Returns the generated `AlarmEvent` on successful transition.
 pub fn trigger_alarm_transition(
-    address_space: &mut AddressSpace,
+    address_space: &AddressSpace,
     state_machine: &ConditionStateMachine,
     active: bool,
     severity: u16,
@@ -66,7 +66,7 @@ pub fn trigger_alarm_transition(
 
 /// Acknowledges an active Alarm. Sets `acked_state` to true and updates standard properties.
 pub fn acknowledge_alarm(
-    address_space: &mut AddressSpace,
+    address_space: &AddressSpace,
     state_machine: &ConditionStateMachine,
     comment: LocalizedText,
 ) -> Result<Option<AlarmEvent>, StatusCode> {
@@ -113,7 +113,7 @@ pub fn acknowledge_alarm(
 
 /// Confirms an acknowledged Alarm. Sets `confirmed_state` to true and updates standard properties.
 pub fn confirm_alarm(
-    address_space: &mut AddressSpace,
+    address_space: &AddressSpace,
     state_machine: &ConditionStateMachine,
     comment: LocalizedText,
 ) -> Result<Option<AlarmEvent>, StatusCode> {

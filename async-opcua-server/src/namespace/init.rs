@@ -25,9 +25,9 @@ pub fn register_alarm_condition(
 ) -> ConditionStateMachine {
     // 1. Create the state machine nodes in the Address Space
     let state_machine = {
-        let mut space = opcua_core::trace_write_lock!(address_space);
+        let space = opcua_core::trace_write_lock!(address_space);
         ConditionStateMachine::create_in_address_space(
-            &mut space,
+            &space,
             device,
             alarm_type,
             source_node_id,
@@ -64,12 +64,12 @@ pub fn register_limit_alarm(
     cfg: LimitConfig,
 ) -> LimitAlarm {
     let alarm = {
-        let mut space = opcua_core::trace_write_lock!(address_space);
+        let space = opcua_core::trace_write_lock!(address_space);
         let ns = 2;
 
         match cfg.mode {
             LimitMode::Exclusive => LimitAlarm::create_exclusive_in_address_space(
-                &mut space,
+                &space,
                 ns,
                 device,
                 alarm_name,
@@ -77,7 +77,7 @@ pub fn register_limit_alarm(
                 cfg,
             ),
             LimitMode::NonExclusive => LimitAlarm::create_non_exclusive_in_address_space(
-                &mut space,
+                &space,
                 ns,
                 device,
                 alarm_name,
@@ -147,11 +147,11 @@ pub fn register_discrete_alarm(
     normal: Variant,
 ) -> DiscreteAlarm {
     let alarm = {
-        let mut space = opcua_core::trace_write_lock!(address_space);
+        let space = opcua_core::trace_write_lock!(address_space);
         let ns = 2;
 
         DiscreteAlarm::create_in_address_space(
-            &mut space,
+            &space,
             ns,
             device,
             alarm_name,

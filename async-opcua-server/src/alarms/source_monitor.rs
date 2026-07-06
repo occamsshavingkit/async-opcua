@@ -21,7 +21,7 @@ pub trait SourceMonitoredAlarm: Send + Sync {
     /// existing `update_value` and add no new evaluation logic.
     fn re_evaluate(
         &self,
-        address_space: &mut AddressSpace,
+        address_space: &AddressSpace,
         value: &DataValue,
     ) -> Option<AlarmEvent>;
 }
@@ -175,7 +175,7 @@ mod tests {
 
         fn re_evaluate(
             &self,
-            _address_space: &mut AddressSpace,
+            _address_space: &AddressSpace,
             _value: &DataValue,
         ) -> Option<AlarmEvent> {
             None

@@ -221,7 +221,7 @@ impl Drop for PlainMethodServer {
 fn insert_plain_method_nodes(node_manager: &SimpleNodeManager, namespace_index: u16) {
     let object_id = NodeId::new(namespace_index, OBJECT_ID);
     let method_id = NodeId::new(namespace_index, METHOD_ID);
-    let mut address_space = node_manager.address_space().write();
+    let address_space = node_manager.address_space().write();
 
     ObjectBuilder::new(&object_id, "CallbackObject", "CallbackObject")
         .organized_by(ObjectId::ObjectsFolder)
@@ -230,12 +230,12 @@ fn insert_plain_method_nodes(node_manager: &SimpleNodeManager, namespace_index: 
     MethodBuilder::new(&method_id, "PlainEcho", "PlainEcho")
         .component_of(object_id)
         .input_args(
-            &mut *address_space,
+            &*address_space,
             &NodeId::new(namespace_index, "PlainEchoInputArguments"),
             &[("Value", DataTypeId::String).into()],
         )
         .output_args(
-            &mut *address_space,
+            &*address_space,
             &NodeId::new(namespace_index, "PlainEchoOutputArguments"),
             &[("Value", DataTypeId::String).into()],
         )

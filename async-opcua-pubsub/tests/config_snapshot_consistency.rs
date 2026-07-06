@@ -168,7 +168,7 @@ fn config_snapshot_consistency_part14_dataset_writer_preserves_supported_fields(
 
 #[test]
 fn config_snapshot_consistency_part14_9_1_10_1_pubsub_status_matches_runtime_snapshot() {
-    let mut space = AddressSpace::new();
+    let space = AddressSpace::new();
     space.add_namespace("urn:test", 1);
     let config = PubSubConnectionConfig {
         connection_id: "conn-status".to_string(),
@@ -194,7 +194,7 @@ fn config_snapshot_consistency_part14_9_1_10_1_pubsub_status_matches_runtime_sna
     status.filtered_count = 2;
     status.dropped_count = 1;
 
-    let map = reflect_pubsub_config_with_status(&mut space, 1, &[config], &[(3, status)]);
+    let map = reflect_pubsub_config_with_status(&space, 1, &[config], &[(3, status)]);
 
     assert_eq!(map.readers.len(), 1);
     assert_eq!(map.readers[0].0, 3);

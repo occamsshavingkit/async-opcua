@@ -107,21 +107,21 @@ impl Fixture {
         let replacement_callback_node = NodeId::new(namespace_index, "ReplacementCallbackValue");
 
         {
-            let mut address_space = node_manager.address_space().write();
+            let address_space = node_manager.address_space().write();
             add_i32_variable(
-                &mut address_space,
+                &address_space,
                 namespace_index,
                 &read_node,
                 "ReadCallbackValue",
             );
             add_i32_variable(
-                &mut address_space,
+                &address_space,
                 namespace_index,
                 &source_node,
                 "CallbackSourceValue",
             );
             add_i32_variable(
-                &mut address_space,
+                &address_space,
                 namespace_index,
                 &replacement_callback_node,
                 "ReplacementCallbackValue",

@@ -184,7 +184,7 @@ pub fn scalar_random_value(id: DataTypeId) -> Variant {
 fn add_static_scalar_variables(manager: &SimpleNodeManager, ns: u16, static_folder_id: &NodeId) {
     // The address space is guarded so obtain a lock to change it
     let address_space = manager.address_space();
-    let mut address_space = address_space.write();
+    let address_space = address_space.write();
 
     // Create a folder under static folder
     let scalar_folder_id = NodeId::new(ns, "static_scalar");
@@ -198,14 +198,14 @@ fn add_static_scalar_variables(manager: &SimpleNodeManager, ns: u16, static_fold
             .value(scalar_default_value(*sn))
             .organized_by(&scalar_folder_id)
             .writable()
-            .insert(&mut *address_space);
+            .insert(&*address_space);
     }
 }
 
 fn add_static_array_variables(manager: &SimpleNodeManager, ns: u16, static_folder_id: &NodeId) {
     // The address space is guarded so obtain a lock to change it
     let address_space = manager.address_space();
-    let mut address_space = address_space.write();
+    let address_space = address_space.write();
 
     // Create a folder under static folder
     let array_folder_id = NodeId::new(ns, "static_array");
@@ -228,7 +228,7 @@ fn add_static_array_variables(manager: &SimpleNodeManager, ns: u16, static_folde
             .value((s, values))
             .organized_by(&array_folder_id)
             .writable()
-            .insert(&mut *address_space);
+            .insert(&*address_space);
     });
 }
 
@@ -238,7 +238,7 @@ fn add_data_access_conformance_variables(
     static_folder_id: &NodeId,
 ) {
     let address_space = manager.address_space();
-    let mut address_space = address_space.write();
+    let address_space = address_space.write();
 
     let folder_id = NodeId::new(ns, "data_access");
     address_space.add_folder(&folder_id, "DataAccess", "DataAccess", static_folder_id);
@@ -249,7 +249,7 @@ fn add_data_access_conformance_variables(
         .value(50.0f64)
         .organized_by(&folder_id)
         .writable()
-        .insert(&mut *address_space);
+        .insert(&*address_space);
 
     VariableBuilder::new(
         &NodeId::new(ns, "PercentDeadbandAnalog_EURange"),
@@ -263,7 +263,7 @@ fn add_data_access_conformance_variables(
     })
     .has_type_definition(VariableTypeId::PropertyType)
     .property_of(analog_id)
-    .insert(&mut *address_space);
+    .insert(&*address_space);
 
     VariableBuilder::new(
         &NodeId::new(ns, "PercentDeadbandPlain"),
@@ -274,13 +274,13 @@ fn add_data_access_conformance_variables(
     .value(50.0f64)
     .organized_by(&folder_id)
     .writable()
-    .insert(&mut *address_space);
+    .insert(&*address_space);
 }
 
 fn add_dynamic_scalar_variables(manager: &SimpleNodeManager, ns: u16, dynamic_folder_id: &NodeId) {
     // The address space is guarded so obtain a lock to change it
     let address_space = manager.address_space();
-    let mut address_space = address_space.write();
+    let address_space = address_space.write();
 
     // Create a folder under static folder
     let scalar_folder_id = NodeId::new(ns, "dynamic_scalar");
@@ -293,14 +293,14 @@ fn add_dynamic_scalar_variables(manager: &SimpleNodeManager, ns: u16, dynamic_fo
             .data_type(*sn)
             .value(scalar_default_value(*sn))
             .organized_by(&scalar_folder_id)
-            .insert(&mut *address_space);
+            .insert(&*address_space);
     });
 }
 
 fn add_dynamic_array_variables(manager: &SimpleNodeManager, ns: u16, dynamic_folder_id: &NodeId) {
     // The address space is guarded so obtain a lock to change it
     let address_space = manager.address_space();
-    let mut address_space = address_space.write();
+    let address_space = address_space.write();
 
     // Create a folder under static folder
     let array_folder_id = NodeId::new(ns, "dynamic_array");
@@ -321,7 +321,7 @@ fn add_dynamic_array_variables(manager: &SimpleNodeManager, ns: u16, dynamic_fol
             .value_rank(1)
             .value((s, values))
             .organized_by(&array_folder_id)
-            .insert(&mut *address_space);
+            .insert(&*address_space);
     });
 }
 
@@ -376,7 +376,7 @@ pub fn add_stress_variables(
 
     {
         let address_space = manager.address_space();
-        let mut address_space = address_space.write();
+        let address_space = address_space.write();
 
         let folder_id = NodeId::new(ns, "stress");
         address_space.add_folder(&folder_id, "Stress", "Stress", &NodeId::objects_folder_id());
@@ -387,7 +387,7 @@ pub fn add_stress_variables(
                 .data_type(DataTypeId::Int32)
                 .value(0i32)
                 .organized_by(&folder_id)
-                .insert(&mut *address_space);
+                .insert(&*address_space);
         });
     }
 

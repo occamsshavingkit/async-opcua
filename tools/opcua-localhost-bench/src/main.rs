@@ -686,7 +686,7 @@ struct BenchNodeManager {
 
 #[async_trait]
 impl InMemoryNodeManagerImpl for BenchNodeManager {
-    async fn init(&self, _address_space: &mut AddressSpace, _context: ServerContext) {}
+    async fn init(&self, _address_space: &AddressSpace, _context: ServerContext) {}
 
     fn name(&self) -> &str {
         "bench"
@@ -738,7 +738,7 @@ impl InMemoryNodeManagerImpl for BenchNodeManager {
 }
 
 fn bench_node_manager() -> impl NodeManagerBuilder {
-    InMemoryNodeManagerBuilder::new(|context: ServerContext, address_space: &mut AddressSpace| {
+    InMemoryNodeManagerBuilder::new(|context: ServerContext, address_space: &AddressSpace| {
         let mut namespace = NamespaceMetadata {
             namespace_uri: BENCH_NAMESPACE_URI.to_owned(),
             ..Default::default()

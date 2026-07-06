@@ -116,7 +116,7 @@ impl SimpleNodeManagerBuilder {
 impl InMemoryNodeManagerImplBuilder for SimpleNodeManagerBuilder {
     type Impl = SimpleNodeManagerImpl;
 
-    fn build(mut self, context: ServerContext, address_space: &mut AddressSpace) -> Self::Impl {
+    fn build(mut self, context: ServerContext, address_space: &AddressSpace) -> Self::Impl {
         {
             let mut type_tree = context.type_tree.write();
             for import in self.imports {
@@ -191,7 +191,7 @@ pub struct SimpleNodeManagerImpl {
 #[async_trait]
 impl InMemoryNodeManagerImpl for SimpleNodeManagerImpl {
     #[cfg_attr(not(feature = "subscriptions"), allow(unused_variables))]
-    async fn init(&self, _address_space: &mut AddressSpace, context: ServerContext) {
+    async fn init(&self, _address_space: &AddressSpace, context: ServerContext) {
         #[cfg(feature = "subscriptions")]
         {
             *self.subscriptions.write() = Some(context.subscriptions.clone());
@@ -410,12 +410,12 @@ impl InMemoryNodeManagerImpl for SimpleNodeManagerImpl {
 
         #[cfg(all(feature = "alarms", feature = "subscriptions"))]
         if !source_writes.is_empty() {
-            let mut address_space = trace_write_lock!(address_space);
+            let address_space = trace_write_lock!(address_space);
 
             for (source, value) in source_writes {
                 Self::reevaluate_and_dispatch(
                     self.alarm_source_registry(),
-                    &mut address_space,
+                    &address_space,
                     Some(context.subscriptions.as_ref()),
                     &source,
                     &value,
@@ -966,9 +966,9 @@ impl SimpleNodeManagerImpl {
         alarm.set_source_node(source.clone());
 
         {
-            let mut space = trace_write_lock!(address_space);
-            alarm.write_input_node_property(&mut space, source);
-            alarm.write_has_condition_reference(&mut space, source);
+            let space = trace_write_lock!(address_space);
+            alarm.write_input_node_property(&space, source);
+            alarm.write_has_condition_reference(&space, source);
         }
 
         Arc::new(alarm)
@@ -1027,10 +1027,10 @@ impl SimpleNodeManagerImpl {
                     continue;
                 };
 
-                let mut space = trace_write_lock!(address_space);
+                let space = trace_write_lock!(address_space);
                 Self::reevaluate_and_dispatch(
                     alarm_sources.as_ref(),
-                    &mut space,
+                    &space,
                     Some(subscriptions.as_ref()),
                     &source,
                     &value,
@@ -1061,7 +1061,7 @@ impl SimpleNodeManagerImpl {
     #[cfg(all(feature = "alarms", feature = "subscriptions"))]
     fn reevaluate_and_dispatch(
         alarm_sources: &AlarmSourceRegistry,
-        space: &mut AddressSpace,
+        space: &AddressSpace,
         subscriptions: Option<&SubscriptionCache>,
         source: &NodeId,
         value: &DataValue,
@@ -1098,7 +1098,7 @@ impl SimpleNodeManagerImpl {
         value: DataValue,
     ) {
         let subscriptions = self.subscriptions.read().clone();
-        let mut space = trace_write_lock!(address_space);
+        let space = trace_write_lock!(address_space);
 
         let Some(mut node) = space.find_mut(source) else {
             return;
@@ -1113,7 +1113,7 @@ impl SimpleNodeManagerImpl {
 
         Self::reevaluate_and_dispatch(
             self.alarm_source_registry(),
-            &mut space,
+            &space,
             subscriptions.as_deref(),
             source,
             &value,
@@ -1448,7 +1448,7 @@ mod tests {
 
         fn re_evaluate(
             &self,
-            _address_space: &mut AddressSpace,
+            _address_space: &AddressSpace,
             _value: &DataValue,
         ) -> Option<opcua_core::events::AlarmEvent> {
             None
@@ -1638,7 +1638,7 @@ mod tests {
         let source = NodeId::new(2, "sampled-source");
         let interval = Duration::from_millis(250);
         let alarm = {
-            let mut space = address_space.write();
+            let space = address_space.write();
             space.add_namespace("urn:test:sampled", 2);
             space.add_variables(
                 vec![crate::address_space::Variable::new(
@@ -1660,7 +1660,7 @@ mod tests {
                 .expect("limit config should be valid");
 
             LimitAlarm::create_exclusive_in_address_space(
-                &mut space,
+                &space,
                 2,
                 "Device",
                 "High",

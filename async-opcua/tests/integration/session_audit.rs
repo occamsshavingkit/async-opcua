@@ -15,7 +15,7 @@ use opcua_client::IdentityToken;
 /// AuditActivateSessionEventType (i=2075) from the Server node.
 #[tokio::test]
 async fn session_lifecycle_emits_audit_events() {
-    let (mut tester, _nm, session) = setup().await;
+    let (tester, _nm, session) = setup().await;
 
     // Subscribe the existing session to Server events before opening the audited session.
     let (notifs, _, mut events) = ChannelNotifications::new();

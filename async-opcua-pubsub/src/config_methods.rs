@@ -366,8 +366,8 @@ fn add_connection(
         (ns, connection_id, manager.connections.clone())
     };
 
-    let mut space = address_space.write();
-    let _ = reflect_pubsub_config(&mut space, ns, &connections_snapshot);
+    let space = address_space.write();
+    let _ = reflect_pubsub_config(&space, ns, &connections_snapshot);
     Ok(vec![Variant::from(connection_node_id(ns, &connection_id))])
 }
 
@@ -391,9 +391,9 @@ fn remove_connection(
         (ns, removed, manager.connections.clone())
     };
 
-    let mut space = address_space.write();
-    delete_connection_nodes(&mut space, ns, &removed);
-    let _ = reflect_pubsub_config(&mut space, ns, &connections_snapshot);
+    let space = address_space.write();
+    delete_connection_nodes(&space, ns, &removed);
+    let _ = reflect_pubsub_config(&space, ns, &connections_snapshot);
     Ok(Vec::new())
 }
 
@@ -438,8 +438,8 @@ fn add_writer_group(
         )
     };
 
-    let mut space = address_space.write();
-    let _ = reflect_pubsub_config(&mut space, ns, &connections_snapshot);
+    let space = address_space.write();
+    let _ = reflect_pubsub_config(&space, ns, &connections_snapshot);
     Ok(vec![Variant::from(writer_group_node_id(
         ns,
         &connection_id,
@@ -482,8 +482,8 @@ fn add_reader_group(
         )
     };
 
-    let mut space = address_space.write();
-    let _ = reflect_pubsub_config(&mut space, ns, &connections_snapshot);
+    let space = address_space.write();
+    let _ = reflect_pubsub_config(&space, ns, &connections_snapshot);
     Ok(vec![Variant::from(reader_group_node_id(
         ns,
         &connection_id,
@@ -538,16 +538,16 @@ fn remove_group(
             }
         };
 
-    let mut space = address_space.write();
+    let space = address_space.write();
     match removed {
         RemovedGroup::Writer(group) => {
-            delete_writer_group_nodes(&mut space, ns, &connection_id, &group);
+            delete_writer_group_nodes(&space, ns, &connection_id, &group);
         }
         RemovedGroup::Reader(group) => {
-            delete_reader_group_nodes(&mut space, ns, &connection_id, &group);
+            delete_reader_group_nodes(&space, ns, &connection_id, &group);
         }
     }
-    let _ = reflect_pubsub_config(&mut space, ns, &connections_snapshot);
+    let _ = reflect_pubsub_config(&space, ns, &connections_snapshot);
     Ok(Vec::new())
 }
 
@@ -585,8 +585,8 @@ fn add_dataset_writer(
         )
     };
 
-    let mut space = address_space.write();
-    let _ = reflect_pubsub_config(&mut space, ns, &connections_snapshot);
+    let space = address_space.write();
+    let _ = reflect_pubsub_config(&space, ns, &connections_snapshot);
     Ok(vec![Variant::from(dataset_writer_node_id(
         ns,
         &connection_id,
@@ -621,9 +621,9 @@ fn remove_dataset_writer(
         (ns, connection_id, removed, manager.connections.clone())
     };
 
-    let mut space = address_space.write();
-    delete_dataset_writer_nodes(&mut space, ns, &connection_id, &removed);
-    let _ = reflect_pubsub_config(&mut space, ns, &connections_snapshot);
+    let space = address_space.write();
+    delete_dataset_writer_nodes(&space, ns, &connection_id, &removed);
+    let _ = reflect_pubsub_config(&space, ns, &connections_snapshot);
     Ok(Vec::new())
 }
 
@@ -656,8 +656,8 @@ fn add_dataset_reader(
         )
     };
 
-    let mut space = address_space.write();
-    let _ = reflect_pubsub_config(&mut space, ns, &connections_snapshot);
+    let space = address_space.write();
+    let _ = reflect_pubsub_config(&space, ns, &connections_snapshot);
     Ok(vec![Variant::from(dataset_reader_node_id(
         ns,
         &connection_id,
@@ -692,9 +692,9 @@ fn remove_dataset_reader(
         (ns, connection_id, removed, manager.connections.clone())
     };
 
-    let mut space = address_space.write();
-    delete_dataset_reader_nodes(&mut space, ns, &connection_id, &removed);
-    let _ = reflect_pubsub_config(&mut space, ns, &connections_snapshot);
+    let space = address_space.write();
+    delete_dataset_reader_nodes(&space, ns, &connection_id, &removed);
+    let _ = reflect_pubsub_config(&space, ns, &connections_snapshot);
     Ok(Vec::new())
 }
 
@@ -729,8 +729,8 @@ fn add_published_data_items(
         (ns, unique, version, manager.published_data_sets.clone())
     };
 
-    let mut space = address_space.write();
-    let _ = reflect_published_data_sets(&mut space, ns, &datasets_snapshot);
+    let space = address_space.write();
+    let _ = reflect_published_data_sets(&space, ns, &datasets_snapshot);
     Ok(vec![
         Variant::from(published_data_set_node_id(ns, &unique)),
         Variant::from(ExtensionObject::from_message(version)),
@@ -756,9 +756,9 @@ fn remove_published_data_set(
         (ns, removed.name, manager.published_data_sets.clone())
     };
 
-    let mut space = address_space.write();
+    let space = address_space.write();
     space.delete(&published_data_set_node_id(ns, &removed_name), true);
-    let _ = reflect_published_data_sets(&mut space, ns, &datasets_snapshot);
+    let _ = reflect_published_data_sets(&space, ns, &datasets_snapshot);
     Ok(Vec::new())
 }
 
@@ -797,8 +797,8 @@ fn add_variables(
         (ns, new_version, manager.published_data_sets.clone())
     };
 
-    let mut space = address_space.write();
-    let _ = reflect_published_data_sets(&mut space, ns, &datasets_snapshot);
+    let space = address_space.write();
+    let _ = reflect_published_data_sets(&space, ns, &datasets_snapshot);
     Ok(vec![
         Variant::from(ExtensionObject::from_message(new_version)),
         add_results.into(),
@@ -864,8 +864,8 @@ fn remove_variables(
         )
     };
 
-    let mut space = address_space.write();
-    let _ = reflect_published_data_sets(&mut space, ns, &datasets_snapshot);
+    let space = address_space.write();
+    let _ = reflect_published_data_sets(&space, ns, &datasets_snapshot);
     Ok(vec![
         Variant::from(ExtensionObject::from_message(new_version)),
         remove_results.into(),
@@ -929,7 +929,7 @@ fn next_id(existing: impl Iterator<Item = u16>) -> u16 {
 
 // `AddressSpace::delete` is not recursive, so removals delete the entity's whole reflected subtree.
 
-fn delete_connection_nodes(space: &mut AddressSpace, ns: u16, connection: &PubSubConnectionConfig) {
+fn delete_connection_nodes(space: &AddressSpace, ns: u16, connection: &PubSubConnectionConfig) {
     for group in &connection.writer_groups {
         delete_writer_group_nodes(space, ns, &connection.connection_id, group);
     }
@@ -940,7 +940,7 @@ fn delete_connection_nodes(space: &mut AddressSpace, ns: u16, connection: &PubSu
 }
 
 fn delete_writer_group_nodes(
-    space: &mut AddressSpace,
+    space: &AddressSpace,
     ns: u16,
     connection_id: &str,
     group: &WriterGroupConfig,
@@ -959,7 +959,7 @@ fn delete_writer_group_nodes(
 }
 
 fn delete_dataset_writer_nodes(
-    space: &mut AddressSpace,
+    space: &AddressSpace,
     ns: u16,
     connection_id: &str,
     writer: &DataSetWriterConfig,
@@ -975,7 +975,7 @@ fn delete_dataset_writer_nodes(
 }
 
 fn delete_reader_group_nodes(
-    space: &mut AddressSpace,
+    space: &AddressSpace,
     ns: u16,
     connection_id: &str,
     group: &ReaderGroupConfig,
@@ -994,7 +994,7 @@ fn delete_reader_group_nodes(
 }
 
 fn delete_dataset_reader_nodes(
-    space: &mut AddressSpace,
+    space: &AddressSpace,
     ns: u16,
     connection_id: &str,
     reader: &DataSetReaderConfig,

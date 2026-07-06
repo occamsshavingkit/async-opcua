@@ -14,7 +14,7 @@ use opcua_types::{
 
 #[test]
 fn reflect_pubsub_config_materializes_referenceable_instances() {
-    let mut space = AddressSpace::new();
+    let space = AddressSpace::new();
     space.add_namespace("urn:test", 1);
 
     let cfg = PubSubConnectionConfig {
@@ -37,7 +37,7 @@ fn reflect_pubsub_config_materializes_referenceable_instances() {
         }],
     };
 
-    let map: PubSubModelMap = reflect_pubsub_config(&mut space, 1, &[cfg]);
+    let map: PubSubModelMap = reflect_pubsub_config(&space, 1, &[cfg]);
     let tt = DefaultTypeTree::new();
 
     // The map locates the connection and the dataset writer by their config ids.
@@ -128,7 +128,7 @@ fn reflect_pubsub_config_materializes_referenceable_instances() {
 
 #[test]
 fn reflect_pubsub_config_materializes_reader_side_instances() {
-    let mut space = AddressSpace::new();
+    let space = AddressSpace::new();
     space.add_namespace("urn:test", 1);
 
     let cfg = PubSubConnectionConfig {
@@ -149,7 +149,7 @@ fn reflect_pubsub_config_materializes_reader_side_instances() {
         }],
     };
 
-    let map: PubSubModelMap = reflect_pubsub_config(&mut space, 1, &[cfg]);
+    let map: PubSubModelMap = reflect_pubsub_config(&space, 1, &[cfg]);
     let tt = DefaultTypeTree::new();
 
     // The map locates the DataSetReader by its config id.

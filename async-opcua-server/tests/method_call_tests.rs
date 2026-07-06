@@ -75,7 +75,7 @@ impl CallbackNodeManagerBuilder {
 impl InMemoryNodeManagerImplBuilder for CallbackNodeManagerBuilder {
     type Impl = CallbackNodeManager;
 
-    fn build(self, context: ServerContext, address_space: &mut AddressSpace) -> Self::Impl {
+    fn build(self, context: ServerContext, address_space: &AddressSpace) -> Self::Impl {
         let namespace_index = context
             .type_tree
             .write()
@@ -120,7 +120,7 @@ impl CallbackNodeManager {
 
 #[async_trait]
 impl InMemoryNodeManagerImpl for CallbackNodeManager {
-    async fn init(&self, address_space: &mut AddressSpace, _context: ServerContext) {
+    async fn init(&self, address_space: &AddressSpace, _context: ServerContext) {
         ObjectBuilder::new(&self.node_id(OBJECT_ID), "CallbackObject", "CallbackObject")
             .organized_by(ObjectId::ObjectsFolder)
             .insert(address_space);

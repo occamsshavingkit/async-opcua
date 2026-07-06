@@ -502,7 +502,7 @@ pub fn write_node_value(
 /// `address_space`.
 pub fn add_namespaces(
     context: &ServerContext,
-    address_space: &mut AddressSpace,
+    address_space: &AddressSpace,
     namespaces: &[&str],
 ) -> Vec<u16> {
     let mut type_tree = context.type_tree.write();
@@ -700,7 +700,7 @@ mod tests {
     fn read_node_through_address_space(context: &RequestContext, node: NodeType) -> DataValue {
         let node_id = node.node_id().clone();
         let node_to_read = read_value_id(&node_id);
-        let mut address_space = AddressSpace::new();
+        let address_space = AddressSpace::new();
         address_space.add_namespace("urn:test", 1);
         assert!(address_space.insert(node, Option::<&[(&NodeId, &NodeId, _)]>::None));
 

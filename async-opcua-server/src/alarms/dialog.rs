@@ -41,7 +41,7 @@ impl DialogCondition {
     /// Creates a DialogConditionType instance and its mandatory dialog components.
     #[allow(clippy::too_many_arguments)]
     pub fn create_in_address_space(
-        address_space: &mut AddressSpace,
+        address_space: &AddressSpace,
         ns: u16,
         device: &str,
         name: &str,
@@ -170,7 +170,7 @@ impl DialogCondition {
     }
 
     /// Activates the dialog and returns the event for the new active state.
-    pub fn activate(&self, address_space: &mut AddressSpace) -> AlarmEvent {
+    pub fn activate(&self, address_space: &AddressSpace) -> AlarmEvent {
         self.set_dialog_state_active(address_space, true);
         self.condition.set_active(address_space, true);
         self.condition.set_acked(address_space, true);
@@ -189,7 +189,7 @@ impl DialogCondition {
     /// Selects a response option and ends the dialog.
     pub fn respond(
         &self,
-        address_space: &mut AddressSpace,
+        address_space: &AddressSpace,
         selected_response: i32,
     ) -> Result<AlarmEvent, StatusCode> {
         let index = self.validate_response(address_space, selected_response)?;
@@ -200,7 +200,7 @@ impl DialogCondition {
     /// Selects a response option, applies a comment, and ends the dialog.
     pub fn respond2(
         &self,
-        address_space: &mut AddressSpace,
+        address_space: &AddressSpace,
         selected_response: i32,
         comment: LocalizedText,
     ) -> Result<AlarmEvent, StatusCode> {
@@ -215,7 +215,7 @@ impl DialogCondition {
     }
 
     /// Sets DialogState and DialogState/Id.
-    pub fn set_dialog_state_active(&self, address_space: &mut AddressSpace, active: bool) {
+    pub fn set_dialog_state_active(&self, address_space: &AddressSpace, active: bool) {
         set_variable_value(
             address_space,
             &self.dialog_state_id,
@@ -251,7 +251,7 @@ impl DialogCondition {
 
     fn complete_response(
         &self,
-        address_space: &mut AddressSpace,
+        address_space: &AddressSpace,
         selected_response: i32,
         message: LocalizedText,
     ) -> AlarmEvent {
@@ -341,7 +341,7 @@ fn dialog_state_text(active: bool) -> LocalizedText {
 }
 
 fn add_localized_text_property(
-    address_space: &mut AddressSpace,
+    address_space: &AddressSpace,
     node_id: &NodeId,
     parent_id: &NodeId,
     name: &str,
@@ -357,7 +357,7 @@ fn add_localized_text_property(
 }
 
 fn add_localized_text_array_property(
-    address_space: &mut AddressSpace,
+    address_space: &AddressSpace,
     node_id: &NodeId,
     parent_id: &NodeId,
     name: &str,
@@ -375,7 +375,7 @@ fn add_localized_text_array_property(
 }
 
 fn add_i32_property(
-    address_space: &mut AddressSpace,
+    address_space: &AddressSpace,
     node_id: &NodeId,
     parent_id: &NodeId,
     name: &str,
@@ -409,7 +409,7 @@ fn read_bool_value(address_space: &AddressSpace, id: &NodeId) -> bool {
     false
 }
 
-fn set_variable_value(address_space: &mut AddressSpace, id: &NodeId, value: Variant) {
+fn set_variable_value(address_space: &AddressSpace, id: &NodeId, value: Variant) {
     if let Some(mut node) = address_space.find_mut(id) {
         if let NodeType::Variable(ref mut var) = &mut *node {
             let _ = var.set_value(&opcua_types::NumericRange::None, value);

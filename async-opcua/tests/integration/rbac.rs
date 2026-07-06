@@ -451,13 +451,13 @@ async fn call_enforced_by_role() {
         let in_id = nm.inner().next_node_id();
         let out_id = nm.inner().next_node_id();
         {
-            let mut sp = nm.address_space().write();
+            let sp = nm.address_space().write();
             MethodBuilder::new(&id, name, name)
                 .component_of(ObjectId::ObjectsFolder)
                 .input_args(&mut *sp, &in_id, &[])
                 .output_args(&mut *sp, &out_id, &[])
                 .role_permissions(vec![rp(role, PermissionType::Call)])
-                .insert(&mut *sp);
+                .insert(&*sp);
         }
         nm.inner().add_method_cb(id.clone(), move |_| Ok(vec![]));
         id

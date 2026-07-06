@@ -118,7 +118,7 @@ impl TemporaryFileNode {
 
     /// Create and insert a session-bound FileType object and its standard child nodes.
     pub fn create(
-        address_space: &mut AddressSpace,
+        address_space: &AddressSpace,
         config: TemporaryFileNodeConfig,
     ) -> Result<Self, StatusCode> {
         address_space.add_namespace(&config.namespace_uri, config.namespace_index);
@@ -289,7 +289,7 @@ fn insert(inserted: bool) -> Result<(), StatusCode> {
 }
 
 fn insert_property(
-    address_space: &mut AddressSpace,
+    address_space: &AddressSpace,
     file_id: &NodeId,
     node_id: &NodeId,
     name: &str,
@@ -307,7 +307,7 @@ fn insert_property(
 }
 
 fn insert_method(
-    address_space: &mut AddressSpace,
+    address_space: &AddressSpace,
     file_id: &NodeId,
     node_id: &NodeId,
     name: &str,
@@ -377,10 +377,10 @@ mod tests {
 
     #[test]
     fn creates_session_bound_file_type_node() {
-        let mut address_space = AddressSpace::new();
+        let address_space = AddressSpace::new();
         let config = TemporaryFileNodeConfig::new(2, NodeId::new(0, "session-1"), "firmware.bin");
 
-        let node = TemporaryFileNode::create(&mut address_space, config)
+        let node = TemporaryFileNode::create(&address_space, config)
             .expect("temporary file node should be created");
 
         assert!(matches!(
@@ -405,12 +405,12 @@ mod tests {
 
     #[test]
     fn rejects_duplicate_session_file_node() {
-        let mut address_space = AddressSpace::new();
+        let address_space = AddressSpace::new();
         let config = TemporaryFileNodeConfig::new(2, NodeId::new(0, "session-1"), "firmware.bin");
 
-        TemporaryFileNode::create(&mut address_space, config.clone())
+        TemporaryFileNode::create(&address_space, config.clone())
             .expect("initial temporary file node should be created");
-        let err = TemporaryFileNode::create(&mut address_space, config)
+        let err = TemporaryFileNode::create(&address_space, config)
             .expect_err("duplicate temporary file node should fail");
 
         assert_eq!(err, StatusCode::BadNodeIdExists);

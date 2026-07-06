@@ -30,7 +30,7 @@ fn target_value(space: &AddressSpace, node: &NodeId) -> Option<Variant> {
         .value
 }
 
-fn insert_target(space: &mut AddressSpace, name: &str, value: Variant) -> NodeId {
+fn insert_target(space: &AddressSpace, name: &str, value: Variant) -> NodeId {
     let node_id = NodeId::new(1, name);
     VariableBuilder::new(&node_id, name, name)
         .data_type(DataTypeId::Double)
@@ -147,10 +147,10 @@ fn legacy_subscribed_variables_map_to_value_attribute_targets() {
 
 #[test]
 fn matching_key_frame_updates_targets_in_field_order() {
-    let mut space = AddressSpace::new();
+    let space = AddressSpace::new();
     space.add_namespace("urn:test", 1);
-    let a = insert_target(&mut space, "A", Variant::Double(0.0));
-    let b = insert_target(&mut space, "B", Variant::Double(0.0));
+    let a = insert_target(&space, "A", Variant::Double(0.0));
+    let b = insert_target(&space, "B", Variant::Double(0.0));
     let address_space = Arc::new(RwLock::new(space));
     let mut runtime = SubscriberRuntime::with_connections(
         address_space.clone(),
@@ -174,9 +174,9 @@ fn matching_key_frame_updates_targets_in_field_order() {
 
 #[test]
 fn nonmatching_filters_do_not_write_and_increment_filtered_count() {
-    let mut space = AddressSpace::new();
+    let space = AddressSpace::new();
     space.add_namespace("urn:test", 1);
-    let target = insert_target(&mut space, "Target", Variant::Double(5.0));
+    let target = insert_target(&space, "Target", Variant::Double(5.0));
     let address_space = Arc::new(RwLock::new(space));
     let mut runtime = SubscriberRuntime::with_connections(
         address_space.clone(),
@@ -210,9 +210,9 @@ fn nonmatching_filters_do_not_write_and_increment_filtered_count() {
 
 #[test]
 fn wildcard_publisher_and_dataset_writer_filters_allow_matching_message() {
-    let mut space = AddressSpace::new();
+    let space = AddressSpace::new();
     space.add_namespace("urn:test", 1);
-    let target = insert_target(&mut space, "Target", Variant::Double(0.0));
+    let target = insert_target(&space, "Target", Variant::Double(0.0));
     let mut cfg_reader = reader(vec![target.clone()]);
     cfg_reader.publisher_id = None;
     cfg_reader.dataset_writer_id = 0;
@@ -234,10 +234,10 @@ fn wildcard_publisher_and_dataset_writer_filters_allow_matching_message() {
 
 #[test]
 fn field_count_mismatch_is_atomic_and_reports_error() {
-    let mut space = AddressSpace::new();
+    let space = AddressSpace::new();
     space.add_namespace("urn:test", 1);
-    let a = insert_target(&mut space, "A", Variant::Double(1.0));
-    let b = insert_target(&mut space, "B", Variant::Double(2.0));
+    let a = insert_target(&space, "A", Variant::Double(1.0));
+    let b = insert_target(&space, "B", Variant::Double(2.0));
     let address_space = Arc::new(RwLock::new(space));
     let mut runtime = SubscriberRuntime::with_connections(
         address_space.clone(),
@@ -344,9 +344,9 @@ async fn udp_subscriber_bind_conflict_returns_bad_communication_error() {
 fn encoded_key_frame_datagram_processes_through_decode_path() {
     let ctx_owned = ContextOwned::default();
     let ctx = ctx_owned.context();
-    let mut space = AddressSpace::new();
+    let space = AddressSpace::new();
     space.add_namespace("urn:test", 1);
-    let target = insert_target(&mut space, "Target", Variant::Double(0.0));
+    let target = insert_target(&space, "Target", Variant::Double(0.0));
     let address_space = Arc::new(RwLock::new(space));
     let mut runtime = SubscriberRuntime::with_connections(
         address_space.clone(),

@@ -111,10 +111,10 @@ impl<T: InMemoryNodeManagerImplBuilder> InMemoryNodeManagerBuilder<T> {
 
 impl<T: InMemoryNodeManagerImplBuilder> NodeManagerBuilder for InMemoryNodeManagerBuilder<T> {
     fn build(self: Box<Self>, context: ServerContext) -> Arc<DynNodeManager> {
-        let mut address_space = AddressSpace::new();
+        let address_space = AddressSpace::new();
         let snapshot_info = Arc::clone(&context.info);
         let snapshot_type_tree = Arc::clone(&context.type_tree);
-        let inner = self.impl_builder.build(context, &mut address_space);
+        let inner = self.impl_builder.build(context, &address_space);
         {
             let type_tree = trace_read_lock!(snapshot_type_tree);
             snapshot_info.publish_type_tree_snapshot(&type_tree);
@@ -830,9 +830,9 @@ impl<TImpl: InMemoryNodeManagerImpl> NodeManagerCore for InMemoryNodeManager<TIm
     #[allow(clippy::await_holding_lock)]
     async fn init(&self, type_tree: &mut DefaultTypeTree, context: ServerContext) {
         // During init we effectively own the address space, so this should be safe.
-        let mut address_space = trace_write_lock!(self.address_space);
+        let address_space = trace_write_lock!(self.address_space);
 
-        self.inner.init(&mut address_space, context).await;
+        self.inner.init(&address_space, context).await;
         address_space.load_into_type_tree(type_tree);
         address_space.ensure_browse_name_index(type_tree);
         // Type-tree snapshot is published exactly once in
@@ -1462,7 +1462,7 @@ mod tests {
 
     #[async_trait]
     impl InMemoryNodeManagerImpl for TestMethodImpl {
-        async fn init(&self, _address_space: &mut AddressSpace, _context: ServerContext) {}
+        async fn init(&self, _address_space: &AddressSpace, _context: ServerContext) {}
 
         fn name(&self) -> &str {
             "test"
@@ -1585,7 +1585,7 @@ mod tests {
     }
 
     fn node_management_manager(nodes: Vec<NodeType>) -> InMemoryNodeManager<TestMethodImpl> {
-        let mut address_space = AddressSpace::new();
+        let address_space = AddressSpace::new();
         address_space.add_namespace("urn:test", 1);
         for node in nodes {
             address_space.insert::<_, NodeId>(node, None);
@@ -1698,7 +1698,7 @@ mod tests {
     }
 
     fn history_manager(nodes: Vec<NodeType>) -> InMemoryNodeManager<TestMethodImpl> {
-        let mut address_space = AddressSpace::new();
+        let address_space = AddressSpace::new();
         address_space.add_namespace("urn:test", 1);
         for node in nodes {
             address_space.insert::<_, NodeId>(node, None);
@@ -1831,7 +1831,7 @@ mod tests {
             Option<AccessRestrictionType>,
         )>,
     ) -> InMemoryNodeManager<TestMethodImpl> {
-        let mut address_space = AddressSpace::new();
+        let address_space = AddressSpace::new();
         address_space.add_namespace("urn:test", 1);
         address_space.insert::<_, NodeId>(
             Object::new(object_id, "object", "object", EventNotifier::empty()),
@@ -1868,7 +1868,7 @@ mod tests {
             Option<AccessRestrictionType>,
         )>,
     ) -> InMemoryNodeManager<TestMethodImpl> {
-        let mut address_space = AddressSpace::new();
+        let address_space = AddressSpace::new();
         address_space.add_namespace("urn:test", 1);
         address_space.insert::<_, NodeId>(
             Object::new(parent_id, "parent", "parent", EventNotifier::empty()),

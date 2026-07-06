@@ -36,22 +36,22 @@ const STATEFUL_NAMESPACE_URI: &str = "urn:async-opcua:stateful-tests:nodes";
 
 #[test]
 fn alarm_transition_acknowledge_and_confirm_update_address_space_state() {
-    let mut address_space = AddressSpace::new();
+    let address_space = AddressSpace::new();
     address_space.add_namespace(STATEFUL_NAMESPACE_URI, 2);
     let source_node_id = NodeId::new(2, "Boiler1");
     let condition = ConditionStateMachine::create_in_address_space(
-        &mut address_space,
+        &address_space,
         "Boiler1",
         "HighPressure",
         source_node_id,
         "High pressure",
     );
 
-    condition.set_acked(&mut address_space, true);
-    condition.set_confirmed(&mut address_space, true);
+    condition.set_acked(&address_space, true);
+    condition.set_confirmed(&address_space, true);
 
     let event = trigger_alarm_transition(
-        &mut address_space,
+        &address_space,
         &condition,
         true,
         700,
@@ -69,7 +69,7 @@ fn alarm_transition_acknowledge_and_confirm_update_address_space_state() {
     assert!(condition.get_retain(&address_space));
 
     acknowledge_alarm(
-        &mut address_space,
+        &address_space,
         &condition,
         LocalizedText::new("en", "operator acknowledged"),
     )
@@ -85,7 +85,7 @@ fn alarm_transition_acknowledge_and_confirm_update_address_space_state() {
     assert!(condition.get_retain(&address_space));
 
     trigger_alarm_transition(
-        &mut address_space,
+        &address_space,
         &condition,
         false,
         100,
@@ -98,7 +98,7 @@ fn alarm_transition_acknowledge_and_confirm_update_address_space_state() {
     assert!(condition.get_retain(&address_space));
 
     confirm_alarm(
-        &mut address_space,
+        &address_space,
         &condition,
         LocalizedText::new("en", "operator confirmed"),
     )
@@ -171,9 +171,9 @@ async fn cleanup_session_deletes_temporary_file_nodes_and_backing_file() {
         .expect("temporary backing file should be written");
 
     let file_node: TemporaryFileNode = {
-        let mut address_space = address_space.write();
+        let address_space = address_space.write();
         TemporaryFileNode::create(
-            &mut address_space,
+            &address_space,
             TemporaryFileNodeConfig::new(2, session_id.clone(), "firmware.bin"),
         )
         .expect("temporary FileType nodes should be created")

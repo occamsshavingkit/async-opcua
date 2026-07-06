@@ -357,7 +357,7 @@ impl SubscriberRuntime {
 ///
 /// Returns the number of DataSetMessages applied.
 pub fn apply_network_message(
-    address_space: &mut AddressSpace,
+    address_space: &AddressSpace,
     message: &UadpNetworkMessage,
     reader_groups: &[ReaderGroupConfig],
 ) -> usize {
@@ -392,7 +392,7 @@ pub fn apply_network_message(
 
 /// Decode a UADP NetworkMessage and apply matching DataSets to target Variables.
 pub fn decode_and_apply(
-    address_space: &mut AddressSpace,
+    address_space: &AddressSpace,
     payload: &[u8],
     ctx: &Context<'_>,
     reader_groups: &[ReaderGroupConfig],

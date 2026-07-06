@@ -21,7 +21,7 @@ async fn test_udp_multicast_pubsub() {
     println!("UDP receiver socket bound to: {}", local_addr);
 
     let node_id = NodeId::new(1, "UdpTempSensor");
-    let mut space = AddressSpace::new();
+    let space = AddressSpace::new();
     space.add_namespace("http://opcfoundation.org/UA/", 0);
     space.add_namespace("urn:test", 1);
 
@@ -231,7 +231,7 @@ async fn test_mqtt_broker_pubsub() {
     });
 
     let node_id = NodeId::new(1, "MqttTempSensor");
-    let mut space = AddressSpace::new();
+    let space = AddressSpace::new();
     space.add_namespace("http://opcfoundation.org/UA/", 0);
     space.add_namespace("urn:test", 1);
 

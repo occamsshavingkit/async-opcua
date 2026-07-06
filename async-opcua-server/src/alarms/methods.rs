@@ -41,8 +41,8 @@ impl ConditionMethodHandler for AlarmMethodHandler {
             return Err(StatusCode::BadConditionDisabled);
         }
 
-        let mut address_space = opcua_core::trace_write_lock!(self.address_space);
-        match acknowledge_alarm(&mut address_space, &self.state_machine, comment.clone()) {
+        let address_space = opcua_core::trace_write_lock!(self.address_space);
+        match acknowledge_alarm(&address_space, &self.state_machine, comment.clone()) {
             Ok(_) => Ok(StatusCode::Good),
             Err(e) => Err(e),
         }
@@ -266,8 +266,8 @@ impl AlarmMethodHandler {
             _ => return Err(StatusCode::BadTypeMismatch),
         };
 
-        let mut address_space = opcua_core::trace_write_lock!(self.address_space);
-        match confirm_alarm(&mut address_space, &self.state_machine, comment) {
+        let address_space = opcua_core::trace_write_lock!(self.address_space);
+        match confirm_alarm(&address_space, &self.state_machine, comment) {
             Ok(Some(event)) => {
                 notify_alarm_event(context, &event);
                 Ok(vec![])
@@ -310,8 +310,8 @@ impl DialogConditionMethodHandler {
             .registry
             .get(object_id)
             .ok_or(StatusCode::BadNodeIdUnknown)?;
-        let mut address_space = opcua_core::trace_write_lock!(self.address_space);
-        let event = dialog.respond(&mut address_space, selected_response)?;
+        let address_space = opcua_core::trace_write_lock!(self.address_space);
+        let event = dialog.respond(&address_space, selected_response)?;
         notify_alarm_event(context, &event);
         Ok(vec![])
     }
@@ -329,8 +329,8 @@ impl DialogConditionMethodHandler {
             .registry
             .get(object_id)
             .ok_or(StatusCode::BadNodeIdUnknown)?;
-        let mut address_space = opcua_core::trace_write_lock!(self.address_space);
-        let event = dialog.respond2(&mut address_space, selected_response, comment)?;
+        let address_space = opcua_core::trace_write_lock!(self.address_space);
+        let event = dialog.respond2(&address_space, selected_response, comment)?;
         notify_alarm_event(context, &event);
         Ok(vec![])
     }
@@ -437,8 +437,8 @@ impl ConditionRefreshHandler {
             .registry
             .get_by_shelving_state(object_id)
             .ok_or(StatusCode::BadNodeIdUnknown)?;
-        let mut address_space = opcua_core::trace_write_lock!(self.address_space);
-        let status_code = condition.one_shot_shelve(&mut address_space);
+        let address_space = opcua_core::trace_write_lock!(self.address_space);
+        let status_code = condition.one_shot_shelve(&address_space);
         if status_code.is_good() {
             Ok(vec![])
         } else {
@@ -458,8 +458,8 @@ impl ConditionRefreshHandler {
             .registry
             .get_by_shelving_state(object_id)
             .ok_or(StatusCode::BadNodeIdUnknown)?;
-        let mut address_space = opcua_core::trace_write_lock!(self.address_space);
-        let status_code = condition.timed_shelve(&mut address_space, shelving_time_ms);
+        let address_space = opcua_core::trace_write_lock!(self.address_space);
+        let status_code = condition.timed_shelve(&address_space, shelving_time_ms);
         if status_code.is_good() {
             Ok(vec![])
         } else {
@@ -478,8 +478,8 @@ impl ConditionRefreshHandler {
             .registry
             .get_by_shelving_state(object_id)
             .ok_or(StatusCode::BadNodeIdUnknown)?;
-        let mut address_space = opcua_core::trace_write_lock!(self.address_space);
-        let status_code = condition.unshelve(&mut address_space);
+        let address_space = opcua_core::trace_write_lock!(self.address_space);
+        let status_code = condition.unshelve(&address_space);
         if status_code.is_good() {
             Ok(vec![])
         } else {

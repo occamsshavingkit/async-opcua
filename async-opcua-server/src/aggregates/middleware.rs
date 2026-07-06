@@ -113,7 +113,7 @@ mod tests {
 
     #[test]
     fn resolve_stepped_reads_historical_configuration() {
-        let mut space = AddressSpace::new();
+        let space = AddressSpace::new();
         space.add_namespace("urn:test", 1);
 
         let var = NodeId::new(1, "var");
@@ -122,12 +122,12 @@ mod tests {
 
         VariableBuilder::new(&var, "var", "var")
             .data_type(DataTypeId::Double)
-            .insert(&mut space);
-        ObjectBuilder::new(&cfg, "HA Configuration", "HA Configuration").insert(&mut space);
+            .insert(&space);
+        ObjectBuilder::new(&cfg, "HA Configuration", "HA Configuration").insert(&space);
         VariableBuilder::new(&stepped, "Stepped", "Stepped")
             .data_type(DataTypeId::Boolean)
             .value(Variant::Boolean(false))
-            .insert(&mut space);
+            .insert(&space);
 
         space.insert_reference(&var, &cfg, ReferenceTypeId::HasHistoricalConfiguration);
         space.insert_reference(&cfg, &stepped, ReferenceTypeId::HasProperty);
@@ -139,7 +139,7 @@ mod tests {
         let plain = NodeId::new(1, "plain");
         VariableBuilder::new(&plain, "plain", "plain")
             .data_type(DataTypeId::Double)
-            .insert(&mut space);
+            .insert(&space);
         assert!(resolve_stepped(&space, &plain));
     }
 }

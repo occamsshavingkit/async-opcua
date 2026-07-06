@@ -541,7 +541,7 @@ mod tests {
         fn new(object_count: usize) -> Self {
             let namespace_index = 1;
             let object_type = NodeId::new(namespace_index, "PagedObjectType");
-            let mut address_space = AddressSpace::new();
+            let address_space = AddressSpace::new();
             address_space.add_namespace(TEST_NAMESPACE_URI, namespace_index);
 
             ObjectTypeBuilder::new(
@@ -550,7 +550,7 @@ mod tests {
                 "PagedObjectType",
             )
             .subtype_of(ObjectTypeId::BaseObjectType)
-            .insert(&mut address_space);
+            .insert(&address_space);
 
             for index in 0..object_count {
                 let node_id = NodeId::new(namespace_index, format!("PagedObject-{index}"));
@@ -560,7 +560,7 @@ mod tests {
                     format!("Paged Object {index}"),
                 )
                 .has_type_definition(object_type.clone())
-                .insert(&mut address_space);
+                .insert(&address_space);
             }
 
             let mut type_tree = DefaultTypeTree::new();

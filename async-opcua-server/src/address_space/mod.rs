@@ -704,15 +704,15 @@ mod tests {
     use super::{write_node_value, AddressSpace};
 
     fn make_sample_address_space() -> AddressSpace {
-        let mut address_space = AddressSpace::new();
+        let address_space = AddressSpace::new();
         address_space.add_namespace("http://opcfoundation.org/UA/", 0);
         let mut namespaces = NamespaceMap::default();
         address_space.import_node_set(&CoreNamespace, &mut namespaces);
-        add_sample_vars_to_address_space(&mut address_space);
+        add_sample_vars_to_address_space(&address_space);
         address_space
     }
 
-    fn add_sample_vars_to_address_space(address_space: &mut AddressSpace) {
+    fn add_sample_vars_to_address_space(address_space: &AddressSpace) {
         address_space.add_namespace("urn:test", 1);
         let ns = 1;
 
@@ -1147,19 +1147,19 @@ mod tests {
 
     #[test]
     fn object_builder() {
-        let mut address_space = make_sample_address_space();
+        let address_space = make_sample_address_space();
 
         let node_type_id = NodeId::new(1, "HelloType");
         let _ot = ObjectTypeBuilder::new(&node_type_id, "HelloType", "HelloType")
             .subtype_of(ObjectTypeId::BaseObjectType)
-            .insert(&mut address_space);
+            .insert(&address_space);
 
         let node_id = NodeId::new(1, "Hello");
         let _o = ObjectBuilder::new(&node_id, "Foo", "Foo")
             .event_notifier(EventNotifier::SUBSCRIBE_TO_EVENTS)
             .organized_by(ObjectId::ObjectsFolder)
             .has_type_definition(node_type_id.clone())
-            .insert(&mut address_space);
+            .insert(&address_space);
 
         // Verify the variable is there
         let _o = match &*address_space.find_node(&node_id).unwrap() {
@@ -1182,12 +1182,12 @@ mod tests {
 
     #[test]
     fn object_type_builder() {
-        let mut address_space = make_sample_address_space();
+        let address_space = make_sample_address_space();
 
         let node_type_id = NodeId::new(1, "HelloType");
         let _ot = ObjectTypeBuilder::new(&node_type_id, "HelloType", "HelloType")
             .subtype_of(ObjectTypeId::BaseObjectType)
-            .insert(&mut address_space);
+            .insert(&address_space);
 
         let _ot = match &*address_space.find_node(&node_type_id).unwrap() {
             NodeType::ObjectType(ot) => ot,
@@ -1248,7 +1248,7 @@ mod tests {
 
         // Add a variable to the address space
 
-        let mut address_space = make_sample_address_space();
+        let address_space = make_sample_address_space();
         let node_id = NodeId::new(1, "Hello");
         let _v = VariableBuilder::new(&node_id, "BrowseName", "DisplayName")
             .description("Desc")
@@ -1259,7 +1259,7 @@ mod tests {
             .value(Variant::from(999))
             .minimum_sampling_interval(123.0)
             .organized_by(ObjectId::ObjectsFolder)
-            .insert(&mut address_space);
+            .insert(&address_space);
 
         // Verify the variable is there
         assert!(address_space.find_node(&node_id).is_some());
@@ -1273,7 +1273,7 @@ mod tests {
 
     #[test]
     fn method_builder() {
-        let mut address_space = make_sample_address_space();
+        let address_space = make_sample_address_space();
 
         address_space.add_namespace("urn:test", 1);
         let ns = 1;
@@ -1286,11 +1286,11 @@ mod tests {
         let inserted = MethodBuilder::new(&fn_node_id, "HelloWorld", "HelloWorld")
             .component_of(object_id.clone())
             .output_args(
-                &mut address_space,
+                &address_space,
                 &out_args,
                 &[("Result", DataTypeId::String).into()],
             )
-            .insert(&mut address_space);
+            .insert(&address_space);
         assert!(inserted);
 
         assert!(matches!(
@@ -1353,7 +1353,7 @@ mod tests {
         // all to the child.
 
         // A blank address space, with nothing at all in it
-        let mut address_space = make_sample_address_space();
+        let address_space = make_sample_address_space();
 
         // Add a root node
         let root_node = NodeId::root_folder_id();
@@ -1364,7 +1364,7 @@ mod tests {
         let node_id = NodeId::new(1, "Hello");
         let _o = ObjectBuilder::new(&node_id, "Foo", "Foo")
             .organized_by(root_node.clone())
-            .insert(&mut address_space);
+            .insert(&address_space);
 
         // Verify the object and refs are there
         assert!(address_space.find_node(&node_id).is_some());
@@ -1382,19 +1382,19 @@ mod tests {
     fn delete_node() {
         // Try creating and deleting a node, verifying that it's totally gone afterwards
         (0..2).for_each(|i| {
-            let mut address_space = make_sample_address_space();
+            let address_space = make_sample_address_space();
 
             let node_type_id = NodeId::new(1, "HelloType");
             let _ot = ObjectTypeBuilder::new(&node_type_id, "HelloType", "HelloType")
                 .subtype_of(ObjectTypeId::BaseObjectType)
-                .insert(&mut address_space);
+                .insert(&address_space);
 
             let node_id = NodeId::new(1, "Hello");
             let _o = ObjectBuilder::new(&node_id, "Foo", "Foo")
                 .event_notifier(EventNotifier::SUBSCRIBE_TO_EVENTS)
                 .organized_by(ObjectId::ObjectsFolder)
                 .has_type_definition(node_type_id.clone())
-                .insert(&mut address_space);
+                .insert(&address_space);
 
             // Verify the object and refs are there
             assert!(address_space.find_node(&node_id).is_some());

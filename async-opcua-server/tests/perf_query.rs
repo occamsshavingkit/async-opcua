@@ -62,15 +62,15 @@ struct PerfQueryFixture {
 
 impl PerfQueryFixture {
     fn new() -> Self {
-        let mut address_space = AddressSpace::new();
+        let address_space = AddressSpace::new();
         address_space.add_namespace(PERF_QUERY_NAMESPACE_URI, PERF_QUERY_NAMESPACE_INDEX);
 
         let vessel_type = NodeId::new(PERF_QUERY_NAMESPACE_INDEX, "VesselType");
         let controller_type = NodeId::new(PERF_QUERY_NAMESPACE_INDEX, "ControllerType");
-        add_perf_query_types(&mut address_space, &vessel_type, &controller_type);
+        add_perf_query_types(&address_space, &vessel_type, &controller_type);
 
         for index in 0..QUERY_NODE_COUNT {
-            add_vessel(&mut address_space, &vessel_type, index);
+            add_vessel(&address_space, &vessel_type, index);
         }
 
         let mut type_tree = DefaultTypeTree::new();
@@ -134,7 +134,7 @@ fn scan_related_to_query(
 }
 
 fn add_perf_query_types(
-    address_space: &mut AddressSpace,
+    address_space: &AddressSpace,
     vessel_type: &NodeId,
     controller_type: &NodeId,
 ) {
@@ -155,7 +155,7 @@ fn add_perf_query_types(
     .insert(address_space);
 }
 
-fn add_vessel(address_space: &mut AddressSpace, vessel_type: &NodeId, index: usize) {
+fn add_vessel(address_space: &AddressSpace, vessel_type: &NodeId, index: usize) {
     let vessel_name = vessel_node_name(index);
     let vessel_id = NodeId::new(PERF_QUERY_NAMESPACE_INDEX, vessel_name.as_str());
 

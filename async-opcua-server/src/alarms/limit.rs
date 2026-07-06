@@ -339,14 +339,14 @@ impl LimitAlarm {
     }
 
     /// Ensures the AlarmConditionType InputNode property exists and writes the source NodeId.
-    pub fn write_input_node_property(&mut self, address_space: &mut AddressSpace, source: &NodeId) {
+    pub fn write_input_node_property(&mut self, address_space: &AddressSpace, source: &NodeId) {
         let input_node_id = ensure_input_node_property(address_space, &self.condition.condition_id);
         set_variable_value(address_space, &input_node_id, Variant::from(source.clone()));
         self.source_node = source.clone();
     }
 
     /// Ensures the bound source has a forward HasCondition reference to this condition.
-    pub fn write_has_condition_reference(&self, address_space: &mut AddressSpace, source: &NodeId) {
+    pub fn write_has_condition_reference(&self, address_space: &AddressSpace, source: &NodeId) {
         let condition_id = &self.condition.condition_id;
         if !address_space.has_reference(source, condition_id, ReferenceTypeId::HasCondition) {
             address_space.insert_reference(source, condition_id, ReferenceTypeId::HasCondition);
@@ -355,7 +355,7 @@ impl LimitAlarm {
 
     /// Creates an ExclusiveLimitAlarmType instance and its LimitState nodes in the address space.
     pub fn create_exclusive_in_address_space(
-        address_space: &mut AddressSpace,
+        address_space: &AddressSpace,
         ns: u16,
         device: &str,
         alarm_name: &str,
@@ -437,7 +437,7 @@ impl LimitAlarm {
 
     /// Creates a NonExclusiveLimitAlarmType instance and its limit state nodes in the address space.
     pub fn create_non_exclusive_in_address_space(
-        address_space: &mut AddressSpace,
+        address_space: &AddressSpace,
         ns: u16,
         device: &str,
         alarm_name: &str,
@@ -503,7 +503,7 @@ impl LimitAlarm {
     }
 
     /// Evaluates and writes a new process value, returning an alarm event when the limit state changes.
-    pub fn update_value(&self, address_space: &mut AddressSpace, value: f64) -> Option<AlarmEvent> {
+    pub fn update_value(&self, address_space: &AddressSpace, value: f64) -> Option<AlarmEvent> {
         if !self.condition.get_enabled(address_space) {
             return None;
         }
@@ -562,14 +562,14 @@ impl LimitAlarm {
         })
     }
 
-    fn write_limit_state(&self, address_space: &mut AddressSpace, limits: ActiveLimits) {
+    fn write_limit_state(&self, address_space: &AddressSpace, limits: ActiveLimits) {
         match self.config.mode {
             LimitMode::Exclusive => self.write_exclusive_limit_state(address_space, limits),
             LimitMode::NonExclusive => self.write_non_exclusive_limit_state(address_space, limits),
         }
     }
 
-    fn write_exclusive_limit_state(&self, address_space: &mut AddressSpace, limits: ActiveLimits) {
+    fn write_exclusive_limit_state(&self, address_space: &AddressSpace, limits: ActiveLimits) {
         let level = match limits {
             ActiveLimits::Exclusive(level) => level,
             ActiveLimits::NonExclusive(_) => None,
@@ -599,7 +599,7 @@ impl LimitAlarm {
 
     fn write_non_exclusive_limit_state(
         &self,
-        address_space: &mut AddressSpace,
+        address_space: &AddressSpace,
         limits: ActiveLimits,
     ) {
         let state = match limits {
@@ -633,7 +633,7 @@ impl SourceMonitoredAlarm for LimitAlarm {
 
     fn re_evaluate(
         &self,
-        address_space: &mut AddressSpace,
+        address_space: &AddressSpace,
         value: &DataValue,
     ) -> Option<AlarmEvent> {
         source_value_as_f64(value).and_then(|value| self.update_value(address_space, value))
@@ -832,7 +832,7 @@ fn level_name(level: LimitLevel) -> &'static str {
 }
 
 fn add_limit_property(
-    address_space: &mut AddressSpace,
+    address_space: &AddressSpace,
     ns: u16,
     condition_id: &NodeId,
     base_s: &str,
@@ -850,7 +850,7 @@ fn add_limit_property(
 }
 
 fn add_deadband_property(
-    address_space: &mut AddressSpace,
+    address_space: &AddressSpace,
     ns: u16,
     condition_id: &NodeId,
     base_s: &str,
@@ -868,7 +868,7 @@ fn add_deadband_property(
 }
 
 fn add_double_property(
-    address_space: &mut AddressSpace,
+    address_space: &AddressSpace,
     node_id: &NodeId,
     parent_id: &NodeId,
     name: &str,
@@ -884,7 +884,7 @@ fn add_double_property(
 }
 
 fn add_non_exclusive_limit_state(
-    address_space: &mut AddressSpace,
+    address_space: &AddressSpace,
     ns: u16,
     condition_id: &NodeId,
     base_s: &str,
@@ -931,7 +931,7 @@ fn add_non_exclusive_limit_state(
 }
 
 fn add_localized_text_property(
-    address_space: &mut AddressSpace,
+    address_space: &AddressSpace,
     node_id: &NodeId,
     parent_id: &NodeId,
     name: &str,
@@ -993,7 +993,7 @@ fn non_exclusive_state_text(level: LimitLevel, active: bool) -> &'static str {
     }
 }
 
-fn set_variable_value(address_space: &mut AddressSpace, node_id: &NodeId, value: Variant) {
+fn set_variable_value(address_space: &AddressSpace, node_id: &NodeId, value: Variant) {
     if let Some(mut node) = address_space.find_mut(node_id) {
         if let NodeType::Variable(ref mut var) = &mut *node {
             let _ = var.set_value(&opcua_types::NumericRange::None, value);
@@ -1001,7 +1001,7 @@ fn set_variable_value(address_space: &mut AddressSpace, node_id: &NodeId, value:
     }
 }
 
-fn ensure_input_node_property(address_space: &mut AddressSpace, condition_id: &NodeId) -> NodeId {
+fn ensure_input_node_property(address_space: &AddressSpace, condition_id: &NodeId) -> NodeId {
     if let Some(node_id) = find_input_node_property(address_space, condition_id) {
         return node_id;
     }
@@ -1060,7 +1060,7 @@ mod tests {
     use super::*;
 
     fn test_address_space() -> AddressSpace {
-        let mut address_space = AddressSpace::new();
+        let address_space = AddressSpace::new();
         address_space.add_namespace("http://opcfoundation.org/UA/", 0);
         address_space.add_namespace("urn:test", 2);
         address_space
@@ -1110,7 +1110,7 @@ mod tests {
             .build()
             .expect("limit config should be valid");
         let mut alarm = LimitAlarm::create_exclusive_in_address_space(
-            &mut address_space,
+            &address_space,
             2,
             "DeviceA",
             "HighTemperature",
@@ -1131,7 +1131,7 @@ mod tests {
             .is_none());
 
         let source = NodeId::new(2, "DeviceA.Temperature");
-        alarm.write_input_node_property(&mut address_space, &source);
+        alarm.write_input_node_property(&address_space, &source);
 
         assert_eq!(alarm.source_node(), &source);
         let input_node_id = input_node_property_id(&address_space, &condition_id);
@@ -1160,7 +1160,7 @@ mod tests {
         );
 
         let updated_source = NodeId::new(2, "DeviceA.Pressure");
-        alarm.write_input_node_property(&mut address_space, &updated_source);
+        alarm.write_input_node_property(&address_space, &updated_source);
 
         assert_eq!(alarm.source_node(), &updated_source);
         assert_eq!(
@@ -1185,7 +1185,7 @@ mod tests {
             .build()
             .expect("limit config should be valid");
         let alarm = LimitAlarm::create_exclusive_in_address_space(
-            &mut address_space,
+            &address_space,
             2,
             "DeviceA",
             "HighTemperature",
@@ -1195,8 +1195,8 @@ mod tests {
         let condition_id = alarm.condition.condition_id.clone();
         let source = NodeId::new(2, "DeviceA.Temperature");
 
-        alarm.write_has_condition_reference(&mut address_space, &source);
-        alarm.write_has_condition_reference(&mut address_space, &source);
+        alarm.write_has_condition_reference(&address_space, &source);
+        alarm.write_has_condition_reference(&address_space, &source);
 
         assert!(address_space.has_reference(&source, &condition_id, ReferenceTypeId::HasCondition));
 

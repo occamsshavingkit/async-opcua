@@ -543,7 +543,7 @@ mod tests {
             let nonmatching_fermenter = NodeId::new(namespace_index, "Fermenter-102");
             let controller = NodeId::new(namespace_index, "Controller-101");
 
-            let mut address_space = AddressSpace::new();
+            let address_space = AddressSpace::new();
             address_space.add_namespace(TEST_NAMESPACE_URI, namespace_index);
 
             ObjectTypeBuilder::new(
@@ -552,7 +552,7 @@ mod tests {
                 "FermenterType",
             )
             .subtype_of(ObjectTypeId::BaseObjectType)
-            .insert(&mut address_space);
+            .insert(&address_space);
 
             ObjectTypeBuilder::new(
                 &cip_fermenter_type,
@@ -560,7 +560,7 @@ mod tests {
                 "CipFermenterType",
             )
             .subtype_of(fermenter_type.clone())
-            .insert(&mut address_space);
+            .insert(&address_space);
 
             ObjectTypeBuilder::new(
                 &controller_type,
@@ -568,7 +568,7 @@ mod tests {
                 "ControllerType",
             )
             .subtype_of(ObjectTypeId::BaseObjectType)
-            .insert(&mut address_space);
+            .insert(&address_space);
 
             ObjectBuilder::new(
                 &matching_fermenter,
@@ -576,7 +576,7 @@ mod tests {
                 "Fermenter 101",
             )
             .has_type_definition(cip_fermenter_type.clone())
-            .insert(&mut address_space);
+            .insert(&address_space);
 
             ObjectBuilder::new(
                 &nonmatching_fermenter,
@@ -584,7 +584,7 @@ mod tests {
                 "Fermenter 102",
             )
             .has_type_definition(cip_fermenter_type.clone())
-            .insert(&mut address_space);
+            .insert(&address_space);
 
             ObjectBuilder::new(
                 &controller,
@@ -593,7 +593,7 @@ mod tests {
             )
             .has_type_definition(controller_type.clone())
             .component_of(matching_fermenter.clone())
-            .insert(&mut address_space);
+            .insert(&address_space);
 
             let mut type_tree = DefaultTypeTree::new();
             type_tree.namespaces_mut().add_namespace(TEST_NAMESPACE_URI);

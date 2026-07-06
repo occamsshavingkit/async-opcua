@@ -42,7 +42,7 @@ impl DiscreteAlarm {
 
     /// Creates an OffNormalAlarmType or TripAlarmType instance and its NormalState property.
     pub fn create_in_address_space(
-        address_space: &mut AddressSpace,
+        address_space: &AddressSpace,
         ns: u16,
         device: &str,
         alarm_name: &str,
@@ -87,7 +87,7 @@ impl DiscreteAlarm {
     /// Evaluates and writes a new discrete value, returning an alarm event when active state changes.
     pub fn update_value(
         &self,
-        address_space: &mut AddressSpace,
+        address_space: &AddressSpace,
         value: Variant,
     ) -> Option<AlarmEvent> {
         if !self.condition.get_enabled(address_space) {
@@ -162,7 +162,7 @@ impl SourceMonitoredAlarm for DiscreteAlarm {
 
     fn re_evaluate(
         &self,
-        address_space: &mut AddressSpace,
+        address_space: &AddressSpace,
         value: &DataValue,
     ) -> Option<AlarmEvent> {
         if value.status.is_some_and(|status| status.is_bad()) {
@@ -192,7 +192,7 @@ mod tests {
     use opcua_types::{DataValue, StatusCode};
 
     fn test_address_space() -> AddressSpace {
-        let mut address_space = AddressSpace::new();
+        let address_space = AddressSpace::new();
         address_space.add_namespace("http://opcfoundation.org/UA/", 0);
         address_space.add_namespace("urn:test", 2);
         address_space
@@ -202,7 +202,7 @@ mod tests {
     fn source_monitor_re_evaluate_delegates_raw_discrete_variant_and_skips_bad_status() {
         let mut address_space = test_address_space();
         let alarm = DiscreteAlarm::create_in_address_space(
-            &mut address_space,
+            &address_space,
             2,
             "DeviceA",
             "RunState",
@@ -213,7 +213,7 @@ mod tests {
 
         let active_event = SourceMonitoredAlarm::re_evaluate(
             &alarm,
-            &mut address_space,
+            &address_space,
             &DataValue::from((Variant::from(true), StatusCode::Good)),
         )
         .expect("off-normal value should activate the discrete alarm");
@@ -221,7 +221,7 @@ mod tests {
 
         let repeat_event = SourceMonitoredAlarm::re_evaluate(
             &alarm,
-            &mut address_space,
+            &address_space,
             &DataValue::from((Variant::from(true), StatusCode::Good)),
         );
         assert!(
@@ -231,7 +231,7 @@ mod tests {
 
         let bad_status_event = SourceMonitoredAlarm::re_evaluate(
             &alarm,
-            &mut address_space,
+            &address_space,
             &DataValue::from((Variant::from(false), StatusCode::Bad)),
         );
         assert!(

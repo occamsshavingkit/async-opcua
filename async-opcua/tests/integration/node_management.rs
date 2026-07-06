@@ -62,10 +62,10 @@ async fn setup_simple_rbac(
     // Seed a parent object owned by the SimpleNodeManager so AddNodes under it routes to that manager.
     let parent = NodeId::new(ns, "WritableParent");
     {
-        let mut sp = nm.address_space().write();
+        let sp = nm.address_space().write();
         ObjectBuilder::new(&parent, "WritableParent", "WritableParent")
             .organized_by(ObjectId::ObjectsFolder)
-            .insert(&mut *sp);
+            .insert(&*sp);
     }
 
     let (session, lp) = tester.connect_default().await.unwrap();
@@ -333,10 +333,10 @@ async fn simple_gate_off_refuses_modification() {
 
 /// Seed an Object owned by the SimpleNodeManager, organized under `parent`.
 fn seed_object(nm: &SimpleNodeManager, parent: &NodeId, id: &NodeId, name: &str) {
-    let mut sp = nm.address_space().write();
+    let sp = nm.address_space().write();
     ObjectBuilder::new(id, name, name)
         .organized_by(parent.clone())
-        .insert(&mut *sp);
+        .insert(&*sp);
 }
 
 #[tokio::test]
@@ -521,11 +521,11 @@ async fn add_nodes_abstract_type_definition_returns_bad_type_definition_invalid(
     let (_tester, nm, ns, parent, session) = setup_simple(true).await;
     let abstract_type = NodeId::new(ns, "AbstractObjectType");
     {
-        let mut sp = nm.address_space().write();
+        let sp = nm.address_space().write();
         ObjectTypeBuilder::new(&abstract_type, "AbstractObjectType", "AbstractObjectType")
             .is_abstract(true)
             .subtype_of(ObjectTypeId::BaseObjectType)
-            .insert(&mut *sp);
+            .insert(&*sp);
     }
 
     // OPC UA Part 3 5.6/6: abstract type definitions cannot be instantiated.
@@ -551,7 +551,7 @@ async fn add_references_abstract_reference_type_returns_bad_reference_type_id_in
 
     let abstract_reference_type = NodeId::new(ns, "AbstractReferenceType");
     {
-        let mut sp = nm.address_space().write();
+        let sp = nm.address_space().write();
         ReferenceTypeBuilder::new(
             &abstract_reference_type,
             "AbstractReferenceType",
@@ -559,7 +559,7 @@ async fn add_references_abstract_reference_type_returns_bad_reference_type_id_in
         )
         .is_abstract(true)
         .subtype_of(ReferenceTypeId::References)
-        .insert(&mut *sp);
+        .insert(&*sp);
     }
     let references_type = NodeId::from(ReferenceTypeId::References);
     tester.handle.type_tree().write().add_type_node(
@@ -1396,17 +1396,17 @@ async fn simple_add_reference_enforced_by_role_permission() {
     let src = NodeId::new(ns, "RbacRefSrc");
     let tgt = NodeId::new(ns, "RbacRefTgt");
     {
-        let mut sp = nm.address_space().write();
+        let sp = nm.address_space().write();
         ObjectBuilder::new(&src, "RbacRefSrc", "RbacRefSrc")
             .organized_by(parent.clone())
             .role_permissions(vec![RolePermissionType {
                 role_id: NodeId::new(0, 15680), // Operator only — anonymous session lacks it
                 permissions: PermissionType::AddReference,
             }])
-            .insert(&mut *sp);
+            .insert(&*sp);
         ObjectBuilder::new(&tgt, "RbacRefTgt", "RbacRefTgt")
             .organized_by(parent.clone())
-            .insert(&mut *sp);
+            .insert(&*sp);
     }
 
     let denied = session
@@ -1426,14 +1426,14 @@ async fn simple_add_reference_enforced_by_role_permission() {
     // (Under opt-in enforcement an UNconfigured node would fail closed, so the grant is explicit.)
     let open = NodeId::new(ns, "OpenRefSrc");
     {
-        let mut sp = nm.address_space().write();
+        let sp = nm.address_space().write();
         ObjectBuilder::new(&open, "OpenRefSrc", "OpenRefSrc")
             .organized_by(parent.clone())
             .role_permissions(vec![RolePermissionType {
                 role_id: NodeId::new(0, 15644), // Anonymous — held by the anonymous session
                 permissions: PermissionType::AddReference,
             }])
-            .insert(&mut *sp);
+            .insert(&*sp);
     }
     let allowed = session
         .add_references(&[AddReferencesItem {

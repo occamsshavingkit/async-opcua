@@ -202,7 +202,7 @@ impl ActorFixture {
             .expect("SimpleNodeManager");
 
         {
-            let mut address_space = node_manager.address_space().write();
+            let address_space = node_manager.address_space().write();
             for task_index in 0..CONCURRENT_TASKS {
                 let node_id = load_node_id(task_index);
                 let name = format!("LoadVar{task_index}");
@@ -210,7 +210,7 @@ impl ActorFixture {
                     .data_type(DataTypeId::Int32)
                     .value(0i32)
                     .writable()
-                    .insert(&mut *address_space);
+                    .insert(&*address_space);
             }
         }
 

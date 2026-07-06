@@ -141,7 +141,7 @@ pub struct CoreNodeManagerBuilder;
 impl InMemoryNodeManagerImplBuilder for CoreNodeManagerBuilder {
     type Impl = CoreNodeManagerImpl;
 
-    fn build(self, context: ServerContext, address_space: &mut AddressSpace) -> Self::Impl {
+    fn build(self, context: ServerContext, address_space: &AddressSpace) -> Self::Impl {
         {
             let mut type_tree = context.type_tree.write();
             address_space.import_node_set(&CoreNamespace, type_tree.namespaces_mut());
@@ -168,7 +168,7 @@ of changes to these to the one doing the modifying.
 
 #[async_trait]
 impl InMemoryNodeManagerImpl for CoreNodeManagerImpl {
-    async fn init(&self, address_space: &mut AddressSpace, context: ServerContext) {
+    async fn init(&self, address_space: &AddressSpace, context: ServerContext) {
         self.set_core_namespace_metadata_defaults(address_space, &context);
         self.add_aggregates(address_space, &context.info.capabilities);
         #[cfg(feature = "subscriptions")]
@@ -398,7 +398,7 @@ impl CoreNodeManagerImpl {
 
     fn set_core_namespace_metadata_defaults(
         &self,
-        address_space: &mut AddressSpace,
+        address_space: &AddressSpace,
         context: &ServerContext,
     ) {
         let defaults = &context.info.namespace_defaults;
@@ -426,7 +426,7 @@ impl CoreNodeManagerImpl {
     }
 
     fn set_core_namespace_metadata_value(
-        address_space: &mut AddressSpace,
+        address_space: &AddressSpace,
         variable_id: VariableId,
         value: Variant,
     ) {
@@ -1155,7 +1155,7 @@ impl CoreNodeManagerImpl {
         }
     }
 
-    fn add_aggregates(&self, address_space: &mut AddressSpace, capabilities: &ServerCapabilities) {
+    fn add_aggregates(&self, address_space: &AddressSpace, capabilities: &ServerCapabilities) {
         for aggregate in &capabilities.history.aggregates {
             address_space.insert_reference(
                 &ObjectId::HistoryServerCapabilities_AggregateFunctions.into(),

@@ -111,7 +111,7 @@ fn establish_connection_wires_writer_to_reader_and_data_flows() {
     );
 
     // End-to-end C2C: the publisher emits a message with the bound id; the subscriber applies it.
-    let mut sub_space = AddressSpace::new();
+    let sub_space = AddressSpace::new();
     sub_space.add_namespace("urn:test", 1);
     VariableBuilder::new(&target, "Target", "Target")
         .data_type(DataTypeId::Double)

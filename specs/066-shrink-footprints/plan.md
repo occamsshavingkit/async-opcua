@@ -16,10 +16,10 @@ Reduce binary sizes of nano (12 MB → <5 MB), micro (13 MB → <7 MB), and embe
 
 ## Key Optimization Strategies
 
-1. **LTO + codegen-units**: `lto = true`, `codegen-units = 1` in release profile — typically 10-30% reduction
+1. **LTO + codegen-units**: `lto = true`, `codegen-units = 1` in custom `release-footprint` profile — typically 10-30% reduction
 2. **opt-level = "s"**: Size-optimized code generation — 5-15% reduction
 3. **strip = true**: Automatic symbol stripping — 30-50% of binary is debug symbols
-4. **panic = "abort"**: Remove unwind tables — 5-10% reduction
+4. **panic = "abort"**: Remove unwind tables — 5-10% reduction (custom profile only, to avoid breaking catch_unwind in standard builds)
 5. **Feature gate crypto**: Use `aws-lc-rs` only for profiles that need it (nano may only need ring or no TLS)
 6. **Dependency audit**: Check if `aws-lc-rs` or other large deps are pulled into nano/micro unnecessarily
 7. **Remove unused code**: `cargo bloat` to identify large functions that shouldn't be in smaller profiles

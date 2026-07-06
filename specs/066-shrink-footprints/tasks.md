@@ -17,7 +17,7 @@
 
 **Goal**: Apply global Rust binary size optimization settings to all foundation profiles.
 
-- [ ] T002 Add `[profile.release]` settings to workspace `Cargo.toml`: `opt-level = "s"`, `lto = true`, `codegen-units = 1`, `strip = true`, `panic = "abort"`
+- [ ] T002 Add `[profile.release-footprint]` custom profile to workspace `Cargo.toml` with `inherits = "release"`, `opt-level = "s"`, `lto = true`, `codegen-units = 1`, `strip = true`, `panic = "abort"`. Update each foundation profile server's `Cargo.toml` to reference `--profile release-footprint` in their build instructions. This avoids affecting the standard release profile used by other crates.
 - [ ] T003 Build and test `cargo test --all-features` to verify no regressions from profile changes
 - [ ] T004 Record new stripped binary sizes. Verify each profile is below its target. If not, proceed to Phase 3.
 
@@ -30,7 +30,7 @@
 - [ ] T005 [US1] Audit nano profile deps with `cargo bloat --release -p async-opcua-foundation-profile-nano-server --crates`. Check if `aws-lc-rs` (large crypto library) is pulled into nano. If so, feature-gate it to only load on profiles that need it.
 - [ ] T006 [US2] Audit micro profile deps — same check as T005. Micro adds subscriptions; check if `moka` or `dashmap` size is disproportionate.
 - [ ] T007 [US3] Audit embedded profile deps — the jump from 13 MB (micro) to 26 MB (embedded) suggests a large dep being pulled. Check `history`, `alarms`, `events` subsystems for size impact.
-- [ ] T008 [P] [US1] Switch nano crypto backend from `aws-lc-rs` to `ring` if `aws-lc-rs` is the bloat cause. Ring is typically smaller.
+- [ ] T008 [P] [US1] Switch nano crypto backend from `aws-lc-rs` to `ring` if `aws-lc-rs` is the bloat cause: modify `async-opcua-crypto/Cargo.toml` (make `aws-lc-rs` optional for nano), update `async-opcua/Cargo.toml` feature definitions to not pull `aws-lc-rs` into nano/micro profiles. Ring is typically smaller and suffices for basic TLS.
 - [ ] T009 [P] [US2] Add `default-features = false` to large deps in the facade crate's feature definitions to avoid pulling unused transitive deps.
 
 ---
@@ -41,7 +41,8 @@
 - [ ] T011 Run existing profile smoke tests: `cargo test -p async-opcua-foundation-profile-nano-server --features profile-tests` (repeat for micro, embedded)
 - [ ] T012 Run full test suite `cargo test --all-features`
 - [ ] T013 Run `tools/ci-playbook.sh --ci` — footprint job must pass with new size thresholds
-- [ ] T014 Update TODO.md
+- [ ] T014 Update CI footprint size thresholds in `tools/ci-playbook.sh` (`job_footprint`) to reflect new targets: nano < 5 MB, micro < 7 MB, embedded < 10 MB
+- [ ] T015 Update TODO.md
 
 ---
 

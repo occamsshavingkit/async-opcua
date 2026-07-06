@@ -44,7 +44,9 @@
   - Enforce 64KB maximum token size (reject oversized tokens with `BadIdentityTokenRejected`)
   - Call `ServerCtx::step()` inside `tokio::task::spawn_blocking` with 5-second timeout
   - Extract client principal via `sender_name().display()`
-  - Return `ClaimProfile { username: principal, roles: [], permissions: [] }` — RFC 2743 §1.1.1, OPC-10000-6 §6.4.1
+  - Handle clock skew errors (`KRB5KRB_AP_ERR_SKEW`) explicitly: log a warning with the skew amount and reject with `BadIdentityTokenRejected`
+  - Reject any other GSSAPI error with `BadIdentityTokenRejected`
+  - Return `ClaimProfile { username: principal, roles: [], permissions: [] }` — RFC 2743 §1.1.1, RFC 4120 §5.3, OPC-10000-6 §6.4.1
 - [ ] T007 Re-export `GssapiIdentityValidator` from `async-opcua-crypto/src/identity/mod.rs` behind feature flag
 - [ ] T008 Build and run `cargo test --features kerberos -p async-opcua-crypto` to verify compilation
 
@@ -98,7 +100,7 @@
 - [ ] T017 [P] [US2] Add `kerberos_keytab(impl Into<PathBuf>)` builder method to `ServerBuilder` in `async-opcua-server/src/builder.rs` behind feature flag
 - [ ] T018 [P] [US2] Add `kerberos_principal_role(principal, role)` builder method to `ServerBuilder` in `async-opcua-server/src/builder.rs` behind feature flag
 - [ ] T019 [US2] In `ServerBuilder::build()`, if Kerberos config is present, construct `GssapiIdentityValidator` and populate `ServerInfo.kerberos_validator` in `async-opcua-server/src/server.rs` — OPC-10000-6 §6.4
-- [ ] T020 [US2] In `ServerBuilder::build()`, validate that the keytab is accessible: if `keytab_path` is set, check `File::open()` and fail with a clear error if missing. If `keytab_path` is None, set `KRB5_KTNAME` to the default and let GSSAPI validate at first use — OPC-10000-6 §6.4
+- [ ] T020 [US2] In `ServerBuilder::build()`, validate Kerberos readiness: (a) if `keytab_path` is set, check `File::open()` and fail with a clear error if missing; (b) if `keytab_path` is None, set `KRB5_KTNAME` or rely on the GSSAPI default; (c) probe GSSAPI library availability by calling `Name::new(b"dummy", None)` — if it panics or returns an unexpected error, report "GSSAPI/Kerberos library not available" and fail startup — OPC-10000-6 §6.4
 - [ ] T021 [US2] Build and run `cargo test --all-features` to verify no regressions
 
 **Checkpoint**: Administrator can configure Kerberos via code or config. Server validates keytab existence at startup.
@@ -132,6 +134,7 @@
 - [ ] T027 Run `cargo clippy --workspace --all-targets --all-features -- -D warnings` and fix any issues
 - [ ] T028 Run full CI playbook `tools/ci-playbook.sh --ci` — all steps must pass
 - [ ] T029 Update `TODO.md` to mark Kerberos SSO as done
+- [ ] T030 [P] Profile ActivateSession round-trip latency with Kerberos vs. without in `tools/opcua-localhost-bench`. Verify Kerberos path adds < 50ms to the handshake. Run 100 iterations and check p95 latency does not exceed 60ms. Document results in quickstart.md or research.md.
 
 ---
 
@@ -196,3 +199,4 @@
 - All existing tests (618+) must pass after each phase
 - Commit after each phase or logical task group
 - The `OAuth2IdentityValidator` trait name is kept as-is for this feature; renaming to `IdentityTokenValidator` is deferred
+- Cross-realm trust (KDC trust between domains) is handled by GSSAPI at the library level — no server-side code changes needed. Multi-realm testing requires two KDCs in CI (infrastructure-heavy) and is deferred to a follow-up feature.

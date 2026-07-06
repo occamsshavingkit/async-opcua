@@ -33,9 +33,9 @@ use opcua_core::comms::url::{hostname_from_url, url_matches_except_host};
 use opcua_core::config::Config;
 use opcua_core::handle::AtomicHandle;
 use opcua_core::sync::RwLock;
-use opcua_crypto::identity::{LocalOAuth2Validator, OAuth2IdentityValidator};
 #[cfg(feature = "kerberos")]
 use opcua_crypto::identity::GssapiIdentityValidator;
+use opcua_crypto::identity::{LocalOAuth2Validator, OAuth2IdentityValidator};
 use opcua_crypto::{CertificateStore, PrivateKey, SecurityPolicy, SuppressedFinding, X509};
 #[cfg(all(feature = "lds", feature = "discovery-mdns"))]
 use opcua_types::MdnsDiscoveryConfiguration;
@@ -1331,22 +1331,17 @@ impl ServerInfo {
             #[cfg(feature = "kerberos")]
             if let (Some(validator), true) = (
                 &self.kerberos_validator,
-                decrypted_token
-                    .as_ref()
-                    .starts_with(b"GSSAPI "),
+                decrypted_token.as_ref().starts_with(b"GSSAPI "),
             ) {
-                let token_str = std::str::from_utf8(decrypted_token.as_ref())
-                    .map_err(|_| {
-                        Error::new(
-                            StatusCode::BadIdentityTokenRejected,
-                            "Kerberos token is not valid UTF-8",
-                        )
-                    })?;
-                let claims = validator
-                    .validate_token(token_str)
-                    .map_err(|status| {
-                        Error::new(status, "Kerberos GSSAPI token validation failed")
-                    })?;
+                let token_str = std::str::from_utf8(decrypted_token.as_ref()).map_err(|_| {
+                    Error::new(
+                        StatusCode::BadIdentityTokenRejected,
+                        "Kerberos token is not valid UTF-8",
+                    )
+                })?;
+                let claims = validator.validate_token(token_str).map_err(|status| {
+                    Error::new(status, "Kerberos GSSAPI token validation failed")
+                })?;
                 return Ok((UserToken(claims.username.clone()), Some(claims)));
             }
 

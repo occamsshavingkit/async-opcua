@@ -6,14 +6,11 @@ use tokio_util::sync::CancellationToken;
 use tracing::warn;
 
 #[cfg(feature = "rbac")]
-use crate::{
-    config::IdentityMappingRuleConfig,
-    rbac::rules::IdentityMappingRule,
-};
-#[cfg(feature = "kerberos")]
-use opcua_crypto::identity::GssapiIdentityValidator;
+use crate::{config::IdentityMappingRuleConfig, rbac::rules::IdentityMappingRule};
 use crate::{constants, node_manager::TypeTreeForUser};
 use opcua_core::config::Config;
+#[cfg(feature = "kerberos")]
+use opcua_crypto::identity::GssapiIdentityValidator;
 use opcua_crypto::SecurityPolicy;
 #[cfg(feature = "rbac")]
 use opcua_types::NodeId;
@@ -282,7 +279,11 @@ impl ServerBuilder {
     /// Map a Kerberos principal to an OPC UA role name (OPC 10000-18 §8.2).
     /// Multiple roles may be added per principal.
     #[cfg(feature = "kerberos")]
-    pub fn kerberos_principal_role(mut self, principal: impl Into<String>, role: impl Into<String>) -> Self {
+    pub fn kerberos_principal_role(
+        mut self,
+        principal: impl Into<String>,
+        role: impl Into<String>,
+    ) -> Self {
         let principal = principal.into();
         let role = role.into();
         let v = self.kerberos_validator.take();

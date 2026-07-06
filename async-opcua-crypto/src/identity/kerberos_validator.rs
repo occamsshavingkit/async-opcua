@@ -145,13 +145,8 @@ impl OAuth2IdentityValidator for GssapiIdentityValidator {
                     .map_err(|_| StatusCode::BadIdentityTokenRejected)?;
 
                 // Acquire acceptor credentials
-                let cred = Cred::acquire(
-                    Some(&canonical),
-                    None,
-                    CredUsage::Accept,
-                    Some(&mechs),
-                )
-                .map_err(|_| StatusCode::BadIdentityTokenRejected)?;
+                let cred = Cred::acquire(Some(&canonical), None, CredUsage::Accept, Some(&mechs))
+                    .map_err(|_| StatusCode::BadIdentityTokenRejected)?;
 
                 // Create server context and process the token
                 let mut server = ServerCtx::new(Some(cred));
@@ -219,8 +214,7 @@ mod tests {
 
     #[test]
     fn rejects_invalid_base64() {
-        let validator =
-            GssapiIdentityValidator::new("OPCUA/test@PLANT.LOCAL".into(), None);
+        let validator = GssapiIdentityValidator::new("OPCUA/test@PLANT.LOCAL".into(), None);
         assert_eq!(
             validator.validate_token("!!!not-base64!!!"),
             Err(StatusCode::BadIdentityTokenRejected)
@@ -229,8 +223,7 @@ mod tests {
 
     #[test]
     fn rejects_empty_token() {
-        let validator =
-            GssapiIdentityValidator::new("OPCUA/test@PLANT.LOCAL".into(), None);
+        let validator = GssapiIdentityValidator::new("OPCUA/test@PLANT.LOCAL".into(), None);
         assert_eq!(
             validator.validate_token(""),
             Err(StatusCode::BadIdentityTokenRejected)
@@ -239,10 +232,8 @@ mod tests {
 
     #[test]
     fn rejects_oversized_token() {
-        let validator =
-            GssapiIdentityValidator::new("OPCUA/test@PLANT.LOCAL".into(), None);
-        let big =
-            base64::engine::general_purpose::STANDARD.encode(vec![0u8; MAX_TOKEN_SIZE + 1]);
+        let validator = GssapiIdentityValidator::new("OPCUA/test@PLANT.LOCAL".into(), None);
+        let big = base64::engine::general_purpose::STANDARD.encode(vec![0u8; MAX_TOKEN_SIZE + 1]);
         assert_eq!(
             validator.validate_token(&big),
             Err(StatusCode::BadIdentityTokenRejected)

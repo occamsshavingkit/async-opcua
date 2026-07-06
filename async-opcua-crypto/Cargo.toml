@@ -54,6 +54,7 @@ x509-cert = { workspace = true }
 zeroize = { workspace = true }
 x509-ocsp = { version = "0.2.1", default-features = false, features = ["std", "builder"] }
 ureq = { version = "3", default-features = false, features = ["_tls"] }
+libgssapi = { version = "0.11", optional = true }
 
 [dev-dependencies]
 tempfile = "3"
@@ -63,3 +64,4 @@ default = ["aws-lc-rs", "ecc"]
 aws-lc-rs = ["dep:aws-lc-rs"]
 ecc = ["dep:ecdsa", "dep:hkdf", "dep:p256", "dep:p384"]
 legacy-crypto = []
+kerberos = ["dep:libgssapi"]

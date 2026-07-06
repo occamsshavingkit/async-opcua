@@ -9,6 +9,8 @@ use tracing::warn;
 use crate::{config::IdentityMappingRuleConfig, rbac::rules::IdentityMappingRule};
 use crate::{constants, node_manager::TypeTreeForUser};
 use opcua_core::config::Config;
+#[cfg(feature = "kerberos")]
+use opcua_crypto::identity::GssapiIdentityValidator;
 use opcua_crypto::SecurityPolicy;
 #[cfg(feature = "rbac")]
 use opcua_types::NodeId;
@@ -34,6 +36,8 @@ pub struct ServerBuilder {
     pub(crate) config: ServerConfig,
     pub(crate) node_managers: Vec<Box<dyn NodeManagerBuilder>>,
     pub(crate) authenticator: Option<Arc<dyn AuthManager>>,
+    #[cfg(feature = "kerberos")]
+    pub(crate) kerberos_validator: Option<GssapiIdentityValidator>,
     pub(crate) type_tree_getter: Option<Arc<dyn TypeTreeForUser>>,
     pub(crate) type_loaders: TypeLoaderCollection,
     pub(crate) token: CancellationToken,
@@ -46,6 +50,8 @@ impl Default for ServerBuilder {
             config: Default::default(),
             node_managers: Default::default(),
             authenticator: None,
+            #[cfg(feature = "kerberos")]
+            kerberos_validator: None,
             token: CancellationToken::new(),
             type_tree_getter: None,
             build_info: BuildInfo::default(),
@@ -241,6 +247,51 @@ impl ServerBuilder {
     /// Set a custom authenticator.
     pub fn with_authenticator(mut self, authenticator: Arc<dyn AuthManager>) -> Self {
         self.authenticator = Some(authenticator);
+        self
+    }
+
+    /// Enable Kerberos/GSSAPI single sign-on with the given service principal name
+    /// (OPC 10000-6 §6.4), e.g. "OPCUA/hostname@PLANT.LOCAL".
+    #[cfg(feature = "kerberos")]
+    pub fn kerberos_spn(mut self, spn: impl Into<String>) -> Self {
+        let spn = spn.into();
+        let keytab = self
+            .kerberos_validator
+            .as_ref()
+            .and_then(|v| v.keytab_path().cloned());
+        self.kerberos_validator = Some(GssapiIdentityValidator::new(spn, keytab));
+        self
+    }
+
+    /// Set the path to the Kerberos keytab file.
+    #[cfg(feature = "kerberos")]
+    pub fn kerberos_keytab(mut self, path: impl Into<std::path::PathBuf>) -> Self {
+        let path = path.into();
+        let spn = self
+            .kerberos_validator
+            .as_ref()
+            .map(|v| v.spn().to_string())
+            .unwrap_or_default();
+        self.kerberos_validator = Some(GssapiIdentityValidator::new(spn, Some(path)));
+        self
+    }
+
+    /// Map a Kerberos principal to an OPC UA role name (OPC 10000-18 §8.2).
+    /// Multiple roles may be added per principal.
+    #[cfg(feature = "kerberos")]
+    pub fn kerberos_principal_role(
+        mut self,
+        principal: impl Into<String>,
+        role: impl Into<String>,
+    ) -> Self {
+        let principal = principal.into();
+        let role = role.into();
+        let v = self.kerberos_validator.take();
+        let spn = v.as_ref().map(|v| v.spn().to_string()).unwrap_or_default();
+        let keytab = v.as_ref().and_then(|v| v.keytab_path().cloned());
+        let mut roles = v.map(|v| v.into_roles()).unwrap_or_default();
+        roles.entry(principal).or_default().push(role);
+        self.kerberos_validator = Some(GssapiIdentityValidator::new_with_roles(spn, keytab, roles));
         self
     }
 

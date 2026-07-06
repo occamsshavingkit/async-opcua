@@ -1,3 +1,1 @@
-{
-  "feature_directory": "specs/063-hot-path-and-locks"
-}
+{"feature_directory": "specs/064-kerberos-sso"}

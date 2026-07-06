@@ -119,6 +119,9 @@ wss = [
   "dep:rustls-pki-types",
 ]
 
+# Kerberos/GSSAPI single sign-on via IssuedToken (OPC 10000-6 §6.4).
+kerberos = ["async-opcua-crypto/kerberos"]
+
 [dependencies]
 moka = { version = "0.12", features = ["future", "sync"] }
 # opc.wss transport (feature 009 / R5 / FR-044), gated by the `wss` feature.

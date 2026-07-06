@@ -13,9 +13,10 @@ jobs:
           toolchain: stable
 
       # libelf is needed by libbpf-sys, pulled in by xsk-rs when the pubsub
-      # tsn feature is enabled via --all-features.
-      - name: Install libelf
-        run: sudo apt-get update && sudo apt-get install -y libelf-dev
+      # tsn feature is enabled via --all-features. libkrb5-dev is needed by
+      # the kerberos SSO feature (also --all-features).
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y libelf-dev libkrb5-dev
 
       - name: Run clippy
         # --all-targets lints tests/benches/examples (not just lib+bins) and

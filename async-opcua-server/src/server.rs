@@ -25,6 +25,9 @@ use opcua_crypto::{
     CertificateStore, PrivateKey, RevocationMode, SecurityPolicy, ValidationOptions, X509,
 };
 
+#[cfg(feature = "kerberos")]
+use opcua_crypto::identity::GssapiIdentityValidator;
+
 #[cfg(feature = "diagnostics")]
 use crate::diagnostics::ServerDiagnostics;
 use crate::metrics::ServerMetricsSnapshot;
@@ -533,10 +536,29 @@ impl Server {
 
         let certificate_store = Arc::new(RwLock::new(certificate_store));
 
+        // Validate Kerberos configuration (OPC 10000-6 §6.4)
+        #[cfg(feature = "kerberos")]
+        if let Some(ref validator) = builder.kerberos_validator {
+            if validator.spn().is_empty() {
+                return Err("Kerberos SPN is empty — configure with kerberos_spn()".to_string());
+            }
+            if let Some(keytab_path) = validator.keytab_path() {
+                if !keytab_path.exists() {
+                    return Err(format!(
+                        "Kerberos keytab file not found: {}",
+                        keytab_path.display()
+                    ));
+                }
+            }
+            GssapiIdentityValidator::probe_library()?;
+        }
+
         let info = ServerInfo {
             authenticator: builder
                 .authenticator
                 .unwrap_or_else(|| Arc::new(DefaultAuthenticator::new(config.user_tokens.clone()))),
+            #[cfg(feature = "kerberos")]
+            kerberos_validator: builder.kerberos_validator,
             role_resolver: Arc::new(RwLock::new(role_resolver)),
             namespace_defaults,
             application_uri,

@@ -958,3 +958,15 @@ impl ServerConfig {
         endpoint.map(|endpoint| endpoint.1)
     }
 }
+
+/// Configuration for Kerberos/GSSAPI single sign-on authentication (OPC 10000-6 §6.4).
+#[cfg(feature = "kerberos")]
+#[derive(Debug, Clone)]
+pub struct KerberosConfig {
+    /// Service principal name, e.g. "OPCUA/hostname@PLANT.LOCAL".
+    pub spn: String,
+    /// Path to keytab file. If None, GSSAPI uses the default system keytab.
+    pub keytab_path: Option<std::path::PathBuf>,
+    /// Principal-to-role mappings. Maps "user@REALM" strings to OPC UA role names.
+    pub principal_roles: std::collections::HashMap<String, Vec<String>>,
+}

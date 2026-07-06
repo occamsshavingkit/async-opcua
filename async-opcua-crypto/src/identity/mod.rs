@@ -15,7 +15,7 @@ pub use rsa_kem::decrypt_rsa_kem_secret;
 pub use rsa_oaep::decrypt_rsa_oaep_secret;
 
 /// Claims extracted from a validated OAuth2 identity token.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ClaimProfile {
     /// Stable username or subject for the authenticated identity.
     pub username: String,

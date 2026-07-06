@@ -537,6 +537,8 @@ impl Server {
             authenticator: builder
                 .authenticator
                 .unwrap_or_else(|| Arc::new(DefaultAuthenticator::new(config.user_tokens.clone()))),
+            #[cfg(feature = "kerberos")]
+            kerberos_validator: builder.kerberos_validator,
             role_resolver: Arc::new(RwLock::new(role_resolver)),
             namespace_defaults,
             application_uri,

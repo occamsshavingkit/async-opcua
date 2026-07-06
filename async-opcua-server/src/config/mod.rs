@@ -12,3 +12,5 @@ pub use server::IdentityMappingRuleConfig;
 pub use server::WssServerConfig;
 pub use server::{CertificateValidation, TcpConfig, TcpKeepaliveConfig};
 pub use server::{NamespaceDefaultConfig, ServerConfig, ServerUserToken, ANONYMOUS_USER_TOKEN_ID};
+#[cfg(feature = "kerberos")]
+pub use server::KerberosConfig;

@@ -6,7 +6,14 @@ use tokio_util::sync::CancellationToken;
 use tracing::warn;
 
 #[cfg(feature = "rbac")]
-use crate::{config::IdentityMappingRuleConfig, rbac::rules::IdentityMappingRule};
+use crate::{
+    config::IdentityMappingRuleConfig,
+    rbac::rules::IdentityMappingRule,
+};
+#[cfg(feature = "kerberos")]
+use crate::config::KerberosConfig;
+#[cfg(feature = "kerberos")]
+use opcua_crypto::identity::GssapiIdentityValidator;
 use crate::{constants, node_manager::TypeTreeForUser};
 use opcua_core::config::Config;
 use opcua_crypto::SecurityPolicy;
@@ -34,6 +41,8 @@ pub struct ServerBuilder {
     pub(crate) config: ServerConfig,
     pub(crate) node_managers: Vec<Box<dyn NodeManagerBuilder>>,
     pub(crate) authenticator: Option<Arc<dyn AuthManager>>,
+    #[cfg(feature = "kerberos")]
+    pub(crate) kerberos_validator: Option<GssapiIdentityValidator>,
     pub(crate) type_tree_getter: Option<Arc<dyn TypeTreeForUser>>,
     pub(crate) type_loaders: TypeLoaderCollection,
     pub(crate) token: CancellationToken,
@@ -46,6 +55,8 @@ impl Default for ServerBuilder {
             config: Default::default(),
             node_managers: Default::default(),
             authenticator: None,
+            #[cfg(feature = "kerberos")]
+            kerberos_validator: None,
             token: CancellationToken::new(),
             type_tree_getter: None,
             build_info: BuildInfo::default(),

@@ -34,6 +34,8 @@ use opcua_core::config::Config;
 use opcua_core::handle::AtomicHandle;
 use opcua_core::sync::RwLock;
 use opcua_crypto::identity::{LocalOAuth2Validator, OAuth2IdentityValidator};
+#[cfg(feature = "kerberos")]
+use opcua_crypto::identity::GssapiIdentityValidator;
 use opcua_crypto::{CertificateStore, PrivateKey, SecurityPolicy, SuppressedFinding, X509};
 #[cfg(all(feature = "lds", feature = "discovery-mdns"))]
 use opcua_types::MdnsDiscoveryConfiguration;
@@ -190,6 +192,9 @@ pub struct ServerInfo {
     pub receive_buffer_size: usize,
     /// Authenticator to use when verifying user identities, and checking for user access.
     pub authenticator: Arc<dyn AuthManager>,
+    /// Kerberos/GSSAPI identity validator (OPC 10000-6 §6.4).
+    #[cfg(feature = "kerberos")]
+    pub(crate) kerberos_validator: Option<GssapiIdentityValidator>,
     /// Resolver for mapping activated identities to granted role NodeIds.
     pub(crate) role_resolver: Arc<RwLock<RoleResolver>>,
     /// Per-namespace default RolePermissions and AccessRestrictions.
@@ -1321,6 +1326,29 @@ impl ServerInfo {
             } else {
                 token.token_data.clone()
             };
+
+            // Kerberos/GSSAPI token path (OPC 10000-6 §6.4)
+            #[cfg(feature = "kerberos")]
+            if let (Some(validator), true) = (
+                &self.kerberos_validator,
+                decrypted_token
+                    .as_ref()
+                    .starts_with(b"GSSAPI "),
+            ) {
+                let token_str = std::str::from_utf8(decrypted_token.as_ref())
+                    .map_err(|_| {
+                        Error::new(
+                            StatusCode::BadIdentityTokenRejected,
+                            "Kerberos token is not valid UTF-8",
+                        )
+                    })?;
+                let claims = validator
+                    .validate_token(token_str)
+                    .map_err(|status| {
+                        Error::new(status, "Kerberos GSSAPI token validation failed")
+                    })?;
+                return Ok((UserToken(claims.username.clone()), Some(claims)));
+            }
 
             let issued_jwt = validate_issued_jwt(&decrypted_token)?;
             debug!(

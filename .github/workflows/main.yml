@@ -37,7 +37,7 @@ jobs:
       # libelf is needed by libbpf-sys, pulled in by xsk-rs when the
       # pubsub tsn feature is enabled via --all-features.
       - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y libelf-dev
+        run: sudo apt-get update && sudo apt-get install -y libelf-dev libkrb5-dev
       - name: Build
         run: cargo check --locked
       - name: Run tests
@@ -72,7 +72,7 @@ jobs:
         with:
           toolchain: stable
       - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y libelf-dev
+        run: sudo apt-get update && sudo apt-get install -y libelf-dev libkrb5-dev
       - name: Build (${{ matrix.name }})
         run: cargo build --locked ${{ matrix.args }}
 

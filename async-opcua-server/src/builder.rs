@@ -11,8 +11,6 @@ use crate::{
     rbac::rules::IdentityMappingRule,
 };
 #[cfg(feature = "kerberos")]
-use crate::config::KerberosConfig;
-#[cfg(feature = "kerberos")]
 use opcua_crypto::identity::GssapiIdentityValidator;
 use crate::{constants, node_manager::TypeTreeForUser};
 use opcua_core::config::Config;
@@ -285,14 +283,13 @@ impl ServerBuilder {
     /// Multiple roles may be added per principal.
     #[cfg(feature = "kerberos")]
     pub fn kerberos_principal_role(mut self, principal: impl Into<String>, role: impl Into<String>) -> Self {
-        use std::collections::HashMap;
         let principal = principal.into();
         let role = role.into();
         let v = self.kerberos_validator.take();
         let spn = v.as_ref().map(|v| v.spn().to_string()).unwrap_or_default();
         let keytab = v.as_ref().and_then(|v| v.keytab_path().cloned());
         let mut roles = v.map(|v| v.into_roles()).unwrap_or_default();
-        roles.entry(principal).or_insert_with(Vec::new).push(role);
+        roles.entry(principal).or_default().push(role);
         self.kerberos_validator = Some(GssapiIdentityValidator::new_with_roles(spn, keytab, roles));
         self
     }

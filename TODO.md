@@ -5,9 +5,12 @@ Ideas that could be implemented.
 ## Remaining
 
 - **CTT certification run**: run the demo server against the OPC Foundation Compliance Test Tool on Windows. See `docs/ctt-conformance.md`.
+- **Kerberos SSO integration test & CI**: write end-to-end integration test with a local KDC, add KDC setup to CI playbook (feature 064, T008-T009 deferred).
+- **Kerberos SSO: expose keytab path to GSSAPI**: currently the server relies on `KRB5_KTNAME` env var; the `keytab_path` config field needs to be plumbed through to GSSAPI's `gss_acquire_cred_from` (feature 064).
 
 ## Done
 
+- ~~Kerberos SSO: GssapiIdentityValidator, feature flag, builder API, IssuedToken dispatch, role mapping~~ — feature 064.
 - ~~Replace per-request timers with shared deadline queue~~ — feature 063 (US3).
 - ~~Cache session Arc in request dispatch context~~ — feature 063 (US2).
 - ~~Investigate ArcSwap debt overhead~~ — feature 063 (US4): 3 of 4 ArcSwap instances were startup-only and replaced with plain `Arc<T>`.

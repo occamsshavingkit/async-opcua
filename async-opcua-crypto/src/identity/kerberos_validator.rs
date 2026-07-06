@@ -160,23 +160,20 @@ impl OAuth2IdentityValidator for GssapiIdentityValidator {
                     .map_err(|_| StatusCode::BadIdentityTokenRejected)?;
 
                 // Handle multi-step if needed
-                match result {
-                    Some(_response) => {
-                        debug!("GSSAPI multi-step handshake initiated");
-                        let deadline = Instant::now() + GSSAPI_STEP_TIMEOUT;
-                        loop {
-                            if Instant::now() > deadline {
-                                return Err(StatusCode::BadTimeout);
-                            }
-                            let r = server
-                                .step(b"", None)
-                                .map_err(|_| StatusCode::BadIdentityTokenRejected)?;
-                            if r.is_none() {
-                                break;
-                            }
+                if let Some(_response) = result {
+                    debug!("GSSAPI multi-step handshake initiated");
+                    let deadline = Instant::now() + GSSAPI_STEP_TIMEOUT;
+                    loop {
+                        if Instant::now() > deadline {
+                            return Err(StatusCode::BadTimeout);
+                        }
+                        let r = server
+                            .step(b"", None)
+                            .map_err(|_| StatusCode::BadIdentityTokenRejected)?;
+                        if r.is_none() {
+                            break;
                         }
                     }
-                    None => {}
                 }
 
                 // Extract client principal
@@ -245,7 +242,7 @@ mod tests {
         let validator =
             GssapiIdentityValidator::new("OPCUA/test@PLANT.LOCAL".into(), None);
         let big =
-            base64::engine::general_purpose::STANDARD.encode(&vec![0u8; MAX_TOKEN_SIZE + 1]);
+            base64::engine::general_purpose::STANDARD.encode(vec![0u8; MAX_TOKEN_SIZE + 1]);
         assert_eq!(
             validator.validate_token(&big),
             Err(StatusCode::BadIdentityTokenRejected)

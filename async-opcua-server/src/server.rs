@@ -540,23 +540,17 @@ impl Server {
         #[cfg(feature = "kerberos")]
         if let Some(ref validator) = builder.kerberos_validator {
             if validator.spn().is_empty() {
-                return Err(format!(
-                    "Kerberos SPN is empty — configure with kerberos_spn()"
-                )
-                .into());
+                return Err("Kerberos SPN is empty — configure with kerberos_spn()".to_string());
             }
-            if let Some(ref keytab_path) = validator.keytab_path() {
+            if let Some(keytab_path) = validator.keytab_path() {
                 if !keytab_path.exists() {
                     return Err(format!(
                         "Kerberos keytab file not found: {}",
                         keytab_path.display()
-                    )
-                    .into());
+                    ));
                 }
             }
-            if let Err(e) = GssapiIdentityValidator::probe_library() {
-                return Err(e.into());
-            }
+            GssapiIdentityValidator::probe_library()?;
         }
 
         let info = ServerInfo {

@@ -147,3 +147,21 @@ lto = true        # whole-program optimization shrinks the binary substantially
 codegen-units = 1 # better size/inlining at the cost of build time
 strip = true      # drop symbols from the shipped binary
 panic = "unwind"  # keep per-connection recovery (do NOT set to "abort")
+
+# Size-optimized profile for foundation profile builds (feature 066).
+# Build with `cargo build --profile release-footprint ...`.
+[profile.release-footprint]
+inherits = "release"
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true
+panic = "unwind"
+
+# Apply size optimization to the largest crates in the dependency tree.
+[profile.release-footprint.package.async-opcua-types]
+opt-level = "z"
+[profile.release-footprint.package.async-opcua-server]
+opt-level = "z"
+[profile.release-footprint.package.tokio]
+opt-level = "z"

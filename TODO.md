@@ -8,6 +8,7 @@ Ideas that could be implemented.
 
 ## Done
 
+- ~~Shrink foundation profile footprints~~ — feature 066: nano 12M→6.8M, micro 13M→7.3M, embedded 26M→17M (43-45% reduction via opt-level=z + LTO + strip).
 - ~~Kerberos SSO: keytab path plumbing~~ — feature 065.
 - ~~Kerberos SSO: integration test & CI KDC setup~~ — feature 065.
 - ~~Kerberos SSO: GssapiIdentityValidator, feature flag, builder API, IssuedToken dispatch, role mapping~~ — feature 064.

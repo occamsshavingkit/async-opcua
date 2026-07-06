@@ -122,8 +122,8 @@ job_footprint() {
     maybe_skip && return 0
 
     step "footprint: minimal embedded server"
-    cargo build --locked --profile embedded -p async-opcua-minimal-server || fail
-    ls -lh target/embedded/async-opcua-minimal-server
+    cargo build --locked --profile release-footprint -p async-opcua-minimal-server || fail
+    ls -lh target/release-footprint/async-opcua-minimal-server
     pass
 
     local pkgs=(
@@ -135,8 +135,8 @@ job_footprint() {
     for entry in "${pkgs[@]}"; do
         local profile="${entry%%:*}" pkg="${entry##*:}"
         step "footprint: foundation profile $profile ($pkg)"
-        cargo build --locked --profile embedded -p "$pkg" || fail
-        ls -lh "target/embedded/$pkg"
+        cargo build --locked --profile release-footprint -p "$pkg" || fail
+        ls -lh "target/release-footprint/$pkg"
         pass
     done
 }

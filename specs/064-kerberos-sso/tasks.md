@@ -29,26 +29,26 @@
 
 **Purpose**: Core types that all user stories depend on. Must be complete before US1 or US3.
 
-**Goal**: Define `KerberosConfig` and implement `KerberosValidator` (GSSAPI-backed `OAuth2IdentityValidator`).
+**Goal**: Define `KerberosConfig` and implement `GssapiIdentityValidator` (GSSAPI-backed `OAuth2IdentityValidator`).
 
-**Independent Test**: Unit test verifies `KerberosValidator::validate_token()` rejects invalid base64, validates a real GSSAPI token against a local KDC, and extracts the correct principal.
+**Independent Test**: Unit test verifies `GssapiIdentityValidator::validate_token()` rejects invalid base64, validates a real GSSAPI token against a local KDC, and extracts the correct principal.
 
 **Spec reference**: OPC-10000-6 §6.4 (IssuedToken identity), RFC 2743 (GSSAPI), RFC 4120 (Kerberos V5).
 
 ### Implementation for Phase 2
 
 - [ ] T004 Create `KerberosConfig` struct with `spn`, `keytab_path`, and `principal_roles` fields in `async-opcua-server/src/config.rs` behind `#[cfg(feature = "kerberos")]` — OPC-10000-6 §6.4
-- [ ] T005 [P] Implement `GssapiIdentityValidator` in `async-opcua-crypto/src/identity/kerberos_validator.rs` behind `#[cfg(feature = "kerberos")]` — RFC 2743 §3.1, RFC 4120 §5.3
-- [ ] T006 [P] Implement `OAuth2IdentityValidator` trait for `GssapiIdentityValidator` in `async-opcua-crypto/src/identity/kerberos_validator.rs`:
+- [ ] T005 [P] Implement `GssapiIdentityValidator` struct and `OAuth2IdentityValidator` trait impl in `async-opcua-crypto/src/identity/kerberos_validator.rs` behind `#[cfg(feature = "kerberos")]` — RFC 2743 §3.1, RFC 4120 §5.3, OPC-10000-6 §6.4.1:
+  - Struct with `spn: String` and `keytab_path: Option<PathBuf>`
   - Decode base64 token → raw GSSAPI binary
-  - Enforce 64KB maximum token size (reject oversized tokens with `BadIdentityTokenRejected`)
+  - Enforce 64KB maximum token size (reject oversized with `BadIdentityTokenRejected`)
   - Call `ServerCtx::step()` inside `tokio::task::spawn_blocking` with 5-second timeout
   - Extract client principal via `sender_name().display()`
-  - Handle clock skew errors (`KRB5KRB_AP_ERR_SKEW`) explicitly: log a warning with the skew amount and reject with `BadIdentityTokenRejected`
+  - Handle clock skew (`KRB5KRB_AP_ERR_SKEW`): log warning with skew amount, reject with `BadIdentityTokenRejected`
   - Reject any other GSSAPI error with `BadIdentityTokenRejected`
-  - Return `ClaimProfile { username: principal, roles: [], permissions: [] }` — RFC 2743 §1.1.1, RFC 4120 §5.3, OPC-10000-6 §6.4.1
-- [ ] T007 Re-export `GssapiIdentityValidator` from `async-opcua-crypto/src/identity/mod.rs` behind feature flag
-- [ ] T008 Build and run `cargo test --features kerberos -p async-opcua-crypto` to verify compilation
+  - Return `ClaimProfile { username: principal, roles: [], permissions: [] }`
+- [ ] T006 Re-export `GssapiIdentityValidator` from `async-opcua-crypto/src/identity/mod.rs` behind feature flag
+- [ ] T007 Build and run `cargo test --features kerberos -p async-opcua-crypto` to verify compilation
 
 **Checkpoint**: `KerberosConfig` defined. `GssapiIdentityValidator` validates tokens against a live GSSAPI context. Ready to wire into server.
 
@@ -64,8 +64,8 @@
 
 ### Integration Test for User Story 1
 
-- [ ] T009 [US1] Set up local MIT Kerberos KDC in `tools/ci-playbook.sh` (install `krb5-kdc`, create test realm, create test user and service principal, export keytab)
-- [ ] T010 [US1] Write integration test in `async-opcua-server/tests/kerberos_sso.rs` that:
+- [ ] T008 [US1] Add `setup_kerberos_kdc()` function to `tools/ci-playbook.sh` — install `krb5-kdc` and `krb5-admin-server` packages, create test realm `PLANT.LOCAL`, create test user `operator1` (password: `testpass`) and service principal `OPCUA/localhost`, export keytab to `/tmp/opcua.keytab` — OPC-10000-4 §5.6.3, OPC-10000-6 §6.4
+- [ ] T009 [US1] Write integration test in `async-opcua-server/tests/kerberos_sso.rs` — OPC-10000-4 §5.6.3, OPC-10000-6 §6.4 — that:
   - Starts server with Kerberos config pointing at test KDC keytab
   - Gets a Kerberos TGT for a test user via `kinit` (shell out or use `libgssapi` client API)
   - Acquires a service ticket via GSSAPI `ClientCtx`
@@ -76,11 +76,11 @@
 
 ### Implementation for User Story 1
 
-- [ ] T011 [US1] Add `kerberos_validator: Option<GssapiIdentityValidator>` field to `ServerInfo` in `async-opcua-server/src/info.rs` behind feature flag — OPC-10000-6 §6.4.1
-- [ ] T012 [US1] Modify IssuedToken validation in `ServerInfo::authenticate_endpoint_with_ecc_ctx()` in `async-opcua-server/src/info.rs` to dispatch to `KerberosValidator` when the token prefix matches "GSSAPI " — OPC-10000-4 §5.6.3, OPC-10000-6 §6.4.1
-- [ ] T013 [US1] Add token prefix detection logic: if IssuedToken `tokenData` starts with `GSSAPI ` prefix, route to `GssapiIdentityValidator`; otherwise fall through to existing JWT/`LocalOAuth2Validator` flow — OPC-10000-6 §6.4.1
-- [ ] T014 [US1] Build and run `cargo test --all-features` to verify no regressions; fix any compilation errors
-- [ ] T015 [US1] Run the Kerberos integration test and verify it passes
+- [ ] T010 [US1] Add `kerberos_validator: Option<GssapiIdentityValidator>` field to `ServerInfo` in `async-opcua-server/src/info.rs` behind feature flag — OPC-10000-6 §6.4.1
+- [ ] T011 [US1] Modify IssuedToken validation in `ServerInfo::authenticate_endpoint_with_ecc_ctx()` in `async-opcua-server/src/info.rs` to dispatch to `GssapiIdentityValidator` when the token prefix matches "GSSAPI " — OPC-10000-4 §5.6.3, OPC-10000-6 §6.4.1
+- [ ] T012 [US1] Add token prefix detection logic: if IssuedToken `tokenData` starts with `GSSAPI ` prefix, route to `GssapiIdentityValidator`; otherwise fall through to existing JWT/`LocalOAuth2Validator` flow — OPC-10000-6 §6.4.1
+- [ ] T013 [US1] Build and run `cargo test --all-features` to verify no regressions; fix any compilation errors
+- [ ] T014 [US1] Run the Kerberos integration test and verify it passes
 
 **Checkpoint**: Operator can authenticate via Kerberos. Server accepts GSSAPI tokens as IssuedToken and maps principal to identity.
 
@@ -96,12 +96,12 @@
 
 ### Implementation for User Story 2
 
-- [ ] T016 [P] [US2] Add `kerberos_spn(impl Into<String>)` builder method to `ServerBuilder` in `async-opcua-server/src/builder.rs` behind feature flag
-- [ ] T017 [P] [US2] Add `kerberos_keytab(impl Into<PathBuf>)` builder method to `ServerBuilder` in `async-opcua-server/src/builder.rs` behind feature flag
-- [ ] T018 [P] [US2] Add `kerberos_principal_role(principal, role)` builder method to `ServerBuilder` in `async-opcua-server/src/builder.rs` behind feature flag
-- [ ] T019 [US2] In `ServerBuilder::build()`, if Kerberos config is present, construct `GssapiIdentityValidator` and populate `ServerInfo.kerberos_validator` in `async-opcua-server/src/server.rs` — OPC-10000-6 §6.4
-- [ ] T020 [US2] In `ServerBuilder::build()`, validate Kerberos readiness: (a) if `keytab_path` is set, check `File::open()` and fail with a clear error if missing; (b) if `keytab_path` is None, set `KRB5_KTNAME` or rely on the GSSAPI default; (c) probe GSSAPI library availability by calling `Name::new(b"dummy", None)` — if it panics or returns an unexpected error, report "GSSAPI/Kerberos library not available" and fail startup — OPC-10000-6 §6.4
-- [ ] T021 [US2] Build and run `cargo test --all-features` to verify no regressions
+- [ ] T015 [P] [US2] Add `kerberos_spn(impl Into<String>)` builder method to `ServerBuilder` in `async-opcua-server/src/builder.rs` behind feature flag — OPC-10000-6 §6.4
+- [ ] T016 [P] [US2] Add `kerberos_keytab(impl Into<PathBuf>)` builder method to `ServerBuilder` in `async-opcua-server/src/builder.rs` behind feature flag — OPC-10000-6 §6.4
+- [ ] T017 [P] [US2] Add `kerberos_principal_role(principal, role)` builder method to `ServerBuilder` in `async-opcua-server/src/builder.rs` behind feature flag — OPC-10000-6 §6.4
+- [ ] T018 [US2] In `ServerBuilder::build()`, if Kerberos config is present, construct `GssapiIdentityValidator` and populate `ServerInfo.kerberos_validator` in `async-opcua-server/src/server.rs` — OPC-10000-6 §6.4
+- [ ] T019 [US2] In `ServerBuilder::build()`, validate Kerberos readiness: (a) if `keytab_path` is set, check `File::open()` and fail with a clear error if missing; (b) if `keytab_path` is None, set `KRB5_KTNAME` or rely on the GSSAPI default; (c) probe GSSAPI library availability by calling `Name::new(b"dummy", None)` — if it panics or returns an unexpected error, report "GSSAPI/Kerberos library not available" and fail startup — OPC-10000-6 §6.4
+- [ ] T020 [US2] Build and run `cargo test --all-features` to verify no regressions
 
 **Checkpoint**: Administrator can configure Kerberos via code or config. Server validates keytab existence at startup.
 
@@ -117,10 +117,10 @@
 
 ### Implementation for User Story 3
 
-- [ ] T022 [US3] Modify `GssapiIdentityValidator` to look up principal in `KerberosConfig.principal_roles` and populate `ClaimProfile.roles` in `async-opcua-crypto/src/identity/kerberos_validator.rs` — OPC-10000-18 §8.2
-- [ ] T023 [US3] Add default role fallback: if principal is not in the role map, set `ClaimProfile.roles = vec![]` (let RBAC assign default/observer permissions) — OPC-10000-18 §8.2
-- [ ] T024 [US3] Extend Kerberos integration test to verify role assignment: connect as mapped principal, verify role, attempt restricted write — in `async-opcua-server/tests/kerberos_sso.rs`
-- [ ] T025 [US3] Build and run `cargo test --all-features` to verify no regressions
+- [ ] T021 [US3] Modify `GssapiIdentityValidator` to look up principal in `KerberosConfig.principal_roles` and populate `ClaimProfile.roles` in `async-opcua-crypto/src/identity/kerberos_validator.rs` — OPC-10000-18 §8.2
+- [ ] T022 [US3] Add default role fallback: if principal is not in the role map, set `ClaimProfile.roles = vec![]` (let RBAC assign default/observer permissions) — OPC-10000-18 §8.2
+- [ ] T023 [US3] Extend Kerberos integration test to verify role assignment: connect as mapped principal, verify role, attempt restricted write — in `async-opcua-server/tests/kerberos_sso.rs` — OPC-10000-18 §8.2
+- [ ] T024 [US3] Build and run `cargo test --all-features` to verify no regressions
 
 **Checkpoint**: Kerberos principals are mapped to OPC UA roles. Unmapped principals get default access.
 
@@ -130,11 +130,11 @@
 
 **Purpose**: CI integration, clippy, docs, and final verification.
 
-- [ ] T026 Update `tools/ci-playbook.sh` to install `libkrb5-dev` and set up MIT Kerberos KDC for the Kerberos integration test step
-- [ ] T027 Run `cargo clippy --workspace --all-targets --all-features -- -D warnings` and fix any issues
-- [ ] T028 Run full CI playbook `tools/ci-playbook.sh --ci` — all steps must pass
-- [ ] T029 Update `TODO.md` to mark Kerberos SSO as done
-- [ ] T030 [P] Profile ActivateSession round-trip latency with Kerberos vs. without in `tools/opcua-localhost-bench`. Verify Kerberos path adds < 50ms to the handshake. Run 100 iterations and check p95 latency does not exceed 60ms. Document results in quickstart.md or research.md.
+- [ ] T025 Update `tools/ci-playbook.sh` to install `libkrb5-dev` and set up MIT Kerberos KDC for the Kerberos integration test step
+- [ ] T026 Run `cargo clippy --workspace --all-targets --all-features -- -D warnings` and fix any issues
+- [ ] T027 Run full CI playbook `tools/ci-playbook.sh --ci` — all steps must pass
+- [ ] T028 Update `TODO.md` to mark Kerberos SSO as done
+- [ ] T029 [P] Profile ActivateSession round-trip latency with Kerberos vs. without in `tools/opcua-localhost-bench`. Verify Kerberos path adds < 50ms to the handshake. Run 100 iterations and check p95 latency does not exceed 60ms. Document results in quickstart.md or research.md.
 
 ---
 

@@ -81,7 +81,7 @@ mod tests {
     #[test]
     fn attach_annotations_property_creates_property_variable_and_reference() {
         let source = NodeId::new(2, "DeviceA.Temperature");
-        let mut address_space = address_space_with_source(&source);
+        let address_space = address_space_with_source(&source);
 
         let annotations_id = attach_annotations_property(&address_space, &source);
 

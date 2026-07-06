@@ -209,7 +209,7 @@ fn request_context(handle: &ServerHandle) -> RequestContext {
 }
 
 fn add_i32_variable(
-    address_space: &mut opcua_server::address_space::AddressSpace,
+    address_space: &opcua_server::address_space::AddressSpace,
     namespace_index: u16,
     node_id: &NodeId,
     name: &str,

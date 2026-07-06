@@ -1100,7 +1100,7 @@ mod tests {
 
     #[test]
     fn write_input_node_property_creates_and_updates_condition_property() {
-        let mut address_space = test_address_space();
+        let address_space = test_address_space();
         let cfg = LimitConfig::new(LimitMode::Exclusive)
             .with_high(LimitDef {
                 value: 100.0,
@@ -1175,7 +1175,7 @@ mod tests {
 
     #[test]
     fn write_has_condition_reference_adds_forward_source_reference_idempotently() {
-        let mut address_space = test_address_space();
+        let address_space = test_address_space();
         let cfg = LimitConfig::new(LimitMode::Exclusive)
             .with_high(LimitDef {
                 value: 100.0,

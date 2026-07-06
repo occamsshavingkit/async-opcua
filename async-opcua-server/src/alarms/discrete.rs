@@ -200,7 +200,7 @@ mod tests {
 
     #[test]
     fn source_monitor_re_evaluate_delegates_raw_discrete_variant_and_skips_bad_status() {
-        let mut address_space = test_address_space();
+        let address_space = test_address_space();
         let alarm = DiscreteAlarm::create_in_address_space(
             &address_space,
             2,

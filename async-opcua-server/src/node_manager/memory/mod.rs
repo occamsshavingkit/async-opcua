@@ -2118,7 +2118,7 @@ mod tests {
             ))),
         ]);
         {
-            let mut address_space = manager.address_space.write();
+            let address_space = manager.address_space.write();
             address_space.insert_reference(
                 &denied_source_id,
                 &denied_target_id,

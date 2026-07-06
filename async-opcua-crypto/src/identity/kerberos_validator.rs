@@ -4,6 +4,7 @@
 //! using the GSSAPI `gss_accept_sec_context` flow.
 
 use std::{
+    collections::HashMap,
     path::PathBuf,
     time::{Duration, Instant},
 };
@@ -22,15 +23,64 @@ const GSSAPI_STEP_TIMEOUT: Duration = Duration::from_secs(5);
 /// GSSAPI-backed Kerberos identity validator.
 pub struct GssapiIdentityValidator {
     spn: String,
-    #[allow(dead_code)] // Used via KRB5_KTNAME env var in GSSAPI, direct path support deferred
+    #[allow(dead_code)]
     keytab_path: Option<PathBuf>,
+    principal_roles: HashMap<String, Vec<String>>,
 }
 
 impl GssapiIdentityValidator {
     /// Create a new GSSAPI Kerberos validator.
     #[must_use]
     pub fn new(spn: String, keytab_path: Option<PathBuf>) -> Self {
-        Self { spn, keytab_path }
+        Self {
+            spn,
+            keytab_path,
+            principal_roles: HashMap::new(),
+        }
+    }
+
+    /// Create a validator with role mappings.
+    #[must_use]
+    pub fn new_with_roles(
+        spn: String,
+        keytab_path: Option<PathBuf>,
+        principal_roles: HashMap<String, Vec<String>>,
+    ) -> Self {
+        Self {
+            spn,
+            keytab_path,
+            principal_roles,
+        }
+    }
+
+    /// Return the service principal name.
+    #[must_use]
+    pub fn spn(&self) -> &str {
+        &self.spn
+    }
+
+    /// Return the configured keytab path.
+    #[must_use]
+    pub fn keytab_path(&self) -> Option<&PathBuf> {
+        self.keytab_path.as_ref()
+    }
+
+    /// Consume self and return the SPN.
+    #[must_use]
+    pub fn into_spn(self) -> String {
+        self.spn
+    }
+
+    /// Consume self and return the keytab path.
+    #[must_use]
+    pub fn into_keytab(self) -> Option<PathBuf> {
+        self.keytab_path
+    }
+
+    /// Consume self and return the roles map.
+    #[must_use]
+    pub fn into_roles(self) -> HashMap<String, Vec<String>> {
+        self.principal_roles
     }
 
     /// Probe whether the GSSAPI library is available.
@@ -151,9 +201,15 @@ impl OAuth2IdentityValidator for GssapiIdentityValidator {
             elapsed.as_millis()
         );
 
+        let roles = self
+            .principal_roles
+            .get(&principal)
+            .cloned()
+            .unwrap_or_default();
+
         Ok(ClaimProfile {
             username: principal,
-            roles: vec![],
+            roles,
             permissions: vec![],
         })
     }

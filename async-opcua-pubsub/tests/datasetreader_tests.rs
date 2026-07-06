@@ -44,13 +44,13 @@ fn network_msg(messages: Vec<UadpDataSetMessage>) -> UadpNetworkMessage {
 
 #[test]
 fn datasetreader_binds_incoming_fields_into_target_variables() {
-    let mut space = AddressSpace::new();
+    let space = AddressSpace::new();
     space.add_namespace("urn:test", 1);
     let target = NodeId::new(1, "Target");
     VariableBuilder::new(&target, "Target", "Target")
         .data_type(DataTypeId::Double)
         .value(Variant::Double(0.0))
-        .insert(&mut space);
+        .insert(&space);
 
     let reader_groups = vec![ReaderGroupConfig {
         reader_group_id: 1,
@@ -66,7 +66,7 @@ fn datasetreader_binds_incoming_fields_into_target_variables() {
 
     // A matching DataSetMessage (writer id 7) binds its field into the target variable.
     let applied = apply_network_message(
-        &mut space,
+        &space,
         &network_msg(vec![dataset_msg(7, vec![Variant::Double(42.0)])]),
         &reader_groups,
     );
@@ -75,7 +75,7 @@ fn datasetreader_binds_incoming_fields_into_target_variables() {
 
     // A non-matching writer id (9) is ignored; the target keeps its value.
     let applied2 = apply_network_message(
-        &mut space,
+        &space,
         &network_msg(vec![dataset_msg(9, vec![Variant::Double(99.0)])]),
         &reader_groups,
     );

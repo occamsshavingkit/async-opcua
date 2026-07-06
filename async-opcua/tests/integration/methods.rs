@@ -1,3 +1,4 @@
+#![allow(unused_mut, clippy::unnecessary_mut_passed)]
 use std::{
     sync::{atomic::AtomicU64, Arc},
     time::Duration,

@@ -1,3 +1,4 @@
+#![allow(unused_mut)]
 use std::time::Duration;
 
 use crate::utils::{setup, ChannelNotifications};

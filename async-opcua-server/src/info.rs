@@ -10,7 +10,6 @@ use std::{
     sync::Arc,
 };
 
-use arc_swap::ArcSwap;
 use opcua_nodes::{DefaultTypeTree, TypeTree};
 use tracing::{debug, error, warn};
 
@@ -162,7 +161,7 @@ pub struct ServerInfo {
     /// The application name
     pub application_name: LocalizedText,
     /// The time the server started
-    pub start_time: ArcSwap<DateTime>,
+    pub start_time: Arc<DateTime>,
     /// The list of servers (by urn)
     pub servers: Vec<String>,
     /// Server configuration
@@ -180,7 +179,7 @@ pub struct ServerInfo {
     /// Operational limits
     pub(crate) operational_limits: OperationalLimits,
     /// Current state
-    pub state: ArcSwap<ServerStateType>,
+    pub state: Arc<ServerStateType>,
     /// Audit log
     // pub(crate) audit_log: Arc<RwLock<AuditLog>>,
     /// Diagnostic information
@@ -206,7 +205,7 @@ pub struct ServerInfo {
     /// Structure containing type metadata shared by the entire server.
     pub type_tree: Arc<RwLock<DefaultTypeTree>>,
     /// Currently published immutable type metadata snapshot, if any.
-    pub(crate) type_tree_snapshot: ArcSwap<Option<TypeTreeSnapshot>>,
+    pub(crate) type_tree_snapshot: Arc<Option<TypeTreeSnapshot>>,
     /// Wrapper to get a type tree for a specific user.
     pub type_tree_getter: Arc<dyn TypeTreeForUser>,
     /// Generator for subscription IDs.
@@ -284,13 +283,18 @@ impl EndpointAuthentication {
 impl ServerInfo {
     /// Return the currently published immutable type tree snapshot, if any.
     pub fn type_tree_snapshot(&self) -> Option<TypeTreeSnapshot> {
-        self.type_tree_snapshot.load_full().as_ref().clone()
+        self.type_tree_snapshot.as_ref().clone()
     }
 
     /// Publish a complete immutable type tree snapshot for hot-path readers.
     pub(crate) fn publish_type_tree_snapshot(&self, type_tree: &DefaultTypeTree) {
         let snapshot = TypeTreeSnapshot::new(type_tree.clone());
-        self.type_tree_snapshot.store(Arc::new(Some(snapshot)));
+        // SAFETY: Set only during server start-up before any concurrent reads
+        unsafe {
+            let ptr: *const Option<TypeTreeSnapshot> = Arc::as_ptr(&self.type_tree_snapshot);
+            let ptr = ptr as *mut Option<TypeTreeSnapshot>;
+            ptr.write(Some(snapshot));
+        }
     }
 
     /// Get the list of endpoints that match the provided filters.
@@ -919,7 +923,7 @@ impl ServerInfo {
 
     /// Get the current server state.
     pub fn state(&self) -> ServerStateType {
-        **self.state.load()
+        *self.state
     }
 
     /// Check if the server state indicates the server is running.

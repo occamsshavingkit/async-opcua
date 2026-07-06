@@ -53,7 +53,7 @@ impl MetadataNodeManagerBuilder {
 
 impl InMemoryNodeManagerImplBuilder for MetadataNodeManagerBuilder {
     type Impl = MetadataNodeManager;
-    fn build(self, context: ServerContext, address_space: &mut AddressSpace) -> Self::Impl {
+    fn build(self, context: ServerContext, address_space: &AddressSpace) -> Self::Impl {
         // This kind of pattern is very common in node managers. We need to register the namespace
         // we will use. If we had any custom reference types, we would need to add these here as well,
         // so that other node managers can use them.
@@ -89,7 +89,7 @@ impl MetadataNodeManager {
 #[async_trait]
 impl InMemoryNodeManagerImpl for MetadataNodeManager {
     /// Populate the address space.
-    async fn init(&self, address_space: &mut AddressSpace, _context: ServerContext) {
+    async fn init(&self, address_space: &AddressSpace, _context: ServerContext) {
         // Populate the static address space
         ObjectBuilder::new(&self.node_id(ROOT_NODE), "Simulation", "Simulation")
             .organized_by(ObjectId::ObjectsFolder)

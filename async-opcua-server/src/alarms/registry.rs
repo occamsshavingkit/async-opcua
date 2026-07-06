@@ -69,24 +69,24 @@ mod tests {
 
     #[test]
     fn iter_retained_returns_only_conditions_with_retain_true() {
-        let mut address_space = AddressSpace::new();
+        let address_space = AddressSpace::new();
         address_space.add_namespace("urn:test", 2);
         let retained = ConditionStateMachine::create_in_address_space(
-            &mut address_space,
+            &address_space,
             "DeviceA",
             "High",
             NodeId::new(2, "DeviceA"),
             "Retained alarm",
         );
         let not_retained = ConditionStateMachine::create_in_address_space(
-            &mut address_space,
+            &address_space,
             "DeviceB",
             "High",
             NodeId::new(2, "DeviceB"),
             "Cleared alarm",
         );
-        retained.set_retain(&mut address_space, true);
-        not_retained.set_retain(&mut address_space, false);
+        retained.set_retain(&address_space, true);
+        not_retained.set_retain(&address_space, false);
 
         let registry = ConditionRegistry::new();
         registry.register(retained.clone());

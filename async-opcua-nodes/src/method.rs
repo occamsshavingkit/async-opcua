@@ -28,7 +28,7 @@ impl MethodBuilder {
     /// variable child of the method which describes the out parameters.
     pub fn output_args(
         self,
-        address_space: &mut impl NodeInsertTarget,
+        address_space: &impl NodeInsertTarget,
         node_id: &NodeId,
         arguments: &[Argument],
     ) -> Self {
@@ -40,7 +40,7 @@ impl MethodBuilder {
     /// variable child of the method which describes the in parameters.
     pub fn input_args(
         self,
-        address_space: &mut impl NodeInsertTarget,
+        address_space: &impl NodeInsertTarget,
         node_id: &NodeId,
         arguments: &[Argument],
     ) -> Self {
@@ -81,7 +81,7 @@ impl MethodBuilder {
         &self,
         node_id: &NodeId,
         args_name: &str,
-        address_space: &mut impl NodeInsertTarget,
+        address_space: &impl NodeInsertTarget,
         arguments: &[Argument],
     ) {
         let fn_node_id = self.node.node_id();

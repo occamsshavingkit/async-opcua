@@ -1,3 +1,4 @@
+#![allow(unused_mut, clippy::unnecessary_mut_passed)]
 //! Role-Based Access Control integration tests — OPC UA Part 3 §4.8–4.9 / §8.55–8.56, Part 18.
 //!
 //! US1: permission attributes readable. US2: identity→role resolution + RoleSet. US3: Read/Write/Call

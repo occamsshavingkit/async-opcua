@@ -1,3 +1,4 @@
+#![allow(unused_mut)]
 //! Behavioral regression tests for feature 009 hardening findings.
 //!
 //! These exercise fixes that were otherwise covered only by compile-time/config

@@ -136,9 +136,7 @@ pub fn build_server(pki_dir: impl Into<PathBuf>) -> ServerBuilder {
         )
         .discovery_urls(vec!["/".to_owned()])
         .with_node_manager(InMemoryNodeManagerBuilder::new(
-            move |context: ServerContext,
-                  address_space: &mut AddressSpace|
-                  -> SimpleNodeManagerImpl {
+            move |context: ServerContext, address_space: &AddressSpace| -> SimpleNodeManagerImpl {
                 let builder = SimpleNodeManagerBuilder::new_imports(
                     vec![Box::new(MicroNamespace)],
                     "micro-ns0",

@@ -19,11 +19,7 @@ pub trait SourceMonitoredAlarm: Send + Sync {
     /// Re-evaluate against a new source value; returns the AlarmEvent to dispatch, or None
     /// (no transition / disabled / value not usable). Implementations delegate to the alarm's
     /// existing `update_value` and add no new evaluation logic.
-    fn re_evaluate(
-        &self,
-        address_space: &mut AddressSpace,
-        value: &DataValue,
-    ) -> Option<AlarmEvent>;
+    fn re_evaluate(&self, address_space: &AddressSpace, value: &DataValue) -> Option<AlarmEvent>;
 }
 
 /// Extract an f64 from a written source DataValue for numeric-limit re-evaluation.
@@ -175,7 +171,7 @@ mod tests {
 
         fn re_evaluate(
             &self,
-            _address_space: &mut AddressSpace,
+            _address_space: &AddressSpace,
             _value: &DataValue,
         ) -> Option<AlarmEvent> {
             None

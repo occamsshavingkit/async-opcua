@@ -1,3 +1,4 @@
+#![allow(unused_mut)]
 use super::utils::setup;
 use opcua::{
     nodes::TypeTree,

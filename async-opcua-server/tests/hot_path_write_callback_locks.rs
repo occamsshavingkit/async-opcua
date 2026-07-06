@@ -163,12 +163,12 @@ impl WriteCallbackFixture {
             .expect("test server should expose SimpleNodeManager");
 
         {
-            let mut address_space = node_manager.address_space().write();
+            let address_space = node_manager.address_space().write();
             VariableBuilder::new(&node_id, "GuardProbe", "GuardProbe")
                 .data_type(DataTypeId::Int32)
                 .value(0i32)
                 .writable()
-                .insert(&mut *address_space);
+                .insert(&*address_space);
         }
 
         let context = request_context(&handle);

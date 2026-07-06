@@ -39,8 +39,8 @@ pub fn add_machinery(
     let machine2_counter = Arc::new(AtomicU16::new(50));
 
     let (machine1_id, machine2_id) = {
-        let mut address_space = address_space.write();
-        add_machinery_model(&mut address_space, ns);
+        let address_space = address_space.write();
+        add_machinery_model(&address_space, ns);
 
         // Create a folder under static folder
         let devices_folder_id = NodeId::new(ns, "devices");
@@ -61,7 +61,7 @@ pub fn add_machinery(
 
         // Create an object representing a machine that cycles from 0 to 100. Each time it cycles it will create an event
         let machine1_id = add_machine(
-            &mut address_space,
+            &address_space,
             &manager,
             ns,
             devices_folder_id.clone(),
@@ -69,7 +69,7 @@ pub fn add_machinery(
             machine1_counter.clone(),
         );
         let machine2_id = add_machine(
-            &mut address_space,
+            &address_space,
             &manager,
             ns,
             devices_folder_id,
@@ -112,7 +112,7 @@ fn machine_events_folder_id(ns: u16) -> NodeId {
     NodeId::new(ns, "MachineEvents")
 }
 
-fn add_machinery_model(address_space: &mut AddressSpace, ns: u16) {
+fn add_machinery_model(address_space: &AddressSpace, ns: u16) {
     // Create a machine counter type derived from BaseObjectType
     let machine_type_id = machine_type_id(ns);
     ObjectTypeBuilder::new(&machine_type_id, "MachineCounterType", "MachineCounterType")
@@ -143,7 +143,7 @@ fn add_machinery_model(address_space: &mut AddressSpace, ns: u16) {
 }
 
 fn add_machine(
-    address_space: &mut AddressSpace,
+    address_space: &AddressSpace,
     manager: &SimpleNodeManager,
     ns: u16,
     folder_id: NodeId,

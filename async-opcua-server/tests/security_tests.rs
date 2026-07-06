@@ -726,7 +726,7 @@ async fn max_response_message_size_rejects_serialized_read_response_body_above_c
         .get_of_type::<SimpleNodeManager>()
         .expect("maxResponseMessageSize test should have a SimpleNodeManager");
     {
-        let mut address_space = node_manager.address_space().write();
+        let address_space = node_manager.address_space().write();
         VariableBuilder::new(
             &oversized_node_id,
             "OversizedReadValue",
@@ -734,7 +734,7 @@ async fn max_response_message_size_rejects_serialized_read_response_body_above_c
         )
         .data_type(DataTypeId::String)
         .value("x".repeat(OVERSIZED_VALUE_BYTES))
-        .insert(&mut *address_space);
+        .insert(&*address_space);
     }
 
     let endpoint = handle

@@ -383,7 +383,7 @@ mod tests {
 
     #[async_trait]
     impl InMemoryNodeManagerImpl for TestNodeManagerImpl {
-        async fn init(&self, _address_space: &mut AddressSpace, _context: ServerContext) {}
+        async fn init(&self, _address_space: &AddressSpace, _context: ServerContext) {}
 
         fn name(&self) -> &str {
             self.name
@@ -413,7 +413,7 @@ mod tests {
         namespace_uri: &'static str,
         nodes: Vec<Object>,
     ) -> Arc<InMemoryNodeManager<TestNodeManagerImpl>> {
-        let mut address_space = AddressSpace::new();
+        let address_space = AddressSpace::new();
         address_space.add_namespace(namespace_uri, namespace_index);
         for node in nodes {
             address_space.insert::<_, NodeId>(node, None);

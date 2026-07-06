@@ -63,7 +63,7 @@ async fn main() {
     let ns = handle.get_namespace_index("urn:chess-server").unwrap();
 
     {
-        let mut address_space = node_manager.address_space().write();
+        let address_space = node_manager.address_space().write();
 
         let board_node_id = NodeId::new(2, "board");
         address_space.add_folder(
@@ -81,7 +81,7 @@ async fn main() {
                 .organized_by(&board_node_id)
                 .data_type(DataTypeId::Byte)
                 .value(0u8)
-                .insert(&mut *address_space);
+                .insert(&*address_space);
 
             // Another variable is a highlighting flag for the square
             let browse_name = format!("{square}.highlight");
@@ -90,7 +90,7 @@ async fn main() {
                 .organized_by(&board_node_id)
                 .data_type(DataTypeId::Boolean)
                 .value(false)
-                .insert(&mut *address_space);
+                .insert(&*address_space);
         });
     };
 

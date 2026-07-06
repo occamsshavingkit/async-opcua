@@ -185,7 +185,7 @@ async fn mirror_source(
 
         let address_space = node_manager.address_space();
         {
-            let mut address_space = address_space.write();
+            let address_space = address_space.write();
             let mut builder =
                 VariableBuilder::new(&mirror_id, display_text.as_str(), display_text.as_str())
                     .organized_by(NodeId::objects_folder_id())
@@ -199,7 +199,7 @@ async fn mirror_source(
             } else {
                 builder = builder.data_type(DataTypeId::BaseDataType);
             }
-            builder.insert(&mut *address_space);
+            builder.insert(&*address_space);
         }
 
         // Organize mirrors under a folder-like object so they are browsable.

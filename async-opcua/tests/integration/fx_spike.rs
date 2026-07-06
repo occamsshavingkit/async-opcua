@@ -34,7 +34,7 @@ fn load_fx_address_space() -> (AddressSpace, DefaultTypeTree) {
         ])
         .expect("FX nodeset chain must load");
 
-    let mut address_space = AddressSpace::new();
+    let address_space = AddressSpace::new();
     let mut type_tree = DefaultTypeTree::new();
     address_space.import_node_set(
         &opcua::server::address_space::CoreNamespace,
@@ -73,7 +73,7 @@ fn fx_information_model_loads_and_resolves() {
 #[tokio::test]
 async fn fx_c2c_process_value_flows_ac1_to_ac2() {
     // AC1: an FX-model address space exposing one process value to publish.
-    let (mut space, _type_tree) = load_fx_address_space();
+    let (space, _type_tree) = load_fx_address_space();
     // The FX nodeset chain already registered several namespaces at the low
     // indices; register AC1's own namespace at a high, guaranteed-free index so
     // the published variable's NodeId is valid and consistent with

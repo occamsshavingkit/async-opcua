@@ -60,7 +60,7 @@ pub enum FromAttributesError {
 pub trait NodeInsertTarget {
     /// Insert a node with a list of references into a target.
     fn insert<'a>(
-        &mut self,
+        &self,
         node: impl Into<NodeType>,
         references: Option<&'a [(&'a NodeId, &NodeId, ReferenceDirection)]>,
     ) -> bool;
@@ -215,7 +215,7 @@ macro_rules! node_builder_impl {
 
             /// Inserts the node into the address space, including references. This function
             /// will panic if the node is in an invalid state.
-            pub fn insert(self, address_space: &mut impl crate::NodeInsertTarget) -> bool {
+            pub fn insert(self, address_space: &impl crate::NodeInsertTarget) -> bool {
                 if self.is_valid() {
                     if !self.references.is_empty() {
                         let references = self

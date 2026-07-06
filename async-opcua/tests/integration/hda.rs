@@ -1,3 +1,4 @@
+#![allow(unused_mut)]
 use std::{sync::Arc, time::Duration};
 
 use crate::utils::{default_server, Tester};

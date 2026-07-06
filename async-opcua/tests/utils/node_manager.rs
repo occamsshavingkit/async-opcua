@@ -96,7 +96,7 @@ pub fn test_node_manager() -> impl NodeManagerBuilder {
 
 fn make_test_node_manager_impl(
     context: ServerContext,
-    address_space: &mut AddressSpace,
+    address_space: &AddressSpace,
 ) -> TestNodeManagerImpl {
     let idx = add_namespaces(&context, address_space, &["urn:rustopcuatestserver"])[0];
     TestNodeManagerImpl::new(idx, context.node_managers.clone())
@@ -104,7 +104,7 @@ fn make_test_node_manager_impl(
 
 #[async_trait]
 impl InMemoryNodeManagerImpl for TestNodeManagerImpl {
-    async fn init(&self, _address_space: &mut AddressSpace, _context: ServerContext) {}
+    async fn init(&self, _address_space: &AddressSpace, _context: ServerContext) {}
 
     fn namespaces(&self) -> Vec<NamespaceMetadata> {
         vec![NamespaceMetadata {
@@ -446,7 +446,7 @@ impl InMemoryNodeManagerImpl for TestNodeManagerImpl {
             .collect();
         let parent_nodes = get_node_metadata(context, &self.node_managers, &parent_ids).await;
 
-        let mut address_space = trace_write_lock!(address_space);
+        let address_space = trace_write_lock!(address_space);
         let mut type_tree = trace_write_lock!(context.type_tree);
         for (idx, node) in nodes_to_add.iter_mut().enumerate() {
             let node_id = if node.requested_new_node_id().is_null() {
@@ -540,7 +540,7 @@ impl InMemoryNodeManagerImpl for TestNodeManagerImpl {
 
             match res {
                 Ok(n) => self.insert_node_inner(
-                    &mut address_space,
+                    &address_space,
                     &mut type_tree,
                     n,
                     &parent.node_id.node_id,
@@ -585,7 +585,7 @@ impl InMemoryNodeManagerImpl for TestNodeManagerImpl {
             })
             .collect();
         let nodes = get_node_metadata(context, &self.node_managers, &node_pairs).await;
-        let mut address_space = trace_write_lock!(address_space);
+        let address_space = trace_write_lock!(address_space);
         let type_tree = trace_read_lock!(context.type_tree);
         for (idx, rf) in references_to_add.iter_mut().enumerate() {
             let Some(Some(start_node)) = nodes.get(idx * 2) else {
@@ -653,7 +653,7 @@ impl InMemoryNodeManagerImpl for TestNodeManagerImpl {
             }
         }
 
-        let mut address_space = trace_write_lock!(address_space);
+        let address_space = trace_write_lock!(address_space);
         let mut type_tree = trace_write_lock!(context.type_tree);
         for node in nodes_to_delete {
             if address_space
@@ -688,7 +688,7 @@ impl InMemoryNodeManagerImpl for TestNodeManagerImpl {
             }
         }
 
-        let mut address_space = trace_write_lock!(address_space);
+        let address_space = trace_write_lock!(address_space);
         for rf in references_to_delete {
             if !address_space.delete_reference(
                 rf.source_node_id(),
@@ -997,9 +997,9 @@ impl TestNodeManagerImpl {
             reference_type_id.clone(),
             ReferenceDirection::Inverse,
         ));
-        let mut address_space = trace_write_lock!(address_space);
+        let address_space = trace_write_lock!(address_space);
         let mut type_tree = trace_write_lock!(type_tree);
-        self.insert_node_inner(&mut address_space, &mut type_tree, node, parent_id, refs);
+        self.insert_node_inner(&address_space, &mut type_tree, node, parent_id, refs);
     }
 
     #[allow(unused)]
@@ -1009,7 +1009,7 @@ impl TestNodeManagerImpl {
         source: &'a NodeId,
         refs: Vec<(&'a NodeId, NodeId, ReferenceDirection)>,
     ) {
-        let mut address_space = trace_write_lock!(address_space);
+        let address_space = trace_write_lock!(address_space);
         for (target, ty, dir) in refs {
             if matches!(dir, ReferenceDirection::Forward) {
                 address_space.insert_reference(source, target, ty);
@@ -1021,7 +1021,7 @@ impl TestNodeManagerImpl {
 
     fn insert_node_inner(
         &self,
-        address_space: &mut AddressSpace,
+        address_space: &AddressSpace,
         type_tree: &mut DefaultTypeTree,
         node: NodeType,
         parent_id: &NodeId,

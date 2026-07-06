@@ -17,7 +17,7 @@ async fn test_concurrent_read_write() {
     const ITERATIONS: usize = 1000;
 
     {
-        let mut aspace = address_space.write();
+        let aspace = address_space.write();
         aspace.add_namespace("urn:test", 1);
         for i in 0..NUM_VARIABLES {
             let node_id = NodeId::new(1, format!("var_{}", i));
@@ -28,7 +28,7 @@ async fn test_concurrent_read_write() {
             )
             .data_type(DataTypeId::Int32)
             .value(Variant::from(0i32))
-            .insert(&mut *aspace);
+            .insert(&*aspace);
         }
     }
 
@@ -84,7 +84,7 @@ async fn test_dashmap_concurrent_throughput() {
 
     let address_space = Arc::new(RwLock::new(AddressSpace::new()));
     {
-        let mut aspace = address_space.write();
+        let aspace = address_space.write();
         aspace.add_namespace("urn:throughput", 1);
         for i in 0..BASE_VARIABLES {
             let node_id = NodeId::new(1, format!("base_{i}"));
@@ -95,7 +95,7 @@ async fn test_dashmap_concurrent_throughput() {
             )
             .data_type(DataTypeId::Int32)
             .value(Variant::from(0i32))
-            .insert(&mut *aspace);
+            .insert(&*aspace);
         }
     }
 
@@ -109,7 +109,7 @@ async fn test_dashmap_concurrent_throughput() {
                     // Inserters extend the map while others operate on it.
                     0 => {
                         let node_id = NodeId::new(1, format!("ins_{task_id}_{i}"));
-                        let mut aspace = aspace_clone.write();
+                        let aspace = aspace_clone.write();
                         VariableBuilder::new(
                             &node_id,
                             QualifiedName::new(1, format!("ins_{task_id}_{i}").as_str()),
@@ -117,7 +117,7 @@ async fn test_dashmap_concurrent_throughput() {
                         )
                         .data_type(DataTypeId::Int32)
                         .value(Variant::from(i as i32))
-                        .insert(&mut *aspace);
+                        .insert(&*aspace);
                     }
                     // Writers update existing values.
                     1 => {

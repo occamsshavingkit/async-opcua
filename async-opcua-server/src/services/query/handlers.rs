@@ -176,8 +176,9 @@ impl<'a, 'ctx> QueryFirstHandler<'a, 'ctx> {
                 self.type_tree,
                 BrowseDirection::Inverse,
             )
-            .filter(|reference| self.address_space.node_exists(reference.target_node))
-            .map(|reference| reference.target_node.clone());
+            .into_iter()
+            .filter(|reference| self.address_space.node_exists(&reference.target_id))
+            .map(|reference| reference.target_id.clone());
 
         Some(QueryGraphTraversal::with_typed_candidates(
             self.address_space,
@@ -231,8 +232,8 @@ impl<'a, 'ctx> QueryFirstHandler<'a, 'ctx> {
             self.type_tree,
             BrowseDirection::Inverse,
         ) {
-            if self.address_space.node_exists(reference.target_node) {
-                candidates.push(reference.target_node.clone());
+            if self.address_space.node_exists(&reference.target_id) {
+                candidates.push(reference.target_id.clone());
             }
         }
 
@@ -397,7 +398,8 @@ impl<'a, 'ctx> QueryFirstHandler<'a, 'ctx> {
                     self.type_tree,
                     direction,
                 )
-                .filter_map(|reference| self.address_space.find(reference.target_node))
+                .into_iter()
+                .filter_map(|reference| self.address_space.find(&reference.target_id))
                 .find(|candidate| candidate.as_node().browse_name() == &element.target_name)?;
 
             current_node_id = next.as_node().node_id().clone();
@@ -539,7 +541,7 @@ mod tests {
         fn new(object_count: usize) -> Self {
             let namespace_index = 1;
             let object_type = NodeId::new(namespace_index, "PagedObjectType");
-            let mut address_space = AddressSpace::new();
+            let address_space = AddressSpace::new();
             address_space.add_namespace(TEST_NAMESPACE_URI, namespace_index);
 
             ObjectTypeBuilder::new(
@@ -548,7 +550,7 @@ mod tests {
                 "PagedObjectType",
             )
             .subtype_of(ObjectTypeId::BaseObjectType)
-            .insert(&mut address_space);
+            .insert(&address_space);
 
             for index in 0..object_count {
                 let node_id = NodeId::new(namespace_index, format!("PagedObject-{index}"));
@@ -558,7 +560,7 @@ mod tests {
                     format!("Paged Object {index}"),
                 )
                 .has_type_definition(object_type.clone())
-                .insert(&mut address_space);
+                .insert(&address_space);
             }
 
             let mut type_tree = DefaultTypeTree::new();

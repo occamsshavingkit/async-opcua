@@ -232,17 +232,17 @@ fn add_query_graph(handle: &ServerHandle, node_manager: &SimpleNodeManager) -> Q
     let denied_sensor = NodeId::new(namespace_index, "Sensor-Denied");
 
     {
-        let mut address_space = node_manager.address_space().write();
+        let address_space = node_manager.address_space().write();
         add_query_types(
-            &mut address_space,
+            &address_space,
             namespace_index,
             &fermenter_type,
             &controller_type,
             &fermenter_type_batch_id,
         );
-        add_query_sensor_type(&mut address_space, namespace_index, &sensor_type);
+        add_query_sensor_type(&address_space, namespace_index, &sensor_type);
         add_fermenter(
-            &mut address_space,
+            &address_space,
             namespace_index,
             &matching_fermenter,
             &fermenter_type,
@@ -250,7 +250,7 @@ fn add_query_graph(handle: &ServerHandle, node_manager: &SimpleNodeManager) -> Q
             "FV-101",
         );
         add_fermenter(
-            &mut address_space,
+            &address_space,
             namespace_index,
             &nonmatching_fermenter,
             &fermenter_type,
@@ -264,16 +264,16 @@ fn add_query_graph(handle: &ServerHandle, node_manager: &SimpleNodeManager) -> Q
         )
         .has_type_definition(controller_type.clone())
         .component_of(matching_fermenter.clone())
-        .insert(&mut *address_space);
+        .insert(&*address_space);
         add_sensor(
-            &mut address_space,
+            &address_space,
             namespace_index,
             &readable_sensor,
             &sensor_type,
             12.5,
         );
         add_sensor(
-            &mut address_space,
+            &address_space,
             namespace_index,
             &denied_sensor,
             &sensor_type,
@@ -296,7 +296,7 @@ fn add_query_graph(handle: &ServerHandle, node_manager: &SimpleNodeManager) -> Q
 }
 
 fn add_query_types(
-    address_space: &mut AddressSpace,
+    address_space: &AddressSpace,
     namespace_index: u16,
     fermenter_type: &NodeId,
     controller_type: &NodeId,
@@ -330,11 +330,7 @@ fn add_query_types(
     .insert(address_space);
 }
 
-fn add_query_sensor_type(
-    address_space: &mut AddressSpace,
-    namespace_index: u16,
-    sensor_type: &NodeId,
-) {
+fn add_query_sensor_type(address_space: &AddressSpace, namespace_index: u16, sensor_type: &NodeId) {
     VariableTypeBuilder::new(
         sensor_type,
         QualifiedName::new(namespace_index, "SensorType"),
@@ -346,7 +342,7 @@ fn add_query_sensor_type(
 }
 
 fn add_fermenter(
-    address_space: &mut AddressSpace,
+    address_space: &AddressSpace,
     namespace_index: u16,
     fermenter: &NodeId,
     fermenter_type: &NodeId,
@@ -375,7 +371,7 @@ fn add_fermenter(
 }
 
 fn add_sensor(
-    address_space: &mut AddressSpace,
+    address_space: &AddressSpace,
     namespace_index: u16,
     sensor: &NodeId,
     sensor_type: &NodeId,

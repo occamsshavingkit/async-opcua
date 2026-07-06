@@ -2087,7 +2087,7 @@ async fn read_max_age_reaches_refreshable_sources() {
 
     let id = NodeId::new(2, "max_age_source");
     {
-        let mut space = nm.address_space().write();
+        let space = nm.address_space().write();
         let var = VariableBuilder::new(&id, "MaxAgeSource", "MaxAgeSource")
             .value(0i32)
             .data_type(DataTypeId::Int32)

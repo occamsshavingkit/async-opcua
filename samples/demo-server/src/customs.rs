@@ -22,7 +22,7 @@ pub fn add_custom_types(nm: Arc<SimpleNodeManager>, ns: u16) {
     let struct_id = add_custom_data_type(&nm, ns, &enum_id);
 
     let addr = nm.address_space();
-    let mut addr = addr.write();
+    let addr = addr.write();
     let folder_node_id = NodeId::next_numeric(ns);
     addr.add_folder(
         &folder_node_id,
@@ -41,7 +41,7 @@ pub fn add_custom_types(nm: Arc<SimpleNodeManager>, ns: u16) {
     .writable()
     .data_type(struct_id.clone())
     .value(ExtensionObject::new(error_data))
-    .insert(&mut *addr);
+    .insert(&*addr);
 
     //read value of error node, jsut to show how to do it and that convertion works
     let dv = addr
@@ -71,7 +71,7 @@ fn enum_field(name: &str, value: i64) -> EnumField {
 }
 
 fn add_enum_data_type(nm: &Arc<SimpleNodeManager>, ns: u16) -> NodeId {
-    let mut addr = nm.address_space().write();
+    let addr = nm.address_space().write();
 
     let id = NodeId::new(ns, ENUM_DATA_TYPE_ID);
 
@@ -87,13 +87,13 @@ fn add_enum_data_type(nm: &Arc<SimpleNodeManager>, ns: u16) -> NodeId {
     DataTypeBuilder::new(&id, "AxisState", "AxisState")
         .subtype_of(DataTypeId::Enumeration)
         .data_type_definition(type_def)
-        .insert(&mut *addr);
+        .insert(&*addr);
 
     id
 }
 
 fn add_encoding(nm: &SimpleNodeManager, ns: u16, struct_id: &NodeId) -> NodeId {
-    let mut addr = nm.address_space().write();
+    let addr = nm.address_space().write();
     let id = NodeId::new(ns, STRUCT_ENC_TYPE_ID);
     ObjectBuilder::new(&id, "Default Binary", "Default Binary")
         .reference(
@@ -102,7 +102,7 @@ fn add_encoding(nm: &SimpleNodeManager, ns: u16, struct_id: &NodeId) -> NodeId {
             ReferenceDirection::Inverse,
         )
         .has_type_definition(ObjectTypeId::DataTypeEncodingType)
-        .insert(&mut *addr);
+        .insert(&*addr);
     id
 }
 
@@ -135,7 +135,7 @@ fn add_custom_data_type(nm: &SimpleNodeManager, ns: u16, e_state_id: &NodeId) ->
             },
         ]),
     });
-    let mut addr = nm.address_space().write();
+    let addr = nm.address_space().write();
     DataTypeBuilder::new(&struct_id, "ErrorData", "ErrorData")
         .subtype_of(DataTypeId::Structure)
         .data_type_definition(type_def)
@@ -144,7 +144,7 @@ fn add_custom_data_type(nm: &SimpleNodeManager, ns: u16, e_state_id: &NodeId) ->
             ReferenceTypeId::HasEncoding,
             ReferenceDirection::Forward,
         )
-        .insert(&mut *addr);
+        .insert(&*addr);
 
     struct_id
 }

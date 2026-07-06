@@ -1,3 +1,4 @@
+#![allow(unused_mut)]
 //! Adversarial / malicious-transport tests.
 //!
 //! The high-level client always speaks the protocol correctly, so these tests insert a

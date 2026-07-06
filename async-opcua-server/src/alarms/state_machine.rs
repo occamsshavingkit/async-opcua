@@ -95,7 +95,7 @@ pub struct ConditionStateMachine {
 impl ConditionStateMachine {
     /// Creates and registers a new Alarm Condition state machine instance in the AddressSpace.
     pub fn create_in_address_space(
-        address_space: &mut AddressSpace,
+        address_space: &AddressSpace,
         device: &str,
         alarm_type: &str,
         source_node_id: NodeId,
@@ -457,7 +457,7 @@ impl ConditionStateMachine {
     }
 
     /// Sets whether the condition is enabled.
-    pub fn set_enabled(&self, address_space: &mut AddressSpace, enabled: bool) {
+    pub fn set_enabled(&self, address_space: &AddressSpace, enabled: bool) {
         self.set_bool_value(address_space, &self.enabled_state_id, enabled);
     }
 
@@ -467,7 +467,7 @@ impl ConditionStateMachine {
     }
 
     /// Sets whether the condition is active.
-    pub fn set_active(&self, address_space: &mut AddressSpace, active: bool) {
+    pub fn set_active(&self, address_space: &AddressSpace, active: bool) {
         self.set_bool_value(address_space, &self.active_state_id, active);
     }
 
@@ -477,7 +477,7 @@ impl ConditionStateMachine {
     }
 
     /// Sets whether the condition is acknowledged.
-    pub fn set_acked(&self, address_space: &mut AddressSpace, acked: bool) {
+    pub fn set_acked(&self, address_space: &AddressSpace, acked: bool) {
         self.set_bool_value(address_space, &self.acked_state_id, acked);
     }
 
@@ -487,7 +487,7 @@ impl ConditionStateMachine {
     }
 
     /// Sets whether the condition is confirmed.
-    pub fn set_confirmed(&self, address_space: &mut AddressSpace, confirmed: bool) {
+    pub fn set_confirmed(&self, address_space: &AddressSpace, confirmed: bool) {
         self.set_bool_value(address_space, &self.confirmed_state_id, confirmed);
     }
 
@@ -512,7 +512,7 @@ impl ConditionStateMachine {
     }
 
     /// Sets the current severity of the condition.
-    pub fn set_severity(&self, address_space: &mut AddressSpace, severity: u16) {
+    pub fn set_severity(&self, address_space: &AddressSpace, severity: u16) {
         if let Some(mut node) = address_space.find_mut(&self.severity_id) {
             if let NodeType::Variable(ref mut var) = &mut *node {
                 let _ = var.set_value(&opcua_types::NumericRange::None, Variant::from(severity));
@@ -541,7 +541,7 @@ impl ConditionStateMachine {
     }
 
     /// Sets the current localized message of the condition.
-    pub fn set_message(&self, address_space: &mut AddressSpace, message: LocalizedText) {
+    pub fn set_message(&self, address_space: &AddressSpace, message: LocalizedText) {
         if let Some(mut node) = address_space.find_mut(&self.message_id) {
             if let NodeType::Variable(ref mut var) = &mut *node {
                 let _ = var.set_value(&opcua_types::NumericRange::None, Variant::from(message));
@@ -555,7 +555,7 @@ impl ConditionStateMachine {
     }
 
     /// Sets whether the condition is retained.
-    pub fn set_retain(&self, address_space: &mut AddressSpace, retain: bool) {
+    pub fn set_retain(&self, address_space: &AddressSpace, retain: bool) {
         self.set_bool_value(address_space, &self.retain_id, retain);
     }
 
@@ -565,7 +565,7 @@ impl ConditionStateMachine {
     }
 
     /// Sets whether the condition is system-suppressed.
-    pub fn set_suppressed(&self, address_space: &mut AddressSpace, suppressed: bool) {
+    pub fn set_suppressed(&self, address_space: &AddressSpace, suppressed: bool) {
         self.set_bool_value(address_space, &self.suppressed_state_id, suppressed);
         self.recompute_suppressed_or_shelved(address_space);
     }
@@ -576,7 +576,7 @@ impl ConditionStateMachine {
     }
 
     /// Sets whether the condition is maintenance-suppressed.
-    pub fn set_out_of_service(&self, address_space: &mut AddressSpace, out_of_service: bool) {
+    pub fn set_out_of_service(&self, address_space: &AddressSpace, out_of_service: bool) {
         self.set_bool_value(address_space, &self.out_of_service_state_id, out_of_service);
         self.recompute_suppressed_or_shelved(address_space);
     }
@@ -611,7 +611,7 @@ impl ConditionStateMachine {
     }
 
     /// Sets the current shelving state.
-    pub fn set_shelving_state(&self, address_space: &mut AddressSpace, state: ShelvingState) {
+    pub fn set_shelving_state(&self, address_space: &AddressSpace, state: ShelvingState) {
         if let Some(mut node) = address_space.find_mut(&self.shelving_current_state_id) {
             if let NodeType::Variable(ref mut var) = &mut *node {
                 let _ = var.set_value(
@@ -644,7 +644,7 @@ impl ConditionStateMachine {
     }
 
     /// Sets the remaining timed-shelve duration in milliseconds.
-    pub fn set_unshelve_time(&self, address_space: &mut AddressSpace, unshelve_time_ms: f64) {
+    pub fn set_unshelve_time(&self, address_space: &AddressSpace, unshelve_time_ms: f64) {
         if let Some(mut node) = address_space.find_mut(&self.unshelve_time_id) {
             if let NodeType::Variable(ref mut var) = &mut *node {
                 let _ = var.set_value(
@@ -656,7 +656,7 @@ impl ConditionStateMachine {
     }
 
     /// Recomputes SuppressedOrShelved from suppression and shelving state.
-    pub fn recompute_suppressed_or_shelved(&self, address_space: &mut AddressSpace) {
+    pub fn recompute_suppressed_or_shelved(&self, address_space: &AddressSpace) {
         let suppressed_or_shelved = self.get_suppressed(address_space)
             || self.get_out_of_service(address_space)
             || self.get_shelving_state(address_space) != ShelvingState::Unshelved;
@@ -668,7 +668,7 @@ impl ConditionStateMachine {
     }
 
     /// Shelves the condition until the alarm next goes inactive.
-    pub fn one_shot_shelve(&self, address_space: &mut AddressSpace) -> StatusCode {
+    pub fn one_shot_shelve(&self, address_space: &AddressSpace) -> StatusCode {
         if self.get_shelving_state(address_space) == ShelvingState::OneShotShelved {
             return StatusCode::BadConditionAlreadyShelved;
         }
@@ -680,11 +680,7 @@ impl ConditionStateMachine {
     }
 
     /// Shelves the condition for the supplied duration in milliseconds.
-    pub fn timed_shelve(
-        &self,
-        address_space: &mut AddressSpace,
-        shelving_time_ms: f64,
-    ) -> StatusCode {
+    pub fn timed_shelve(&self, address_space: &AddressSpace, shelving_time_ms: f64) -> StatusCode {
         if shelving_time_ms <= 0.0 {
             return StatusCode::BadShelvingTimeOutOfRange;
         }
@@ -699,7 +695,7 @@ impl ConditionStateMachine {
     }
 
     /// Returns a shelved condition to Unshelved.
-    pub fn unshelve(&self, address_space: &mut AddressSpace) -> StatusCode {
+    pub fn unshelve(&self, address_space: &AddressSpace) -> StatusCode {
         if self.get_shelving_state(address_space) == ShelvingState::Unshelved {
             return StatusCode::BadConditionNotShelved;
         }
@@ -729,7 +725,7 @@ impl ConditionStateMachine {
         false
     }
 
-    fn set_bool_value(&self, address_space: &mut AddressSpace, id: &NodeId, value: bool) {
+    fn set_bool_value(&self, address_space: &AddressSpace, id: &NodeId, value: bool) {
         if let Some(mut node) = address_space.find_mut(id) {
             if let NodeType::Variable(ref mut var) = &mut *node {
                 let _ = var.set_value(&opcua_types::NumericRange::None, Variant::from(value));

@@ -12,7 +12,7 @@ const ANNOTATIONS_PROPERTY_NAME: &str = "Annotations";
 /// `HasProperty` reference from `source_variable`.
 #[must_use]
 pub fn attach_annotations_property(
-    address_space: &mut AddressSpace,
+    address_space: &AddressSpace,
     source_variable: &NodeId,
 ) -> NodeId {
     let annotations_id = annotations_property_node_id(source_variable);
@@ -66,14 +66,14 @@ mod tests {
     use opcua_types::{DataEncoding, NumericRange, TimestampsToReturn};
 
     fn address_space_with_source(source: &NodeId) -> AddressSpace {
-        let mut address_space = AddressSpace::new();
+        let address_space = AddressSpace::new();
         address_space.add_namespace("http://opcfoundation.org/UA/", 0);
         address_space.add_namespace("urn:test", source.namespace);
 
         VariableBuilder::new(source, "Temperature", "Temperature")
             .data_type(DataTypeId::Double)
             .value(1.0)
-            .insert(&mut address_space);
+            .insert(&address_space);
 
         address_space
     }
@@ -81,9 +81,9 @@ mod tests {
     #[test]
     fn attach_annotations_property_creates_property_variable_and_reference() {
         let source = NodeId::new(2, "DeviceA.Temperature");
-        let mut address_space = address_space_with_source(&source);
+        let address_space = address_space_with_source(&source);
 
-        let annotations_id = attach_annotations_property(&mut address_space, &source);
+        let annotations_id = attach_annotations_property(&address_space, &source);
 
         assert_eq!(annotations_id.namespace, source.namespace);
         assert!(address_space.has_reference(

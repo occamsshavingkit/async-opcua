@@ -34,7 +34,7 @@ pub fn add_alarm_demo(
     let alarms_folder_id = NodeId::new(ns, "alarms");
 
     {
-        let mut address_space = manager.address_space().write();
+        let address_space = manager.address_space().write();
         address_space.add_folder(
             &alarms_folder_id,
             "Alarms",
@@ -46,7 +46,7 @@ pub fn add_alarm_demo(
             .data_type(DataTypeId::Boolean)
             .value(false)
             .organized_by(&alarms_folder_id)
-            .insert(&mut *address_space);
+            .insert(&*address_space);
 
         ObjectBuilder::new(
             &temperature_event_source_node_id,
@@ -55,7 +55,7 @@ pub fn add_alarm_demo(
         )
         .event_notifier(EventNotifier::SUBSCRIBE_TO_EVENTS)
         .organized_by(&alarms_folder_id)
-        .insert(&mut *address_space);
+        .insert(&*address_space);
 
         // Part 9 sections 5.8.2 and 4.4: this writable Variable becomes the
         // AlarmConditionType InputNode and ConditionSource when bound below.
@@ -66,13 +66,13 @@ pub fn add_alarm_demo(
             .access_level(temperature_access)
             .user_access_level(temperature_access)
             .organized_by(&alarms_folder_id)
-            .insert(&mut *address_space);
+            .insert(&*address_space);
 
         VariableBuilder::new(&tank_level_node_id, "TankLevel", "Tank Level")
             .data_type(DataTypeId::Double)
             .value(50.0)
             .organized_by(&alarms_folder_id)
-            .insert(&mut *address_space);
+            .insert(&*address_space);
     }
 
     let condition = register_alarm_condition(
@@ -212,9 +212,9 @@ fn drive_alarm(
 
     let event = {
         let address_space = manager.address_space();
-        let mut address_space = address_space.write();
+        let address_space = address_space.write();
         trigger_alarm_transition(
-            &mut address_space,
+            &address_space,
             condition,
             active,
             if active { 700 } else { 100 },
@@ -253,8 +253,8 @@ fn drive_limit_alarm(
 
     let event = {
         let address_space = manager.address_space();
-        let mut address_space = address_space.write();
-        alarm.update_value(&mut address_space, level)
+        let address_space = address_space.write();
+        alarm.update_value(&address_space, level)
     };
 
     if let Some(event) = event {

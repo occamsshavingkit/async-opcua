@@ -17,7 +17,7 @@ pub mod transitions;
 const ALARM_CONDITION_TYPE_ID: u32 = 2915;
 
 pub(crate) fn replace_condition_type_definition(
-    address_space: &mut AddressSpace,
+    address_space: &AddressSpace,
     condition_id: &NodeId,
     new_type: NodeId,
 ) {

@@ -114,7 +114,7 @@ pub fn register_program(
         .build();
 
     {
-        let mut space = opcua_core::trace_write_lock!(address_space);
+        let space = opcua_core::trace_write_lock!(address_space);
         space.insert::<_, NodeId>(program_obj, None);
     }
 
@@ -131,7 +131,7 @@ pub fn register_program(
     let progress_id = NodeId::new(ns_idx, format!("{}_Progress", base_s));
 
     {
-        let mut space = opcua_core::trace_write_lock!(address_space);
+        let space = opcua_core::trace_write_lock!(address_space);
 
         // CurrentState (String)
         let current_state_var =
@@ -244,7 +244,7 @@ pub fn register_program(
         let reset_method_id = NodeId::new(ns_idx, format!("{}_Reset", base_s));
 
         {
-            let mut space = opcua_core::trace_write_lock!(address_space);
+            let space = opcua_core::trace_write_lock!(address_space);
 
             let start_method = opcua_nodes::MethodBuilder::new(&start_method_id, "Start", "Start")
                 .component_of(parent_id.clone())

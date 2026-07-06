@@ -1,3 +1,4 @@
+#![allow(unused_mut)]
 //! Historical data access integration tests.
 
 use std::{

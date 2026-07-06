@@ -101,7 +101,7 @@ fn cleanup_resources(resources: Vec<CleanupResource>) -> CleanupReport {
 
     for resource in resources {
         if let Some(address_space) = resource.address_space.and_then(|weak| weak.upgrade()) {
-            let mut address_space = opcua_core::trace_write_lock!(address_space);
+            let address_space = opcua_core::trace_write_lock!(address_space);
             for node_id in &resource.node_ids {
                 if address_space.delete(node_id, true).is_some() {
                     report.nodes += 1;
@@ -149,9 +149,9 @@ mod tests {
         let address_space = Arc::new(RwLock::new(AddressSpace::new()));
         let session_id = NodeId::new(0, "cleanup-session-1");
         let file_node = {
-            let mut address_space = address_space.write();
+            let address_space = address_space.write();
             TemporaryFileNode::create(
-                &mut address_space,
+                &address_space,
                 TemporaryFileNodeConfig::new(2, session_id.clone(), "firmware.bin"),
             )
             .expect("temporary file node should be created")

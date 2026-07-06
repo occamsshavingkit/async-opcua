@@ -14,7 +14,7 @@ use opcua_types::{
 
 #[test]
 fn reflect_pubsub_config_materializes_referenceable_instances() {
-    let mut space = AddressSpace::new();
+    let space = AddressSpace::new();
     space.add_namespace("urn:test", 1);
 
     let cfg = PubSubConnectionConfig {
@@ -37,7 +37,7 @@ fn reflect_pubsub_config_materializes_referenceable_instances() {
         }],
     };
 
-    let map: PubSubModelMap = reflect_pubsub_config(&mut space, 1, &[cfg]);
+    let map: PubSubModelMap = reflect_pubsub_config(&space, 1, &[cfg]);
     let tt = DefaultTypeTree::new();
 
     // The map locates the connection and the dataset writer by their config ids.
@@ -64,11 +64,12 @@ fn reflect_pubsub_config_materializes_referenceable_instances() {
             &tt,
             BrowseDirection::Forward,
         )
+        .into_iter()
         .next()
         .expect("DataSetWriter HasTypeDefinition");
     assert_eq!(
-        type_def.target_node,
-        &NodeId::from(ObjectTypeId::DataSetWriterType)
+        type_def.target_id,
+        NodeId::from(ObjectTypeId::DataSetWriterType)
     );
 
     // It carries the DataSetWriterId identity property = 7.
@@ -101,11 +102,12 @@ fn reflect_pubsub_config_materializes_referenceable_instances() {
             &tt,
             BrowseDirection::Forward,
         )
+        .into_iter()
         .next()
         .expect("Connection HasWriterGroup");
     let wg_prop = space
         .find_node_by_browse_name(
-            group.target_node,
+            &group.target_id,
             Some((ReferenceTypeId::HasProperty, false)),
             &tt,
             BrowseDirection::Forward,
@@ -126,7 +128,7 @@ fn reflect_pubsub_config_materializes_referenceable_instances() {
 
 #[test]
 fn reflect_pubsub_config_materializes_reader_side_instances() {
-    let mut space = AddressSpace::new();
+    let space = AddressSpace::new();
     space.add_namespace("urn:test", 1);
 
     let cfg = PubSubConnectionConfig {
@@ -147,7 +149,7 @@ fn reflect_pubsub_config_materializes_reader_side_instances() {
         }],
     };
 
-    let map: PubSubModelMap = reflect_pubsub_config(&mut space, 1, &[cfg]);
+    let map: PubSubModelMap = reflect_pubsub_config(&space, 1, &[cfg]);
     let tt = DefaultTypeTree::new();
 
     // The map locates the DataSetReader by its config id.
@@ -168,11 +170,12 @@ fn reflect_pubsub_config_materializes_reader_side_instances() {
             &tt,
             BrowseDirection::Forward,
         )
+        .into_iter()
         .next()
         .expect("DataSetReader HasTypeDefinition");
     assert_eq!(
-        type_def.target_node,
-        &NodeId::from(ObjectTypeId::DataSetReaderType)
+        type_def.target_id,
+        NodeId::from(ObjectTypeId::DataSetReaderType)
     );
 
     let id_prop = space
@@ -204,11 +207,12 @@ fn reflect_pubsub_config_materializes_reader_side_instances() {
             &tt,
             BrowseDirection::Forward,
         )
+        .into_iter()
         .next()
         .expect("Connection HasReaderGroup");
     let wg = space
         .find_node_by_browse_name(
-            group.target_node,
+            &group.target_id,
             Some((ReferenceTypeId::HasProperty, false)),
             &tt,
             BrowseDirection::Forward,

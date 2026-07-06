@@ -18,20 +18,18 @@ use std::sync::Arc;
 /// interpolation as required by OPC 10000-13.
 pub fn resolve_stepped(address_space: &AddressSpace, node_id: &NodeId) -> bool {
     let type_tree = DefaultTypeTree::new();
-    let Some(config_ref) = address_space
-        .find_references(
-            node_id,
-            Some((ReferenceTypeId::HasHistoricalConfiguration, false)),
-            &type_tree,
-            BrowseDirection::Forward,
-        )
-        .next()
-    else {
+    let refs = address_space.find_references(
+        node_id,
+        Some((ReferenceTypeId::HasHistoricalConfiguration, false)),
+        &type_tree,
+        BrowseDirection::Forward,
+    );
+    let Some(config_ref) = refs.first() else {
         return true;
     };
 
     let Some(stepped_node) = address_space.find_node_by_browse_name(
-        config_ref.target_node,
+        &config_ref.target_id,
         Some((ReferenceTypeId::HasProperty, false)),
         &type_tree,
         BrowseDirection::Forward,
@@ -115,7 +113,7 @@ mod tests {
 
     #[test]
     fn resolve_stepped_reads_historical_configuration() {
-        let mut space = AddressSpace::new();
+        let space = AddressSpace::new();
         space.add_namespace("urn:test", 1);
 
         let var = NodeId::new(1, "var");
@@ -124,12 +122,12 @@ mod tests {
 
         VariableBuilder::new(&var, "var", "var")
             .data_type(DataTypeId::Double)
-            .insert(&mut space);
-        ObjectBuilder::new(&cfg, "HA Configuration", "HA Configuration").insert(&mut space);
+            .insert(&space);
+        ObjectBuilder::new(&cfg, "HA Configuration", "HA Configuration").insert(&space);
         VariableBuilder::new(&stepped, "Stepped", "Stepped")
             .data_type(DataTypeId::Boolean)
             .value(Variant::Boolean(false))
-            .insert(&mut space);
+            .insert(&space);
 
         space.insert_reference(&var, &cfg, ReferenceTypeId::HasHistoricalConfiguration);
         space.insert_reference(&cfg, &stepped, ReferenceTypeId::HasProperty);
@@ -141,7 +139,7 @@ mod tests {
         let plain = NodeId::new(1, "plain");
         VariableBuilder::new(&plain, "plain", "plain")
             .data_type(DataTypeId::Double)
-            .insert(&mut space);
+            .insert(&space);
         assert!(resolve_stepped(&space, &plain));
     }
 }

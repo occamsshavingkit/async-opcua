@@ -391,9 +391,9 @@ fn add_role(
     let namespace_uri = decode_string_argument(args, 1)?;
 
     let role_node_id = {
-        let mut space = address_space.write();
+        let space = address_space.write();
         let role_set = role_set_node_id();
-        let namespace_index = namespace_index_for_role(&mut space, &namespace_uri);
+        let namespace_index = namespace_index_for_role(&space, &namespace_uri);
         let browse_name = QualifiedName::new(namespace_index, role_name.as_str());
 
         let duplicate = {
@@ -416,7 +416,7 @@ fn add_role(
         let inserted = ObjectBuilder::new(&role_node_id, browse_name, role_name.as_str())
             .has_type_definition(ObjectTypeId::RoleType)
             .component_of(role_set)
-            .insert(&mut *space);
+            .insert(&*space);
         if !inserted {
             return Err(StatusCode::BadNodeIdExists);
         }
@@ -452,7 +452,7 @@ fn remove_role(
     }
 
     let role_set = role_set_node_id();
-    let mut space = address_space.write();
+    let space = address_space.write();
     if !space.node_exists(&role_node_id)
         || !space.has_reference(&role_set, &role_node_id, ReferenceTypeId::HasComponent)
     {
@@ -480,7 +480,7 @@ fn role_set_node_id() -> NodeId {
     ObjectId::Server_ServerCapabilities_RoleSet.into()
 }
 
-fn namespace_index_for_role(space: &mut AddressSpace, namespace_uri: &str) -> u16 {
+fn namespace_index_for_role(space: &AddressSpace, namespace_uri: &str) -> u16 {
     if namespace_uri.is_empty() {
         return 0;
     }
@@ -1000,7 +1000,7 @@ mod tests {
     }
 
     fn core_address_space() -> AddressSpace {
-        let mut address_space = AddressSpace::new();
+        let address_space = AddressSpace::new();
         address_space.add_namespace("http://opcfoundation.org/UA/", 0);
         let mut namespaces = NamespaceMap::default();
         address_space.import_node_set(&CoreNamespace, &mut namespaces);

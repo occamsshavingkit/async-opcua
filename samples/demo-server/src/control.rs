@@ -23,7 +23,7 @@ pub fn add_control_switches(
     let control_folder_id = NodeId::new(ns, "control");
 
     {
-        let mut address_space = manager.address_space().write();
+        let address_space = manager.address_space().write();
         address_space.add_folder(
             &control_folder_id,
             "Control",
@@ -36,7 +36,7 @@ pub fn add_control_switches(
             .value(false)
             .writable()
             .organized_by(&control_folder_id)
-            .insert(&mut *address_space);
+            .insert(&*address_space);
     }
 
     let mgr_ref = manager.clone();

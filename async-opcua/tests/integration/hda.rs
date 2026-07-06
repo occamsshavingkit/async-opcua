@@ -1,3 +1,4 @@
+#![allow(unused_mut)]
 use std::{sync::Arc, time::Duration};
 
 use crate::utils::{default_server, Tester};
@@ -56,7 +57,7 @@ async fn test_hda_integration() {
     // 1. Create a source node with History Read/Write access level in the AddressSpace
     let node_id = NodeId::new(2, "MyHistoricalVar");
     {
-        let space = nm.address_space().write();
+        let mut space = nm.address_space().write();
         let var = VariableBuilder::new(&node_id, "MyHistoricalVar", "MyHistoricalVar")
             .data_type(DataTypeId::Double)
             .historizing(true)
@@ -105,7 +106,7 @@ async fn test_hda_integration() {
     let end_time = DateTime::from(now.ticks() + 11 * 10_000_000);
 
     let mut retrieved_values = Vec::new();
-    let (chunk, mut cp) = session
+    let (mut chunk, mut cp) = session
         .history_read_raw(node_id.clone(), start_time, end_time, 3, false, None)
         .await
         .unwrap();
@@ -114,7 +115,7 @@ async fn test_hda_integration() {
 
     // Page through using continuation points
     while let Some(token) = cp {
-        let (next_chunk, next_cp) = session
+        let (mut next_chunk, next_cp) = session
             .history_read_raw(node_id.clone(), start_time, end_time, 3, false, Some(token))
             .await
             .unwrap();
@@ -138,7 +139,7 @@ async fn test_hda_integration() {
 
 // A historizing, readable node used by the history error-mode tests.
 fn insert_hist_node(nm: &SimpleNodeManager, id: &NodeId) {
-    let space = nm.address_space().write();
+    let mut space = nm.address_space().write();
     let var = VariableBuilder::new(id, "HistVar", "HistVar")
         .data_type(DataTypeId::Double)
         .historizing(true)
@@ -169,7 +170,7 @@ async fn history_read_without_history_access_is_denied() {
     let (_tester, nm, session, _backend) = setup_hda().await;
     let plain = NodeId::new(2, "PlainVar");
     {
-        let space = nm.address_space().write();
+        let mut space = nm.address_space().write();
         let var = VariableBuilder::new(&plain, "PlainVar", "PlainVar")
             .data_type(DataTypeId::Double)
             .value(0.0f64)
@@ -297,7 +298,7 @@ async fn setup_hda_inmemory() -> (Tester, Arc<SimpleNodeManager>, Arc<opcua_clie
 }
 
 fn insert_historized(nm: &SimpleNodeManager, id: &NodeId, history_write: bool) {
-    let space = nm.address_space().write();
+    let mut space = nm.address_space().write();
     let mut al = AccessLevel::HISTORY_READ | AccessLevel::CURRENT_READ | AccessLevel::CURRENT_WRITE;
     if history_write {
         al |= AccessLevel::HISTORY_WRITE;

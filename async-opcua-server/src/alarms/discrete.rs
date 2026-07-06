@@ -85,11 +85,7 @@ impl DiscreteAlarm {
     }
 
     /// Evaluates and writes a new discrete value, returning an alarm event when active state changes.
-    pub fn update_value(
-        &self,
-        address_space: &AddressSpace,
-        value: Variant,
-    ) -> Option<AlarmEvent> {
+    pub fn update_value(&self, address_space: &AddressSpace, value: Variant) -> Option<AlarmEvent> {
         if !self.condition.get_enabled(address_space) {
             return None;
         }
@@ -160,11 +156,7 @@ impl SourceMonitoredAlarm for DiscreteAlarm {
         &self.condition.condition_id
     }
 
-    fn re_evaluate(
-        &self,
-        address_space: &AddressSpace,
-        value: &DataValue,
-    ) -> Option<AlarmEvent> {
+    fn re_evaluate(&self, address_space: &AddressSpace, value: &DataValue) -> Option<AlarmEvent> {
         if value.status.is_some_and(|status| status.is_bad()) {
             return None;
         }

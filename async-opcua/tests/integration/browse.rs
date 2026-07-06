@@ -1,3 +1,4 @@
+#![allow(unused_mut)]
 use super::utils::setup;
 use opcua::{
     nodes::TypeTree,
@@ -834,7 +835,7 @@ async fn browse_attached_annotations_property() {
     let (_tester, nm, session) = setup().await;
     let source = NodeId::new(2, "AnnotatedVar");
     {
-        let guard = nm.address_space().write();
+        let mut guard = nm.address_space().write();
         let space = &mut *guard;
         VariableBuilder::new(&source, "AnnotatedVar", "AnnotatedVar")
             .data_type(DataTypeId::Double)

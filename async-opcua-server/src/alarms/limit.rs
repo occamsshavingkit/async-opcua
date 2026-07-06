@@ -597,11 +597,7 @@ impl LimitAlarm {
         );
     }
 
-    fn write_non_exclusive_limit_state(
-        &self,
-        address_space: &AddressSpace,
-        limits: ActiveLimits,
-    ) {
+    fn write_non_exclusive_limit_state(&self, address_space: &AddressSpace, limits: ActiveLimits) {
         let state = match limits {
             ActiveLimits::NonExclusive(state) => state,
             ActiveLimits::Exclusive(_) => NonExclusiveState::default(),
@@ -631,11 +627,7 @@ impl SourceMonitoredAlarm for LimitAlarm {
         &self.condition.condition_id
     }
 
-    fn re_evaluate(
-        &self,
-        address_space: &AddressSpace,
-        value: &DataValue,
-    ) -> Option<AlarmEvent> {
+    fn re_evaluate(&self, address_space: &AddressSpace, value: &DataValue) -> Option<AlarmEvent> {
         source_value_as_f64(value).and_then(|value| self.update_value(address_space, value))
     }
 }

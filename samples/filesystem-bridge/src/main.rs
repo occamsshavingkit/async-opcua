@@ -87,12 +87,7 @@ async fn main() {
     {
         let address_space = node_manager.address_space();
         let address_space = address_space.write();
-        build_tree(
-            &address_space,
-            ns,
-            &root,
-            &ObjectId::ObjectsFolder.into(),
-        );
+        build_tree(&address_space, ns, &root, &ObjectId::ObjectsFolder.into());
     }
 
     info!("filesystem-bridge listening on opc.tcp://localhost:0/");

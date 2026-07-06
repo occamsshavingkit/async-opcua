@@ -1,3 +1,4 @@
+#![allow(unused_mut)]
 use std::{
     sync::Arc,
     time::{Duration, Instant},
@@ -66,7 +67,7 @@ async fn test_alarm_trigger_and_acknowledge() {
     // 1. Create a source node in the AddressSpace
     let source_node_id = NodeId::new(2, "MyDevice");
     {
-        let space = nm.address_space().write();
+        let mut space = nm.address_space().write();
         let source_node = opcua::server::address_space::ObjectBuilder::new(
             &source_node_id,
             "MyDevice",
@@ -134,9 +135,9 @@ async fn test_alarm_trigger_and_acknowledge() {
 
     // 4. Trigger Alarm state transition to Active
     let event = {
-        let space = nm.address_space().write();
+        let mut space = nm.address_space().write();
         trigger_alarm_transition(
-            &space,
+            &mut space,
             &state_machine,
             true,
             800,
@@ -243,7 +244,7 @@ async fn test_alarm_trigger_and_acknowledge() {
 
 // Helper to access transition triggers in testing
 fn trigger_alarm_transition(
-    address_space: &AddressSpace,
+    address_space: &mut AddressSpace,
     state_machine: &opcua::server::alarms::ConditionStateMachine,
     active: bool,
     severity: u16,
@@ -274,7 +275,7 @@ async fn alarm_acknowledge_confirm_error_paths() {
 
     let source_node_id = NodeId::new(2, "ErrDevice");
     {
-        let space = nm.address_space().write();
+        let mut space = nm.address_space().write();
         let source = opcua::server::address_space::ObjectBuilder::new(
             &source_node_id,
             "ErrDevice",
@@ -300,9 +301,9 @@ async fn alarm_acknowledge_confirm_error_paths() {
 
     // Drive the condition to Active so it is acknowledgeable.
     let event = {
-        let space = nm.address_space().write();
+        let mut space = nm.address_space().write();
         trigger_alarm_transition(
-            &space,
+            &mut space,
             &state_machine,
             true,
             800,
@@ -392,9 +393,9 @@ async fn acknowledge_disabled_condition_returns_bad_condition_disabled() {
     register_condition_methods(&core_nm, registry, nm.address_space().clone());
 
     let event = {
-        let space = nm.address_space().write();
+        let mut space = nm.address_space().write();
         let event = trigger_alarm_transition(
-            &space,
+            &mut space,
             &state_machine,
             true,
             800,
@@ -402,7 +403,7 @@ async fn acknowledge_disabled_condition_returns_bad_condition_disabled() {
         )
         .unwrap()
         .expect("active transition should produce an event id");
-        state_machine.set_enabled(&space, false);
+        state_machine.set_enabled(&mut space, false);
         event
     };
 
@@ -438,7 +439,7 @@ const REFRESH_END_EVENT_TYPE: u32 = 2788;
 
 fn make_event_source(nm: &SimpleNodeManager, id: &str) -> NodeId {
     let source_node_id = NodeId::new(2, id);
-    let space = nm.address_space().write();
+    let mut space = nm.address_space().write();
     let source = opcua::server::address_space::ObjectBuilder::new(&source_node_id, id, id)
         .component_of(ObjectId::ObjectsFolder)
         .event_notifier(opcua::server::address_space::EventNotifier::SUBSCRIBE_TO_EVENTS)
@@ -530,8 +531,8 @@ async fn condition_refresh_delivers_retained_alarm_to_late_subscriber() {
 
     // Alarm becomes Active BEFORE the client subscribes, and we deliberately do NOT broadcast it.
     {
-        let space = nm.address_space().write();
-        trigger_alarm_transition(&space, &sm, true, 700, LocalizedText::new("en", "high"))
+        let mut space = nm.address_space().write();
+        trigger_alarm_transition(&mut space, &sm, true, 700, LocalizedText::new("en", "high"))
             .unwrap()
             .expect("transition should produce an event");
     }
@@ -602,8 +603,8 @@ async fn condition_refresh2_targets_a_single_monitored_item() {
     register_condition_methods(&core_nm, registry, nm.address_space().clone());
 
     {
-        let space = nm.address_space().write();
-        trigger_alarm_transition(&space, &sm, true, 500, LocalizedText::new("en", "a"))
+        let mut space = nm.address_space().write();
+        trigger_alarm_transition(&mut space, &sm, true, 500, LocalizedText::new("en", "a"))
             .unwrap()
             .expect("transition event");
     }
@@ -732,8 +733,8 @@ async fn alarm_client_helpers_acknowledge_and_confirm() {
     let _item = add_event_item(&session, sub_id, &source).await;
 
     let event = {
-        let space = nm.address_space().write();
-        trigger_alarm_transition(&space, &sm, true, 600, LocalizedText::new("en", "x"))
+        let mut space = nm.address_space().write();
+        trigger_alarm_transition(&mut space, &sm, true, 600, LocalizedText::new("en", "x"))
             .unwrap()
             .expect("transition event")
     };
@@ -798,8 +799,8 @@ async fn alarm_client_helpers_acknowledge_and_confirm() {
 /// the same way an application would.
 fn drive_limit(alarm: &LimitAlarm, nm: &SimpleNodeManager, tester: &Tester, value: f64) {
     let event = {
-        let space = nm.address_space().write();
-        alarm.update_value(&space, value)
+        let mut space = nm.address_space().write();
+        alarm.update_value(&mut space, value)
     };
     if let Some(ev) = event {
         let wrapper = opcua::server::alarms::ServerAlarmEvent { event: &ev };
@@ -1051,8 +1052,8 @@ async fn limit_alarm_conditionrefresh_replays_active_limit() {
 
     // Drive into the HighHigh band BEFORE subscribing, without broadcasting.
     {
-        let space = nm.address_space().write();
-        let _ = alarm.update_value(&space, 115.0);
+        let mut space = nm.address_space().write();
+        let _ = alarm.update_value(&mut space, 115.0);
     }
 
     let (notifs, _dv, mut events) = ChannelNotifications::new();
@@ -1111,8 +1112,8 @@ async fn bench_condition_refresh_lock_hold_scaling() {
                 "bench alarm",
             );
             {
-                let space = nm.address_space().write();
-                trigger_alarm_transition(&space, &sm, true, 500, LocalizedText::new("en", "x"))
+                let mut space = nm.address_space().write();
+                trigger_alarm_transition(&mut space, &sm, true, 500, LocalizedText::new("en", "x"))
                     .unwrap();
             }
             registry.register(sm);
@@ -1156,8 +1157,8 @@ async fn bench_condition_refresh_lock_hold_scaling() {
 /// Apply a discrete value to an OffNormal/Trip alarm and dispatch the resulting event (if any).
 fn drive_discrete(alarm: &DiscreteAlarm, nm: &SimpleNodeManager, tester: &Tester, value: Variant) {
     let event = {
-        let space = nm.address_space().write();
-        alarm.update_value(&space, value)
+        let mut space = nm.address_space().write();
+        alarm.update_value(&mut space, value)
     };
     if let Some(ev) = event {
         let wrapper = opcua::server::alarms::ServerAlarmEvent { event: &ev };
@@ -1502,7 +1503,7 @@ async fn limit_alarm_validates_against_analog_item_eurange() {
     let source_id = NodeId::new(2, "AnalogSrc");
     {
         use opcua::server::address_space::{ReferenceDirection, VariableBuilder};
-        let space = nm.address_space().write();
+        let mut space = nm.address_space().write();
         let src = VariableBuilder::new(&source_id, "AnalogSrc", "AnalogSrc")
             .data_type(DataTypeId::Double)
             .has_type_definition(VariableTypeId::AnalogItemType)
@@ -1575,7 +1576,7 @@ async fn alarm_add_comment_reports_without_state_change() {
 
     let source_node_id = NodeId::new(2, "CommentDevice");
     {
-        let space = nm.address_space().write();
+        let mut space = nm.address_space().write();
         let source_node = opcua::server::address_space::ObjectBuilder::new(
             &source_node_id,
             "CommentDevice",
@@ -1637,9 +1638,9 @@ async fn alarm_add_comment_reports_without_state_change() {
 
     // Trigger Active (unacknowledged).
     let event = {
-        let space = nm.address_space().write();
+        let mut space = nm.address_space().write();
         trigger_alarm_transition(
-            &space,
+            &mut space,
             &state_machine,
             true,
             800,
@@ -1726,7 +1727,7 @@ async fn dialog_condition_respond_ends_dialog_and_validates() {
 
     let source_node_id = NodeId::new(2, "DialogDevice");
     {
-        let space = nm.address_space().write();
+        let mut space = nm.address_space().write();
         let source_node = opcua::server::address_space::ObjectBuilder::new(
             &source_node_id,
             "DialogDevice",
@@ -1745,9 +1746,9 @@ async fn dialog_condition_respond_ends_dialog_and_validates() {
         .expect("CoreNodeManager not found");
 
     let dialog = {
-        let space = nm.address_space().write();
+        let mut space = nm.address_space().write();
         DialogCondition::create_in_address_space(
-            &space,
+            &mut space,
             2,
             "Device1",
             "Restart",
@@ -1770,8 +1771,8 @@ async fn dialog_condition_respond_ends_dialog_and_validates() {
 
     // Activate the dialog (it is shown to the operator).
     {
-        let space = nm.address_space().write();
-        let _ = dialog.activate(&space);
+        let mut space = nm.address_space().write();
+        let _ = dialog.activate(&mut space);
         assert!(
             dialog.get_dialog_state_active(&space),
             "dialog should be active after activate"
@@ -1809,8 +1810,8 @@ async fn dialog_condition_respond_ends_dialog_and_validates() {
 
     // Re-activate, then respond with an out-of-range index -> BadDialogResponseInvalid.
     {
-        let space = nm.address_space().write();
-        let _ = dialog.activate(&space);
+        let mut space = nm.address_space().write();
+        let _ = dialog.activate(&mut space);
     }
     let oob = session
         .call_one(CallMethodRequest {
@@ -1850,7 +1851,7 @@ async fn condition_event_history_read_returns_recorded_events() {
 
     let source = NodeId::new(2, "HistDevice");
     {
-        let space = nm.address_space().write();
+        let mut space = nm.address_space().write();
         let source_node =
             opcua::server::address_space::ObjectBuilder::new(&source, "HistDevice", "HistDevice")
                 .component_of(ObjectId::ObjectsFolder)
@@ -1921,7 +1922,7 @@ async fn condition_event_history_read_returns_recorded_events() {
 
 fn make_writable_double(nm: &SimpleNodeManager, id: &str) -> NodeId {
     let nid = NodeId::new(2, id);
-    let space = nm.address_space().write();
+    let mut space = nm.address_space().write();
     let var = VariableBuilder::new(&nid, id, id)
         .data_type(DataTypeId::Double)
         .value(0.0f64)
@@ -2114,10 +2115,10 @@ async fn disabled_alarm_does_not_auto_fire() {
         exclusive_level_cfg(),
     );
     {
-        let space = nm.address_space().write();
+        let mut space = nm.address_space().write();
         alarm
             .condition_state_machine()
-            .set_enabled(&space, false);
+            .set_enabled(&mut space, false);
     }
     let mut events = sub_with_events(&session, &event_source).await;
     session.write(&[write_double(&input, 105.0)]).await.unwrap();
@@ -2166,7 +2167,7 @@ async fn non_numeric_source_write_does_not_panic_or_fire() {
     // A BaseDataType source accepts a non-numeric value, so it reaches the re-eval hook.
     let input = NodeId::new(2, "AutoIn18");
     {
-        let space = nm.address_space().write();
+        let mut space = nm.address_space().write();
         let var = VariableBuilder::new(&input, "AutoIn18", "AutoIn18")
             .data_type(DataTypeId::BaseDataType)
             .value(0.0f64)
@@ -2293,8 +2294,8 @@ async fn source_has_condition_reference_to_alarm() {
 /// Change a source variable's Value directly in the address space, bypassing the node-manager
 /// Write path — so ONLY the sampler (if any) will notice. Mirrors an out-of-band source update.
 fn set_value_out_of_band(nm: &SimpleNodeManager, id: &NodeId, v: f64) {
-    let guard = nm.address_space().write();
-    let space: &AddressSpace = &mut guard;
+    let mut guard = nm.address_space().write();
+    let space: &mut AddressSpace = &mut guard;
     if let Some(mut node) = space.find_mut(id) {
         if let opcua::nodes::NodeType::Variable(ref mut var) = &mut *node {
             let _ = var.set_value(&opcua_types::NumericRange::None, Variant::from(v));

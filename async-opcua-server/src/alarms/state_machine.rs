@@ -680,11 +680,7 @@ impl ConditionStateMachine {
     }
 
     /// Shelves the condition for the supplied duration in milliseconds.
-    pub fn timed_shelve(
-        &self,
-        address_space: &AddressSpace,
-        shelving_time_ms: f64,
-    ) -> StatusCode {
+    pub fn timed_shelve(&self, address_space: &AddressSpace, shelving_time_ms: f64) -> StatusCode {
         if shelving_time_ms <= 0.0 {
             return StatusCode::BadShelvingTimeOutOfRange;
         }

@@ -1,3 +1,4 @@
+#![allow(unused_mut)]
 use std::{
     sync::{atomic::AtomicU64, Arc},
     time::Duration,
@@ -30,12 +31,12 @@ async fn call_trivial() {
     let input_id = nm.inner().next_node_id();
     let output_id = nm.inner().next_node_id();
     {
-        let sp = nm.address_space().write();
+        let mut sp = nm.address_space().write();
         MethodBuilder::new(&id, "TestMethod1", "TestMethod1")
             .component_of(ObjectId::ObjectsFolder)
             .input_args(&mut *sp, &input_id, &[])
             .output_args(&mut *sp, &output_id, &[])
-            .insert(&*sp);
+            .insert(&mut *sp);
     }
 
     let called_ref = called.clone();
@@ -64,7 +65,7 @@ async fn call_args() {
     let input_id = nm.inner().next_node_id();
     let output_id = nm.inner().next_node_id();
     {
-        let sp = nm.address_space().write();
+        let mut sp = nm.address_space().write();
         MethodBuilder::new(&id, "MethodAdd", "MethodAdd")
             .component_of(ObjectId::ObjectsFolder)
             .input_args(
@@ -80,7 +81,7 @@ async fn call_args() {
                 &output_id,
                 &[("Result", DataTypeId::Int64).into()],
             )
-            .insert(&*sp);
+            .insert(&mut *sp);
     }
 
     nm.inner().add_method_cb(id.clone(), |args| {
@@ -137,7 +138,7 @@ async fn call_fail() {
     let input_id = nm.inner().next_node_id();
     let output_id = nm.inner().next_node_id();
     {
-        let sp = nm.address_space().write();
+        let mut sp = nm.address_space().write();
         MethodBuilder::new(&id, "MethodAdd", "MethodAdd")
             .user_executable(false)
             .component_of(ObjectId::ObjectsFolder)
@@ -154,7 +155,7 @@ async fn call_fail() {
                 &output_id,
                 &[("Result", DataTypeId::Int64).into()],
             )
-            .insert(&*sp);
+            .insert(&mut *sp);
     }
 
     nm.inner().add_method_cb(id.clone(), |args| {
@@ -315,7 +316,7 @@ async fn call_typed_method_roundtrip() {
     let input_id = nm.inner().next_node_id();
     let output_id = nm.inner().next_node_id();
     {
-        let sp = nm.address_space().write();
+        let mut sp = nm.address_space().write();
         MethodBuilder::new(&id, "TypedAdd", "TypedAdd")
             .component_of(ObjectId::ObjectsFolder)
             .input_args(
@@ -331,7 +332,7 @@ async fn call_typed_method_roundtrip() {
                 &output_id,
                 &[("Result", DataTypeId::Int64).into()],
             )
-            .insert(&*sp);
+            .insert(&mut *sp);
     }
 
     // Registered through the typed adapter — the closure sees decoded i64s and returns a typed tuple.
@@ -361,7 +362,7 @@ async fn call_typed_method_user_error_propagates() {
     let input_id = nm.inner().next_node_id();
     let output_id = nm.inner().next_node_id();
     {
-        let sp = nm.address_space().write();
+        let mut sp = nm.address_space().write();
         MethodBuilder::new(&id, "TypedDouble", "TypedDouble")
             .component_of(ObjectId::ObjectsFolder)
             .input_args(&mut *sp, &input_id, &[("X", DataTypeId::Int64).into()])
@@ -370,7 +371,7 @@ async fn call_typed_method_user_error_propagates() {
                 &output_id,
                 &[("Result", DataTypeId::Int64).into()],
             )
-            .insert(&*sp);
+            .insert(&mut *sp);
     }
 
     nm.inner().add_method_cb(
@@ -419,7 +420,7 @@ async fn call_typed_method_with_context() {
     let input_id = nm.inner().next_node_id();
     let output_id = nm.inner().next_node_id();
     {
-        let sp = nm.address_space().write();
+        let mut sp = nm.address_space().write();
         MethodBuilder::new(&id, "TypedCtx", "TypedCtx")
             .component_of(ObjectId::ObjectsFolder)
             .input_args(&mut *sp, &input_id, &[("Addend", DataTypeId::Int64).into()])
@@ -428,7 +429,7 @@ async fn call_typed_method_with_context() {
                 &output_id,
                 &[("SessionPlusAddend", DataTypeId::Int64).into()],
             )
-            .insert(&*sp);
+            .insert(&mut *sp);
     }
 
     // Context-aware typed handler: reads the session id from the context AND a decoded i64 argument.
@@ -474,13 +475,13 @@ async fn call_non_executable_method_is_bad_not_executable() {
     let input_id = nm.inner().next_node_id();
     let output_id = nm.inner().next_node_id();
     {
-        let sp = nm.address_space().write();
+        let mut sp = nm.address_space().write();
         MethodBuilder::new(&id, "NonExec", "NonExec")
             .executable(false)
             .component_of(ObjectId::ObjectsFolder)
             .input_args(&mut *sp, &input_id, &[])
             .output_args(&mut *sp, &output_id, &[])
-            .insert(&*sp);
+            .insert(&mut *sp);
     }
     nm.inner().add_method_cb(id.clone(), move |_| Ok(vec![]));
 
@@ -504,7 +505,7 @@ async fn failed_method_call_has_no_output_arguments() {
     let input_id = nm.inner().next_node_id();
     let output_id = nm.inner().next_node_id();
     {
-        let sp = nm.address_space().write();
+        let mut sp = nm.address_space().write();
         MethodBuilder::new(&id, "NoPerm", "NoPerm")
             .user_executable(false)
             .component_of(ObjectId::ObjectsFolder)
@@ -514,7 +515,7 @@ async fn failed_method_call_has_no_output_arguments() {
                 &output_id,
                 &[("Result", DataTypeId::Int64).into()],
             )
-            .insert(&*sp);
+            .insert(&mut *sp);
     }
     nm.inner()
         .add_method_cb(id.clone(), |_| Ok(vec![Variant::Int64(1)]));
@@ -545,7 +546,7 @@ async fn call_with_missing_arguments() {
     let input_id = nm.inner().next_node_id();
     let output_id = nm.inner().next_node_id();
     {
-        let sp = nm.address_space().write();
+        let mut sp = nm.address_space().write();
         MethodBuilder::new(&id, "MethodAdd2", "MethodAdd2")
             .component_of(ObjectId::ObjectsFolder)
             .input_args(
@@ -561,7 +562,7 @@ async fn call_with_missing_arguments() {
                 &output_id,
                 &[("Result", DataTypeId::Int64).into()],
             )
-            .insert(&*sp);
+            .insert(&mut *sp);
     }
     nm.inner()
         .add_method_cb(id.clone(), |_args| Ok(vec![Variant::Int64(0)]));
@@ -592,12 +593,12 @@ async fn method_call_emits_audit_event() {
     let input_id = nm.inner().next_node_id();
     let output_id = nm.inner().next_node_id();
     {
-        let sp = nm.address_space().write();
+        let mut sp = nm.address_space().write();
         MethodBuilder::new(&id, "AuditMethod", "AuditMethod")
             .component_of(ObjectId::ObjectsFolder)
             .input_args(&mut *sp, &input_id, &[])
             .output_args(&mut *sp, &output_id, &[])
-            .insert(&*sp);
+            .insert(&mut *sp);
     }
     nm.inner().add_method_cb(id.clone(), move |_| Ok(vec![]));
 

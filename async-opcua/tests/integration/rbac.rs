@@ -1,3 +1,4 @@
+#![allow(unused_mut)]
 //! Role-Based Access Control integration tests — OPC UA Part 3 §4.8–4.9 / §8.55–8.56, Part 18.
 //!
 //! US1: permission attributes readable. US2: identity→role resolution + RoleSet. US3: Read/Write/Call
@@ -451,13 +452,13 @@ async fn call_enforced_by_role() {
         let in_id = nm.inner().next_node_id();
         let out_id = nm.inner().next_node_id();
         {
-            let sp = nm.address_space().write();
+            let mut sp = nm.address_space().write();
             MethodBuilder::new(&id, name, name)
                 .component_of(ObjectId::ObjectsFolder)
                 .input_args(&mut *sp, &in_id, &[])
                 .output_args(&mut *sp, &out_id, &[])
                 .role_permissions(vec![rp(role, PermissionType::Call)])
-                .insert(&*sp);
+                .insert(&mut *sp);
         }
         nm.inner().add_method_cb(id.clone(), move |_| Ok(vec![]));
         id

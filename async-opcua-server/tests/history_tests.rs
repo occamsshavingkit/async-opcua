@@ -1,3 +1,4 @@
+#![allow(unused_mut)]
 //! Historical data access integration tests.
 
 use std::{
@@ -144,7 +145,7 @@ async fn setup_history_server(test_name: &str) -> HistoryServer {
 }
 
 fn add_historical_variable(node_manager: &SimpleNodeManager, node_id: &NodeId) {
-    let space = node_manager.address_space().write();
+    let mut space = node_manager.address_space().write();
     let variable = VariableBuilder::new(node_id, "HistoricalValue", "HistoricalValue")
         .data_type(DataTypeId::Double)
         .historizing(true)
@@ -166,7 +167,7 @@ fn add_historical_variable(node_manager: &SimpleNodeManager, node_id: &NodeId) {
 }
 
 fn add_historical_event_object(node_manager: &SimpleNodeManager, node_id: &NodeId) {
-    let space = node_manager.address_space().write();
+    let mut space = node_manager.address_space().write();
     let object = ObjectBuilder::new(node_id, "HistoricalEventSource", "HistoricalEventSource")
         .event_notifier(EventNotifier::HISTORY_READ)
         .build();
@@ -264,7 +265,7 @@ async fn test_history_read_100k_page_reads() {
     let mut seen = HashSet::with_capacity(100_000);
     let mut continuation_point = None;
     loop {
-        let (page, next) = server
+        let (mut page, next) = server
             .session
             .history_read_raw(
                 node_id.clone(),

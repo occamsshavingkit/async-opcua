@@ -1,3 +1,4 @@
+#![allow(unused_mut)]
 //! Behavioral regression tests for feature 009 hardening findings.
 //!
 //! These exercise fixes that were otherwise covered only by compile-time/config
@@ -159,7 +160,7 @@ async fn too_many_sessions_is_rejected() {
 /// stolen or sniffed token cannot be replayed over an attacker's own channel.
 #[tokio::test]
 async fn session_token_used_on_another_channel_is_rejected() {
-    let (tester, _nm, session_a) = setup().await;
+    let (mut tester, _nm, session_a) = setup().await;
 
     // A second, independent session on its own secure channel.
     let (session_b, lp_b) = tester

@@ -330,11 +330,7 @@ fn add_query_types(
     .insert(address_space);
 }
 
-fn add_query_sensor_type(
-    address_space: &AddressSpace,
-    namespace_index: u16,
-    sensor_type: &NodeId,
-) {
+fn add_query_sensor_type(address_space: &AddressSpace, namespace_index: u16, sensor_type: &NodeId) {
     VariableTypeBuilder::new(
         sensor_type,
         QualifiedName::new(namespace_index, "SensorType"),

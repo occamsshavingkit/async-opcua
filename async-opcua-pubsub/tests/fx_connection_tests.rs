@@ -1,3 +1,4 @@
+#![allow(unused_mut)]
 //! FX4 (OPC UA FX Part 81 §E.2.2.1): ConnectionManager wires a writer↔reader pair and data flows end-to-end.
 
 use opcua_pubsub::{
@@ -111,7 +112,7 @@ fn establish_connection_wires_writer_to_reader_and_data_flows() {
     );
 
     // End-to-end C2C: the publisher emits a message with the bound id; the subscriber applies it.
-    let sub_space = AddressSpace::new();
+    let mut sub_space = AddressSpace::new();
     sub_space.add_namespace("urn:test", 1);
     VariableBuilder::new(&target, "Target", "Target")
         .data_type(DataTypeId::Double)

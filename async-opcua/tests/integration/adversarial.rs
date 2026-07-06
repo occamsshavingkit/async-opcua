@@ -1,3 +1,4 @@
+#![allow(unused_mut)]
 //! Adversarial / malicious-transport tests.
 //!
 //! The high-level client always speaks the protocol correctly, so these tests insert a
@@ -84,8 +85,8 @@ async fn start_attack_proxy(server_addr: SocketAddr, attack: Attack) -> SocketAd
 }
 
 async fn handle_conn(client_conn: TcpStream, server_conn: TcpStream, attack: Attack) {
-    let (client_r, mut client_w) = client_conn.into_split();
-    let (server_r, mut server_w) = server_conn.into_split();
+    let (mut client_r, mut client_w) = client_conn.into_split();
+    let (mut server_r, mut server_w) = server_conn.into_split();
 
     // Server -> client: straight passthrough.
     tokio::spawn(async move {
@@ -619,7 +620,7 @@ async fn open_secure_channel_invalid_certificate_audit_uses_certificate_source_n
 
 #[tokio::test]
 async fn hard_x509_user_certificate_validation_failure_emits_audit_certificate_event() {
-    let (tester, _nm, session) = setup().await;
+    let (mut tester, _nm, session) = setup().await;
     let mut events = subscribe_to_certificate_audits(&session).await;
 
     let user_cert =
@@ -753,8 +754,8 @@ async fn start_dup_chunk_proxy(server_addr: SocketAddr) -> SocketAddr {
                 continue;
             };
             tokio::spawn(async move {
-                let (client_r, mut client_w) = client_conn.into_split();
-                let (server_r, mut server_w) = server_conn.into_split();
+                let (mut client_r, mut client_w) = client_conn.into_split();
+                let (mut server_r, mut server_w) = server_conn.into_split();
                 tokio::spawn(async move {
                     let _ = tokio::io::copy(&mut server_r, &mut client_w).await;
                 });

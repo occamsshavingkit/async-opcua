@@ -1,4 +1,4 @@
-#![allow(unused_mut)]
+#![allow(unused_mut, clippy::unnecessary_mut_passed)]
 use std::{
     sync::Arc,
     time::{Duration, Instant},

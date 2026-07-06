@@ -1,4 +1,4 @@
-#![allow(unused_mut)]
+#![allow(unused_mut, clippy::unnecessary_mut_passed)]
 //! FX4 (OPC UA FX Part 81 §E.2.2.1): ConnectionManager wires a writer↔reader pair and data flows end-to-end.
 
 use opcua_pubsub::{

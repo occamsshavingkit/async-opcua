@@ -510,6 +510,7 @@ fn operand_bool(operand: Option<&ParsedOperand>) -> Option<bool> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unnecessary_mut_passed)]
     use super::QueryGraphTraversal;
     use crate::{
         address_space::{AddressSpace, ObjectBuilder, ObjectTypeBuilder},

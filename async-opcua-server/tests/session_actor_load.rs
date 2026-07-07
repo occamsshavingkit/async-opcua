@@ -127,24 +127,10 @@ async fn run_load_test() {
         }
     }
 
-    // The actor metrics must have advanced by at least the message volume.
-    let total_messages = (CONCURRENT_TASKS * WRITES_PER_TASK * 2) as u64;
-    let messages_after = metrics.actor_messages_processed.load(Ordering::Relaxed);
-    let duration_after = metrics.actor_message_duration_ns.load(Ordering::Relaxed);
-    assert!(
-        messages_after - messages_before >= total_messages,
-        "metrics should count all processed messages: before={messages_before}, after={messages_after}"
-    );
-    assert!(
-        duration_after > duration_before,
-        "metrics should accumulate processing time"
-    );
-    assert!(
-        metrics.actor_queue_peak_depth.load(Ordering::Relaxed) <= ACTOR_QUEUE_CAPACITY,
-        "peak queue depth must stay within the channel capacity"
-    );
-
-    // Terminate the actor and verify acknowledgement and cleanup.
+    // Terminate the actor and verify acknowledgement and cleanup. This must happen
+    // before the metric assertions: the actor increments the message counter *after*
+    // sending the service response, so the counter may lag behind. After termination
+    // acknowledgement the actor has fully drained and the counter is settled.
     let (acknowledge, acknowledged) = oneshot::channel();
     fixture
         .sender
@@ -171,6 +157,24 @@ async fn run_load_test() {
     assert!(
         run_result.is_ok(),
         "actor should exit cleanly on terminate: {run_result:?}"
+    );
+
+    // The actor metrics must have advanced by at least the message volume.
+    // Read after termination acknowledgement so the actor has fully drained.
+    let total_messages = (CONCURRENT_TASKS * WRITES_PER_TASK * 2) as u64;
+    let messages_after = metrics.actor_messages_processed.load(Ordering::Relaxed);
+    let duration_after = metrics.actor_message_duration_ns.load(Ordering::Relaxed);
+    assert!(
+        messages_after - messages_before >= total_messages,
+        "metrics should count all processed messages: before={messages_before}, after={messages_after}"
+    );
+    assert!(
+        duration_after > duration_before,
+        "metrics should accumulate processing time"
+    );
+    assert!(
+        metrics.actor_queue_peak_depth.load(Ordering::Relaxed) <= ACTOR_QUEUE_CAPACITY,
+        "peak queue depth must stay within the channel capacity"
     );
 }
 

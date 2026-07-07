@@ -135,9 +135,7 @@ The server and client support the following user identity tokens
 
 OPC UA for Rust uses cryptographic algorithms for signing, verifying, encrypting and decrypting data. In addition it creates, loads and saves certificates and keys.
 
-OpenSSL is used for encryption although it would be nice to go to a pure Rust implementation assuming a crate delivers everything required. The crypto+OpenSSL code is isolated in an `async-opcua-crypto` crate.
-
-You must read the [setup](./setup.md) to configure OpenSSL for your environment.
+The default build uses `aws-lc-rs` for RSA operations (constant-time), pure-Rust elliptic-curve crates (`p256`, `p384`, `ecdsa`) for ECC, and `rustls` for TLS on `opc.tcp` and `opc.wss` transports. A pure-Rust fallback that requires no C compiler is available with `--no-default-features` (see [crypto.md](./crypto.md)). All cryptographic code is isolated in the `async-opcua-crypto` crate.
 
 ### Certificate pki structure
 

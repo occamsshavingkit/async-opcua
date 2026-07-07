@@ -1,3 +1,0 @@
-[submodule "schemas/companion"]
-	path = schemas/companion
-	url = https://github.com/OPCFoundation/UA-Nodeset.git

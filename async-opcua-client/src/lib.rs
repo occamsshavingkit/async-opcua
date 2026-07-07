@@ -175,6 +175,6 @@ pub mod services {
     }
 }
 
-pub use identity_token::{IdentityToken, IssuedTokenSource, IssuedTokenWrapper, Password};
 #[cfg(feature = "kerberos")]
 pub use identity_token::acquire_kerberos_token;
+pub use identity_token::{IdentityToken, IssuedTokenSource, IssuedTokenWrapper, Password};

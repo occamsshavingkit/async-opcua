@@ -24,6 +24,7 @@ pub mod authorization {
 }
 pub mod authenticator;
 mod builder;
+mod companion;
 mod config;
 #[cfg(feature = "diagnostics")]
 pub mod diagnostics;

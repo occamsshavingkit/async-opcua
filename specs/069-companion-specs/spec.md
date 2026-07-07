@@ -15,29 +15,21 @@ A developer building an OPC UA server for a factory wants to expose standard CNC
 
 A developer only needs the DI (Device Integration) types for their application. They don't want to bloat their binary with CNC or Robotics types. Each companion spec is behind its own Cargo feature flag.
 
-## Companion Specs Available (from OPCFoundation/UA-Nodeset)
+## Companion Specs (from OPCFoundation/UA-Nodeset)
 
-**Tier 1 — Foundation/frequently used (8)**:
-DI, AutoID, CNC, Robotics, MachineTool, PROFINET, ISA-95, PackML
+All ~70 publicly available companion specifications from the OPC Foundation's public UA-Nodeset repository. Each spec gets its own Cargo feature flag under `companion-{name}`.
 
-**Tier 2 — Manufacturing (8)**:
-PlasticsRubber, MetalForming, Woodworking, SurfaceTechnology, Powertrain, Shotblasting, CuttingTool, AdditiveManufacturing
-
-**Tier 3 — Infrastructure/domain-specific (10+)**:
-IEC61850, BACnet, MDIS, GDS, Safety, Sercos, Pumps, Scales, LADS, GPOS, CommercialKitchenEquipment, etc.
-
-**Already done**: FX (Parts 80-84), GDS (partial)
+Includes: ADI, AMB, AML, AdditiveManufacturing, AutoID, BACnet, CAS, CNC, CSPPlusForMachine, CommercialKitchenEquipment, CranesHoists, CuttingTool, DEXPI, DI, ECM, FDI, FDT, GDS, GMS, GPOS, Glass/Flat, I4AAS, IA, IEC61850, IJT, IOLink, IREDES, ISA-95, ISA95-JOBCONTROL, LADS, LaserSystems, MDIS, MTConnect, MachineTool, MachineVision, Machinery, MetalForming, Mining, OpenSCS, PADIM, PAEFS, PLCopen, PNDRV, PNEM, PNENC, PNGSDGM, PNRIO, POWERLINK, PROFINET, PackML, PlasticsRubber, Powertrain, Pumps, RSL, Robotics, Safety, Scales, Scheduler, Sercos, Shotblasting, SurfaceTechnology, TMC, TTD, UAFX, WMTP, Weihenstephan, WireHarness, WoT, Woodworking, and others.
 
 ## Functional Requirements
 
-- **FR-001**: Each companion spec MUST have its own Cargo feature flag in `async-opcua-server`.
+- **FR-001**: Each companion spec MUST have its own Cargo feature flag.
 - **FR-002**: Generated types MUST be in separate modules per companion spec.
-- **FR-003**: The codegen tool MUST accept multiple companion spec configs.
-- **FR-004**: Tier 1 companion specs MUST be bundled in the generated code.
-- **FR-005**: All existing tests MUST continue to pass.
+- **FR-003**: A `companion` meta-feature MUST enable all specs at once.
+- **FR-004**: All existing tests MUST continue to pass.
 
 ## Success Criteria
 
-- **SC-001**: At least 8 Tier 1 companion specs are available behind Cargo features.
-- **SC-002**: `cargo build --features companion-di` includes DI types in the address space.
-- **SC-003**: All existing 618+ tests pass.
+- **SC-001**: All ~70 publicly available companion specs have Cargo features.
+- **SC-002**: All existing 618+ tests pass.
+- **SC-003**: `cargo check --features companion` (or with any single feature) compiles.

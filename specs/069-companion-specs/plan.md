@@ -4,7 +4,7 @@
 
 ## Summary
 
-Download companion spec NodeSet XMLs from `OPCFoundation/UA-Nodeset`, run them through the existing `async-opcua-codegen` pipeline, and register the generated types behind Cargo feature flags in `async-opcua-server`.
+All ~70 companion specs from OPCFoundation/UA-Nodeset. Each gets a `companion-{name}` Cargo feature flag.
 
 ## Technical Context
 

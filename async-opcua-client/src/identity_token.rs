@@ -118,4 +118,58 @@ impl IdentityToken {
     pub fn new_issued_token_arc(token_source: Arc<dyn IssuedTokenSource>) -> Self {
         IdentityToken::IssuedToken(IssuedTokenWrapper::new(token_source))
     }
+
+    /// Create a Kerberos IssuedToken identity for the given service principal (OPC 10000-6 §6.4).
+    /// Acquires a GSSAPI service ticket and wraps it as a `GSSAPI <base64>` IssuedToken.
+    /// Requires the `kerberos` feature and a valid Kerberos TGT.
+    #[cfg(feature = "kerberos")]
+    pub fn new_kerberos(spn: impl Into<String>) -> Result<Self, opcua_types::Error> {
+        let token = acquire_kerberos_token(&spn.into())
+            .map_err(|e| opcua_types::Error::new(StatusCode::BadIdentityTokenRejected, e))?;
+        Ok(IdentityToken::IssuedToken(IssuedTokenWrapper::new_source(
+            token,
+        )))
+    }
+}
+
+/// Acquire a Kerberos service ticket via GSSAPI for the given SPN (OPC 10000-6 §6.4).
+/// Returns the token as a `ByteString` with the `GSSAPI ` base64 prefix.
+#[cfg(feature = "kerberos")]
+#[allow(unreachable_pub)]
+pub fn acquire_kerberos_token(spn: &str) -> Result<ByteString, String> {
+    use base64::Engine;
+    use libgssapi::context::ClientCtx;
+    use libgssapi::credential::{Cred, CredUsage};
+    use libgssapi::name::Name;
+    use libgssapi::oid::{GSS_MECH_KRB5, GSS_NT_HOSTBASED_SERVICE};
+
+    let name = Name::new(spn.as_bytes(), Some(GSS_NT_HOSTBASED_SERVICE))
+        .map_err(|_| format!("GSSAPI: invalid SPN '{spn}'"))?;
+    let canonical = name
+        .canonicalize(Some(GSS_MECH_KRB5))
+        .map_err(|_| "GSSAPI: failed to canonicalize SPN".to_string())?;
+
+    let cred = Cred::acquire(
+        None,
+        None,
+        CredUsage::Initiate,
+        None::<&libgssapi::oid::OidSet>,
+    )
+    .map_err(|_| "GSSAPI: no Kerberos credentials (run kinit)".to_string())?;
+
+    let mut client = ClientCtx::new(
+        Some(cred),
+        canonical,
+        libgssapi::context::CtxFlags::GSS_C_MUTUAL_FLAG
+            | libgssapi::context::CtxFlags::GSS_C_CONF_FLAG,
+        Some(GSS_MECH_KRB5),
+    );
+
+    let token = client
+        .step(None, None)
+        .map_err(|_| "GSSAPI: failed to acquire service ticket".to_string())?;
+
+    let token_bytes = token.map(|b| b.to_vec()).unwrap_or_default();
+    let encoded = base64::engine::general_purpose::STANDARD.encode(&token_bytes);
+    Ok(ByteString::from(format!("GSSAPI {encoded}").into_bytes()))
 }

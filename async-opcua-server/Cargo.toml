@@ -124,25 +124,98 @@ kerberos = ["async-opcua-crypto/kerberos"]
 
 # Companion specification NodeSet imports (OPC 10000-1 Annex A).
 # Each enables importing the corresponding published NodeSet XML at startup.
-companion-di = []
+companion-adi = []
+companion-amb = []
+companion-aml = []
 companion-autoid = []
-companion-robotics = []
+companion-bacnet = []
+companion-cas = []
 companion-cnc = []
+companion-commercialkitchenequipment = []
+companion-craneshoists = []
+companion-cspplusformachine = []
+companion-cuttingtool = []
+companion-demomodel = []
+companion-dexpi = []
+companion-di = []
+companion-ecm = []
+companion-fdi = []
+companion-fdt = []
+companion-gds = []
+companion-gpos = []
+companion-i4aas = []
+companion-ia = []
+companion-iolink = []
+companion-iredes = []
+companion-isa_95 = []
+companion-lads = []
+companion-lasersystems = []
+companion-machinery = []
 companion-machinetool = []
-companion-profinet = []
-companion-isa95 = []
+companion-machinevision = []
+companion-mdis = []
+companion-metalforming = []
+companion-mtconnect = []
+companion-onboarding = []
+companion-openscs = []
 companion-packml = []
+companion-padim = []
+companion-paefs = []
+companion-plcopen = []
+companion-pnem = []
+companion-powerlink = []
+companion-powertrain = []
+companion-profinet = []
+companion-pumps = []
+companion-robotics = []
 # Enables ALL companion specs at once.
 companion = [
-    "companion-di",
+    "companion-adi",
+    "companion-amb",
+    "companion-aml",
     "companion-autoid",
-    "companion-robotics",
+    "companion-bacnet",
+    "companion-cas",
     "companion-cnc",
+    "companion-commercialkitchenequipment",
+    "companion-craneshoists",
+    "companion-cspplusformachine",
+    "companion-cuttingtool",
+    "companion-demomodel",
+    "companion-dexpi",
+    "companion-di",
+    "companion-ecm",
+    "companion-fdi",
+    "companion-fdt",
+    "companion-gds",
+    "companion-gpos",
+    "companion-i4aas",
+    "companion-ia",
+    "companion-iolink",
+    "companion-iredes",
+    "companion-isa_95",
+    "companion-lads",
+    "companion-lasersystems",
+    "companion-machinery",
     "companion-machinetool",
-    "companion-profinet",
-    "companion-isa95",
+    "companion-machinevision",
+    "companion-mdis",
+    "companion-metalforming",
+    "companion-mtconnect",
+    "companion-onboarding",
+    "companion-openscs",
     "companion-packml",
+    "companion-padim",
+    "companion-paefs",
+    "companion-plcopen",
+    "companion-pnem",
+    "companion-powerlink",
+    "companion-powertrain",
+    "companion-profinet",
+    "companion-pumps",
+    "companion-robotics",
 ]
+
 
 [dependencies]
 moka = { version = "0.12", features = ["future", "sync"] }

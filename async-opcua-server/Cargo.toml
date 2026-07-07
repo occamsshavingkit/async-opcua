@@ -134,19 +134,20 @@ companion-commercialkitchenequipment = []
 companion-craneshoists = []
 companion-cspplusformachine = []
 companion-cuttingtool = []
-companion-demomodel = []
 companion-dexpi = []
 companion-di = []
 companion-ecm = []
 companion-fdi = []
 companion-fdt = []
 companion-gds = []
+companion-gms = []
 companion-gpos = []
 companion-i4aas = []
 companion-ia = []
 companion-iolink = []
 companion-iredes = []
-companion-isa_95 = []
+companion-isa95 = []
+companion-isa95_jobcontrol = []
 companion-lads = []
 companion-lasersystems = []
 companion-machinery = []
@@ -155,13 +156,16 @@ companion-machinevision = []
 companion-mdis = []
 companion-metalforming = []
 companion-mtconnect = []
-companion-onboarding = []
 companion-openscs = []
 companion-packml = []
 companion-padim = []
 companion-paefs = []
 companion-plcopen = []
+companion-pndrv = []
 companion-pnem = []
+companion-pnenc = []
+companion-pngsdgm = []
+companion-pnrio = []
 companion-powerlink = []
 companion-powertrain = []
 companion-profinet = []
@@ -191,19 +195,20 @@ companion = [
     "companion-craneshoists",
     "companion-cspplusformachine",
     "companion-cuttingtool",
-    "companion-demomodel",
     "companion-dexpi",
     "companion-di",
     "companion-ecm",
     "companion-fdi",
     "companion-fdt",
     "companion-gds",
+    "companion-gms",
     "companion-gpos",
     "companion-i4aas",
     "companion-ia",
     "companion-iolink",
     "companion-iredes",
-    "companion-isa_95",
+    "companion-isa95",
+    "companion-isa95_jobcontrol",
     "companion-lads",
     "companion-lasersystems",
     "companion-machinery",
@@ -212,13 +217,16 @@ companion = [
     "companion-mdis",
     "companion-metalforming",
     "companion-mtconnect",
-    "companion-onboarding",
     "companion-openscs",
     "companion-packml",
     "companion-padim",
     "companion-paefs",
     "companion-plcopen",
+    "companion-pndrv",
     "companion-pnem",
+    "companion-pnenc",
+    "companion-pngsdgm",
+    "companion-pnrio",
     "companion-powerlink",
     "companion-powertrain",
     "companion-profinet",

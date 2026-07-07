@@ -5,6 +5,15 @@ Ideas that could be implemented.
 ## Remaining
 
 - **CTT certification run**: run the demo server against the OPC Foundation Compliance Test Tool on Windows. See `docs/ctt-conformance.md`.
+- ~~**Technical debt quick wins**: fix companion feature-name drift between `async-opcua-server/Cargo.toml` and `async-opcua-server/src/companion/mod.rs`; remove or narrow the `unexpected_cfgs` allowance; add a consistency check for declared companion features versus importer gates.~~
+- ~~**Spec Kit reconciliation**: update `specs/069-companion-specs/tasks.md` and related plan/spec artifacts so they match the current companion-spec implementation strategy, or document the intended migration path if runtime XML import is temporary.~~
+- ~~**Documentation cleanup**: update `docs/compatibility.md` so the crypto backend description matches the current `aws-lc-rs`/`rustls`/Rust-crypto implementation instead of stale OpenSSL wording.~~
+- **Async lock audit**: audit synchronous lock use in session, subscription, secure-channel, and SQLite history paths; confirm lock guards are not held across `.await`; add targeted high-contention tests where needed.
+- **Dependency debt review**: revisit `deny.toml` advisory exceptions and duplicate dependency stacks (`tokio-tungstenite`, `thiserror`, `rand`, `getrandom`, `rustix`, async runtime support crates); collapse versions where upstream compatibility allows.
+- **Companion import strategy decision**: decide and document whether companion specs should use generated Rust, runtime XML imports, or a hybrid model; measure build time and footprint before enabling broad companion support.
+- **Protocol TODO conversion**: turn high-impact protocol TODOs into grounded implementation tasks with OPC UA section references, including query partial-success behavior, `Variant::set_range_of` completeness, and event filter `RelatedTo` support.
+- **Large-module refactoring backlog**: split the largest handwritten modules only around stable domain boundaries, starting with subscription service/client code, memory node manager internals, session manager, secure channel, and subscription state handling.
+- **Debt KPI tracking**: track generated-code size, non-generated LOC hotspots, build time, binary footprint, dependency advisories, and feature-lattice failures as recurring technical debt metrics. See `docs/technical-debt-report-2026-07-07.md`.
 
 ## Done
 

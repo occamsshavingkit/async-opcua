@@ -1,21 +1,22 @@
 # Tasks: Bundle All Public Companion Specifications
 
-## Phase 1: Infrastructure
+**Note**: The original plan assumed generated Rust code per spec (T001-T004). The implemented approach uses runtime XML NodeSet import via the `companion!()` macro in `async-opcua-server/src/companion/mod.rs`. These tasks are superseded and replaced below.
 
-- [ ] T001 Clone `OPCFoundation/UA-Nodeset` as a submodule into `schemas/companion/` — OPC 10000-1 Annex A
-- [ ] T002 Generate a codegen config that targets all ~70 companion specs from the cloned repo, one output module per spec
-- [ ] T003 Run codegen: `cargo run --bin async-opcua-codegen companions_codegen_config.yml`
-- [ ] T004 Add generated modules under `async-opcua-server/src/companion/`
+## Phase 1: Infrastructure — Runtime XML Import (supersedes T001-T004)
 
-## Phase 2: Feature Gates & Registration
+- [x] T001 Define per-spec import functions via the `companion!()` macro in `async-opcua-server/src/companion/mod.rs`
+- [x] T002 Declare each `companion-{name}` Cargo feature in `async-opcua-server/Cargo.toml`
 
-- [ ] T005 Script generation of a `companion-{name}` Cargo feature for each spec in `async-opcua-server/Cargo.toml`, each gating the corresponding generated module and its `import_node_set` call
-- [ ] T006 Register all companion namespaces in a unified `import_companion_nodesets` function behind a `companion` meta-feature that enables all specs — OPC 10000-1 Annex A
-- [ ] T007 Wire the unified import into `ServerBuilder` so any enabled companion spec is auto-registered
+## Phase 2: Feature Gates & Registration (supersedes T005-T007)
+
+- [x] T003 Create `companion` meta-feature that enables all specs
+- [x] T004 Define `import_all_companions()` function that calls each spec importer
+- [ ] T005 Wire `import_all_companions` into `ServerBuilder` during address-space initialization
 
 ## Phase 3: Polish
 
-- [ ] T008 Build and test `cargo test --all-features`
-- [ ] T009 Run `cargo clippy --workspace --all-targets --all-features -- -D warnings`
-- [ ] T010 Run `tools/ci-playbook.sh --ci`
-- [ ] T011 Update TODO.md
+- [ ] T006 Build and test `cargo test --all-features`
+- [ ] T007 Run `cargo clippy --workspace --all-targets --all-features -- -D warnings`
+- [ ] T008 Run `tools/ci-playbook.sh --ci`
+- [ ] T009 Verify companion features match importer gates (see `tools/check-companion-features.sh`)
+- [ ] T010 Update TODO.md

@@ -5,7 +5,7 @@
 //!
 //! Clone the repository into `schemas/companion/` before building with any
 //! `companion-*` features. See `schemas/companion/README.md` for instructions.
-#![allow(dead_code, unused_imports, unreachable_pub, clippy::all, unexpected_cfgs)]
+#![allow(dead_code, unused_imports, unreachable_pub, clippy::all)]
 
 use std::path::PathBuf;
 

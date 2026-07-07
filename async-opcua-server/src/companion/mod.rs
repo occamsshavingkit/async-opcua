@@ -1,6 +1,6 @@
 //! Companion specification NodeSet imports (OPC 10000-1 Annex A).
 //!
-//! 44 companion specs available behind Cargo feature flags.
+//! 55 companion specs available behind Cargo feature flags.
 //! Each imports its published NodeSet XML at server startup.
 #![allow(dead_code, unused_imports, unreachable_pub, clippy::all)]
 
@@ -16,11 +16,7 @@ fn import_companion_xml(
     let import = match opcua_nodes::NodeSet2Import::new_str("en", xml, dependent_namespaces) {
         Ok(i) => i,
         Err(e) => {
-            tracing::warn!(
-                "Failed to load companion spec '{}' NodeSet XML: {}",
-                name,
-                e
-            );
+            tracing::warn!("Failed to load companion spec '{}' NodeSet XML: {}", name, e);
             return;
         }
     };
@@ -42,222 +38,61 @@ macro_rules! companion {
     };
 }
 
-companion!(
-    "companion-adi",
-    import_adi,
-    "../../../schemas/companion/ADI/Opc.Ua.Adi.NodeSet2.xml"
-);
-companion!(
-    "companion-amb",
-    import_amb,
-    "../../../schemas/companion/AMB/Opc.Ua.AMB.NodeSet2.xml"
-);
-companion!(
-    "companion-aml",
-    import_aml,
-    "../../../schemas/companion/AML/Opc.Ua.AMLLibraries.NodeSet2.xml"
-);
-companion!(
-    "companion-autoid",
-    import_autoid,
-    "../../../schemas/companion/AutoID/Opc.Ua.AutoID.NodeSet2.xml"
-);
-companion!(
-    "companion-bacnet",
-    import_bacnet,
-    "../../../schemas/companion/BACnet/Opc.Ua.BACnet.NodeSet2.xml"
-);
-companion!(
-    "companion-cas",
-    import_cas,
-    "../../../schemas/companion/CAS/Opc.Ua.CAS.NodeSet2.xml"
-);
-companion!(
-    "companion-cnc",
-    import_cnc,
-    "../../../schemas/companion/CNC/Opc.Ua.CNC.NodeSet.xml"
-);
-companion!(
-    "companion-cspplusformachine",
-    import_cspplusformachine,
-    "../../../schemas/companion/CSPPlusForMachine/Opc.Ua.CSPPlusForMachine.NodeSet2.xml"
-);
+companion!("companion-adi", import_adi, "../../../schemas/companion/ADI/Opc.Ua.Adi.NodeSet2.xml");
+companion!("companion-amb", import_amb, "../../../schemas/companion/AMB/Opc.Ua.AMB.NodeSet2.xml");
+companion!("companion-aml", import_aml, "../../../schemas/companion/AML/Opc.Ua.AMLLibraries.NodeSet2.xml");
+companion!("companion-autoid", import_autoid, "../../../schemas/companion/AutoID/Opc.Ua.AutoID.NodeSet2.xml");
+companion!("companion-bacnet", import_bacnet, "../../../schemas/companion/BACnet/Opc.Ua.BACnet.NodeSet2.xml");
+companion!("companion-cas", import_cas, "../../../schemas/companion/CAS/Opc.Ua.CAS.NodeSet2.xml");
+companion!("companion-cnc", import_cnc, "../../../schemas/companion/CNC/Opc.Ua.CNC.NodeSet.xml");
+companion!("companion-cspplusformachine", import_cspplusformachine, "../../../schemas/companion/CSPPlusForMachine/Opc.Ua.CSPPlusForMachine.NodeSet2.xml");
 companion!("companion-commercialkitchenequipment", import_commercialkitchenequipment, "../../../schemas/companion/CommercialKitchenEquipment/Opc.Ua.CommercialKitchenEquipment.NodeSet2.xml");
-companion!(
-    "companion-craneshoists",
-    import_craneshoists,
-    "../../../schemas/companion/CranesHoists/Opc.Ua.CranesHoists.NodeSet2.xml"
-);
-companion!(
-    "companion-cuttingtool",
-    import_cuttingtool,
-    "../../../schemas/companion/CuttingTool/Opc.Ua.CuttingTool.NodeSet2.xml"
-);
-companion!(
-    "companion-dexpi",
-    import_dexpi,
-    "../../../schemas/companion/DEXPI/Opc.Ua.DEXPI.NodeSet2.xml"
-);
-companion!(
-    "companion-di",
-    import_di,
-    "../../../schemas/companion/DI/Opc.Ua.Di.PackageMetadata.NodeSet2.xml"
-);
-companion!(
-    "companion-demomodel",
-    import_demomodel,
-    "../../../schemas/companion/DemoModel/DemoModel.NodeSet2.xml"
-);
-companion!(
-    "companion-ecm",
-    import_ecm,
-    "../../../schemas/companion/ECM/Opc.Ua.ECM.NodeSet2.xml"
-);
-companion!(
-    "companion-fdi",
-    import_fdi,
-    "../../../schemas/companion/FDI/Opc.Ua.Fdi7.NodeSet2.xml"
-);
-companion!(
-    "companion-fdt",
-    import_fdt,
-    "../../../schemas/companion/FDT/Opc.Ua.FDT.NodeSet.xml"
-);
-companion!(
-    "companion-gds",
-    import_gds,
-    "../../../schemas/companion/GDS/Opc.Ua.Gds.NodeSet2.xml"
-);
-companion!(
-    "companion-gpos",
-    import_gpos,
-    "../../../schemas/companion/GPOS/Opc.Ua.GPOS.NodeSet2.xml"
-);
-companion!(
-    "companion-i4aas",
-    import_i4aas,
-    "../../../schemas/companion/I4AAS/Opc.Ua.I4AAS.NodeSet2.xml"
-);
-companion!(
-    "companion-ia",
-    import_ia,
-    "../../../schemas/companion/IA/Opc.Ua.IA.NodeSet2.examples.xml"
-);
-companion!(
-    "companion-iolink",
-    import_iolink,
-    "../../../schemas/companion/IOLink/Opc.Ua.IOLinkIODD.NodeSet2.xml"
-);
-companion!(
-    "companion-iredes",
-    import_iredes,
-    "../../../schemas/companion/IREDES/Opc.Ua.IREDES.NodeSet2.xml"
-);
-companion!(
-    "companion-isa_95",
-    import_isa_95,
-    "../../../schemas/companion/ISA-95/Opc.ISA95.NodeSet2.xml"
-);
-companion!(
-    "companion-lads",
-    import_lads,
-    "../../../schemas/companion/LADS/Opc.Ua.LADS.NodeSet2.xml"
-);
-companion!(
-    "companion-lasersystems",
-    import_lasersystems,
-    "../../../schemas/companion/LaserSystems/LaserSystem-Example.NodeSet2.xml"
-);
-companion!(
-    "companion-mdis",
-    import_mdis,
-    "../../../schemas/companion/MDIS/Opc.MDIS.NodeSet2.xml"
-);
-companion!(
-    "companion-mtconnect",
-    import_mtconnect,
-    "../../../schemas/companion/MTConnect/Opc.Ua.MTConnect.NodeSet2.xml"
-);
-companion!(
-    "companion-machinetool",
-    import_machinetool,
-    "../../../schemas/companion/MachineTool/Opc.Ua.MachineTool.NodeSet2.xml"
-);
-companion!(
-    "companion-machinevision",
-    import_machinevision,
-    "../../../schemas/companion/MachineVision/Opc.Ua.MachineVision.NodeSet2.xml"
-);
-companion!(
-    "companion-machinery",
-    import_machinery,
-    "../../../schemas/companion/Machinery/Opc.Ua.Machinery.Examples.NodeSet2.xml"
-);
-companion!(
-    "companion-metalforming",
-    import_metalforming,
-    "../../../schemas/companion/MetalForming/Opc.Ua.MetalForming.NodeSet2.xml"
-);
-companion!(
-    "companion-onboarding",
-    import_onboarding,
-    "../../../schemas/companion/Onboarding/Opc.Ua.Onboarding.NodeSet2.xml"
-);
-companion!(
-    "companion-openscs",
-    import_openscs,
-    "../../../schemas/companion/OpenSCS/Opc.Ua.OPENSCS.NodeSet2.xml"
-);
-companion!(
-    "companion-padim",
-    import_padim,
-    "../../../schemas/companion/PADIM/Opc.Ua.IRDI.NodeSet2.xml"
-);
-companion!(
-    "companion-paefs",
-    import_paefs,
-    "../../../schemas/companion/PAEFS/Opc.Ua.PAEFS.NodeSet2.xml"
-);
-companion!(
-    "companion-plcopen",
-    import_plcopen,
-    "../../../schemas/companion/PLCopen/Opc.Ua.PLCopen.NodeSet2_V1.02.xml"
-);
-companion!(
-    "companion-pnem",
-    import_pnem,
-    "../../../schemas/companion/PNEM/Opc.Ua.PnEm.NodeSet2.xml"
-);
-companion!(
-    "companion-powerlink",
-    import_powerlink,
-    "../../../schemas/companion/POWERLINK/Opc.Ua.POWERLINK.NodeSet2.xml"
-);
-companion!(
-    "companion-profinet",
-    import_profinet,
-    "../../../schemas/companion/PROFINET/Opc.Ua.Pn.NodeSet2.xml"
-);
-companion!(
-    "companion-packml",
-    import_packml,
-    "../../../schemas/companion/PackML/Opc.Ua.PackML.NodeSet2.xml"
-);
-companion!(
-    "companion-powertrain",
-    import_powertrain,
-    "../../../schemas/companion/Powertrain/Opc.Ua.Powertrain.NodeSet2.xml"
-);
-companion!(
-    "companion-pumps",
-    import_pumps,
-    "../../../schemas/companion/Pumps/Opc.Ua.Pumps.NodeSet2.xml"
-);
-companion!(
-    "companion-robotics",
-    import_robotics,
-    "../../../schemas/companion/Robotics/Opc.Ua.Robotics.NodeSet2.xml"
-);
+companion!("companion-craneshoists", import_craneshoists, "../../../schemas/companion/CranesHoists/Opc.Ua.CranesHoists.NodeSet2.xml");
+companion!("companion-cuttingtool", import_cuttingtool, "../../../schemas/companion/CuttingTool/Opc.Ua.CuttingTool.NodeSet2.xml");
+companion!("companion-dexpi", import_dexpi, "../../../schemas/companion/DEXPI/Opc.Ua.DEXPI.NodeSet2.xml");
+companion!("companion-di", import_di, "../../../schemas/companion/DI/Opc.Ua.Di.PackageMetadata.NodeSet2.xml");
+companion!("companion-demomodel", import_demomodel, "../../../schemas/companion/DemoModel/DemoModel.NodeSet2.xml");
+companion!("companion-ecm", import_ecm, "../../../schemas/companion/ECM/Opc.Ua.ECM.NodeSet2.xml");
+companion!("companion-fdi", import_fdi, "../../../schemas/companion/FDI/Opc.Ua.Fdi7.NodeSet2.xml");
+companion!("companion-fdt", import_fdt, "../../../schemas/companion/FDT/Opc.Ua.FDT.NodeSet.xml");
+companion!("companion-gds", import_gds, "../../../schemas/companion/GDS/Opc.Ua.Gds.NodeSet2.xml");
+companion!("companion-gpos", import_gpos, "../../../schemas/companion/GPOS/Opc.Ua.GPOS.NodeSet2.xml");
+companion!("companion-i4aas", import_i4aas, "../../../schemas/companion/I4AAS/Opc.Ua.I4AAS.NodeSet2.xml");
+companion!("companion-ia", import_ia, "../../../schemas/companion/IA/Opc.Ua.IA.NodeSet2.examples.xml");
+companion!("companion-iolink", import_iolink, "../../../schemas/companion/IOLink/Opc.Ua.IOLinkIODD.NodeSet2.xml");
+companion!("companion-iredes", import_iredes, "../../../schemas/companion/IREDES/Opc.Ua.IREDES.NodeSet2.xml");
+companion!("companion-isa_95", import_isa_95, "../../../schemas/companion/ISA-95/Opc.ISA95.NodeSet2.xml");
+companion!("companion-lads", import_lads, "../../../schemas/companion/LADS/Opc.Ua.LADS.NodeSet2.xml");
+companion!("companion-lasersystems", import_lasersystems, "../../../schemas/companion/LaserSystems/LaserSystem-Example.NodeSet2.xml");
+companion!("companion-mdis", import_mdis, "../../../schemas/companion/MDIS/Opc.MDIS.NodeSet2.xml");
+companion!("companion-mtconnect", import_mtconnect, "../../../schemas/companion/MTConnect/Opc.Ua.MTConnect.NodeSet2.xml");
+companion!("companion-machinetool", import_machinetool, "../../../schemas/companion/MachineTool/Opc.Ua.MachineTool.NodeSet2.xml");
+companion!("companion-machinevision", import_machinevision, "../../../schemas/companion/MachineVision/Opc.Ua.MachineVision.NodeSet2.xml");
+companion!("companion-machinery", import_machinery, "../../../schemas/companion/Machinery/Opc.Ua.Machinery.Examples.NodeSet2.xml");
+companion!("companion-metalforming", import_metalforming, "../../../schemas/companion/MetalForming/Opc.Ua.MetalForming.NodeSet2.xml");
+companion!("companion-onboarding", import_onboarding, "../../../schemas/companion/Onboarding/Opc.Ua.Onboarding.NodeSet2.xml");
+companion!("companion-openscs", import_openscs, "../../../schemas/companion/OpenSCS/Opc.Ua.OPENSCS.NodeSet2.xml");
+companion!("companion-padim", import_padim, "../../../schemas/companion/PADIM/Opc.Ua.IRDI.NodeSet2.xml");
+companion!("companion-paefs", import_paefs, "../../../schemas/companion/PAEFS/Opc.Ua.PAEFS.NodeSet2.xml");
+companion!("companion-plcopen", import_plcopen, "../../../schemas/companion/PLCopen/Opc.Ua.PLCopen.NodeSet2_V1.02.xml");
+companion!("companion-pnem", import_pnem, "../../../schemas/companion/PNEM/Opc.Ua.PnEm.NodeSet2.xml");
+companion!("companion-powerlink", import_powerlink, "../../../schemas/companion/POWERLINK/Opc.Ua.POWERLINK.NodeSet2.xml");
+companion!("companion-profinet", import_profinet, "../../../schemas/companion/PROFINET/Opc.Ua.Pn.NodeSet2.xml");
+companion!("companion-packml", import_packml, "../../../schemas/companion/PackML/Opc.Ua.PackML.NodeSet2.xml");
+companion!("companion-powertrain", import_powertrain, "../../../schemas/companion/Powertrain/Opc.Ua.Powertrain.NodeSet2.xml");
+companion!("companion-pumps", import_pumps, "../../../schemas/companion/Pumps/Opc.Ua.Pumps.NodeSet2.xml");
+companion!("companion-rsl", import_rsl, "../../../schemas/companion/RSL/Opc.Ua.RSL.NodeSet2.xml");
+companion!("companion-robotics", import_robotics, "../../../schemas/companion/Robotics/Opc.Ua.Robotics.NodeSet2.xml");
+companion!("companion-safety", import_safety, "../../../schemas/companion/Safety/Opc.Ua.Safety.NodeSet2.xml");
+companion!("companion-scales", import_scales, "../../../schemas/companion/Scales/Opc.Ua.Scales.NodeSet2.xml");
+companion!("companion-scheduler", import_scheduler, "../../../schemas/companion/Scheduler/Opc.Ua.Scheduler.NodeSet2.xml");
+companion!("companion-sercos", import_sercos, "../../../schemas/companion/Sercos/Sercos.NodeSet2.xml");
+companion!("companion-shotblasting", import_shotblasting, "../../../schemas/companion/Shotblasting/Opc.Ua.Shotblasting.NodeSet2.profiles.xml");
+companion!("companion-tmc", import_tmc, "../../../schemas/companion/TMC/Opc.Ua.TMC.NodeSet2.xml");
+companion!("companion-wmtp", import_wmtp, "../../../schemas/companion/WMTP/Opc.Ua.WMTP.NodeSet2.profiles.xml");
+companion!("companion-weihenstephan", import_weihenstephan, "../../../schemas/companion/Weihenstephan/Opc.Ua.Weihenstephan.NodeSet2.xml");
+companion!("companion-wot", import_wot, "../../../schemas/companion/WoT/Opc.Ua.WotCon.NodeSet2.xml");
+companion!("companion-woodworking", import_woodworking, "../../../schemas/companion/Woodworking/Opc.Ua.Woodworking.NodeSet2.xml");
 
 /// Import all enabled companion specifications.
 #[cfg(feature = "companion")]
@@ -305,5 +140,16 @@ pub fn import_all_companions(address_space: &RwLock<AddressSpace>) {
     import_packml(address_space);
     import_powertrain(address_space);
     import_pumps(address_space);
+    import_rsl(address_space);
     import_robotics(address_space);
+    import_safety(address_space);
+    import_scales(address_space);
+    import_scheduler(address_space);
+    import_sercos(address_space);
+    import_shotblasting(address_space);
+    import_tmc(address_space);
+    import_wmtp(address_space);
+    import_weihenstephan(address_space);
+    import_wot(address_space);
+    import_woodworking(address_space);
 }

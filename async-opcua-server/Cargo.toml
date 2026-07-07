@@ -123,7 +123,6 @@ wss = [
 kerberos = ["async-opcua-crypto/kerberos"]
 
 # Companion specification NodeSet imports (OPC 10000-1 Annex A).
-# Each enables importing the corresponding published NodeSet XML at startup.
 companion-adi = []
 companion-amb = []
 companion-aml = []
@@ -168,6 +167,17 @@ companion-powertrain = []
 companion-profinet = []
 companion-pumps = []
 companion-robotics = []
+companion-rsl = []
+companion-safety = []
+companion-scales = []
+companion-scheduler = []
+companion-sercos = []
+companion-shotblasting = []
+companion-tmc = []
+companion-weihenstephan = []
+companion-wmtp = []
+companion-woodworking = []
+companion-wot = []
 # Enables ALL companion specs at once.
 companion = [
     "companion-adi",
@@ -214,7 +224,19 @@ companion = [
     "companion-profinet",
     "companion-pumps",
     "companion-robotics",
+    "companion-rsl",
+    "companion-safety",
+    "companion-scales",
+    "companion-scheduler",
+    "companion-sercos",
+    "companion-shotblasting",
+    "companion-tmc",
+    "companion-weihenstephan",
+    "companion-wmtp",
+    "companion-woodworking",
+    "companion-wot",
 ]
+
 
 
 [dependencies]

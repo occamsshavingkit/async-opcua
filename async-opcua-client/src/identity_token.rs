@@ -135,6 +135,7 @@ impl IdentityToken {
 /// Acquire a Kerberos service ticket via GSSAPI for the given SPN (OPC 10000-6 §6.4).
 /// Returns the token as a `ByteString` with the `GSSAPI ` base64 prefix.
 #[cfg(feature = "kerberos")]
+#[allow(unreachable_pub)]
 pub fn acquire_kerberos_token(spn: &str) -> Result<ByteString, String> {
     use base64::Engine;
     use libgssapi::context::ClientCtx;

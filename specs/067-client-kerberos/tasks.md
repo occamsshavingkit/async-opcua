@@ -15,8 +15,8 @@
 
 ## Phase 3: Builder API (US2)
 
-- [ ] T005 [US2] Add `kerberos_spn(impl Into<String>)` method to `ClientBuilder` in `async-opcua-client/src/builder.rs` that stores the SPN and auto-applies at session creation
-- [ ] T006 [US2] Wire the stored SPN into `Session::new()` to call `acquire_kerberos_token` when connecting
+- [ ] T005 [US2] Add `kerberos_spn(impl Into<String>)` method to `ClientBuilder` in `async-opcua-client/src/builder.rs` that stores the SPN and auto-applies at session creation — OPC-10000-6 §6.4
+- [ ] T006 [US2] Wire the stored SPN into `Session::new()` to call `acquire_kerberos_token` when connecting — OPC-10000-4 §5.6.3, OPC-10000-6 §6.4
 - [ ] T007 [US2] Build and test `cargo test --all-features`
 
 ## Phase 4: Polish

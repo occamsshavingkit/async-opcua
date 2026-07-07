@@ -122,6 +122,28 @@ wss = [
 # Kerberos/GSSAPI single sign-on via IssuedToken (OPC 10000-6 §6.4).
 kerberos = ["async-opcua-crypto/kerberos"]
 
+# Companion specification NodeSet imports (OPC 10000-1 Annex A).
+# Each enables importing the corresponding published NodeSet XML at startup.
+companion-di = []
+companion-autoid = []
+companion-robotics = []
+companion-cnc = []
+companion-machinetool = []
+companion-profinet = []
+companion-isa95 = []
+companion-packml = []
+# Enables ALL companion specs at once.
+companion = [
+    "companion-di",
+    "companion-autoid",
+    "companion-robotics",
+    "companion-cnc",
+    "companion-machinetool",
+    "companion-profinet",
+    "companion-isa95",
+    "companion-packml",
+]
+
 [dependencies]
 moka = { version = "0.12", features = ["future", "sync"] }
 # opc.wss transport (feature 009 / R5 / FR-044), gated by the `wss` feature.

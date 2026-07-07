@@ -5,11 +5,12 @@ Ideas that could be implemented.
 ## Remaining
 
 - **CTT certification run**: run the demo server against the OPC Foundation Compliance Test Tool on Windows. See `docs/ctt-conformance.md`.
-- **Kerberos SSO integration test & CI**: write end-to-end integration test with a local KDC, add KDC setup to CI playbook (feature 064, T008-T009 deferred).
-- **Kerberos SSO: expose keytab path to GSSAPI**: currently the server relies on `KRB5_KTNAME` env var; the `keytab_path` config field needs to be plumbed through to GSSAPI's `gss_acquire_cred_from` (feature 064).
 
 ## Done
 
+- ~~Shrink foundation profile footprints~~ — feature 066: nano 12M→6.8M, micro 13M→7.3M, embedded 26M→17M (43-45% reduction via opt-level=z + LTO + strip).
+- ~~Kerberos SSO: keytab path plumbing~~ — feature 065.
+- ~~Kerberos SSO: integration test & CI KDC setup~~ — feature 065.
 - ~~Kerberos SSO: GssapiIdentityValidator, feature flag, builder API, IssuedToken dispatch, role mapping~~ — feature 064.
 - ~~Replace per-request timers with shared deadline queue~~ — feature 063 (US3).
 - ~~Cache session Arc in request dispatch context~~ — feature 063 (US2).

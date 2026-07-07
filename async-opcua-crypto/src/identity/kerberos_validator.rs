@@ -20,10 +20,31 @@ const MAX_TOKEN_SIZE: usize = 64 * 1024;
 /// Timeout for each GSSAPI context step (5 seconds).
 const GSSAPI_STEP_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// RAII guard that sets KRB5_KTNAME for GSSAPI credential acquisition.
+struct KeytabEnvGuard {
+    prev: Option<String>,
+}
+
+impl KeytabEnvGuard {
+    fn set(path: &std::path::Path) -> Self {
+        let prev = std::env::var("KRB5_KTNAME").ok();
+        std::env::set_var("KRB5_KTNAME", path);
+        Self { prev }
+    }
+}
+
+impl Drop for KeytabEnvGuard {
+    fn drop(&mut self) {
+        match &self.prev {
+            Some(prev) => std::env::set_var("KRB5_KTNAME", prev),
+            None => std::env::remove_var("KRB5_KTNAME"),
+        }
+    }
+}
+
 /// GSSAPI-backed Kerberos identity validator.
 pub struct GssapiIdentityValidator {
     spn: String,
-    #[allow(dead_code)]
     keytab_path: Option<PathBuf>,
     principal_roles: HashMap<String, Vec<String>>,
 }
@@ -121,11 +142,17 @@ impl OAuth2IdentityValidator for GssapiIdentityValidator {
         }
 
         let spn = self.spn.clone();
+        let keytab = self.keytab_path.clone();
         let start = Instant::now();
 
         let principal = std::thread::Builder::new()
             .name("kerberos-gssapi".into())
             .spawn(move || -> Result<String, StatusCode> {
+                // Set keytab path if configured (OPC 10000-6 §6.4).
+                // libgssapi doesn't expose gss_acquire_cred_from; fall back to
+                // the KRB5_KTNAME environment variable in this worker thread.
+                let _keytab_guard = keytab.as_ref().map(|path| KeytabEnvGuard::set(path));
+                let _ = _keytab_guard;
                 use libgssapi::context::{SecurityContext, ServerCtx};
                 use libgssapi::credential::{Cred, CredUsage};
                 use libgssapi::name::Name;

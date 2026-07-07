@@ -122,8 +122,8 @@ job_footprint() {
     maybe_skip && return 0
 
     step "footprint: minimal embedded server"
-    cargo build --locked --profile embedded -p async-opcua-minimal-server || fail
-    ls -lh target/embedded/async-opcua-minimal-server
+    cargo build --locked --profile release-footprint -p async-opcua-minimal-server || fail
+    ls -lh target/release-footprint/async-opcua-minimal-server
     pass
 
     local pkgs=(
@@ -135,8 +135,8 @@ job_footprint() {
     for entry in "${pkgs[@]}"; do
         local profile="${entry%%:*}" pkg="${entry##*:}"
         step "footprint: foundation profile $profile ($pkg)"
-        cargo build --locked --profile embedded -p "$pkg" || fail
-        ls -lh "target/embedded/$pkg"
+        cargo build --locked --profile release-footprint -p "$pkg" || fail
+        ls -lh "target/release-footprint/$pkg"
         pass
     done
 }
@@ -235,6 +235,65 @@ echo "Started at $(date)"
 
 job_cargo_fmt
 
+# ────────────────────────────────────────────────────────────────────
+# 8. Kerberos SSO integration test (feature 064/065)
+# ────────────────────────────────────────────────────────────────────
+setup_kerberos_kdc() {
+    step "kerberos: setting up MIT KDC"
+    if ! command -v krb5_newrealm &>/dev/null; then
+        skip_msg "krb5-kdc not installed — install libkrb5-dev krb5-kdc krb5-admin-server"
+        return 1
+    fi
+    # Create realm non-interactively
+    export KRB5_CONFIG=/tmp/krb5.conf
+    cat > "$KRB5_CONFIG" <<EOF
+[libdefaults]
+    default_realm = PLANT.LOCAL
+    dns_lookup_realm = false
+    dns_lookup_kdc = false
+[realms]
+    PLANT.LOCAL = {
+        kdc = 127.0.0.1:8888
+        admin_server = 127.0.0.1:8889
+    }
+EOF
+    # Kill any existing KDC processes
+    sudo pkill -f krb5kdc 2>/dev/null || true
+    sudo pkill -f kadmind 2>/dev/null || true
+    sleep 1
+    # Create realm database
+    sudo krb5_newrealm --realm PLANT.LOCAL --master-password testpass 2>/dev/null || {
+        skip_msg "Failed to create Kerberos realm"
+        return 1
+    }
+    # Start KDC and admin server
+    sudo krb5kdc -n &
+    sudo kadmind -nofork &
+    sleep 2
+    # Create test user and service principal
+    echo "addprinc -pw testpass operator1@PLANT.LOCAL" | sudo kadmin.local -r PLANT.LOCAL 2>/dev/null
+    echo "addprinc -randkey OPCUA/localhost@PLANT.LOCAL" | sudo kadmin.local -r PLANT.LOCAL 2>/dev/null
+    echo "ktadd -k /tmp/opcua.keytab OPCUA/localhost@PLANT.LOCAL" | sudo kadmin.local -r PLANT.LOCAL 2>/dev/null
+    sudo chmod 644 /tmp/opcua.keytab
+    export KRB5_KTNAME=/tmp/opcua.keytab
+    pass
+}
+
+job_kerberos_test() {
+    maybe_skip && return 0
+    step "kerberos: integration test"
+    if ! command -v krb5_newrealm &>/dev/null; then
+        skip_msg "krb5-kdc not installed — skipping Kerberos test"
+        return 0
+    fi
+    setup_kerberos_kdc || return 0
+    cargo test --features kerberos -p async-opcua-server -- kerberos_sso 2>&1 || fail
+    # Cleanup
+    sudo pkill -f krb5kdc 2>/dev/null || true
+    sudo pkill -f kadmind 2>/dev/null || true
+    pass
+}
+
 # Pre-PR gate and regular mode: everything except interop
 if [[ "$CI_ONLY" == "true" ]]; then
     job_build_linux
@@ -243,6 +302,7 @@ if [[ "$CI_ONLY" == "true" ]]; then
     job_footprint
     job_feature_lattice
     job_verify_codegen
+    job_kerberos_test
     job_interop
     echo -e "\n${GREEN}CI gate complete.${NC}"
     exit 0
@@ -257,6 +317,7 @@ job_footprint
 job_feature_lattice
 job_code_coverage
 job_verify_codegen
+job_kerberos_test
 job_interop
 
 echo

@@ -611,6 +611,18 @@ impl ServerBuilder {
         self
     }
 
+    /// Configure the maximum number of threads in tokio's spawn_blocking pool.
+    ///
+    /// The default is determined by tokio (currently 512). This pool handles
+    /// RSA/ECC crypto operations offloaded via spawn_blocking (FR-001, FR-027).
+    /// Under heavy connection storms with many concurrent OpenSecureChannel and
+    /// CreateSession operations, the blocking pool may saturate. Set this to a
+    /// higher value if P99 latency exceeds acceptable thresholds under load.
+    pub fn max_blocking_threads(mut self, max_threads: usize) -> Self {
+        self.config.limits.max_blocking_threads = Some(max_threads);
+        self
+    }
+
     /// Try to construct a server from this builder, may fail if the configuration
     /// is invalid.
     pub fn build(self) -> Result<(Server, ServerHandle), String> {

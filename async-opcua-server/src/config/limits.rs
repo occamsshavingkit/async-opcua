@@ -61,6 +61,10 @@ pub struct Limits {
     /// Whether missing RolePermissions should fail closed globally. Default false keeps backwards compatibility.
     #[serde(default = "defaults::enforce_role_based_access")]
     pub enforce_role_based_access: bool,
+    /// Maximum threads in tokio's spawn_blocking pool (default: None = tokio default, currently 512).
+    /// Controls crypto offloading capacity (FR-001, FR-027).
+    #[serde(default)]
+    pub max_blocking_threads: Option<usize>,
 }
 
 impl Default for Limits {
@@ -85,6 +89,7 @@ impl Default for Limits {
             max_registered_servers: defaults::max_registered_servers(),
             clients_can_modify_address_space: defaults::clients_can_modify_address_space(),
             enforce_role_based_access: defaults::enforce_role_based_access(),
+            max_blocking_threads: None,
         }
     }
 }

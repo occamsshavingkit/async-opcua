@@ -174,8 +174,8 @@ async fn corrupt_event_history_read_reports_data_lost_and_preserves_valid_rows()
     .unwrap();
 
     {
-        let conn = b.connection();
-        let conn = conn.lock();
+        let pool = b.pool();
+        let conn = pool.get().expect("get connection");
         conn.execute(
             "INSERT INTO historical_events (node_id, event_id, field_blob, event_time)
              VALUES (?1, ?2, ?3, ?4)",
@@ -201,8 +201,8 @@ async fn corrupt_event_history_read_reports_data_lost_and_preserves_valid_rows()
         .await;
 
     {
-        let conn = b.connection();
-        let conn = conn.lock();
+        let pool = b.pool();
+        let conn = pool.get().expect("get connection");
         let valid_rows: i64 = conn
             .query_row(
                 "SELECT COUNT(*)

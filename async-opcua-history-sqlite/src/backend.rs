@@ -2,6 +2,7 @@
 
 use crate::{migration::run_migrations, query};
 use async_trait::async_trait;
+use dashmap::DashMap;
 use opcua_server::{
     aggregates::{compute_processed_intervals, engine::get_value_timestamp},
     history::{HistoryRawModifiedResult, HistoryStorageBackend},
@@ -12,16 +13,16 @@ use opcua_types::{
     NodeId, ObjectTypeId, PerformUpdateType, QualifiedName, SimpleAttributeOperand, StatusCode,
     UAString, Variant,
 };
-use parking_lot::Mutex;
+use r2d2::Pool;
+use r2d2_sqlite::SqliteConnectionManager;
 use rusqlite::{params, Connection, Error as SqliteError, OptionalExtension};
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 /// Reference SQLite-based storage engine implementation for OPC UA HDA.
 pub struct SqliteHistoryBackend {
-    connection: Arc<Mutex<Connection>>,
-    continuation_points: Arc<Mutex<HashMap<Vec<u8>, CachedContinuationPoint>>>,
+    pool: Pool<SqliteConnectionManager>,
+    continuation_points: Arc<DashMap<Vec<u8>, CachedContinuationPoint>>,
 }
 
 struct CachedContinuationPoint {
@@ -214,27 +215,47 @@ fn map_history_read_sqlite_error(operation: &str, err: SqliteError) -> StatusCod
 impl SqliteHistoryBackend {
     /// Creates a new SQLite history backend using the database at `path`.
     pub fn new(path: &str) -> Result<Self, SqliteError> {
-        let connection = Connection::open(path)?;
-        run_migrations(&connection)?;
+        let manager = SqliteConnectionManager::file(path);
+        let pool = Pool::builder()
+            .max_size(4)
+            .build(manager)
+            .expect("r2d2 pool should build successfully");
+        {
+            let conn = pool.get().expect("get connection");
+            conn.execute_batch("PRAGMA journal_mode=WAL;")?;
+            run_migrations(&conn)?;
+        }
         Ok(Self {
-            connection: Arc::new(Mutex::new(connection)),
-            continuation_points: Arc::new(Mutex::new(HashMap::new())),
+            pool,
+            continuation_points: Arc::new(DashMap::new()),
         })
     }
 
     /// Creates a new in-memory SQLite history backend.
     pub fn new_in_memory() -> Result<Self, SqliteError> {
-        let connection = Connection::open_in_memory()?;
-        run_migrations(&connection)?;
+        let db_uri = format!(
+            "file:memory-{}.db?mode=memory&cache=shared",
+            uuid::Uuid::new_v4()
+        );
+        let manager = SqliteConnectionManager::file(&db_uri);
+        let pool = Pool::builder()
+            .max_size(4)
+            .build(manager)
+            .expect("r2d2 pool should build successfully");
+        {
+            let conn = pool.get().expect("get connection");
+            conn.execute_batch("PRAGMA journal_mode=WAL;")?;
+            run_migrations(&conn)?;
+        }
         Ok(Self {
-            connection: Arc::new(Mutex::new(connection)),
-            continuation_points: Arc::new(Mutex::new(HashMap::new())),
+            pool,
+            continuation_points: Arc::new(DashMap::new()),
         })
     }
 
-    /// Returns the underlying database connection.
-    pub fn connection(&self) -> Arc<Mutex<Connection>> {
-        self.connection.clone()
+    /// Returns the underlying database connection pool.
+    pub fn pool(&self) -> Pool<SqliteConnectionManager> {
+        self.pool.clone()
     }
 
     /// Reads processed aggregate values using the Part 13 default stepped interpolation.
@@ -266,8 +287,8 @@ impl SqliteHistoryBackend {
     }
 
     fn prune_continuation_points(&self) {
-        let mut cps = self.continuation_points.lock();
-        cps.retain(|_, cp| cp.created_at.elapsed() < CONTINUATION_POINT_MAX_AGE);
+        self.continuation_points
+            .retain(|_, cp| cp.created_at.elapsed() < CONTINUATION_POINT_MAX_AGE);
     }
 
     fn page_size(num_values_per_node: u32) -> usize {
@@ -280,7 +301,7 @@ impl SqliteHistoryBackend {
 
     fn insert_continuation_point(&self, cursor: HistoryReadCursor) -> Vec<u8> {
         let token = uuid::Uuid::new_v4().as_bytes().to_vec();
-        self.continuation_points.lock().insert(
+        self.continuation_points.insert(
             token.clone(),
             CachedContinuationPoint {
                 cursor,
@@ -296,11 +317,11 @@ impl SqliteHistoryBackend {
         page_size: usize,
         resume_after: Option<i64>,
     ) -> Result<(Vec<DataValue>, bool), StatusCode> {
-        let conn = self.connection.clone();
+        let pool = self.pool.clone();
         let request = Self::raw_modified_page_request(cursor, page_size, resume_after);
 
         let result: Result<(Vec<DataValue>, bool), SqliteError> =
-            tokio::task::spawn_blocking(move || Self::fetch_raw_modified_values(conn, request))
+            tokio::task::spawn_blocking(move || Self::fetch_raw_modified_values(pool, request))
                 .await
                 .map_err(|_| StatusCode::BadInternalError)?;
 
@@ -322,11 +343,11 @@ impl SqliteHistoryBackend {
         page_size: usize,
         resume_after: Option<ModifiedContinuationKey>,
     ) -> Result<ModifiedPageResult, StatusCode> {
-        let conn = self.connection.clone();
+        let pool = self.pool.clone();
         let request = Self::modified_page_request(cursor, page_size, resume_after);
 
         let result: Result<ModifiedPageResult, SqliteError> =
-            tokio::task::spawn_blocking(move || Self::fetch_modified_values(conn, request))
+            tokio::task::spawn_blocking(move || Self::fetch_modified_values(pool, request))
                 .await
                 .map_err(|_| StatusCode::BadInternalError)?;
 
@@ -366,10 +387,10 @@ impl SqliteHistoryBackend {
     }
 
     fn fetch_raw_modified_values(
-        conn: Arc<Mutex<Connection>>,
+        pool: Pool<SqliteConnectionManager>,
         request: RawModifiedPageRequest,
     ) -> Result<(Vec<DataValue>, bool), SqliteError> {
-        let conn = conn.lock();
+        let conn = pool.get().expect("get connection from pool");
         let query_limit = request.page_size.saturating_add(1);
         let mut values = Vec::with_capacity(query_limit);
 
@@ -382,10 +403,10 @@ impl SqliteHistoryBackend {
     }
 
     fn fetch_modified_values(
-        conn: Arc<Mutex<Connection>>,
+        pool: Pool<SqliteConnectionManager>,
         request: ModifiedPageRequest,
     ) -> Result<ModifiedPageResult, SqliteError> {
-        let conn = conn.lock();
+        let conn = pool.get().expect("get connection from pool");
         let query_limit = request.page_size.saturating_add(1);
         let resume_source_ticks = request.resume_after.map(|key| key.source_ticks);
         let resume_modification_ticks = request.resume_after.map(|key| key.modification_ticks);
@@ -574,9 +595,8 @@ impl HistoryStorageBackend for SqliteHistoryBackend {
         let page_size = Self::page_size(num_values_per_node);
 
         let (cursor, resume_after) = if let Some(token) = continuation_point {
-            let cp = self
+            let (_, cp) = self
                 .continuation_points
-                .lock()
                 .remove(&token)
                 .ok_or(StatusCode::BadContinuationPointInvalid)?;
             let resume_after = Some(cp.cursor.last_source_timestamp);
@@ -723,7 +743,7 @@ impl HistoryStorageBackend for SqliteHistoryBackend {
             return Err(StatusCode::BadContinuationPointInvalid);
         }
 
-        let conn = self.connection.clone();
+        let pool = self.pool.clone();
         let node_id_str = node_id.to_string();
         let row_limit = if num_values_per_node > 0 {
             num_values_per_node as i64
@@ -733,7 +753,7 @@ impl HistoryStorageBackend for SqliteHistoryBackend {
 
         let events: Result<Vec<HistoryEventFieldList>, SqliteError> =
             tokio::task::spawn_blocking(move || {
-                let conn = conn.lock();
+                let conn = pool.get().expect("get connection from pool");
                 let mut stmt = conn.prepare(
                     "SELECT field_blob
                      FROM historical_events
@@ -767,7 +787,7 @@ impl HistoryStorageBackend for SqliteHistoryBackend {
             return Err(StatusCode::BadContinuationPointInvalid);
         }
 
-        let conn = self.connection.clone();
+        let pool = self.pool.clone();
         let node_id_str = node_id.to_string();
         let req_ticks = req_times
             .iter()
@@ -775,7 +795,7 @@ impl HistoryStorageBackend for SqliteHistoryBackend {
             .collect::<Vec<_>>();
 
         let values: Result<Vec<DataValue>, SqliteError> = tokio::task::spawn_blocking(move || {
-            let conn = conn.lock();
+            let conn = pool.get().expect("get connection from pool");
 
             if req_ticks.is_empty() {
                 let mut stmt = conn.prepare(
@@ -820,12 +840,12 @@ impl HistoryStorageBackend for SqliteHistoryBackend {
     ) -> Result<Vec<StatusCode>, StatusCode> {
         self.prune_continuation_points();
 
-        let conn = self.connection.clone();
+        let pool = self.pool.clone();
         let node_id_str = node_id.to_string();
 
         let results: Result<Vec<StatusCode>, SqliteError> =
             tokio::task::spawn_blocking(move || {
-                let mut conn = conn.lock();
+                let mut conn = pool.get().expect("get connection from pool");
                 let tx = conn.transaction()?;
                 let mut status_codes = Vec::with_capacity(values.len());
 
@@ -997,12 +1017,12 @@ impl HistoryStorageBackend for SqliteHistoryBackend {
     ) -> Result<Vec<StatusCode>, StatusCode> {
         self.prune_continuation_points();
 
-        let conn = self.connection.clone();
+        let pool = self.pool.clone();
         let node_id_str = node_id.to_string();
 
         let results: Result<Vec<StatusCode>, SqliteError> =
             tokio::task::spawn_blocking(move || {
-                let mut conn = conn.lock();
+                let mut conn = pool.get().expect("get connection from pool");
                 let tx = conn.transaction()?;
                 let mut status_codes = Vec::with_capacity(values.len());
 
@@ -1156,12 +1176,12 @@ impl HistoryStorageBackend for SqliteHistoryBackend {
         };
         let event_time_index = event_time_select_clause_index(filter);
 
-        let conn = self.connection.clone();
+        let pool = self.pool.clone();
         let node_id_str = node_id.to_string();
 
         let results: Result<Vec<StatusCode>, SqliteError> =
             tokio::task::spawn_blocking(move || {
-                let mut conn = conn.lock();
+                let mut conn = pool.get().expect("get connection from pool");
                 let tx = conn.transaction()?;
                 let mut status_codes = Vec::with_capacity(events.len());
 
@@ -1273,13 +1293,13 @@ impl HistoryStorageBackend for SqliteHistoryBackend {
     ) -> Result<StatusCode, StatusCode> {
         self.prune_continuation_points();
 
-        let conn = self.connection.clone();
+        let pool = self.pool.clone();
         let node_id_str = node_id.to_string();
         let start_ticks = start_time.ticks();
         let end_ticks = end_time.ticks();
 
         let deleted_count: Result<usize, SqliteError> = tokio::task::spawn_blocking(move || {
-            let mut conn = conn.lock();
+            let mut conn = pool.get().expect("get connection from pool");
             let tx = conn.transaction()?;
 
             let deleted_count = if start_ticks >= end_ticks {
@@ -1361,12 +1381,12 @@ impl HistoryStorageBackend for SqliteHistoryBackend {
     ) -> Result<Vec<StatusCode>, StatusCode> {
         self.prune_continuation_points();
 
-        let conn = self.connection.clone();
+        let pool = self.pool.clone();
         let node_id_str = node_id.to_string();
 
         let results: Result<Vec<StatusCode>, SqliteError> =
             tokio::task::spawn_blocking(move || {
-                let mut conn = conn.lock();
+                let mut conn = pool.get().expect("get connection from pool");
                 let tx = conn.transaction()?;
                 let mut status_codes = Vec::with_capacity(req_times.len());
 
@@ -1431,12 +1451,12 @@ impl HistoryStorageBackend for SqliteHistoryBackend {
             return Ok(Vec::new());
         }
 
-        let conn = self.connection.clone();
+        let pool = self.pool.clone();
         let node_id_str = node_id.to_string();
 
         let results: Result<Vec<StatusCode>, SqliteError> =
             tokio::task::spawn_blocking(move || {
-                let mut conn = conn.lock();
+                let mut conn = pool.get().expect("get connection from pool");
                 let tx = conn.transaction()?;
                 let mut status_codes = Vec::with_capacity(event_ids.len());
 
@@ -1476,7 +1496,7 @@ impl HistoryStorageBackend for SqliteHistoryBackend {
     }
 
     async fn release_continuation_point(&self, token: Vec<u8>) -> Result<(), StatusCode> {
-        self.continuation_points.lock().remove(&token);
+        self.continuation_points.remove(&token);
         Ok(())
     }
 }

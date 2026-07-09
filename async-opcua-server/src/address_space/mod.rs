@@ -359,20 +359,20 @@ impl AddressSpace {
     /// Build or rebuild the `(parent NodeId, BrowseName) → [child NodeId]` index
     /// for O(1) TranslateBrowsePathsToNodeIds resolution per OPC 10000-3 §5.2.4.
     pub fn build_browse_name_index(&self, type_tree: &dyn TypeTree) {
-        let mut cold = self.cold.write();
+        // Build index outside the write lock using fine-grained read locks per node.
         let mut index: HashMap<(NodeId, QualifiedName), Vec<NodeId>> = HashMap::new();
         for node_ref in self.node_map.iter() {
             let source_id = node_ref.key().clone();
-            for rf in cold.references.find_references(
+            for rf in self.find_references(
                 &source_id,
                 None::<(ReferenceTypeId, bool)>,
                 type_tree,
                 BrowseDirection::Forward,
             ) {
-                if rf.target_node.is_null() {
+                if rf.target_id.is_null() {
                     continue;
                 }
-                let target_browse_name = if let Some(target) = self.node_map.get(rf.target_node) {
+                let target_browse_name = if let Some(target) = self.node_map.get(&rf.target_id) {
                     target.as_node().browse_name().clone()
                 } else {
                     continue;
@@ -380,8 +380,13 @@ impl AddressSpace {
                 index
                     .entry((source_id.clone(), target_browse_name))
                     .or_default()
-                    .push(rf.target_node.clone());
+                    .push(rf.target_id.clone());
             }
+        }
+        // Swap in the built index under write lock with DCL.
+        let mut cold = self.cold.write();
+        if cold.browse_name_index.is_some() {
+            return;
         }
         cold.browse_name_index = Some(index);
     }

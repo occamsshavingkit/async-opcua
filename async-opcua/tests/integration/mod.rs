@@ -23,6 +23,7 @@ mod read;
 mod reverse_connect;
 mod rsa_kem;
 mod sampling_transition;
+mod secure_channel;
 mod session_audit;
 mod subscriptions;
 mod tier_a;

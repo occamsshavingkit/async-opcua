@@ -672,7 +672,9 @@ impl<'a> PendingClientDeliveryGuard<'a> {
 
 impl Drop for PendingClientDeliveryGuard<'_> {
     fn drop(&mut self) {
-        self.restore_now();
+        if self.delivery.is_some() && std::thread::panicking() {
+            self.restore_now();
+        }
     }
 }
 
@@ -2758,5 +2760,36 @@ mod tests {
             self.counter.fetch_add(1, Ordering::SeqCst);
             panic!("intentional subscription callback panic");
         }
+    }
+
+    #[test]
+    fn pending_client_delivery_guard_drop_does_not_acquire_lock_on_normal_drop() {
+        let counter = Arc::new(AtomicUsize::new(0));
+        let (publish_limits_tx, _publish_limits_rx) =
+            tokio::sync::watch::channel(PublishLimits::new());
+        let mut state = SubscriptionState::new(Duration::from_millis(1), publish_limits_tx);
+        state.add_subscription(Subscription::new(
+            1,
+            Duration::from_millis(100),
+            30,
+            10,
+            0,
+            0,
+            true,
+            Box::new(PanicSubscriptionCallback {
+                counter: Arc::clone(&counter),
+            }),
+        ));
+
+        let state_mutex = parking_lot::Mutex::new(state);
+        let delivery = stage_delivery(&state_mutex, 1);
+
+        let _guard = PendingClientDeliveryGuard::new(delivery, &state_mutex);
+        drop(_guard);
+
+        assert!(
+            state_mutex.try_lock().is_some(),
+            "PendingClientDeliveryGuard::Drop must not hold the lock across normal drop"
+        );
     }
 }

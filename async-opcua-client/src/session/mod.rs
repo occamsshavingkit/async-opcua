@@ -359,6 +359,12 @@ impl Session {
     /// Disable automatic reconnects.
     /// This will make the event loop quit the next time
     /// it disconnects for whatever reason.
+    /// Disable automatic reconnects.
+    ///
+    /// Uses `Ordering::Relaxed` because the flag is consumed via an mpsc channel
+    /// send, whose happens-before relationship provides the necessary ordering
+    /// guarantee — a consumer that sees the mpsc message will also observe the
+    /// updated `should_reconnect` value without an acquire/release pair.
     pub fn disable_reconnects(&self) {
         self.should_reconnect.store(false, Ordering::Relaxed);
     }

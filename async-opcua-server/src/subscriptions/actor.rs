@@ -862,6 +862,14 @@ impl SubscriptionActor {
                 }
                 _ = self.notify.notified() => {
                     self.drain_ring().await;
+                    let now = DateTimeUtc::from(chrono::Utc::now());
+                    let now_instant = std::time::Instant::now();
+                    let mut buffer = NotificationBuffer::new();
+                    self.subs.process_notification_wake(
+                        &now,
+                        now_instant,
+                        &mut buffer,
+                    );
                 }
                 _ = &mut sleep => {
                     self.drain_ring().await;

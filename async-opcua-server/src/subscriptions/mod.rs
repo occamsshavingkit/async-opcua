@@ -891,12 +891,15 @@ impl SubscriptionCache {
         context: &RequestContext,
     ) -> Result<CreateSubscriptionResponse, StatusCode> {
         let cache = {
-            let mut lck = trace_write_lock!(self.inner);
-            lck.session_subscriptions
-                .entry(session_id)
-                .or_insert_with(|| {
+            // Check existing entry under read lock before constructing
+            {
+                let lck = trace_read_lock!(self.inner);
+                if let Some(existing) = lck.session_subscriptions.get(&session_id) {
+                    existing.handle()
+                } else {
+                    drop(lck);
                     let cleanup_tx = self.cleanup_tx.clone();
-                    SessionEntry::new(
+                    let entry = SessionEntry::new(
                         session_id,
                         self.limits,
                         Self::get_key(&context.session),
@@ -907,9 +910,14 @@ impl SubscriptionCache {
                         #[cfg(feature = "events")]
                         context.enforce_role_based_access(),
                         cleanup_tx,
-                    )
-                })
-                .handle()
+                    );
+                    let mut lck = trace_write_lock!(self.inner);
+                    lck.session_subscriptions
+                        .entry(session_id)
+                        .or_insert(entry)
+                        .handle()
+                }
+            }
         };
         let request = request.clone();
         let info = context.info.clone();
@@ -1334,33 +1342,43 @@ impl SubscriptionCache {
             .await
             .map_err(|_| StatusCode::BadNoSubscription)?;
         if let Ok(res) = &result {
-            let mut lck = trace_write_lock!(self.inner);
-            for (create, res) in requests_for_index.iter().zip(res.iter()) {
-                if res.status_code.is_good() {
-                    let key = MonitoredItemKey {
+            // Pre-build reverse-index updates outside the write lock.
+            struct IndexUpdate {
+                key: MonitoredItemKey,
+                handle: MonitoredItemHandle,
+                entry: MonitoredItemEntry,
+                #[cfg(feature = "subscriptions-standard")]
+                eu_range_node_id: Option<NodeId>,
+            }
+            let updates: Vec<IndexUpdate> = requests_for_index
+                .iter()
+                .zip(res.iter())
+                .filter(|(_, r)| r.status_code.is_good())
+                .map(|(create, _)| IndexUpdate {
+                    key: MonitoredItemKey {
                         id: create.item_to_monitor().node_id.clone(),
                         attribute_id: create.item_to_monitor().attribute_id,
-                    };
-
-                    let index_range = create.item_to_monitor().index_range.clone();
-
-                    lck.monitored_items.entry(key).or_default().insert(
-                        create.handle(),
-                        MonitoredItemEntry {
-                            enabled: !matches!(create.monitoring_mode(), MonitoringMode::Disabled),
-                            index_range,
-                            data_encoding: create.item_to_monitor().data_encoding.clone(),
-                        },
-                    );
-
+                    },
+                    handle: create.handle(),
+                    entry: MonitoredItemEntry {
+                        enabled: !matches!(create.monitoring_mode(), MonitoringMode::Disabled),
+                        index_range: create.item_to_monitor().index_range.clone(),
+                        data_encoding: create.item_to_monitor().data_encoding.clone(),
+                    },
                     #[cfg(feature = "subscriptions-standard")]
-                    {
-                        Self::replace_eu_range_registration(
-                            &mut lck,
-                            create.handle(),
-                            create.eu_range_node_id().cloned(),
-                        );
-                    }
+                    eu_range_node_id: create.eu_range_node_id().cloned(),
+                })
+                .collect();
+            // Apply under a single write lock.
+            let mut lck = trace_write_lock!(self.inner);
+            for u in updates {
+                lck.monitored_items
+                    .entry(u.key)
+                    .or_default()
+                    .insert(u.handle, u.entry);
+                #[cfg(feature = "subscriptions-standard")]
+                {
+                    Self::replace_eu_range_registration(&mut lck, u.handle, u.eu_range_node_id);
                 }
             }
         }
@@ -1819,15 +1837,18 @@ impl PersistentSessionKey {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
+    #![allow(clippy::await_holding_lock)]
+    #![allow(clippy::expect_fun_call)]
+    use std::{sync::Arc, time::Duration};
 
-    use opcua_core::sync::RwLock;
+    use opcua_core::{sync::RwLock, ResponseMessage};
     use opcua_crypto::{random, SecurityPolicy};
     use opcua_types::{
         ApplicationDescription, AttributeId, BuildInfo, ByteString, CreateSubscriptionRequest,
-        DiagnosticBits, ExtensionObject, MessageSecurityMode, MonitoredItemCreateRequest,
-        MonitoringMode, MonitoringParameters, NodeId, ReadValueId, StatusCode, TimestampsToReturn,
-        UAString,
+        DataValue, DateTimeUtc, DiagnosticBits, ExtensionObject, MessageSecurityMode,
+        ModifySubscriptionRequest, MonitoredItemCreateRequest, MonitoringMode,
+        MonitoringParameters, NodeId, PublishRequest, ReadValueId, RequestHeader, StatusCode,
+        TimestampsToReturn, UAString,
     };
 
     use crate::{
@@ -1838,7 +1859,149 @@ mod tests {
         ServerBuilder, ServerStatusWrapper, SubscriptionCache,
     };
 
-    use super::CreateMonitoredItem;
+    use super::{CreateMonitoredItem, PendingPublish};
+
+    #[tokio::test]
+    async fn notify_data_change_wakes_queued_publish_request() {
+        let fixture = SubscriptionFixture::new();
+        let subscription_id = fixture
+            .cache
+            .create_subscription(
+                fixture.context.session_id,
+                &CreateSubscriptionRequest {
+                    requested_publishing_interval: 10.0,
+                    requested_lifetime_count: 30,
+                    requested_max_keep_alive_count: 20,
+                    publishing_enabled: true,
+                    ..Default::default()
+                },
+                &fixture.context,
+            )
+            .await
+            .expect("subscription should be created")
+            .subscription_id;
+        let node_id = NodeId::new(2, "notify-data-change-wake-test");
+        let request = MonitoredItemCreateRequest::new(
+            ReadValueId::new(node_id.clone(), AttributeId::Value),
+            MonitoringMode::Reporting,
+            MonitoringParameters {
+                client_handle: 1,
+                sampling_interval: 0.0,
+                filter: ExtensionObject::null(),
+                queue_size: 10,
+                discard_oldest: true,
+            },
+        );
+        let type_tree = fixture.info.type_tree.read();
+        let mut item = CreateMonitoredItem::new(
+            request,
+            fixture.info.monitored_item_id_handle.next(),
+            subscription_id,
+            &fixture.info,
+            TimestampsToReturn::Both,
+            DiagnosticBits::empty(),
+            &*type_tree,
+            None,
+        );
+        item.set_status(StatusCode::Good);
+        drop(type_tree);
+
+        let results = fixture
+            .cache
+            .create_monitored_items(fixture.context.session_id, subscription_id, vec![item])
+            .await
+            .expect("monitored item should be created");
+        assert!(results.iter().all(|r| r.status_code.is_good()));
+
+        let (initial_pending, initial_response) = pending_publish(76);
+        fixture
+            .cache
+            .enqueue_publish_request(
+                fixture.context.session_id,
+                DateTimeUtc::from(chrono::Utc::now()),
+                std::time::Instant::now(),
+                initial_pending,
+            )
+            .await
+            .expect("initial publish request should queue");
+        let _ = tokio::time::timeout(Duration::from_secs(2), initial_response)
+            .await
+            .expect("initial publish cycle should complete")
+            .expect("initial publish response channel should be open");
+
+        fixture
+            .cache
+            .modify_subscription(
+                fixture.context.session_id,
+                &ModifySubscriptionRequest {
+                    subscription_id,
+                    requested_publishing_interval: 30_000.0,
+                    requested_lifetime_count: 30,
+                    requested_max_keep_alive_count: 20,
+                    max_notifications_per_publish: 1000,
+                    priority: 0,
+                    ..Default::default()
+                },
+                fixture.info.clone(),
+            )
+            .await
+            .expect("subscription should be modified");
+
+        let (pending, response) = pending_publish(77);
+        fixture
+            .cache
+            .enqueue_publish_request(
+                fixture.context.session_id,
+                DateTimeUtc::from(chrono::Utc::now()),
+                std::time::Instant::now(),
+                pending,
+            )
+            .await
+            .expect("publish request should queue");
+
+        fixture.cache.notify_data_change(std::iter::once((
+            DataValue::new_now(42i32),
+            &node_id,
+            AttributeId::Value,
+        )));
+
+        let response = tokio::time::timeout(Duration::from_millis(750), response)
+            .await
+            .expect("data change should wake queued publish request")
+            .expect("publish response channel should be open");
+        let ResponseMessage::PublishShared(response) = response else {
+            panic!("expected Publish response, got {response:?}");
+        };
+        assert_eq!(response.response_header.request_handle, 77);
+        assert_eq!(response.response_header.service_result, StatusCode::Good);
+        assert_eq!(response.subscription_id, subscription_id);
+        assert!(
+            response
+                .notification_message
+                .notification_data
+                .as_ref()
+                .is_some_and(|data| !data.is_empty()),
+            "Publish response should contain the data-change notification"
+        );
+
+        let (duplicate_check, duplicate_response) = pending_publish(78);
+        fixture
+            .cache
+            .enqueue_publish_request(
+                fixture.context.session_id,
+                DateTimeUtc::from(chrono::Utc::now()),
+                std::time::Instant::now(),
+                duplicate_check,
+            )
+            .await
+            .expect("duplicate-check publish request should queue");
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), duplicate_response)
+                .await
+                .is_err(),
+            "data-change wake should not produce a duplicate immediate Publish response"
+        );
+    }
 
     #[tokio::test]
     async fn delete_subscriptions_returns_data_change_reverse_indexes_to_baseline() {
@@ -2046,6 +2209,32 @@ mod tests {
         server_context: ServerContext,
     }
 
+    fn pending_publish(
+        request_handle: u32,
+    ) -> (
+        PendingPublish,
+        tokio::sync::oneshot::Receiver<ResponseMessage>,
+    ) {
+        let (response, recv) = tokio::sync::oneshot::channel();
+        let request = PublishRequest {
+            request_header: RequestHeader {
+                request_handle,
+                ..Default::default()
+            },
+            subscription_acknowledgements: None,
+        };
+
+        (
+            PendingPublish {
+                response,
+                request: Box::new(request),
+                ack_results: None,
+                deadline: std::time::Instant::now() + Duration::from_secs(30),
+            },
+            recv,
+        )
+    }
+
     impl SubscriptionFixture {
         fn new() -> Self {
             let (_server, handle) = ServerBuilder::new_anonymous("subscription index leak test")
@@ -2116,6 +2305,37 @@ mod tests {
                 context,
                 server_context,
             }
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn concurrent_create_subscription_completes_under_load() {
+        let fixture = Arc::new(SubscriptionFixture::new());
+        const N: usize = 4;
+
+        let mut handles = Vec::with_capacity(N);
+        for i in 0..N {
+            let f = Arc::clone(&fixture);
+            handles.push(tokio::spawn(async move {
+                f.cache
+                    .create_subscription(
+                        f.context.session_id,
+                        &CreateSubscriptionRequest {
+                            requested_publishing_interval: 100.0,
+                            requested_lifetime_count: 30,
+                            requested_max_keep_alive_count: 10,
+                            publishing_enabled: true,
+                            ..Default::default()
+                        },
+                        &f.context,
+                    )
+                    .await
+                    .expect(&format!("concurrent subscription {i} should be created"))
+            }));
+        }
+
+        for h in handles {
+            h.await.expect("subscribe create task should not panic");
         }
     }
 }

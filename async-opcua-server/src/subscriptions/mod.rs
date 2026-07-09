@@ -1837,6 +1837,8 @@ impl PersistentSessionKey {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::await_holding_lock)]
+    #![allow(clippy::expect_fun_call)]
     use std::{sync::Arc, time::Duration};
 
     use opcua_core::{sync::RwLock, ResponseMessage};

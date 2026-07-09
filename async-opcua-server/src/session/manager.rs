@@ -1599,6 +1599,7 @@ fn x509_user_certificate_from_request(request: &ActivateSessionRequest) -> Optio
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::needless_borrow)]
     use std::{
         cmp::Reverse,
         fs,

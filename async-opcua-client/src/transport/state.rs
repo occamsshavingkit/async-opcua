@@ -258,6 +258,7 @@ impl SecureChannelState {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::expect_used)]
     use super::*;
     use opcua_core::comms::secure_channel::SecureChannel;
     use opcua_crypto::CertificateStore;

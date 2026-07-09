@@ -469,6 +469,7 @@ impl AsyncSecureChannel {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::expect_used)]
     use super::*;
     use crate::{retry::SessionRetryPolicy, IdentityToken};
     use opcua_crypto::SecurityPolicy;

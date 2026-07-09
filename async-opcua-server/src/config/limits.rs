@@ -420,6 +420,7 @@ mod tests {
                 unactivated_session_timeout_ms: 10_000,
                 clients_can_modify_address_space: false,
                 enforce_role_based_access: false,
+                max_blocking_threads: None,
                 subscriptions: SubscriptionLimits {
                     max_subscriptions_per_session: 100,
                     max_pending_publish_requests: 20,

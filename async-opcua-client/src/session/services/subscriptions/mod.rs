@@ -1,6 +1,7 @@
 pub(crate) mod event_loop;
 pub use event_loop::SubscriptionActivity;
 
+mod actor;
 mod callbacks;
 mod event_loop_state;
 mod service;

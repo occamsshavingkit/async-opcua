@@ -155,7 +155,7 @@ impl ServerHandle {
         let _server_pkey = self.info.server_pkey.write();
 
         // Update all existing endpoint entries with the reloaded certificate
-        for (_id, entry) in endpoint_certs.iter_mut() {
+        for entry in endpoint_certs.values_mut() {
             *entry = Some((cert.clone(), pkey.clone()));
         }
 

@@ -42,8 +42,51 @@ async fn secured_create_session_short_client_nonce_is_rejected_before_signing() 
         .expect("CreateSession short client nonce probe should not hang");
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn none_policy_create_session_accepts_short_client_nonce() {
+    tokio::time::timeout(TEST_TIMEOUT, run_none_policy_short_client_nonce_probe())
+        .await
+        .expect("None-policy CreateSession short client nonce probe should not hang");
+}
+
+async fn run_none_policy_short_client_nonce_probe() {
+    let fixture = CreateSessionCertificateFixture::start_with(
+        SecurityPolicy::None,
+        MessageSecurityMode::None,
+    )
+    .await;
+
+    let create_session_result = CreateSession::new_manual(
+        fixture.client.certificate_store(),
+        &fixture.endpoint,
+        1,
+        Duration::from_secs(5),
+        NodeId::null(),
+        fixture.channel.request_handle(),
+    )
+    .endpoint_url(fixture.endpoint_url.as_str())
+    .client_description(ApplicationDescription {
+        application_uri: UAString::from(fixture.client_application_uri.as_str()),
+        product_uri: UAString::from("urn:async-opcua:create-session-certificate-lock-client"),
+        application_type: ApplicationType::Client,
+        ..Default::default()
+    })
+    .nonce_length(1)
+    .session_name("none-policy-create-session-short-client-nonce")
+    .session_timeout(5_000.0)
+    .send(&fixture.channel)
+    .await;
+
+    fixture.handle.cancel();
+    fixture.channel_poller.abort();
+    fixture.server_task.abort();
+
+    create_session_result
+        .expect("SecurityPolicy None does not require a CreateSession clientNonce");
+}
+
 async fn run_short_client_nonce_probe() {
-    let fixture = CreateSessionCertificateFixture::start().await;
+    let fixture = CreateSessionCertificateFixture::start_secured().await;
 
     let create_session_result = CreateSession::new_manual(
         fixture.client.certificate_store(),
@@ -83,7 +126,7 @@ async fn run_short_client_nonce_probe() {
 }
 
 async fn run_certificate_preflight_probe() {
-    let fixture = CreateSessionCertificateFixture::start().await;
+    let fixture = CreateSessionCertificateFixture::start_secured().await;
     let lock_hold = hold_session_manager_write_lock(fixture.handle.clone());
 
     lock_hold
@@ -180,7 +223,18 @@ struct CreateSessionCertificateFixture {
 }
 
 impl CreateSessionCertificateFixture {
-    async fn start() -> Self {
+    async fn start_secured() -> Self {
+        Self::start_with(
+            SecurityPolicy::Aes128Sha256RsaOaep,
+            MessageSecurityMode::SignAndEncrypt,
+        )
+        .await
+    }
+
+    async fn start_with(
+        security_policy: SecurityPolicy,
+        security_mode: MessageSecurityMode,
+    ) -> Self {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("system clock should be after Unix epoch")
@@ -215,11 +269,11 @@ impl CreateSessionCertificateFixture {
             .trust_client_certs(true)
             .discovery_urls(vec![endpoint_url.clone()])
             .add_endpoint(
-                "secured",
+                "create_session_certificate_lock_scope",
                 (
                     "/",
-                    SecurityPolicy::Aes128Sha256RsaOaep,
-                    MessageSecurityMode::SignAndEncrypt,
+                    security_policy,
+                    security_mode,
                     &[ANONYMOUS_USER_TOKEN_ID] as &[&str],
                 ),
             )
@@ -236,11 +290,10 @@ impl CreateSessionCertificateFixture {
             .expect("CreateSession certificate test endpoint should be described")
             .into_iter()
             .find(|endpoint| {
-                endpoint.security_policy_uri.as_ref()
-                    == SecurityPolicy::Aes128Sha256RsaOaep.to_uri()
-                    && endpoint.security_mode == MessageSecurityMode::SignAndEncrypt
+                endpoint.security_policy_uri.as_ref() == security_policy.to_uri()
+                    && endpoint.security_mode == security_mode
             })
-            .expect("secured CreateSession certificate test endpoint should be advertised");
+            .expect("CreateSession certificate test endpoint should be advertised");
         let mut client = ClientBuilder::new()
             .application_name("CreateSession Certificate Lock Scope Client")
             .application_uri(client_application_uri.clone())

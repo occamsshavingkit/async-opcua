@@ -171,10 +171,8 @@ impl SecureChannelState {
     }
 
     pub(super) fn set_client_offset(&self, offset: chrono::Duration) {
-        // This is not strictly speaking thread safe, but it doesn't really matter in this case,
-        // the assumption is that this is only called from a single thread at once.
         self.client_offset
-            .store(Arc::new(**self.client_offset.load() + offset));
+            .rcu(|current| Arc::new(**current + offset));
         debug!("Client offset set to {}", self.client_offset);
     }
 
@@ -255,5 +253,58 @@ impl SecureChannelState {
     /// Get a reference to the secure channel.
     pub fn secure_channel(&self) -> &RwLock<SecureChannel> {
         &self.secure_channel
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use opcua_core::comms::secure_channel::SecureChannel;
+    use opcua_crypto::CertificateStore;
+    use opcua_types::ContextOwned;
+    use std::sync::Arc;
+
+    fn test_state() -> SecureChannelState {
+        SecureChannelState::new(
+            false,
+            Arc::new(RwLock::new(SecureChannel::new(
+                Arc::new(RwLock::new(CertificateStore::new(std::path::Path::new("./pki")))),
+                opcua_core::comms::secure_channel::Role::Client,
+                Arc::new(RwLock::new(ContextOwned::default())),
+            ))),
+            Arc::new(ArcSwap::new(Arc::new(opcua_types::NodeId::null()))),
+        )
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn concurrent_set_client_offset_preserves_all_updates() {
+        let state = Arc::new(test_state());
+        const TASKS: usize = 8;
+        const ITERATIONS: usize = 100;
+
+        let barrier = Arc::new(tokio::sync::Barrier::new(TASKS));
+        let mut handles = Vec::new();
+
+        for _ in 0..TASKS {
+            let s = state.clone();
+            let b = barrier.clone();
+            handles.push(tokio::spawn(async move {
+                b.wait().await;
+                for _ in 0..ITERATIONS {
+                    s.set_client_offset(chrono::Duration::milliseconds(1));
+                }
+            }));
+        }
+
+        for h in handles {
+            h.await.expect("set_client_offset task should not panic");
+        }
+
+        let total = chrono::Duration::milliseconds((TASKS * ITERATIONS) as i64);
+        let actual = **state.client_offset.load();
+        assert_eq!(
+            actual, total,
+            "concurrent set_client_offset must preserve all updates via rcu()"
+        );
     }
 }

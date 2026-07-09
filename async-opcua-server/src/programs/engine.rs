@@ -143,17 +143,20 @@ impl ProgramEngine {
 
                 *progress.write() = i;
 
-                // Sync progress to AddressSpace dynamically
-                let progress_id = NodeId::new(
-                    engine_parent_id.namespace,
-                    format!("{}_Progress", parent_str),
-                );
-                let space = address_space.write();
-                if let Some(mut node) = space.find_mut(&progress_id) {
-                    if let NodeType::Variable(ref mut var) = &mut *node {
-                        var.set_data_value(DataValue::value_only(Variant::from(i as i32)));
-                    }
-                };
+                // Sync progress to AddressSpace every 2nd iteration to batch write
+                // lock acquisitions while keeping progress observable.
+                if i % 2 == 0 {
+                    let progress_id = NodeId::new(
+                        engine_parent_id.namespace,
+                        format!("{}_Progress", parent_str),
+                    );
+                    let space = address_space.write();
+                    if let Some(mut node) = space.find_mut(&progress_id) {
+                        if let NodeType::Variable(ref mut var) = &mut *node {
+                            var.set_data_value(DataValue::value_only(Variant::from(i as i32)));
+                        }
+                    };
+                }
             }
 
             // Task complete: transition to Halted

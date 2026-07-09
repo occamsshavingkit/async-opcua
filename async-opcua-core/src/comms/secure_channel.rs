@@ -5,7 +5,6 @@
 //! The secure channel handles security on an OPC-UA connection.
 
 use std::sync::Arc;
-use std::sync::Mutex;
 use std::{
     collections::HashMap,
     io::{Cursor, Write},
@@ -27,7 +26,7 @@ use opcua_types::{
     ContextOwned, DateTime, DecodingOptions, Error, MessageSecurityMode, NamespaceMap,
     SimpleBinaryDecodable,
 };
-use parking_lot::RwLock;
+use parking_lot::{Mutex, RwLock};
 
 use super::{
     message_chunk::{MessageChunk, MessageChunkHeader, MessageChunkType, MESSAGE_SIZE_OFFSET},
@@ -1007,7 +1006,7 @@ impl SecureChannel {
                 return Ok((
                     MessageChunk {
                         data: src,
-                        cached_chunk_info: Mutex::new(None),
+                        cached_chunk_info: std::sync::Mutex::new(None),
                     },
                     security_policy,
                 ));
@@ -1090,7 +1089,7 @@ impl SecureChannel {
         Ok((
             MessageChunk {
                 data: msg.into(),
-                cached_chunk_info: Mutex::new(None),
+                cached_chunk_info: std::sync::Mutex::new(None),
             },
             security_policy,
         ))
@@ -1134,7 +1133,7 @@ impl SecureChannel {
         decrypted_data.reserve(src.len());
         Ok(MessageChunk {
             data,
-            cached_chunk_info: Mutex::new(None),
+            cached_chunk_info: std::sync::Mutex::new(None),
         })
     }
 
@@ -1207,7 +1206,7 @@ impl SecureChannel {
         } else {
             Ok(MessageChunk {
                 data: src,
-                cached_chunk_info: Mutex::new(None),
+                cached_chunk_info: std::sync::Mutex::new(None),
             })
         }
     }
@@ -1256,7 +1255,7 @@ impl SecureChannel {
         } else {
             Ok(MessageChunk {
                 data: src,
-                cached_chunk_info: Mutex::new(None),
+                cached_chunk_info: std::sync::Mutex::new(None),
             })
         }
     }
@@ -1330,15 +1329,13 @@ impl SecureChannel {
                     security_policy.asymmetric_sign(signing_key, l, signature)?;
                     let mut first_request_signature = self
                         .first_request_signature
-                        .lock()
-                        .map_err(|_| StatusCode::BadSecurityChecksFailed)?;
+                        .lock();
                     first_request_signature.clear();
                     first_request_signature.extend_from_slice(signature);
                 } else if self.apply_channel_thumbprint {
                     let first_request_signature = self
                         .first_request_signature
-                        .lock()
-                        .map_err(|_| StatusCode::BadSecurityChecksFailed)?;
+                        .lock();
                     let mut signed_data =
                         Vec::with_capacity(l.len() + first_request_signature.len());
                     signed_data.extend_from_slice(l);
@@ -1687,12 +1684,7 @@ impl SecureChannel {
                 {
                     if self.is_client_role() && self.apply_channel_thumbprint {
                         let first_request_signature =
-                            self.first_request_signature.lock().map_err(|_| {
-                                Error::new(
-                                    StatusCode::BadSecurityChecksFailed,
-                                    "channel thumbprint state is unavailable",
-                                )
-                            })?;
+                            self.first_request_signature.lock();
                         let mut signed_data_with_thumbprint =
                             Vec::with_capacity(signed_data.len() + first_request_signature.len());
                         signed_data_with_thumbprint.extend_from_slice(signed_data);
@@ -1710,12 +1702,7 @@ impl SecureChannel {
                         )?;
                         if !self.is_client_role() {
                             let mut first_request_signature =
-                                self.first_request_signature.lock().map_err(|_| {
-                                    Error::new(
-                                        StatusCode::BadSecurityChecksFailed,
-                                        "channel thumbprint state is unavailable",
-                                    )
-                                })?;
+                                self.first_request_signature.lock();
                             first_request_signature.clear();
                             first_request_signature.extend_from_slice(signature);
                         }
@@ -2144,6 +2131,42 @@ mod secure_message_range_tests {
         let (signed, encrypted) = SecureChannel::secure_message_ranges(100, 8, 20).unwrap();
         assert_eq!(signed, 0..80);
         assert_eq!(encrypted, 8..100);
+    }
+}
+
+#[cfg(test)]
+mod crypto_offload_tests {
+    use std::time::Duration;
+
+    use tokio::time::{sleep, timeout, Instant};
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn blocking_crypto_work_does_not_starve_runtime_timers() {
+        let started = Instant::now();
+        let timer = tokio::spawn(async move {
+            sleep(Duration::from_millis(25)).await;
+            started.elapsed()
+        });
+
+        let crypto = tokio::task::spawn_blocking(|| {
+            let deadline = std::time::Instant::now() + Duration::from_millis(250);
+            let mut accumulator = 0_u64;
+            while std::time::Instant::now() < deadline {
+                accumulator = accumulator.wrapping_add(1);
+            }
+            accumulator
+        });
+
+        let timer_elapsed = timeout(Duration::from_millis(150), timer)
+            .await
+            .expect("runtime timer should not be starved by blocking crypto work")
+            .unwrap();
+        assert!(
+            timer_elapsed < Duration::from_millis(150),
+            "runtime timer was delayed by blocking crypto work: {timer_elapsed:?}"
+        );
+
+        assert!(crypto.await.unwrap() > 0);
     }
 }
 

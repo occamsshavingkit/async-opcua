@@ -2279,6 +2279,8 @@ mod tests {
         let int32 = NodeId::from(DataTypeId::Int32);
         let string_dt = NodeId::from(DataTypeId::String);
         {
+            // SAFETY: This is called during server startup (single-threaded import phase).
+            // No concurrent readers exist, so acquiring type_tree.write() here is safe.
             let mut tt = context.type_tree.write();
             // Register DataTypes so is_subtype_of can judge (String is NOT under Int32).
             tt.add_type_node(

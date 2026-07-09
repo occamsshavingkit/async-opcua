@@ -127,6 +127,89 @@ async fn simple_subscriptions() {
     session.delete_subscription(sub_id).await.unwrap();
 }
 
+#[tokio::test]
+async fn data_change_wakes_queued_publish_without_waiting_for_publishing_interval() {
+    let (tester, nm, session) = setup().await;
+
+    let id = nm.inner().next_node_id();
+    nm.inner().add_node(
+        nm.address_space(),
+        tester.handle.type_tree(),
+        VariableBuilder::new(&id, "WakePublishVar", "WakePublishVar")
+            .value(0)
+            .data_type(DataTypeId::Int32)
+            .access_level(AccessLevel::CURRENT_READ)
+            .user_access_level(AccessLevel::CURRENT_READ)
+            .build()
+            .into(),
+        &ObjectId::ObjectsFolder.into(),
+        &ReferenceTypeId::Organizes.into(),
+        Some(&VariableTypeId::BaseDataVariableType.into()),
+        Vec::new(),
+    );
+
+    let (notifs, mut data, _) = ChannelNotifications::new();
+    let sub_id = session
+        .create_subscription(Duration::from_millis(100), 100, 20, 1000, 0, true, notifs)
+        .await
+        .unwrap();
+
+    let created = session
+        .create_monitored_items(
+            sub_id,
+            TimestampsToReturn::Both,
+            vec![MonitoredItemCreateRequest {
+                item_to_monitor: ReadValueId {
+                    node_id: id.clone(),
+                    attribute_id: AttributeId::Value as u32,
+                    ..Default::default()
+                },
+                monitoring_mode: MonitoringMode::Reporting,
+                requested_parameters: MonitoringParameters {
+                    sampling_interval: 0.0,
+                    queue_size: 10,
+                    discard_oldest: true,
+                    ..Default::default()
+                },
+            }],
+        )
+        .await
+        .unwrap();
+    assert_eq!(created[0].result.status_code, StatusCode::Good);
+
+    let _initial = timeout(Duration::from_millis(750), data.recv())
+        .await
+        .expect("initial queued publish should be delivered promptly")
+        .unwrap();
+    session
+        .modify_subscription(sub_id, Duration::from_secs(30), 100, 20, 1000, 0)
+        .await
+        .unwrap();
+
+    let changed_at = tokio::time::Instant::now();
+    nm.set_value(
+        tester.handle.subscriptions(),
+        &id,
+        None,
+        DataValue::new_now(1),
+    )
+    .unwrap();
+
+    let (r, v) = timeout(Duration::from_millis(750), data.recv())
+        .await
+        .expect("data change should wake queued publish promptly")
+        .unwrap();
+    assert_eq!(r.node_id, id);
+    assert_eq!(v.value.unwrap(), Variant::Int32(1));
+    assert!(
+        changed_at.elapsed() < Duration::from_millis(750),
+        "data change notification waited for publishing interval: {:?}",
+        changed_at.elapsed()
+    );
+
+    session.delete_subscription(sub_id).await.unwrap();
+}
+
 async fn recv_n<T>(recv: &mut UnboundedReceiver<T>, n: usize) -> Vec<T> {
     let mut res = Vec::with_capacity(n);
     for _ in 0..n {

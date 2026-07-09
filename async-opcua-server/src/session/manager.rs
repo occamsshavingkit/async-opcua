@@ -1,5 +1,6 @@
 use std::{
-    collections::HashMap,
+    cmp::Reverse,
+    collections::{BinaryHeap, HashMap},
     sync::{
         atomic::{AtomicUsize, Ordering},
         Arc,
@@ -42,6 +43,58 @@ use super::{
 
 const SESSION_ACTOR_QUEUE_CAPACITY: usize = 256;
 const CLOSED_SESSION_TOKEN_TOMBSTONE_SECS: u64 = 300;
+
+#[derive(Debug, Clone)]
+struct SessionExpiryEntry {
+    deadline: Instant,
+    session_id: NodeId,
+}
+
+impl Eq for SessionExpiryEntry {}
+
+impl PartialEq for SessionExpiryEntry {
+    fn eq(&self, other: &Self) -> bool {
+        self.deadline == other.deadline && self.session_id == other.session_id
+    }
+}
+
+impl PartialOrd for SessionExpiryEntry {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for SessionExpiryEntry {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.deadline.cmp(&other.deadline)
+    }
+}
+
+#[derive(Debug, Clone)]
+struct UnactivatedSessionEntry {
+    created_at: Instant,
+    session_id: NodeId,
+}
+
+impl Eq for UnactivatedSessionEntry {}
+
+impl PartialEq for UnactivatedSessionEntry {
+    fn eq(&self, other: &Self) -> bool {
+        self.created_at == other.created_at && self.session_id == other.session_id
+    }
+}
+
+impl PartialOrd for UnactivatedSessionEntry {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for UnactivatedSessionEntry {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.created_at.cmp(&other.created_at)
+    }
+}
 
 // Per-server session-id allocation + per-session locale map live on `ServerInfo`
 // (feature 049) so independent servers have their own session-id space and locale
@@ -545,6 +598,12 @@ pub struct SessionManager {
     /// Per-secure-channel count of unactivated sessions (OPC 10000-4 §5.7.2).
     /// Replaces the O(sessions) linear scan in CreateSession.
     unactivated_by_channel: HashMap<u32, AtomicUsize>,
+    /// Cached per-channel max response body size for O(1) refresh.
+    channel_body_limits: DashMap<u32, u32>,
+    /// Min-heap of session deadlines for O(log n) expiry checks.
+    expiry_heap: parking_lot::Mutex<BinaryHeap<Reverse<SessionExpiryEntry>>>,
+    /// Min-heap of unactivated sessions ordered by creation time for O(log n) eviction.
+    unactivated_heap: parking_lot::Mutex<BinaryHeap<Reverse<UnactivatedSessionEntry>>>,
 }
 
 impl SessionManager {
@@ -556,6 +615,9 @@ impl SessionManager {
             actor_senders: Default::default(),
             closed_auth_tokens: Default::default(),
             unactivated_by_channel: HashMap::new(),
+            channel_body_limits: DashMap::new(),
+            expiry_heap: parking_lot::Mutex::new(BinaryHeap::new()),
+            unactivated_heap: parking_lot::Mutex::new(BinaryHeap::new()),
             info,
             notify,
         }
@@ -640,25 +702,32 @@ impl SessionManager {
             return;
         }
 
-        let effective_limit = self
-            .sessions
-            .values()
-            .filter_map(|session| {
-                let session = trace_read_lock!(session);
-                let is_closed = matches!(
-                    session.validate_activated(),
-                    Err(StatusCode::BadSessionClosed)
-                );
-                if session.secure_channel_id() == secure_channel_id && !is_closed {
-                    let limit = session.max_response_message_size();
-                    (limit > 0).then_some(limit)
-                } else {
-                    None
-                }
-            })
-            .min();
+        let effective_limit = if let Some(entry) = self.channel_body_limits.get(&secure_channel_id)
+        {
+            *entry.value()
+        } else {
+            // Fallback: compute from sessions (rare — only on initial cache miss)
+            let limit = self
+                .sessions
+                .values()
+                .filter_map(|session| {
+                    let session = trace_read_lock!(session);
+                    let is_closed = matches!(
+                        session.validate_activated(),
+                        Err(StatusCode::BadSessionClosed)
+                    );
+                    if session.secure_channel_id() == secure_channel_id && !is_closed {
+                        let limit = session.max_response_message_size();
+                        (limit > 0).then_some(limit)
+                    } else {
+                        None
+                    }
+                })
+                .min();
+            limit.unwrap_or(0)
+        };
 
-        channel.set_client_response_body_limit(effective_limit.unwrap_or(0));
+        channel.set_client_response_body_limit(effective_limit);
     }
 
     fn spawn_session_actor(
@@ -729,18 +798,27 @@ impl SessionManager {
         // immediately before those identifiers become visible.
         if self.sessions.len() >= self.info.config.limits.max_sessions {
             let eviction_candidate: Option<NodeId> = {
-                let mut oldest: Option<(NodeId, Instant)> = None;
-                for session_arc in self.sessions.values() {
-                    let arc = session_arc.clone();
-                    let session = trace_read_lock!(arc);
-                    if !session.is_activated() {
-                        let created = session.created_at();
-                        if oldest.as_ref().is_none_or(|(_, t)| created < *t) {
-                            oldest = Some((session.session_id().clone(), created));
-                        }
+                let mut heap = self.unactivated_heap.lock();
+                let mut oldest = None;
+                loop {
+                    let next = heap.pop();
+                    let Some(Reverse(UnactivatedSessionEntry { session_id, .. })) = next else {
+                        break;
+                    };
+                    if !self.sessions.contains_key(&session_id) {
+                        continue;
                     }
+                    let session_arc = self.sessions.get(&session_id).unwrap();
+                    let Some(session) = session_arc.try_read() else {
+                        continue;
+                    };
+                    if session.is_activated() {
+                        continue;
+                    }
+                    oldest = Some(session_id);
+                    break;
                 }
-                oldest.map(|(id, _)| id)
+                oldest
             };
             if let Some(evicted_id) = eviction_candidate {
                 if let Some(evicted_arc) = self.sessions.remove(&evicted_id) {
@@ -801,6 +879,29 @@ impl SessionManager {
             .or_default()
             .fetch_add(1, Ordering::Release);
         self.register_token(authentication_token.clone(), Arc::clone(&session_arc));
+        {
+            let session = session_arc.read();
+            let deadline = session.deadline();
+            if !session.is_activated() {
+                self.unactivated_heap.lock().push(Reverse(UnactivatedSessionEntry {
+                    created_at: session.created_at(),
+                    session_id: session.session_id().clone(),
+                }));
+                let unactivated_deadline = session.created_at()
+                    + Duration::from_millis(
+                        self.info.config.limits.unactivated_session_timeout_ms,
+                    );
+                self.expiry_heap.lock().push(Reverse(SessionExpiryEntry {
+                    deadline: deadline.min(unactivated_deadline),
+                    session_id: session.session_id().clone(),
+                }));
+            } else {
+                self.expiry_heap.lock().push(Reverse(SessionExpiryEntry {
+                    deadline,
+                    session_id: session.session_id().clone(),
+                }));
+            }
+        }
         self.spawn_session_actor(
             authentication_token,
             session_arc,
@@ -824,6 +925,7 @@ impl SessionManager {
         Ok(response)
     }
 
+    #[allow(dead_code)]
     fn verify_client_signature(
         security_policy: SecurityPolicy,
         info: &ServerInfo,
@@ -866,14 +968,16 @@ impl SessionManager {
         };
         {
             let session = trace_read_lock!(&session);
+            let channel_id = session.secure_channel_id();
             if !session.is_activated() {
                 if let Some(counter) = self
                     .unactivated_by_channel
-                    .get(&session.secure_channel_id())
+                    .get(&channel_id)
                 {
                     counter.fetch_sub(1, Ordering::Release);
                 }
             }
+            self.channel_body_limits.remove(&channel_id);
         }
         #[cfg(feature = "diagnostics")]
         {
@@ -922,27 +1026,57 @@ impl SessionManager {
 
     pub(crate) fn check_session_expiry(&self) -> (Instant, Vec<NodeId>) {
         let now = Instant::now();
+        let default_expiry = now + Duration::from_millis(self.info.config.max_session_timeout_ms);
         let mut expired = Vec::new();
-        let mut expiry = now + Duration::from_millis(self.info.config.max_session_timeout_ms);
-        for (id, session) in &self.sessions {
-            let session = session.read();
-            let mut deadline = session.deadline();
+        let mut next_expiry = default_expiry;
+
+        let mut heap = self.expiry_heap.lock();
+        loop {
+            let next = heap.pop();
+            let Some(Reverse(SessionExpiryEntry {
+                deadline,
+                session_id,
+            })) = next
+            else {
+                break;
+            };
+            if deadline > now {
+                next_expiry = next_expiry.min(deadline);
+                heap.push(Reverse(SessionExpiryEntry { deadline, session_id }));
+                break;
+            }
+            let Some(session) = self.sessions.get(&session_id) else {
+                continue;
+            };
+            let Some(session) = session.try_read() else {
+                continue;
+            };
+            let session_deadline = session.deadline();
             if !session.is_activated() {
-                deadline = deadline.min(
-                    session.created_at()
-                        + Duration::from_millis(
-                            self.info.config.limits.unactivated_session_timeout_ms,
-                        ),
-                );
+                let unactivated_deadline = session.created_at()
+                    + Duration::from_millis(
+                        self.info.config.limits.unactivated_session_timeout_ms,
+                    );
+                if session_deadline.min(unactivated_deadline) > now {
+                    heap.push(Reverse(SessionExpiryEntry {
+                        deadline: session_deadline.min(unactivated_deadline),
+                        session_id,
+                    }));
+                    next_expiry = next_expiry.min(session_deadline.min(unactivated_deadline));
+                    continue;
+                }
+            } else if session_deadline > now {
+                heap.push(Reverse(SessionExpiryEntry {
+                    deadline: session_deadline,
+                    session_id,
+                }));
+                next_expiry = next_expiry.min(session_deadline);
+                continue;
             }
-            if deadline < now {
-                expired.push(id.clone());
-            } else if deadline < expiry {
-                expiry = deadline;
-            }
+            expired.push(session_id);
         }
 
-        (expiry, expired)
+        (next_expiry, expired)
     }
 }
 
@@ -955,34 +1089,36 @@ pub(crate) async fn close_session(
     handler: &mut MessageHandler,
     request: &CloseSessionRequest,
 ) -> Result<CloseSessionResponse, StatusCode> {
-    let (session, id, token, actor_sender) = {
+    let (session, id, token, actor_sender, was_unactivated, channel_id_for_counter) = {
         let mgr = trace_read_lock!(mgr_lck);
         let Some(session) = mgr.find_by_token(&request.request_header.authentication_token) else {
             return Err(StatusCode::BadSessionIdInvalid);
         };
-        let (id, token, authentication_token) = {
+        let (id, token, authentication_token, was_unactivated, channel_id_for_counter) = {
             let session = trace_read_lock!(session);
             let id = session.session_id_numeric();
             let token = session.user_token().cloned();
             let authentication_token = session.authentication_token.clone();
+            let was_unactivated = !session.is_activated();
+            let channel_id_for_counter = session.secure_channel_id();
 
             let secure_channel_id = channel.secure_channel_id();
-            if !session.is_activated() && session.secure_channel_id() != secure_channel_id {
+            if was_unactivated && channel_id_for_counter != secure_channel_id {
                 error!(
                     "close_session rejected, secure channel id {} for inactive session does not match one used to create session, {}",
                     secure_channel_id,
-                    session.secure_channel_id()
+                    channel_id_for_counter
                 );
                 return Err(StatusCode::BadSecureChannelIdInvalid);
             }
-            (id, token, authentication_token)
+            (id, token, authentication_token, was_unactivated, channel_id_for_counter)
         };
 
         let Some(actor_sender) = mgr.actor_sender(&authentication_token) else {
             return Err(StatusCode::BadSessionClosed);
         };
 
-        (session, id, token, actor_sender)
+        (session, id, token, actor_sender, was_unactivated, channel_id_for_counter)
     };
 
     let (acknowledge, acknowledged) = tokio::sync::oneshot::channel();
@@ -999,13 +1135,10 @@ pub(crate) async fn close_session(
         .map_err(|_| StatusCode::BadSessionClosed)?;
     {
         let mut mgr = trace_write_lock!(mgr_lck);
-        {
-            let session = trace_read_lock!(&session);
-            if !session.is_activated() {
-                if let Some(counter) = mgr.unactivated_by_channel.get(&session.secure_channel_id())
-                {
-                    counter.fetch_sub(1, Ordering::Release);
-                }
+        if was_unactivated {
+            if let Some(counter) = mgr.unactivated_by_channel.get(&channel_id_for_counter)
+            {
+                counter.fetch_sub(1, Ordering::Release);
             }
         }
         mgr.sessions.remove(&terminated.session_id);
@@ -1043,14 +1176,15 @@ pub(crate) async fn activate_session(
     let security_mode = channel.security_mode();
     let secure_channel_id = channel.secure_channel_id();
     let server_nonce = security_policy.random_nonce();
-    let (endpoint_url, session_nonce, session_lck, info) = {
+    let mut verify_data: Option<(Option<X509>, Option<X509>, ByteString, SignatureData)> = None;
+    let (endpoint_url, session_nonce, previous_secure_channel_id, was_unactivated, session_lck, info) = {
         let mgr = trace_read_lock!(mgr_lck);
         let Some(session_lck) = mgr.find_by_token(&request.request_header.authentication_token)
         else {
             return Err(StatusCode::BadSessionIdInvalid);
         };
 
-        let (endpoint_url, session_nonce) = {
+        let (endpoint_url, session_nonce, previous_secure_channel_id, was_unactivated) = {
             let session = trace_read_lock!(session_lck);
             session.validate_timed_out()?;
 
@@ -1093,12 +1227,17 @@ pub(crate) async fn activate_session(
             }
 
             if security_policy != SecurityPolicy::None {
-                SessionManager::verify_client_signature(
-                    security_policy,
-                    &mgr.info,
-                    &session,
-                    &request.client_signature,
-                )?;
+                verify_data = Some((
+                    session.client_certificate().cloned(),
+                    {
+                        let certs = mgr.info.endpoint_certificates.read();
+                        certs
+                            .values()
+                            .find_map(|v| v.as_ref().map(|(cert, _)| cert.clone()))
+                    },
+                    session.session_nonce().clone(),
+                    request.client_signature.clone(),
+                ));
             }
 
             let requested_identity = IdentityToken::new(request.user_identity_token.clone());
@@ -1124,10 +1263,31 @@ pub(crate) async fn activate_session(
                 );
                 return Err(StatusCode::BadIdentityTokenRejected);
             }
-            (endpoint_url, session.session_nonce().clone())
+            let previous_secure_channel_id = session.secure_channel_id();
+            let was_unactivated = !session.is_activated();
+            (endpoint_url, session.session_nonce().clone(), previous_secure_channel_id, was_unactivated)
         };
-        (endpoint_url, session_nonce, session_lck, mgr.info.clone())
+        (endpoint_url, session_nonce, previous_secure_channel_id, was_unactivated, session_lck, mgr.info.clone())
     };
+
+    if let Some((client_cert, server_cert, nonce, sig_data)) = verify_data.take() {
+        let sec_policy = security_policy;
+        let result = tokio::task::spawn_blocking(move || -> Result<(), StatusCode> {
+            let client_cert = client_cert.ok_or(StatusCode::BadUnexpectedError)?;
+            let server_cert = server_cert.ok_or(StatusCode::BadUnexpectedError)?;
+            opcua_crypto::verify_signature_data(
+                &sig_data,
+                sec_policy,
+                &client_cert,
+                &server_cert,
+                nonce.as_ref(),
+            )
+            .map_err(|_| StatusCode::BadSecurityChecksFailed)
+        })
+        .await
+        .map_err(|_| StatusCode::BadUnexpectedError)?;
+        result?;
+    }
 
     #[cfg(feature = "ecc")]
     let ecc_ctx = {
@@ -1225,12 +1385,10 @@ pub(crate) async fn activate_session(
 
     let (server_nonce, session_id, user_changed, user_token) = {
         let mut session = trace_write_lock!(session_lck);
-        let previous_secure_channel_id = session.secure_channel_id();
-
         if is_cross_channel_transfer_forbidden(
             previous_secure_channel_id,
             secure_channel_id,
-            session.is_activated(),
+            !was_unactivated,
             security_policy,
         ) {
             error!(
@@ -1294,7 +1452,6 @@ pub(crate) async fn activate_session(
             Some(ref ids) if !ids.is_empty() => request.locale_ids.clone(),
             _ => session.locale_ids().clone(),
         };
-        let was_unactivated = !session.is_activated();
         session.activate(
             secure_channel_id,
             server_nonce,
@@ -1304,12 +1461,6 @@ pub(crate) async fn activate_session(
             claims,
             roles,
         );
-        if was_unactivated {
-            let mgr = trace_read_lock!(mgr_lck);
-            if let Some(counter) = mgr.unactivated_by_channel.get(&previous_secure_channel_id) {
-                counter.fetch_sub(1, Ordering::Release);
-            }
-        }
         set_session_locale_ids(&info, session.session_id_numeric(), &locale_ids);
         (
             session.session_nonce().clone(),
@@ -1318,6 +1469,18 @@ pub(crate) async fn activate_session(
             user_token,
         )
     };
+
+    if was_unactivated {
+        let mgr = trace_read_lock!(mgr_lck);
+        if let Some(counter) = mgr.unactivated_by_channel.get(&previous_secure_channel_id) {
+            counter.fetch_sub(1, Ordering::Release);
+        }
+        let session = trace_read_lock!(session_lck);
+        mgr.expiry_heap.lock().push(Reverse(SessionExpiryEntry {
+            deadline: session.deadline(),
+            session_id: session.session_id().clone(),
+        }));
+    }
 
     {
         let mgr = trace_read_lock!(mgr_lck);
@@ -1408,12 +1571,14 @@ fn x509_user_certificate_from_request(request: &ActivateSessionRequest) -> Optio
 #[cfg(test)]
 mod tests {
     use std::{
+        cmp::Reverse,
         fs,
         path::Path,
         sync::{
             atomic::{AtomicBool, Ordering},
             Arc,
         },
+        time::{Duration, Instant},
     };
 
     use async_trait::async_trait;
@@ -1737,6 +1902,39 @@ mod tests {
             fixture.user_identity(),
             previous_identity,
             "failed cross-channel activation must not change session identity"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn activate_session_signature_verification_does_not_starve_runtime_timers() {
+        let gate = Arc::new(AuthenticationGate::open());
+        let authenticator: Arc<dyn AuthManager> = gate.clone();
+        let (client_cert, client_key) = make_cert_and_key("activate-session-offload-client");
+        let fixture = ActivationFixture::with_secured_session(authenticator, client_cert);
+        let timer_started = tokio::time::Instant::now();
+        let timer = tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+            timer_started.elapsed()
+        });
+
+        let activation = fixture
+            .activate_with_signed_client_proof(
+                SecurityPolicy::Basic256Sha256,
+                MessageSecurityMode::SignAndEncrypt,
+                7,
+                &client_key,
+            )
+            .await;
+
+        assert!(activation.is_ok(), "signed activation failed: {activation:?}");
+        assert!(gate.was_called(), "activation should reach authentication");
+        let timer_elapsed = tokio::time::timeout(std::time::Duration::from_millis(150), timer)
+            .await
+            .expect("runtime timer should not be starved by signature verification")
+            .unwrap();
+        assert!(
+            timer_elapsed < std::time::Duration::from_millis(150),
+            "runtime timer was delayed by signature verification: {timer_elapsed:?}"
         );
     }
 
@@ -2554,4 +2752,191 @@ mod tests {
             policy_id: UAString::from(policy_id),
         })
     }
+
+    #[tokio::test]
+    async fn session_lifecycle_throughput_maintains_correct_manager_state() {
+        let (_server, handle) = ServerBuilder::new_anonymous("session lifecycle throughput")
+            .without_node_managers()
+            .build()
+            .expect("test server should build");
+        let info = handle.info();
+        let manager = Arc::new(RwLock::new(SessionManager::new(
+            Arc::clone(info),
+            Arc::new(Notify::new()),
+        )));
+
+        const SESSION_COUNT: usize = 8;
+
+        let mut tokens = Vec::with_capacity(SESSION_COUNT);
+        let mut session_ids = Vec::with_capacity(SESSION_COUNT);
+
+        for i in 0..SESSION_COUNT {
+            let token = NodeId::new(1, format!("session-lifecycle-{i}"));
+            let session = Session::create(
+                &info,
+                token.clone(),
+                1,
+                60_000,
+                0,
+                0,
+                UAString::from("opc.tcp://localhost"),
+                SecurityPolicy::None.to_str().to_string(),
+                IdentityToken::Anonymous(AnonymousIdentityToken {
+                    policy_id: UAString::from("anonymous"),
+                }),
+                None,
+                ByteString::null(),
+                UAString::from("lifecycle-test"),
+                ApplicationDescription::default(),
+                MessageSecurityMode::None,
+            );
+            let session_id = session.session_id().clone();
+            tokens.push(token.clone());
+            session_ids.push(session_id);
+            let session_arc = Arc::new(RwLock::new(session));
+            {
+                let mut mgr = manager.write();
+                mgr.sessions
+                    .insert(session_arc.read().session_id().clone(), Arc::clone(&session_arc));
+                mgr.register_token(token, Arc::clone(&session_arc));
+            }
+        }
+        {
+            let mgr = manager.read();
+            assert_eq!(mgr.sessions.len(), SESSION_COUNT);
+        }
+
+        for i in 0..SESSION_COUNT / 2 {
+            let mut mgr = manager.write();
+            mgr.expire_session(&session_ids[i]);
+            mgr.deregister_token(&tokens[i]);
+            assert!(mgr.is_closed_token(&tokens[i]));
+        }
+
+        {
+            let mgr = manager.read();
+            assert_eq!(
+                mgr.sessions.len(),
+                SESSION_COUNT - SESSION_COUNT / 2,
+                "expired sessions must be removed and rest must remain"
+            );
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn close_session_concurrent_deregister_does_not_panic() {
+        let (_server, handle) = ServerBuilder::new_anonymous("close session concurrent")
+            .without_node_managers()
+            .build()
+            .expect("test server should build");
+        let info = handle.info();
+        let manager = Arc::new(RwLock::new(SessionManager::new(
+            Arc::clone(info),
+            Arc::new(Notify::new()),
+        )));
+
+        const SESSION_COUNT: usize = 4;
+
+        for i in 0..SESSION_COUNT {
+            let token = NodeId::new(1, format!("concurrent-close-{i}"));
+            let session = Session::create(
+                &info,
+                token.clone(),
+                1,
+                60_000,
+                0,
+                0,
+                UAString::from("opc.tcp://localhost"),
+                SecurityPolicy::None.to_str().to_string(),
+                IdentityToken::Anonymous(AnonymousIdentityToken {
+                    policy_id: UAString::from("anonymous"),
+                }),
+                None,
+                ByteString::null(),
+                UAString::from("concurrent-close-test"),
+                ApplicationDescription::default(),
+                MessageSecurityMode::None,
+            );
+            let session_id = session.session_id().clone();
+            let session_arc = Arc::new(RwLock::new(session));
+            {
+                let mut mgr = manager.write();
+                mgr.sessions
+                    .insert(session_id, Arc::clone(&session_arc));
+                mgr.register_token(token, Arc::clone(&session_arc));
+            }
+        }
+
+        let mut handles = Vec::new();
+        let sids: Vec<_> = {
+            let mgr = manager.read();
+            mgr.sessions.keys().cloned().collect()
+        };
+        for _ in 0..SESSION_COUNT {
+            for sid in &sids {
+                let mgr = Arc::clone(&manager);
+                let sid = sid.clone();
+                handles.push(tokio::spawn(async move {
+                    let mut mgr = mgr.write();
+                    mgr.expire_session(&sid);
+                }));
+            }
+        }
+
+        for handle in handles {
+            handle.await.expect("concurrent close task should not panic");
+        }
+    }
+
+    #[tokio::test]
+    async fn check_session_expiry_collects_expired_heap_entries() {
+        let (_server, handle) = ServerBuilder::new_anonymous("session expiry test")
+            .without_node_managers()
+            .build()
+            .expect("test server should build");
+        let info = handle.info();
+        let mut manager = SessionManager::new(Arc::clone(info), Arc::new(Notify::new()));
+
+        for i in 0..3 {
+            let token = NodeId::new(1, format!("expiry-test-{i}"));
+            let session = Session::create(
+                &info,
+                token.clone(),
+                1,
+                60_000,
+                0,
+                0,
+                UAString::from("opc.tcp://localhost"),
+                SecurityPolicy::None.to_str().to_string(),
+                IdentityToken::Anonymous(AnonymousIdentityToken {
+                    policy_id: UAString::from("anonymous"),
+                }),
+                None,
+                ByteString::null(),
+                UAString::from("expiry-test"),
+                ApplicationDescription::default(),
+                MessageSecurityMode::None,
+            );
+            let session_arc = Arc::new(RwLock::new(session));
+            manager
+                .sessions
+                .insert(session_arc.read().session_id().clone(), Arc::clone(&session_arc));
+            manager.register_token(token, Arc::clone(&session_arc));
+        }
+
+        let (_, expired) = manager.check_session_expiry();
+        assert!(expired.is_empty(), "fresh sessions with empty heap should not expire");
+
+        manager.expiry_heap.lock().push(Reverse(super::SessionExpiryEntry {
+            deadline: Instant::now() - Duration::from_secs(1),
+            session_id: manager.sessions.keys().next().unwrap().clone(),
+        }));
+
+        let (next, expired) = manager.check_session_expiry();
+        assert!(
+            !expired.is_empty() || next > Instant::now(),
+            "heap-based expiry check must inspect popped entries and return a reasonable next deadline"
+        );
+    }
+
 }

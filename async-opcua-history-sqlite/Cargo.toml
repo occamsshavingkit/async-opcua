@@ -17,7 +17,10 @@ async-opcua-server = { path = "../async-opcua-server", version = "0.19.0" }
 tokio = { workspace = true }
 tracing = { workspace = true }
 rusqlite = { version = "0.31.0", features = ["bundled"] }
+r2d2 = "0.8"
+r2d2_sqlite = "0.24"
 parking_lot = { workspace = true }
+dashmap = "6.1"
 async-trait = { workspace = true }
 uuid = { workspace = true }
 

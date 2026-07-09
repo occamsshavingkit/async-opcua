@@ -51,8 +51,8 @@ async fn test_history_backend_uses_bounded_continuation_cursor() {
     // cursor. A continuation read must query the remaining rows, not replay a
     // materialized full result set that can grow without bound.
     {
-        let conn = backend.connection();
-        let conn_lock = conn.lock();
+        let pool = backend.pool();
+        let conn_lock = pool.get().expect("get connection");
         conn_lock
             .execute(
                 "DELETE FROM historical_data

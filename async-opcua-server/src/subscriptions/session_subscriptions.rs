@@ -906,6 +906,24 @@ impl SessionSubscriptions {
         removed_subscriptions
     }
 
+    pub(super) fn process_notification_wake(
+        &mut self,
+        now: &DateTimeUtc,
+        now_instant: Instant,
+        buffer: &mut NotificationBuffer,
+    ) {
+        if self.publish_request_queue.is_empty() {
+            return;
+        }
+        let (_, responses, more) = self.tick_subscriptions_with_publish_requests(
+            now,
+            now_instant,
+            TickReason::NotificationAvailable,
+            buffer,
+        );
+        self.send_publish_responses(now, responses, more);
+    }
+
     fn reject_publish_requests_without_subscriptions(&mut self) {
         for pb in self.publish_request_queue.drain(..) {
             let _ = pb.response.send(

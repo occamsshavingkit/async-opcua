@@ -20,6 +20,7 @@ use super::monitored_item::{MonitoredItem, Notification};
 use super::pool::NotificationBuffer;
 
 const DATA_CHANGE_NOTIFICATION_VEC_POOL_LIMIT: usize = 4;
+const IMMEDIATE_NOTIFICATION_WAKE_MIN_INTERVAL: Duration = Duration::from_secs(1);
 
 pub(super) struct DataChangeNotificationVecPool {
     free: Vec<Vec<MonitoredItemNotification>>,
@@ -245,6 +246,7 @@ pub struct Subscription {
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub(crate) enum TickReason {
     ReceivePublishRequest,
+    NotificationAvailable,
     TickTimerFired,
 }
 
@@ -475,6 +477,21 @@ impl Subscription {
             {
                 HandledState::Normal5
             }
+            (SubscriptionState::Normal, TickReason::NotificationAvailable)
+                if self.publishing_enabled
+                    && p.publishing_req_queued
+                    && self.publishing_interval >= IMMEDIATE_NOTIFICATION_WAKE_MIN_INTERVAL
+                    && (p.notifications_available || p.more_notifications) =>
+            {
+                HandledState::IntervalElapsed6
+            }
+            (SubscriptionState::Normal, TickReason::NotificationAvailable)
+                if self.publishing_enabled
+                    && !p.publishing_req_queued
+                    && (p.notifications_available || p.more_notifications) =>
+            {
+                HandledState::Normal5
+            }
             (SubscriptionState::Normal, TickReason::TickTimerFired)
                 if p.publishing_req_queued
                     && self.publishing_enabled
@@ -510,6 +527,12 @@ impl Subscription {
             {
                 HandledState::Late10
             }
+            (SubscriptionState::Late, TickReason::NotificationAvailable)
+                if self.publishing_enabled
+                    && (p.notifications_available || p.more_notifications) =>
+            {
+                HandledState::Late10
+            }
             (SubscriptionState::Late, TickReason::ReceivePublishRequest)
                 if !self.publishing_enabled
                     || self.publishing_enabled
@@ -522,6 +545,19 @@ impl Subscription {
             // This is probably an error in the standard.
             (SubscriptionState::Late, TickReason::TickTimerFired) if self.lifetime_counter > 1 => {
                 HandledState::Late12
+            }
+            (SubscriptionState::KeepAlive, TickReason::NotificationAvailable)
+                if self.publishing_enabled
+                    && p.notifications_available
+                    && p.publishing_req_queued
+                    && self.publishing_interval >= IMMEDIATE_NOTIFICATION_WAKE_MIN_INTERVAL =>
+            {
+                HandledState::KeepAlive14
+            }
+            (SubscriptionState::KeepAlive, TickReason::NotificationAvailable)
+                if self.publishing_enabled && p.notifications_available && !p.publishing_req_queued =>
+            {
+                HandledState::Late10
             }
             (SubscriptionState::KeepAlive, TickReason::ReceivePublishRequest) => {
                 HandledState::KeepAlive13
@@ -675,7 +711,7 @@ impl Subscription {
         data_change_notification_pool: &mut DataChangeNotificationVecPool,
     ) -> TickResult {
         let publishing_interval_elapsed = match tick_reason {
-            TickReason::ReceivePublishRequest => false,
+            TickReason::ReceivePublishRequest | TickReason::NotificationAvailable => false,
             TickReason::TickTimerFired => {
                 if self.state == SubscriptionState::Creating {
                     true

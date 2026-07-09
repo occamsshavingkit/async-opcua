@@ -240,8 +240,8 @@ async fn sqlite_backend_read_raw_modified_bounds_first_page_query_and_continuati
 
     {
         SQL_TRACES.lock().expect("sql traces lock").clear();
-        let connection = backend.connection();
-        let mut conn = connection.lock();
+        let pool = backend.pool();
+        let mut conn = pool.get().expect("get connection");
         conn.trace(Some(record_sql_trace));
     }
 

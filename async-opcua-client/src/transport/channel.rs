@@ -1,4 +1,11 @@
-use std::{str::FromStr, sync::Arc, time::Duration};
+use std::{
+    str::FromStr,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    time::Duration,
+};
 
 use crate::{
     session::{process_unexpected_response, EndpointInfo},
@@ -15,7 +22,7 @@ use opcua_types::{
     ByteString, CloseSecureChannelRequest, ContextOwned, Error, IntegerId, NodeId, RequestHeader,
     SecurityTokenRequestType, StatusCode,
 };
-use tokio::sync::mpsc::Sender;
+use tokio::sync::{mpsc::Sender, Notify};
 use tracing::{debug, debug_span, error, Instrument};
 
 use super::{
@@ -33,6 +40,18 @@ use crate::{
 // memory if it gets into an unexpected (bad) state.
 const MAX_INFLIGHT_MESSAGES: usize = 1_024;
 
+struct RenewGuard<'a> {
+    renewing: &'a AtomicBool,
+    notify: &'a Notify,
+}
+
+impl Drop for RenewGuard<'_> {
+    fn drop(&mut self) {
+        self.renewing.store(false, Ordering::Release);
+        self.notify.notify_waiters();
+    }
+}
+
 /// Wrapper around an open secure channel
 pub struct AsyncSecureChannel {
     endpoint_info: EndpointInfo,
@@ -41,7 +60,8 @@ pub struct AsyncSecureChannel {
     certificate_store: Arc<RwLock<CertificateStore>>,
     transport_config: TransportConfiguration,
     state: Arc<SecureChannelState>,
-    issue_channel_lock: tokio::sync::Mutex<()>,
+    issue_channel_lock: Arc<Notify>,
+    channel_is_renewing: AtomicBool,
     channel_lifetime: u32,
     request_timeout: Duration,
 
@@ -165,7 +185,8 @@ impl AsyncSecureChannel {
 
         Self {
             transport_config,
-            issue_channel_lock: tokio::sync::Mutex::new(()),
+            issue_channel_lock: Arc::new(Notify::new()),
+            channel_is_renewing: AtomicBool::new(false),
             state: Arc::new(SecureChannelState::new(
                 ignore_clock_skew,
                 secure_channel.clone(),
@@ -188,11 +209,23 @@ impl AsyncSecureChannel {
     }
 
     async fn renew_secure_channel(&self, send: Sender<OutgoingMessage>) -> Result<(), Error> {
-        // Grab the lock, then check again whether we should renew the secure channel,
-        // this avoids renewing it multiple times if the client sends many requests in quick
-        // succession.
-        // Also, if the channel is currently being renewed, we need to wait for the new security token.
-        let _guard = self.issue_channel_lock.lock().await;
+        if self
+            .channel_is_renewing
+            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .is_err()
+        {
+            self.issue_channel_lock.notified().await;
+            while self.channel_is_renewing.load(Ordering::Acquire) {
+                self.issue_channel_lock.notified().await;
+            }
+            return Ok(());
+        }
+
+        let guard = RenewGuard {
+            renewing: &self.channel_is_renewing,
+            notify: &self.issue_channel_lock,
+        };
+
         let should_renew_security_token = {
             let secure_channel = trace_read_lock!(self.secure_channel);
             secure_channel.should_renew_security_token()
@@ -218,6 +251,8 @@ impl AsyncSecureChannel {
                 return Err(process_unexpected_response(resp));
             }
         }
+
+        drop(guard);
         Ok(())
     }
 
@@ -245,6 +280,14 @@ impl AsyncSecureChannel {
                 .instrument(debug_span!("Renewing security token"))
                 .await?;
         }
+
+        let sender = self.request_send.load().as_deref().cloned();
+        let send = sender.ok_or_else(|| {
+            Error::new(
+                StatusCode::BadNotConnected,
+                "Unable to send request, transport is not connected",
+            )
+        })?;
 
         Request::new(request, send, timeout)
             .send()
@@ -388,7 +431,21 @@ impl AsyncSecureChannel {
         }
     }
 
-    /// Close the secure channel, optionally wait for the channel to close.
+        #[cfg(test)]
+    pub(crate) fn test_set_channel_is_renewing(&self, value: bool) {
+        self.channel_is_renewing.store(value, Ordering::Release);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_notify_renewal_complete(&self) {
+        self.issue_channel_lock.notify_waiters();
+    }
+
+    /// Close the secure channel.
+    ///
+    /// This is a fire-and-forget best-effort close: the `CloseSecureChannelRequest`
+    /// is sent via `send_no_response()` which does not wait for a reply. Errors
+    /// are logged but not propagated to the caller.
     pub async fn close_channel(&self) {
         let msg = CloseSecureChannelRequest {
             request_header: self.state.make_request_header(Duration::from_secs(60)),
@@ -407,5 +464,145 @@ impl AsyncSecureChannel {
                 error!("Failed to send disconnect message, queue full: {e}");
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{retry::SessionRetryPolicy, IdentityToken};
+    use opcua_crypto::SecurityPolicy;
+    use opcua_types::{
+        ApplicationDescription, ApplicationType, EndpointDescription, MessageSecurityMode,
+        UAString, UserTokenPolicy,
+    };
+    use std::{sync::Arc, time::Duration as StdDuration};
+
+    fn test_endpoint(security_mode: MessageSecurityMode) -> EndpointInfo {
+        EndpointInfo {
+            endpoint: EndpointDescription {
+                endpoint_url: UAString::from("opc.tcp://127.0.0.1:4840"),
+                server: ApplicationDescription {
+                    application_uri: UAString::from("urn:test:server"),
+                    application_type: ApplicationType::Server,
+                    ..Default::default()
+                },
+                security_mode,
+                security_policy_uri: SecurityPolicy::None.to_uri().to_string().into(),
+                user_identity_tokens: Some(vec![UserTokenPolicy::anonymous()]),
+                transport_profile_uri: UAString::null(),
+                security_level: 0,
+                server_certificate: opcua_types::ByteString::null(),
+            },
+            user_identity_token: IdentityToken::Anonymous,
+            preferred_locales: Vec::new(),
+        }
+    }
+
+    fn test_channel() -> AsyncSecureChannel {
+        AsyncSecureChannel::new(
+            Arc::new(RwLock::new(CertificateStore::new(
+                std::path::Path::new("./pki"),
+            ))),
+            test_endpoint(MessageSecurityMode::None),
+            SessionRetryPolicy::never(),
+            false,
+            false,
+            Arc::new(ArcSwap::new(Arc::new(opcua_types::NodeId::null()))),
+            TransportConfiguration {
+                send_buffer_size: 65535,
+                recv_buffer_size: 65535,
+                max_message_size: 2 * 1024 * 1024,
+                max_chunk_count: 8,
+                connect_timeout: Duration::from_secs(5),
+                tcp_keepalive: Default::default(),
+            },
+            60_000,
+            Duration::from_secs(10),
+            Arc::new(RwLock::new(ContextOwned::default())),
+        )
+    }
+
+    #[tokio::test]
+    async fn concurrent_renewal_does_not_deadlock() {
+        let channel = test_channel();
+        {
+            let mut sc = channel.secure_channel.write();
+            sc.set_token_lifetime(100);
+            sc.set_token_created_at(
+                opcua_types::DateTime::now() - chrono::Duration::milliseconds(200),
+            );
+        }
+
+        let (send, _recv) = tokio::sync::mpsc::channel::<OutgoingMessage>(1);
+        channel.request_send.store(Some(Arc::new(send.clone())));
+
+        channel.test_set_channel_is_renewing(true);
+
+        let ch = std::sync::Arc::new(channel);
+        let ch2 = ch.clone();
+
+        let waiter = tokio::spawn(async move { ch2.renew_secure_channel(send).await });
+
+        tokio::time::sleep(StdDuration::from_millis(50)).await;
+
+        ch.test_set_channel_is_renewing(false);
+        ch.test_notify_renewal_complete();
+
+        tokio::time::timeout(StdDuration::from_secs(2), waiter)
+            .await
+            .expect("concurrent renewal should not timeout")
+            .expect("renew_secure_channel should succeed")
+            .expect("renewal should return Ok");
+    }
+
+    #[tokio::test]
+    async fn send_reloads_request_send_after_renewal_block() {
+        let channel = test_channel();
+        {
+            let mut sc = channel.secure_channel.write();
+            sc.set_token_id(1);
+            sc.set_token_lifetime(100);
+            sc.set_token_created_at(
+                opcua_types::DateTime::now() - chrono::Duration::milliseconds(200),
+            );
+        }
+
+        let (send_a, _recv_a) = tokio::sync::mpsc::channel::<OutgoingMessage>(1);
+        channel.request_send.store(Some(Arc::new(send_a)));
+        channel.test_set_channel_is_renewing(true);
+
+        let (send_b, mut recv_b) = tokio::sync::mpsc::channel::<OutgoingMessage>(1);
+
+        let ch = std::sync::Arc::new(channel);
+        let ch2 = ch.clone();
+
+        let request = opcua_types::GetEndpointsRequest {
+            request_header: opcua_types::RequestHeader::new(
+                &opcua_types::NodeId::null(),
+                &opcua_types::DateTime::now(),
+                0,
+            ),
+            endpoint_url: opcua_types::UAString::null(),
+            locale_ids: None,
+            profile_uris: None,
+        };
+
+        let send_handle = tokio::spawn(async move {
+            ch2.send(request, StdDuration::from_secs(10)).await
+        });
+
+        tokio::time::sleep(StdDuration::from_millis(50)).await;
+        ch.request_send.store(Some(Arc::new(send_b)));
+        ch.test_set_channel_is_renewing(false);
+        ch.test_notify_renewal_complete();
+
+        let msg = tokio::time::timeout(StdDuration::from_secs(2), recv_b.recv())
+            .await
+            .expect("send() must use the reloaded request_send; recv_b never got the message")
+            .expect("reloaded sender channel must be open");
+        drop(msg);
+
+        send_handle.abort();
     }
 }

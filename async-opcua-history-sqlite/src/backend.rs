@@ -2,6 +2,7 @@
 
 use crate::{migration::run_migrations, query};
 use async_trait::async_trait;
+use dashmap::DashMap;
 use opcua_server::{
     aggregates::{compute_processed_intervals, engine::get_value_timestamp},
     history::{HistoryRawModifiedResult, HistoryStorageBackend},
@@ -12,7 +13,6 @@ use opcua_types::{
     NodeId, ObjectTypeId, PerformUpdateType, QualifiedName, SimpleAttributeOperand, StatusCode,
     UAString, Variant,
 };
-use dashmap::DashMap;
 use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
 use rusqlite::{params, Connection, Error as SqliteError, OptionalExtension};

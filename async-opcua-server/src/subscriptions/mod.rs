@@ -1354,27 +1354,28 @@ impl SubscriptionCache {
                 .iter()
                 .zip(res.iter())
                 .filter(|(_, r)| r.status_code.is_good())
-                .map(|(create, _)| {
-                    IndexUpdate {
-                        key: MonitoredItemKey {
-                            id: create.item_to_monitor().node_id.clone(),
-                            attribute_id: create.item_to_monitor().attribute_id,
-                        },
-                        handle: create.handle(),
-                        entry: MonitoredItemEntry {
-                            enabled: !matches!(create.monitoring_mode(), MonitoringMode::Disabled),
-                            index_range: create.item_to_monitor().index_range.clone(),
-                            data_encoding: create.item_to_monitor().data_encoding.clone(),
-                        },
-                        #[cfg(feature = "subscriptions-standard")]
-                        eu_range_node_id: create.eu_range_node_id().cloned(),
-                    }
+                .map(|(create, _)| IndexUpdate {
+                    key: MonitoredItemKey {
+                        id: create.item_to_monitor().node_id.clone(),
+                        attribute_id: create.item_to_monitor().attribute_id,
+                    },
+                    handle: create.handle(),
+                    entry: MonitoredItemEntry {
+                        enabled: !matches!(create.monitoring_mode(), MonitoringMode::Disabled),
+                        index_range: create.item_to_monitor().index_range.clone(),
+                        data_encoding: create.item_to_monitor().data_encoding.clone(),
+                    },
+                    #[cfg(feature = "subscriptions-standard")]
+                    eu_range_node_id: create.eu_range_node_id().cloned(),
                 })
                 .collect();
             // Apply under a single write lock.
             let mut lck = trace_write_lock!(self.inner);
             for u in updates {
-                lck.monitored_items.entry(u.key).or_default().insert(u.handle, u.entry);
+                lck.monitored_items
+                    .entry(u.key)
+                    .or_default()
+                    .insert(u.handle, u.entry);
                 #[cfg(feature = "subscriptions-standard")]
                 {
                     Self::replace_eu_range_registration(&mut lck, u.handle, u.eu_range_node_id);
@@ -2208,7 +2209,10 @@ mod tests {
 
     fn pending_publish(
         request_handle: u32,
-    ) -> (PendingPublish, tokio::sync::oneshot::Receiver<ResponseMessage>) {
+    ) -> (
+        PendingPublish,
+        tokio::sync::oneshot::Receiver<ResponseMessage>,
+    ) {
         let (response, recv) = tokio::sync::oneshot::channel();
         let request = PublishRequest {
             request_header: RequestHeader {

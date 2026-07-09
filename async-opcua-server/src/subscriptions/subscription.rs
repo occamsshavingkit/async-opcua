@@ -555,7 +555,9 @@ impl Subscription {
                 HandledState::KeepAlive14
             }
             (SubscriptionState::KeepAlive, TickReason::NotificationAvailable)
-                if self.publishing_enabled && p.notifications_available && !p.publishing_req_queued =>
+                if self.publishing_enabled
+                    && p.notifications_available
+                    && !p.publishing_req_queued =>
             {
                 HandledState::Late10
             }

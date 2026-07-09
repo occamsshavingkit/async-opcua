@@ -431,7 +431,7 @@ impl AsyncSecureChannel {
         }
     }
 
-        #[cfg(test)]
+    #[cfg(test)]
     pub(crate) fn test_set_channel_is_renewing(&self, value: bool) {
         self.channel_is_renewing.store(value, Ordering::Release);
     }
@@ -501,9 +501,9 @@ mod tests {
 
     fn test_channel() -> AsyncSecureChannel {
         AsyncSecureChannel::new(
-            Arc::new(RwLock::new(CertificateStore::new(
-                std::path::Path::new("./pki"),
-            ))),
+            Arc::new(RwLock::new(CertificateStore::new(std::path::Path::new(
+                "./pki",
+            )))),
             test_endpoint(MessageSecurityMode::None),
             SessionRetryPolicy::never(),
             false,
@@ -588,9 +588,8 @@ mod tests {
             profile_uris: None,
         };
 
-        let send_handle = tokio::spawn(async move {
-            ch2.send(request, StdDuration::from_secs(10)).await
-        });
+        let send_handle =
+            tokio::spawn(async move { ch2.send(request, StdDuration::from_secs(10)).await });
 
         tokio::time::sleep(StdDuration::from_millis(50)).await;
         ch.request_send.store(Some(Arc::new(send_b)));

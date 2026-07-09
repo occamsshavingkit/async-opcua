@@ -1327,15 +1327,11 @@ impl SecureChannel {
             {
                 if self.is_client_role() {
                     security_policy.asymmetric_sign(signing_key, l, signature)?;
-                    let mut first_request_signature = self
-                        .first_request_signature
-                        .lock();
+                    let mut first_request_signature = self.first_request_signature.lock();
                     first_request_signature.clear();
                     first_request_signature.extend_from_slice(signature);
                 } else if self.apply_channel_thumbprint {
-                    let first_request_signature = self
-                        .first_request_signature
-                        .lock();
+                    let first_request_signature = self.first_request_signature.lock();
                     let mut signed_data =
                         Vec::with_capacity(l.len() + first_request_signature.len());
                     signed_data.extend_from_slice(l);
@@ -1683,8 +1679,7 @@ impl SecureChannel {
                 #[cfg(feature = "ecc")]
                 {
                     if self.is_client_role() && self.apply_channel_thumbprint {
-                        let first_request_signature =
-                            self.first_request_signature.lock();
+                        let first_request_signature = self.first_request_signature.lock();
                         let mut signed_data_with_thumbprint =
                             Vec::with_capacity(signed_data.len() + first_request_signature.len());
                         signed_data_with_thumbprint.extend_from_slice(signed_data);
@@ -1701,8 +1696,7 @@ impl SecureChannel {
                             signature,
                         )?;
                         if !self.is_client_role() {
-                            let mut first_request_signature =
-                                self.first_request_signature.lock();
+                            let mut first_request_signature = self.first_request_signature.lock();
                             first_request_signature.clear();
                             first_request_signature.extend_from_slice(signature);
                         }

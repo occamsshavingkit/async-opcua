@@ -268,7 +268,9 @@ mod tests {
         SecureChannelState::new(
             false,
             Arc::new(RwLock::new(SecureChannel::new(
-                Arc::new(RwLock::new(CertificateStore::new(std::path::Path::new("./pki")))),
+                Arc::new(RwLock::new(CertificateStore::new(std::path::Path::new(
+                    "./pki",
+                )))),
                 opcua_core::comms::secure_channel::Role::Client,
                 Arc::new(RwLock::new(ContextOwned::default())),
             ))),

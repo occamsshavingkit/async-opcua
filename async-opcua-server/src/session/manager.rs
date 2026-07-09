@@ -883,14 +883,14 @@ impl SessionManager {
             let session = session_arc.read();
             let deadline = session.deadline();
             if !session.is_activated() {
-                self.unactivated_heap.lock().push(Reverse(UnactivatedSessionEntry {
-                    created_at: session.created_at(),
-                    session_id: session.session_id().clone(),
-                }));
+                self.unactivated_heap
+                    .lock()
+                    .push(Reverse(UnactivatedSessionEntry {
+                        created_at: session.created_at(),
+                        session_id: session.session_id().clone(),
+                    }));
                 let unactivated_deadline = session.created_at()
-                    + Duration::from_millis(
-                        self.info.config.limits.unactivated_session_timeout_ms,
-                    );
+                    + Duration::from_millis(self.info.config.limits.unactivated_session_timeout_ms);
                 self.expiry_heap.lock().push(Reverse(SessionExpiryEntry {
                     deadline: deadline.min(unactivated_deadline),
                     session_id: session.session_id().clone(),
@@ -970,10 +970,7 @@ impl SessionManager {
             let session = trace_read_lock!(&session);
             let channel_id = session.secure_channel_id();
             if !session.is_activated() {
-                if let Some(counter) = self
-                    .unactivated_by_channel
-                    .get(&channel_id)
-                {
+                if let Some(counter) = self.unactivated_by_channel.get(&channel_id) {
                     counter.fetch_sub(1, Ordering::Release);
                 }
             }
@@ -1042,7 +1039,10 @@ impl SessionManager {
             };
             if deadline > now {
                 next_expiry = next_expiry.min(deadline);
-                heap.push(Reverse(SessionExpiryEntry { deadline, session_id }));
+                heap.push(Reverse(SessionExpiryEntry {
+                    deadline,
+                    session_id,
+                }));
                 break;
             }
             let Some(session) = self.sessions.get(&session_id) else {
@@ -1054,9 +1054,7 @@ impl SessionManager {
             let session_deadline = session.deadline();
             if !session.is_activated() {
                 let unactivated_deadline = session.created_at()
-                    + Duration::from_millis(
-                        self.info.config.limits.unactivated_session_timeout_ms,
-                    );
+                    + Duration::from_millis(self.info.config.limits.unactivated_session_timeout_ms);
                 if session_deadline.min(unactivated_deadline) > now {
                     heap.push(Reverse(SessionExpiryEntry {
                         deadline: session_deadline.min(unactivated_deadline),
@@ -1111,14 +1109,27 @@ pub(crate) async fn close_session(
                 );
                 return Err(StatusCode::BadSecureChannelIdInvalid);
             }
-            (id, token, authentication_token, was_unactivated, channel_id_for_counter)
+            (
+                id,
+                token,
+                authentication_token,
+                was_unactivated,
+                channel_id_for_counter,
+            )
         };
 
         let Some(actor_sender) = mgr.actor_sender(&authentication_token) else {
             return Err(StatusCode::BadSessionClosed);
         };
 
-        (session, id, token, actor_sender, was_unactivated, channel_id_for_counter)
+        (
+            session,
+            id,
+            token,
+            actor_sender,
+            was_unactivated,
+            channel_id_for_counter,
+        )
     };
 
     let (acknowledge, acknowledged) = tokio::sync::oneshot::channel();
@@ -1136,8 +1147,7 @@ pub(crate) async fn close_session(
     {
         let mut mgr = trace_write_lock!(mgr_lck);
         if was_unactivated {
-            if let Some(counter) = mgr.unactivated_by_channel.get(&channel_id_for_counter)
-            {
+            if let Some(counter) = mgr.unactivated_by_channel.get(&channel_id_for_counter) {
                 counter.fetch_sub(1, Ordering::Release);
             }
         }
@@ -1177,7 +1187,14 @@ pub(crate) async fn activate_session(
     let secure_channel_id = channel.secure_channel_id();
     let server_nonce = security_policy.random_nonce();
     let mut verify_data: Option<(Option<X509>, Option<X509>, ByteString, SignatureData)> = None;
-    let (endpoint_url, session_nonce, previous_secure_channel_id, was_unactivated, session_lck, info) = {
+    let (
+        endpoint_url,
+        session_nonce,
+        previous_secure_channel_id,
+        was_unactivated,
+        session_lck,
+        info,
+    ) = {
         let mgr = trace_read_lock!(mgr_lck);
         let Some(session_lck) = mgr.find_by_token(&request.request_header.authentication_token)
         else {
@@ -1265,9 +1282,21 @@ pub(crate) async fn activate_session(
             }
             let previous_secure_channel_id = session.secure_channel_id();
             let was_unactivated = !session.is_activated();
-            (endpoint_url, session.session_nonce().clone(), previous_secure_channel_id, was_unactivated)
+            (
+                endpoint_url,
+                session.session_nonce().clone(),
+                previous_secure_channel_id,
+                was_unactivated,
+            )
         };
-        (endpoint_url, session_nonce, previous_secure_channel_id, was_unactivated, session_lck, mgr.info.clone())
+        (
+            endpoint_url,
+            session_nonce,
+            previous_secure_channel_id,
+            was_unactivated,
+            session_lck,
+            mgr.info.clone(),
+        )
     };
 
     if let Some((client_cert, server_cert, nonce, sig_data)) = verify_data.take() {
@@ -1926,7 +1955,10 @@ mod tests {
             )
             .await;
 
-        assert!(activation.is_ok(), "signed activation failed: {activation:?}");
+        assert!(
+            activation.is_ok(),
+            "signed activation failed: {activation:?}"
+        );
         assert!(gate.was_called(), "activation should reach authentication");
         let timer_elapsed = tokio::time::timeout(std::time::Duration::from_millis(150), timer)
             .await
@@ -2796,8 +2828,10 @@ mod tests {
             let session_arc = Arc::new(RwLock::new(session));
             {
                 let mut mgr = manager.write();
-                mgr.sessions
-                    .insert(session_arc.read().session_id().clone(), Arc::clone(&session_arc));
+                mgr.sessions.insert(
+                    session_arc.read().session_id().clone(),
+                    Arc::clone(&session_arc),
+                );
                 mgr.register_token(token, Arc::clone(&session_arc));
             }
         }
@@ -2861,8 +2895,7 @@ mod tests {
             let session_arc = Arc::new(RwLock::new(session));
             {
                 let mut mgr = manager.write();
-                mgr.sessions
-                    .insert(session_id, Arc::clone(&session_arc));
+                mgr.sessions.insert(session_id, Arc::clone(&session_arc));
                 mgr.register_token(token, Arc::clone(&session_arc));
             }
         }
@@ -2884,7 +2917,9 @@ mod tests {
         }
 
         for handle in handles {
-            handle.await.expect("concurrent close task should not panic");
+            handle
+                .await
+                .expect("concurrent close task should not panic");
         }
     }
 
@@ -2918,19 +2953,26 @@ mod tests {
                 MessageSecurityMode::None,
             );
             let session_arc = Arc::new(RwLock::new(session));
-            manager
-                .sessions
-                .insert(session_arc.read().session_id().clone(), Arc::clone(&session_arc));
+            manager.sessions.insert(
+                session_arc.read().session_id().clone(),
+                Arc::clone(&session_arc),
+            );
             manager.register_token(token, Arc::clone(&session_arc));
         }
 
         let (_, expired) = manager.check_session_expiry();
-        assert!(expired.is_empty(), "fresh sessions with empty heap should not expire");
+        assert!(
+            expired.is_empty(),
+            "fresh sessions with empty heap should not expire"
+        );
 
-        manager.expiry_heap.lock().push(Reverse(super::SessionExpiryEntry {
-            deadline: Instant::now() - Duration::from_secs(1),
-            session_id: manager.sessions.keys().next().unwrap().clone(),
-        }));
+        manager
+            .expiry_heap
+            .lock()
+            .push(Reverse(super::SessionExpiryEntry {
+                deadline: Instant::now() - Duration::from_secs(1),
+                session_id: manager.sessions.keys().next().unwrap().clone(),
+            }));
 
         let (next, expired) = manager.check_session_expiry();
         assert!(
@@ -2938,5 +2980,4 @@ mod tests {
             "heap-based expiry check must inspect popped entries and return a reasonable next deadline"
         );
     }
-
 }

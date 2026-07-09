@@ -26,7 +26,9 @@ use opcua_types::{
     ContextOwned, DateTime, DecodingOptions, Error, MessageSecurityMode, NamespaceMap,
     SimpleBinaryDecodable,
 };
-use parking_lot::{Mutex, RwLock};
+use parking_lot::RwLock;
+#[cfg(feature = "ecc")]
+use parking_lot::Mutex;
 
 use super::{
     message_chunk::{MessageChunk, MessageChunkHeader, MessageChunkType, MESSAGE_SIZE_OFFSET},

@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use super::state::SubscriptionState;
 
+#[allow(dead_code)]
 pub(crate) enum SubscriptionActorMessage {
     AddSubscription {
         subscription: Subscription,
@@ -34,11 +35,13 @@ pub(crate) enum SubscriptionActorMessage {
     },
 }
 
+#[allow(dead_code)]
 pub(crate) struct SubscriptionActor {
     state: SubscriptionState,
     rx: tokio::sync::mpsc::UnboundedReceiver<SubscriptionActorMessage>,
 }
 
+#[allow(dead_code)]
 impl SubscriptionActor {
     pub(crate) fn spawn(
         state: SubscriptionState,

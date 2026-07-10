@@ -142,6 +142,35 @@ off-CPU wait (the actor `mpsc`/`oneshot` pipeline), not lock contention (confirm
   `OPCUA-BENCHMARK.md` (only CPU 11 is currently isolated). US2 cannot gate until this exists.
 
 **Harness note**: `~/scratch/opcua-localhost-bench/async-opcua-bench-server/Cargo.toml` path-depends on
-`~/scratch/async-opcua` (a distinct clone), not the working repo. To benchmark 072 code changes, repoint
-that path dep at `/home/quackdcs/async-opcua/async-opcua` (or sync the branch into the clone) so each
-rebuild compiles the live changes.
+`~/scratch/async-opcua` (a distinct clone), not the working repo. Repointed to
+`/home/quackdcs/async-opcua/async-opcua` so each rebuild compiles the live 072 changes.
+
+### R11. MEASURED clean-core baseline + the HT-pinning artifact (2026-07-11)
+
+Re-measured on this machine (6 physical cores / 12 logical; CPUs 5 & 11 are SMT siblings on physical
+CORE 5). Bench server built against the working repo; single client; `bench_client read`, warmup 1s,
+measure 5s, median of 3. **A third of the "3× gap" was a measurement artifact.**
+
+| Server | **Clean core** (CPU 11 isolated, sibling 5 offline) | `5,11` (both HT siblings) = recorded config |
+|--------|---------------------------------:|---------------------:|
+| async-opcua | **102,679 read / 96,792 write** | 70,304 / 70,503 (≈ recorded 68,968 — harness validated) |
+| open62541 | 153,846 | 168,915 (recorded) |
+| micro-opcua | 200,070 | 204,128 (recorded) |
+
+**Finding**: async-opcua gains **~45%** (70K→102.7K) purely from giving it an exclusive physical core.
+Its `#[tokio::main]` multi-thread runtime spreads work (reactor, actor, timers, wakers) across BOTH
+logical CPUs of CORE 5, so pinning to `5,11` makes the runtime **self-contend on one physical core's
+execution units**. The single-threaded peers use one thread, so `5,11` doesn't penalize them — they barely
+move. (Deployment corollary: do not pin a multi-threaded tokio server to both HT siblings of a core.)
+
+**Corrected baseline & gap (fair, clean single physical core)**:
+- async-opcua **102,679 read / 96,792 write**; open62541 ~153.8K; micro ~200K.
+- Real single-clean-core gap: **1.50× vs open62541, 1.95× vs micro** (was 2.45× / 2.96× under HT pinning).
+- The old SC-001 target (≥1.5× over 68,968 → ~103K) is **already met by the measurement correction alone**
+  — it must be reset against the clean baseline. Proposed: close a substantial fraction of the *remaining*
+  clean-core gap, e.g. **102.7K → ~130–150K read (≥1.27–1.45×)**, i.e. materially toward open62541's ~154K.
+
+**All US1 code-change measurements use the clean isolated core** (CPU 11, sibling 5 offline;
+`perf_event_paranoid=0` set for the later US2 `c2c`). Reference to beat: **102,679 read / 96,792 write.**
+The remaining gap is the genuine async per-request tax (R1) — so US1's cuts are still worth doing, just
+smaller in magnitude than the HT-inflated numbers suggested.

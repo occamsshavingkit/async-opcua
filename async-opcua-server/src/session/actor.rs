@@ -26,11 +26,6 @@ use super::errors::SessionError;
 use super::instance::Session;
 use super::services::{invoke_service_concurrently_mut, ServiceCb};
 
-/// Response channel for a [`SessionMessage::Read`] request. The outer
-/// `Err` is a service-level fault for the whole request, e.g. when the
-/// owning node manager panicked.
-pub type ReadResponseSender =
-    oneshot::Sender<Result<Vec<(DataValue, Option<DiagnosticInfo>)>, StatusCode>>;
 /// Response channel for a [`SessionMessage::Write`] request. The outer
 /// `Err` is a service-level fault for the whole request, e.g. when the
 /// owning node manager panicked.
@@ -57,19 +52,6 @@ pub struct TerminatedSession {
 /// within the batch.
 #[derive(Debug)]
 pub enum SessionMessage {
-    /// Read a batch of attributes through the owning node managers.
-    Read {
-        /// Nodes and attributes to read.
-        nodes: Vec<ReadValueId>,
-        /// Maximum age of the values in milliseconds.
-        max_age: f64,
-        /// Which timestamps to return.
-        timestamps_to_return: TimestampsToReturn,
-        /// Requested diagnostics.
-        return_diagnostics: DiagnosticBits,
-        /// Channel the results are sent on.
-        response: ReadResponseSender,
-    },
     /// Write a batch of attributes through the owning node managers.
     Write {
         /// Values to write.
@@ -132,25 +114,6 @@ impl SessionActor {
                 .fetch_max(self.receiver.len(), Ordering::Relaxed);
             let processing_start = Instant::now();
             match message {
-                SessionMessage::Read {
-                    nodes,
-                    max_age,
-                    timestamps_to_return,
-                    return_diagnostics,
-                    response,
-                } => {
-                    let result = self
-                        .read(
-                            node_managers.clone(),
-                            nodes,
-                            max_age,
-                            timestamps_to_return,
-                            return_diagnostics,
-                        )
-                        .await;
-                    let _ = response.send(result);
-                    self.record_message_processed(processing_start);
-                }
                 SessionMessage::Write {
                     values,
                     return_diagnostics,
@@ -264,9 +227,12 @@ impl SessionActor {
         }
     }
 
-    async fn read(
-        &mut self,
-        node_managers: NodeManagers,
+    /// Read a batch of attributes through the owning node managers, WITHOUT going
+    /// through the per-session actor (feature 072 S2 read fast-path). Panic-isolated
+    /// so a faulty node manager faults only this request, never the connection.
+    pub(crate) async fn read_nodes(
+        context: RequestContext,
+        node_managers: &NodeManagers,
         nodes: Vec<ReadValueId>,
         max_age: f64,
         timestamps_to_return: TimestampsToReturn,
@@ -303,14 +269,12 @@ impl SessionActor {
             }
         }
 
-        // Node managers run concurrently within the batch; the actor only
-        // serializes between requests on the same session. Catch panics so
-        // a faulty node manager faults the request instead of killing the
-        // actor and with it the session.
+        // Node managers run concurrently within the batch. Catch panics so a
+        // faulty node manager faults only this request.
         let fan_out = invoke_service_concurrently_mut(
-            self.request_context(0),
+            context,
             &mut results,
-            &node_managers,
+            node_managers,
             ReadServiceCb {
                 max_age,
                 timestamps_to_return,
@@ -321,7 +285,7 @@ impl SessionActor {
             },
         );
         if AssertUnwindSafe(fan_out).catch_unwind().await.is_err() {
-            tracing::error!("node manager panicked during actor read");
+            tracing::error!("node manager panicked during read");
             return Err(StatusCode::BadInternalError);
         }
 

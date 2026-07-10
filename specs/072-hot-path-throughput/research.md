@@ -181,6 +181,7 @@ smaller in magnitude than the HT-inflated numbers suggested.
 |--------|-----------:|:------:|------------:|:-------:|----------|
 | baseline (0f7bd5e6) | 102,679 | — | 96,792 | — | — |
 | **S1a** ArcSwap<Instant>→AtomicU64 | 102,420 | ~0% (noise) | 99,240 | **+2.5%** | **keep** (write up, read neutral, removes per-request `Arc` alloc; session tests green) |
+| **S1a + S2** read fast-path (bypass actor mpsc+oneshot) | 104,686 | **+2.0%** | 99,260 | **+2.6%** | **keep** (real; 38 read + hardening + actor tests green, panic-isolation covered via new path) |
 
 **Key finding**: a single per-request micro-cut moves single-client throughput only **~1–2%**, right at the
 run-to-run noise floor (~3.5% spread). Implication: (a) individual S1x gates are near-unresolvable
@@ -189,3 +190,21 @@ single-client — better to judge the *stacked* Stage-1 delta; (b) the per-reque
 actor-bypass — removing the per-request `tokio::spawn` + `mpsc` + `oneshot` = 2 scheduler hops + a heap
 future + a channel per request), not the micro-cuts. Strategy adjusted accordingly: stack S1a/S1b/S1d, then
 S2 as the headline change.
+
+### R13. US1 conclusion — the per-request cuts are marginal single-client; the gap is structural
+
+**Measured, not projected.** S1a + S2 together = **read +2.0% / write +2.6%** single-client. The surprise:
+**S2 (the actor-bypass — the supposed big lever) added only ~+2% read over S1a**, even though it removes an
+`mpsc` send + a `oneshot` round-trip + an actor wakeup per request. Why: the read still pays a per-request
+`tokio::spawn` (kept for cancellation), and single-client throughput is dominated by costs the US1 cuts do
+**not** touch — the spawn itself (heap future + scheduler dispatch), the recv/send **syscalls**, and
+serialization/`memcpy`. The actor hop was only ~2% of the per-request budget.
+
+**Implication**: the ~1.5× clean-core gap to open62541 is **not closable by these per-request refactors** —
+it is structural (async-runtime spawn + syscall boundary + serialization). Closing it needs bigger levers
+outside US1's scope: removing the per-request spawn (resolve reads synchronously, at the cost of mid-flight
+cancellation), syscall batching (`recvmmsg`/io_uring), or a thread-per-core pipeline. The US1 cuts (S1a, S2)
+are still worth keeping — real (+2–3%), remove per-request allocations/hops, and pay off more under
+**multi-core** (less allocator/scheduler contention as it scales — to confirm in the US2 `c2c` sweep).
+**Remaining S1b (ChunkInfo) / S1d (controller timer) are ~1% single-client each and will not change this
+conclusion**; S1c is a diagnostics-off-only hygiene win.

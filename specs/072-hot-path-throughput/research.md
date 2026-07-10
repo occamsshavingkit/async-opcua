@@ -208,3 +208,23 @@ are still worth keeping — real (+2–3%), remove per-request allocations/hops,
 **multi-core** (less allocator/scheduler contention as it scales — to confirm in the US2 `c2c` sweep).
 **Remaining S1b (ChunkInfo) / S1d (controller timer) are ~1% single-client each and will not change this
 conclusion**; S1c is a diagnostics-off-only hygiene win.
+
+### R14. US1 multi-client sweep — the cuts ARE meaningful (the R13 prediction confirmed)
+
+Concurrency sweep, server on cores 5–11, clients on 0–4 (`run_concurrency_sweep.py`):
+
+| Clients | Recorded baseline (0f7bd5e6) | **S1a+S2** | Δ |
+|--------:|-----------------------------:|-----------:|:---:|
+| 1 | 77,026 | 85,717 | +11.3% |
+| 2 | 148,155 | 164,998 | +11.4% |
+| 4 | 259,301 | 282,979 | +9.1% |
+| 8 | 360,976 | 383,524 | +6.4% |
+| 16 | 491,435 | 548,112 | **+11.6%** |
+| 24 | 508,095 | 565,431 | +11.3% |
+| 32 | 507,202 | **568,764** | **+12.1%** |
+
+**Conclusion corrected**: the US1 per-request cuts (S1a, S2) are ~2% single-client but **+12% aggregate
+under load** — plateau 508K→569K. The allocation/hop reductions cut per-request allocator + scheduler
+contention, which scales. So US1 delivers real value on the *deployment-relevant* metric (aggregate /
+per-core scaling), even though single-client (the R13 metric) barely moved. This is the "before" the LIFO
+worker-pool experiment must beat: **plateau ~569K, 16-client 548K**.

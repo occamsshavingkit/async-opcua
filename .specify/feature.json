@@ -1,1 +1,3 @@
-{"feature_directory": "specs/070-async-lock-fixes"}
+{
+  "feature_directory": "specs/072-hot-path-throughput"
+}

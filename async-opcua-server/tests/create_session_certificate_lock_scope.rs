@@ -13,8 +13,9 @@ use std::{
 };
 
 use opcua_client::{
-    services::CreateSession, transport::TransportPollResult, ClientBuilder, IdentityToken,
-    UARequest,
+    services::{ActivateSession, CreateSession},
+    transport::TransportPollResult,
+    ClientBuilder, IdentityToken, UARequest,
 };
 use opcua_crypto::SecurityPolicy;
 use opcua_server::{ServerBuilder, ServerHandle, ANONYMOUS_USER_TOKEN_ID};
@@ -83,6 +84,70 @@ async fn run_none_policy_short_client_nonce_probe() {
 
     create_session_result
         .expect("SecurityPolicy None does not require a CreateSession clientNonce");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn none_policy_activate_session_server_nonce_is_at_least_32_bytes() {
+    tokio::time::timeout(TEST_TIMEOUT, run_none_policy_activate_session_nonce_probe())
+        .await
+        .expect("None-policy ActivateSession nonce probe should not hang");
+}
+
+/// OPC-10000-4 §5.7.3.2: the ActivateSession `serverNonce` "shall have a length
+/// between 32 and 128 bytes inclusive" and "the Client shall check the length",
+/// with no carve-out for `SecurityPolicy::None`. A conformant client (e.g.
+/// open62541's `ua_client_connect.c`) rejects a shorter nonce, so the server
+/// must not emit the null secure-channel nonce for a None-policy session.
+async fn run_none_policy_activate_session_nonce_probe() {
+    let fixture = CreateSessionCertificateFixture::start_with(
+        SecurityPolicy::None,
+        MessageSecurityMode::None,
+    )
+    .await;
+
+    let create_session_response = CreateSession::new_manual(
+        fixture.client.certificate_store(),
+        &fixture.endpoint,
+        1,
+        Duration::from_secs(5),
+        NodeId::null(),
+        fixture.channel.request_handle(),
+    )
+    .endpoint_url(fixture.endpoint_url.as_str())
+    .client_description(ApplicationDescription {
+        application_uri: UAString::from(fixture.client_application_uri.as_str()),
+        product_uri: UAString::from("urn:async-opcua:create-session-certificate-lock-client"),
+        application_type: ApplicationType::Client,
+        ..Default::default()
+    })
+    .session_name("none-policy-activate-session-nonce")
+    .session_timeout(5_000.0)
+    .send(&fixture.channel)
+    .await
+    .expect("None-policy CreateSession should succeed");
+
+    let activate_session_response = ActivateSession::new_manual(
+        fixture.endpoint.clone(),
+        1,
+        Duration::from_secs(5),
+        create_session_response.authentication_token.clone(),
+        fixture.channel.request_handle(),
+    )
+    .identity_token(IdentityToken::Anonymous)
+    .send(&fixture.channel)
+    .await
+    .expect("None-policy ActivateSession should succeed");
+
+    fixture.handle.cancel();
+    fixture.channel_poller.abort();
+    fixture.server_task.abort();
+
+    assert!(
+        activate_session_response.server_nonce.len() >= 32,
+        "None-policy ActivateSession serverNonce must be >= 32 bytes per OPC-10000-4 \
+         §5.7.3.2, got {} bytes",
+        activate_session_response.server_nonce.len()
+    );
 }
 
 async fn run_short_client_nonce_probe() {

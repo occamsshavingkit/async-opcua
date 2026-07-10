@@ -104,3 +104,44 @@ not acceptable evidence here.
 
 `AtomicU64`, `OnceLock`, `Arc`, `DashMap` (already a dep), `catch_unwind` are all in-tree. No `cargo deny`
 impact.
+
+## Task 0 — recorded HEAD baseline (from `~/scratch/ASYNC-OPCUA-IMPROVEMENT-BENCHMARK.md`)
+
+Source: the improvement-benchmark run **on commit `0f7bd5e6`** (= current `master`, the base of branch
+`072`; my 072 commits touch only `specs/` + agent markers, no Rust source → the bench clone
+`~/scratch/async-opcua` @ `0f7bd5e6` is byte-identical to the 072 code baseline). Machine: 12-core x86_64,
+kernel 6.18.35; release (LTO, codegen-units=1); server `taskset`-pinned, clients on the rest; bench client =
+open62541 C client. So the throughput baseline below **is** the HEAD baseline (T002/T004 satisfied); only
+the *profiles* below are still to (re)capture.
+
+**Single-client, sequential (server on cores 5,11; median of 3, 5 s):**
+| Server | Read ops/s | Write ops/s |
+|--------|-----------:|------------:|
+| async-opcua | **68,968** | **66,547** |
+| open62541 | 168,915 | 169,589 |
+| micro-opcua | 204,128 | 208,780 |
+→ async-opcua ~2.4× slower than open62541, ~3× slower than micro-opcua single-client. **US1 target
+(SC-001): ≥1.5× → ~103,000+ read ops/s.**
+
+**Concurrency sweep, 7 server cores (5–11), clients on 0–4:**
+| Clients | 1 | 2 | 4 | 8 | 16 | 24 | 32 |
+|---------|--:|--:|--:|--:|---:|---:|---:|
+| Aggregate ops/s | 77,026 | 148,155 | 259,301 | 360,976 | 491,435 | 508,095 | 507,202 |
+Per-core efficiency 82.0K (2c) → 72.6K (7c) = **11% degradation**; plateau **~508K** at 24 clients.
+(2-core sweep plateaus ~164K.) **US2 target (SC-003): reduce the 11% and/or lift the plateau.**
+
+**CPU utilization (32 clients, 7 cores, `pidstat`):** %usr ~46, %system ~24, **%idle ~30**. Idle-under-load =
+off-CPU wait (the actor `mpsc`/`oneshot` pipeline), not lock contention (confirmed: R0/R1).
+
+**Still to capture (the genuine Task-0 remainder):**
+- **US1 profile**: a *HEAD* single-thread `perf record -e cycles:u` read profile (the existing profiles are
+  June-30 / pre-062-063). Runnable here (`perf_event_paranoid=2` allows `cycles:u`; bench server builds).
+  Diagnostic, not the US1 gate — the US1 gate is single-client throughput via the harness (`taskset`).
+- **US2 profile**: the **never-captured** multi-thread `perf c2c`/HITM + off-CPU/wakeup profile. **Blocked
+  here**: `perf c2c` needs `perf_event_paranoid ≤ 0` (privileged) and the fuller core isolation from
+  `OPCUA-BENCHMARK.md` (only CPU 11 is currently isolated). US2 cannot gate until this exists.
+
+**Harness note**: `~/scratch/opcua-localhost-bench/async-opcua-bench-server/Cargo.toml` path-depends on
+`~/scratch/async-opcua` (a distinct clone), not the working repo. To benchmark 072 code changes, repoint
+that path dep at `/home/quackdcs/async-opcua/async-opcua` (or sync the branch into the clone) so each
+rebuild compiles the live changes.

@@ -174,3 +174,18 @@ move. (Deployment corollary: do not pin a multi-threaded tokio server to both HT
 `perf_event_paranoid=0` set for the later US2 `c2c`). Reference to beat: **102,679 read / 96,792 write.**
 The remaining gap is the genuine async per-request tax (R1) — so US1's cuts are still worth doing, just
 smaller in magnitude than the HT-inflated numbers suggested.
+
+### R12. US1 measured results (clean core CPU 11, median of ≥5; baseline 102,679 read / 96,792 write)
+
+| Change | Read ops/s | Δ read | Write ops/s | Δ write | Decision |
+|--------|-----------:|:------:|------------:|:-------:|----------|
+| baseline (0f7bd5e6) | 102,679 | — | 96,792 | — | — |
+| **S1a** ArcSwap<Instant>→AtomicU64 | 102,420 | ~0% (noise) | 99,240 | **+2.5%** | **keep** (write up, read neutral, removes per-request `Arc` alloc; session tests green) |
+
+**Key finding**: a single per-request micro-cut moves single-client throughput only **~1–2%**, right at the
+run-to-run noise floor (~3.5% spread). Implication: (a) individual S1x gates are near-unresolvable
+single-client — better to judge the *stacked* Stage-1 delta; (b) the per-request allocation/clock cuts help
+*multi-core* (allocator/coherence) more than single-client; (c) **the real single-client lever is S2** (the
+actor-bypass — removing the per-request `tokio::spawn` + `mpsc` + `oneshot` = 2 scheduler hops + a heap
+future + a channel per request), not the micro-cuts. Strategy adjusted accordingly: stack S1a/S1b/S1d, then
+S2 as the headline change.

@@ -1185,7 +1185,6 @@ pub(crate) async fn activate_session(
     let security_policy = channel.security_policy();
     let security_mode = channel.security_mode();
     let secure_channel_id = channel.secure_channel_id();
-    let server_nonce = security_policy.random_nonce();
     let mut verify_data: Option<(Option<X509>, Option<X509>, ByteString, SignatureData)> = None;
     let (
         endpoint_url,
@@ -1297,6 +1296,16 @@ pub(crate) async fn activate_session(
             session_lck,
             mgr.info.clone(),
         )
+    };
+
+    // OPC-10000-4 §5.7.3.2: the ActivateSession serverNonce shall have a length
+    // between 32 and 128 bytes inclusive for every SecurityPolicy, and the Client
+    // shall check the length. SecurityPolicy::None must therefore NOT reuse the
+    // (null) secure-channel nonce; mirror CreateSession and draw a session-length
+    // nonce. Secured policies keep their policy-sized secure-channel nonce.
+    let server_nonce = match security_policy {
+        SecurityPolicy::None => random::byte_string(info.config.session_nonce_length),
+        _ => security_policy.random_nonce(),
     };
 
     if let Some((client_cert, server_cert, nonce, sig_data)) = verify_data.take() {

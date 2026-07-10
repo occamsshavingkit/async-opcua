@@ -30,9 +30,13 @@ beats the **569K** plateau on the concurrency sweep.
   FIFO; it is *not* tokio's `mpsc`/`oneshot`.
 - **Accept-time load balancer** — a new connection is assigned to the core with the **fewest active workers**
   (real, instantaneous load), ties broken by **fewest active connections** (potential load). Reads a per-core
-  atomic busy-count at accept; staleness is harmless for a once-per-connection decision. No mid-life
-  rebalancing (acceptable for long-lived, roughly-steady OPC UA connections; the failure mode is a single
-  connection turning bursty and hot-spotting its core).
+  atomic busy-count at accept; staleness is harmless for a once-per-connection decision. This self-corrects
+  for *new* load: a hot core stops receiving connections until its busy-count drops. Residual imbalance from
+  *existing* connections turning bursty is handled by **backpressure**, not migration — see below.
+- **Per-core backpressure (the primary imbalance response)** — a saturated core simply lets its SPSC ring
+  fill; the network agent then slows `recv` on that core's connections and TCP flow control throttles the
+  clients. No state transfer, no ordering hazard, no migration machinery. This is correctness-safe by
+  construction and is the default answer to a hot core.
 
 **Optional simplification**: the network agent can push directly to the connection's per-core ring (it knows
 the mapping), collapsing the separate central "assigner"/FIFO stage. Keep the assigner separate only if the
@@ -80,7 +84,32 @@ locality the sharding was for.
 1. **Central network agent + assigner as serial fronts** — one thread doing epoll/framing (and one routing)
    for the whole box. Cheap per request, but the eventual scaling ceiling; seastar shards `accept()` to
    avoid it. Fine for a first prototype.
-2. **No mid-life rebalancing** — connections pinned at accept; a bursty connection can hot-spot its core.
+2. **Mid-life rebalancing (deferred, measured-later)** — connections are pinned at accept, so a connection
+   that later turns bursty can hot-spot its core. The **decision is to NOT migrate connections in the first
+   cut**; rely on accept-time balancing + per-core backpressure, and only add migration if a measured
+   per-core distribution under the sweep shows sustained imbalance the balancer + backpressure cannot absorb.
+   The rationale, worked through explicitly:
+
+   - **The tempting trigger "core at max workers + empty idle stack" is the wrong signal on its own.** An
+     empty worker stack means "all workers busy" — but that is two different worlds. Workers busy
+     *computing* → the core is CPU-saturated (shedding load is right). Workers busy *`.await`-ing* (slow node
+     manager, socket backpressure) → the core's CPU is actually **idle**, and the correct response is *more
+     concurrency* (grow the pool / raise the cap), **not** migration. The signal that actually means "this
+     core can't keep up" is the **ring sustained-backing-up** (arrivals outpacing drain) or CPU-util — not
+     the worker count.
+   - **The response — live connection migration — is the real hazard, not the trigger.** A "rebalance
+     request" to the balancer is trivial; *moving the load* is a minefield, which is why seastar/glommio
+     largely **don't** migrate connections:
+     - It **temporarily inverts the whole point** — the connection's session + secure-channel keys go
+       **cache-cold on the new core**, so migration *costs* before it pays; only worth it under *sustained*
+       imbalance.
+     - **Secure-channel sequence ordering** — OPC UA chunks on a channel are strictly ordered by sequence
+       number. Migrating mid-stream risks reordering/torn requests. It requires **draining the old core's
+       in-flight work for that connection, then atomically flipping the connection→core mapping**, with the
+       network agent buffering anything that arrives during the handoff — a small protocol in its own right.
+   - **If migration is ever built**, its trigger must be **sustained ring-backlog** (not empty stack), gated
+     with **hysteresis + a cooldown** so a connection doesn't ping-pong, and it must carry the
+     drain-and-atomic-flip ordering protocol above.
 3. **Run-to-completion vs await** — a worker request that `.await`s (slow node manager, socket backpressure)
    must not stall its shard's whole ring; the shard's `current_thread` runtime provides cooperative
    concurrency (multiple in-flight interleaving at await points) so this is handled *if* requests are

@@ -132,7 +132,10 @@ pub(crate) fn asymmetric_sign_and_encrypt_owned(
     security_mut_slice(&mut dst, 0..encrypted_range.start)?
         .copy_from_slice(security_slice(&src, 0..encrypted_range.start)?);
 
+    #[cfg(feature = "ecc")]
     let mut first_request_signature_to_store = None;
+    #[cfg(not(feature = "ecc"))]
+    let first_request_signature_to_store = None;
     {
         // Sign the message header, security header, sequence header, body, padding.
         let signed_and_signature = security_mut_slice(&mut src, 0..encrypted_range.end)?;

@@ -26,8 +26,8 @@ use opcua_server::{
 };
 use opcua_types::{
     AnonymousIdentityToken, ApplicationDescription, AttributeId, ByteString, DataEncoding,
-    DataTypeId, DataValue, DiagnosticBits, MessageSecurityMode, NodeId, NumericRange,
-    QualifiedName, ReadValueId, StatusCode, TimestampsToReturn, UAString, Variant, WriteValue,
+    DataTypeId, DataValue, DiagnosticBits, MessageSecurityMode, NodeId, NumericRange, StatusCode,
+    TimestampsToReturn, UAString, Variant, WriteValue,
 };
 use tokio::sync::{mpsc, oneshot};
 
@@ -58,6 +58,7 @@ async fn run_load_test() {
     let mut tasks = Vec::with_capacity(CONCURRENT_TASKS);
     for task_index in 0..CONCURRENT_TASKS {
         let sender = fixture.sender.clone();
+        let node_manager = Arc::clone(&fixture.node_manager);
         let node_id = load_node_id(task_index);
         tasks.push(tokio::spawn(async move {
             for value in 1..=WRITES_PER_TASK as i32 {
@@ -80,30 +81,17 @@ async fn run_load_test() {
                     "write of {value} to {node_id} failed: {status}"
                 );
 
-                let (response, response_rx) = oneshot::channel();
-                sender
-                    .send(SessionMessage::Read {
-                        nodes: vec![read_value_id(&node_id)],
-                        max_age: 0.0,
-                        timestamps_to_return: TimestampsToReturn::Neither,
-                        return_diagnostics: DiagnosticBits::empty(),
-                        response,
-                    })
-                    .await
-                    .expect("actor should accept read message");
-                let results = response_rx
-                    .await
-                    .expect("read response should arrive")
-                    .expect("read should not fault the service");
-                let (data_value, _) = results.into_iter().next().expect("one read result");
-                assert!(
-                    data_value.status.unwrap_or(StatusCode::Good).is_good(),
-                    "read of {node_id} failed: {:?}",
-                    data_value.status
-                );
+                // Reads bypass the actor since feature 072 S2 (reads are the free
+                // function `SessionActor::read_nodes`, not a `SessionMessage`). Verify
+                // the acknowledged write is visible in the shared address space
+                // directly — each task owns its own node, so no other task races it.
+                let observed = {
+                    let address_space = node_manager.address_space().read();
+                    variable_value(&address_space, &node_id)
+                };
                 assert_eq!(
-                    data_value.value,
-                    Some(Variant::Int32(value)),
+                    observed,
+                    Variant::Int32(value),
                     "read after acknowledged write must observe the written value"
                 );
             }
@@ -160,8 +148,9 @@ async fn run_load_test() {
     );
 
     // The actor metrics must have advanced by at least the message volume.
-    // Read after termination acknowledgement so the actor has fully drained.
-    let total_messages = (CONCURRENT_TASKS * WRITES_PER_TASK * 2) as u64;
+    // Post-S2 only writes traverse the actor. Read after termination
+    // acknowledgement so the actor has fully drained.
+    let total_messages = (CONCURRENT_TASKS * WRITES_PER_TASK) as u64;
     let messages_after = metrics.actor_messages_processed.load(Ordering::Relaxed);
     let duration_after = metrics.actor_message_duration_ns.load(Ordering::Relaxed);
     assert!(
@@ -301,14 +290,5 @@ fn write_value(node_id: &NodeId, value: i32) -> WriteValue {
         attribute_id: AttributeId::Value as u32,
         index_range: NumericRange::None,
         value: DataValue::new_now(value),
-    }
-}
-
-fn read_value_id(node_id: &NodeId) -> ReadValueId {
-    ReadValueId {
-        node_id: node_id.clone(),
-        attribute_id: AttributeId::Value as u32,
-        index_range: NumericRange::None,
-        data_encoding: QualifiedName::null(),
     }
 }

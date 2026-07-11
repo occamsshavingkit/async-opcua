@@ -312,7 +312,7 @@ struct CreateSessionServerSignature {
 }
 
 impl CreateSessionServerSignature {
-    fn preflight(
+    async fn preflight(
         info: &ServerInfo,
         security_policy: SecurityPolicy,
         request: &CreateSessionRequest,
@@ -320,16 +320,30 @@ impl CreateSessionServerSignature {
         // OPC-10000-4 5.7.2: the server signature proves possession of the
         // server private key for the client certificate and nonce supplied in
         // CreateSession, and can be prepared before the short manager commit.
-        let server_pkey = info.server_pkey.read();
-        let server_signature = if let Some(ref pkey) = *server_pkey {
-            match opcua_crypto::create_signature_data(
-                pkey,
-                security_policy,
-                &request.client_certificate,
-                &request.client_nonce,
-            ) {
-                Ok(signature) => signature,
-                Err(err) => {
+        //
+        // T007: clone the key out of the read guard so no parking_lot guard
+        // crosses the spawn_blocking await boundary (R6/G1). The cloned key
+        // is also reused for the inline ECC section below.
+        let server_pkey = info.server_pkey.read().clone();
+
+        // T007: offload only the RSA server-signature signing onto the
+        // blocking pool. The ECC ephemeral keygen (T008) stays inline.
+        let server_signature = if let Some(ref pkey) = server_pkey {
+            let signing_key = pkey.clone();
+            let client_certificate = request.client_certificate.clone();
+            let client_nonce = request.client_nonce.clone();
+            match tokio::task::spawn_blocking(move || {
+                opcua_crypto::create_signature_data(
+                    &signing_key,
+                    security_policy,
+                    &client_certificate,
+                    &client_nonce,
+                )
+            })
+            .await
+            {
+                Ok(Ok(signature)) => signature,
+                Ok(Err(err)) => {
                     error!(
                         "Cannot create signature data from private key, check log and error {:?}",
                         err
@@ -338,6 +352,17 @@ impl CreateSessionServerSignature {
                         return Err(StatusCode::BadSecurityChecksFailed);
                     }
                     SignatureData::null()
+                }
+                // JoinError: the blocking task panicked or was cancelled —
+                // distinct from an inner crypto error (C2/R6). Map to a
+                // generic internal error without masking the specific crypto
+                // status codes handled above.
+                Err(join_err) => {
+                    error!(
+                        "CreateSession server-signature blocking task failed: {:?}",
+                        join_err
+                    );
+                    return Err(StatusCode::BadInternalError);
                 }
             }
         } else {
@@ -528,7 +553,7 @@ impl CreateSessionAllocation {
 }
 
 impl CreateSessionDraft {
-    pub(crate) fn prepare_endpoint_preflight(
+    pub(crate) async fn prepare_endpoint_preflight(
         info: &ServerInfo,
         channel: &SecureChannel,
         certificate_store: &RwLock<CertificateStore>,
@@ -558,7 +583,7 @@ impl CreateSessionDraft {
             request,
         )?;
         let server_signature =
-            CreateSessionServerSignature::preflight(info, security_policy, request)?;
+            CreateSessionServerSignature::preflight(info, security_policy, request).await?;
         let mut server_signature = server_signature;
         let (actor_construction, session) = CreateSessionActorConstruction::prepare(
             info,

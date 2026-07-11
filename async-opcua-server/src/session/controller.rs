@@ -561,26 +561,37 @@ impl<T: ConnectionTransport> SessionController<T> {
             }
 
             RequestMessage::CreateSession(request) => {
-                let _h = span.enter();
-                let res = CreateSessionDraft::prepare_endpoint_preflight(
+                // T007: the server-signature RSA signing is offloaded to
+                // spawn_blocking inside preflight, so it must be awaited
+                // before the session-manager write lock (OPC-10000-4 5.7.2).
+                // The span guard is entered only after the await so no
+                // tracing guard crosses an .await boundary.
+                let draft = CreateSessionDraft::prepare_endpoint_preflight(
                     &self.info,
                     &self.channel,
                     &self.certificate_store,
                     &request,
                 )
-                .and_then(|draft| {
-                    let node_managers = self.node_managers.clone();
-                    #[cfg(feature = "subscriptions")]
-                    let subscriptions = self.subscriptions.clone();
-                    let mut mgr = trace_write_lock!(self.session_manager);
-                    mgr.commit_create_session_draft(
-                        draft,
-                        &mut self.channel,
-                        node_managers,
+                .instrument(span.clone())
+                .await;
+
+                let _h = span.enter();
+                let res = match draft {
+                    Ok(draft) => {
+                        let node_managers = self.node_managers.clone();
                         #[cfg(feature = "subscriptions")]
-                        subscriptions,
-                    )
-                });
+                        let subscriptions = self.subscriptions.clone();
+                        let mut mgr = trace_write_lock!(self.session_manager);
+                        mgr.commit_create_session_draft(
+                            draft,
+                            &mut self.channel,
+                            node_managers,
+                            #[cfg(feature = "subscriptions")]
+                            subscriptions,
+                        )
+                    }
+                    Err(status) => Err(status),
+                };
                 let (session_id, revised_timeout, status) = match &res {
                     Ok(response) => (
                         Some(response.session_id.clone()),

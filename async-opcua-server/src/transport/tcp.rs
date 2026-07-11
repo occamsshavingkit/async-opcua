@@ -464,7 +464,7 @@ where
                     TransportPollResult::OutgoingMessageSent
                 }
                 incoming = self.read.next() => {
-                    self.handle_incoming_message(incoming, channel)
+                    self.handle_incoming_message(incoming, channel).await
                 }
             }
         } else {
@@ -472,15 +472,18 @@ where
                 return TransportPollResult::Closed;
             }
             let incoming = self.read.next().await;
-            self.handle_incoming_message(incoming, channel)
+            self.handle_incoming_message(incoming, channel).await
         };
 
         // OPC-10000-6 §7.1: after receiving a complete message, drain all
-        // additional available messages without awaiting. This reduces tokio
-        // scheduler wake-ups per message at high throughput.
+        // additional already-available frames without waiting for another read.
+        // Processing a ready frame may still yield if it offloads OSC crypto.
         if let TransportPollResult::IncomingMessages(mut messages) = first_result {
-            while let Some(Some(incoming)) = self.read.next().now_or_never() {
-                match self.handle_incoming_message(Some(incoming), channel) {
+            loop {
+                let Some(Some(incoming)) = self.read.next().now_or_never() else {
+                    break;
+                };
+                match self.handle_incoming_message(Some(incoming), channel).await {
                     TransportPollResult::IncomingMessages(mut more) => {
                         messages.append(&mut more);
                     }
@@ -503,7 +506,7 @@ where
         }
     }
 
-    fn handle_incoming_message(
+    async fn handle_incoming_message(
         &mut self,
         incoming: Option<Result<Message, std::io::Error>>,
         channel: &mut SecureChannel,
@@ -515,7 +518,7 @@ where
             Ok(message) => {
                 self.metrics
                     .record_bytes_received(message_wire_len(&message));
-                match self.process_message(message, channel) {
+                match self.process_message(message, channel).await {
                     Ok(None) => TransportPollResult::IncomingChunk,
                     Ok(Some(message)) => {
                         self.pending_chunks.clear();
@@ -538,7 +541,7 @@ where
         }
     }
 
-    fn process_message(
+    async fn process_message(
         &mut self,
         message: Message,
         channel: &mut SecureChannel,
@@ -552,17 +555,21 @@ where
                     // MessageChunk before processing it." Verify before discarding the
                     // pending chunks, so a forged/unverified abort cannot silently drop a
                     // legitimate in-progress message.
-                    channel.verify_and_remove_security_server(
-                        chunk.data,
-                        &mut self.decrypted_chunk_storage,
-                    )?;
+                    channel
+                        .verify_and_remove_security_server_async(
+                            chunk.data,
+                            &mut self.decrypted_chunk_storage,
+                        )
+                        .await?;
                     self.pending_chunks.clear();
                     Ok(None)
                 } else {
-                    let chunk = channel.verify_and_remove_security_server(
-                        chunk.data,
-                        &mut self.decrypted_chunk_storage,
-                    )?;
+                    let chunk = channel
+                        .verify_and_remove_security_server_async(
+                            chunk.data,
+                            &mut self.decrypted_chunk_storage,
+                        )
+                        .await?;
 
                     let max_chunks = effective_max_chunk_count(
                         self.send_buffer.max_chunk_count,

@@ -1141,7 +1141,8 @@ impl Server {
     #[cfg(feature = "sharded")]
     async fn run_background_tasks(
         &self,
-        #[cfg_attr(not(feature = "subscriptions"), allow(unused_variables))] context: &ServerContext,
+        #[cfg_attr(not(feature = "subscriptions"), allow(unused_variables))]
+        context: &ServerContext,
     ) {
         #[cfg(feature = "discovery-server-registration")]
         let discovery_fut = Self::run_discovery_server_registration(self.info.clone());

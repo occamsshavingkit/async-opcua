@@ -228,3 +228,34 @@ under load** — plateau 508K→569K. The allocation/hop reductions cut per-requ
 contention, which scales. So US1 delivers real value on the *deployment-relevant* metric (aggregate /
 per-core scaling), even though single-client (the R13 metric) barely moved. This is the "before" the LIFO
 worker-pool experiment must beat: **plateau ~569K, 16-client 548K**.
+
+### R15. S1b — chunk_info() `Mutex`→`OnceLock`: MEASURED throughput-neutral (2026-07-11)
+
+S1b removes the per-chunk `Mutex<Option<ChunkInfo>>` lock that `chunk_info()` took on **every one of its
+~5 calls per request** (tcp.rs:576+589, chunker.rs ReceiveStream + validate_chunks + decode), replacing it
+with a lock-free `OnceLock<ChunkInfo>` (hit path = one atomic load, no CAS/unlock; drops the
+"Mutex poisoned" error branch). The other two S1b sub-items were verified *not* actionable: the 3× header
+re-parse in `apply_security` is **already collapsed** to one `chunk_info()` call, and killing the
+`decoding_options()` clone is **not a clean win** — that clone exists precisely to release the
+`encoding_context` RwLock instead of holding it across three header decodes (borrowing trades a ~72-byte
+copy for a longer lock-hold; wrong trade under concurrency).
+
+Measured on the right instrument for a per-request cost — a **single saturated server core (CPU 11)** swept
+1→16 clients, two binaries built identically and **interleaved n=6 each** to cancel drift:
+
+| Clients | baseline | S1b | Δ (median) |
+|--------:|---------:|----:|:---:|
+| 1  | 105,362 | 105,765 | +0.4% |
+| 4  | 175,100 | 179,176 | +2.3% |
+| 8  | 177,373 | 177,498 | +0.1% |
+| 16 | 175,810 | 176,228 | +0.2% |
+
+Every delta is **inside the run-to-run spread** (baseline 4c ranged 171K–179K, S1b 174K–179K — overlapping).
+**Verdict: throughput-neutral.** The `Mutex` was single-owner/uncontended, so its lock/unlock was already
+a couple of cheap atomic ops — too small a fraction of per-request cost to surface (the same
+uncontended-lock lesson as feature #244's ArcSwap removal, ~1.0×). This contrasts with **S1a**, kept because
+its removed cost (a per-request *heap allocation*) demonstrably scales under load. **Kept anyway** as a
+neutral-not-worse lock-removal + simplification aligned with AGENTS.md's "prefer removing locks" — but it is
+**not** a throughput lever, so US1's headline result stands at S1a+S2 (**plateau ~569K**). S1b thus joins
+S1c/S1d as measured-and-marginal; the real single-core gap remains structural (per-request `tokio::spawn` +
+syscalls + serialization), which is US2's target.

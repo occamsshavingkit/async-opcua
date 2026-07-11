@@ -73,7 +73,7 @@ fn set_chunk_sequence_number(
     let _ = chunk_info.sequence_header.encode(&mut stream, &ctx);
     chunk.data = bytes::Bytes::from(data);
     // Reset cache since raw data was modified
-    *chunk.cached_chunk_info.lock().unwrap() = None;
+    chunk.cached_chunk_info.take();
     old_sequence_number
 }
 
@@ -95,7 +95,7 @@ fn set_chunk_request_id(
     let _ = chunk_info.sequence_header.encode(&mut stream, &ctx);
     chunk.data = bytes::Bytes::from(data);
     // Reset cache since raw data was modified
-    *chunk.cached_chunk_info.lock().unwrap() = None;
+    chunk.cached_chunk_info.take();
     old_request_id
 }
 

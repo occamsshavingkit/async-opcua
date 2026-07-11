@@ -42,11 +42,11 @@ use crate::{
     subscriptions::{PendingPublish, SubscriptionCache},
 };
 #[cfg(feature = "subscriptions")]
-use opcua_types::{AttributeId, PublishRequest};
+use opcua_types::{AttributeId, PublishRequest, ReadValueId};
 use opcua_types::{
     CancelResponse, DiagnosticBits, DiagnosticInfo, NamespaceMap, NodeId, ReadRequest,
-    ReadResponse, ReadValueId, ResponseHeader, ServiceFault, StatusCode, TimestampsToReturn,
-    UAString, WriteRequest, WriteResponse,
+    ReadResponse, ResponseHeader, ServiceFault, StatusCode, TimestampsToReturn, UAString,
+    WriteRequest, WriteResponse,
 };
 #[cfg(feature = "subscriptions-standard")]
 use opcua_types::{SetTriggeringRequest, SetTriggeringResponse};

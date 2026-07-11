@@ -10,12 +10,17 @@ Two owned-input cores in `async-opcua-core/src/comms/secure_channel.rs`:
 
 ```
 asymmetric_sign_and_encrypt_owned(
-    security_policy: SecurityPolicy,
-    signing_key:     PrivateKey,
-    encryption_key:  Option<PublicKey>,
-    src:             Vec<u8>,
-    encrypted_range: Range<usize>,
-) -> Result<Vec<u8>, StatusCode>
+    security_policy:          SecurityPolicy,
+    signing_key:              PrivateKey,
+    encryption_key:           Option<PublicKey>,
+    is_client_role:           bool,          // (corrected) ECC signing branch selector
+    apply_channel_thumbprint: bool,          // (corrected) ECC channel-thumbprint selector
+    first_request_signature:  Vec<u8>,        // (corrected) server ECC-thumbprint mixes this INTO the signed data
+    src:                      Vec<u8>,
+    encrypted_range:          Range<usize>,
+) -> Result<(Vec<u8>, Option<Vec<u8>>), StatusCode>
+    // .0 = secured chunk bytes; .1 = the client's newly computed first_request_signature to store back
+    //      (Some only in the ECC client-role case; None otherwise)
 
 asymmetric_decrypt_and_verify_owned(
     security_policy:     SecurityPolicy,
@@ -26,7 +31,18 @@ asymmetric_decrypt_and_verify_owned(
     src:                 Vec<u8>,
     encrypted_range:     Range<usize>,
 ) -> Result<Vec<u8>, Error>
+    // AUDIT during extraction: confirm the verify half touches no additional &self/ECC state
+    // (e.g. first_request_signature) beyond the params above; if it does, thread it as an owned input too.
 ```
+
+**Contract-correction note (discovered during implementation, 2026-07-11):** the original `_sign_and_encrypt_owned`
+signature omitted the ECC path. `SecureChannel::asymmetric_sign_and_encrypt` (secure_channel.rs:1267) also reads
+`self.is_client_role()`, `self.apply_channel_thumbprint`, and `self.first_request_signature` (a `Mutex<Vec<u8>>`
+**read** by the server thumbprint case and **written** by the client-role case). The cheap `first_request_signature`
+read/write stays on the async thread (read → into the closure as an owned input; the returned `.1` written back
+after); only the expensive `asymmetric_sign`/`asymmetric_encrypt` run in `spawn_blocking`. RSA path uses
+`is_client_role`/`apply_channel_thumbprint = false` and an empty `first_request_signature`, so its behavior is
+unchanged.
 
 **Guarantees**:
 - **G1 (Send + 'static)**: no borrow of `SecureChannel`, no thread-local, no I/O — callable

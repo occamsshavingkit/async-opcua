@@ -204,21 +204,15 @@ impl CryptoOffload for CryptoExecutor {
 /// handshake RSA/ECC crypto does not contend with established-session reads
 /// on the tokio workers.
 ///
-/// Uses `extern "C"` FFI to avoid adding the `libc` crate as a dependency.
 /// If the syscall fails (e.g. insufficient permissions), a warning is
 /// logged and the worker continues at default priority.
 #[cfg(unix)]
 fn try_lower_priority() {
-    extern "C" {
-        fn setpriority(which: i32, who: u32, prio: i32) -> i32;
-    }
-    // PRIO_PROCESS = 0, who = 0 means "current thread" on Linux >= 2.6.12.
-    const PRIO_PROCESS: i32 = 0;
     // Nice value 5 = modestly lower priority (range: -20 highest .. 19 lowest).
     const TARGET_NICE: i32 = 5;
 
-    let rc = unsafe { setpriority(PRIO_PROCESS, 0, TARGET_NICE) };
-    if rc != 0 {
+    // pid = None maps to setpriority(PRIO_PROCESS, 0, ...), the current task.
+    if rustix::process::setpriority_process(None, TARGET_NICE).is_err() {
         warn!(
             "Could not lower priority of crypto worker thread (target nice={TARGET_NICE}); \
              continuing at default priority"

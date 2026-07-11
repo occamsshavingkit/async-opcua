@@ -26,6 +26,8 @@ pub mod authenticator;
 mod builder;
 mod companion;
 mod config;
+/// Dedicated lower-priority executor for server-side asymmetric crypto (T010A).
+pub mod crypto_executor;
 #[cfg(feature = "diagnostics")]
 pub mod diagnostics;
 #[cfg(feature = "discovery-server-registration")]

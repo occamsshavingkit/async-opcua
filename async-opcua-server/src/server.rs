@@ -607,6 +607,7 @@ impl Server {
             localized_text_variants: Default::default(),
             next_session_id: std::sync::atomic::AtomicU32::new(1),
             session_locale_ids: Default::default(),
+            crypto_executor: Some(Arc::new(crate::crypto_executor::CryptoExecutor::new(2, 16))),
         };
 
         let info = Arc::new(info);

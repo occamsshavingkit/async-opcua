@@ -7,6 +7,7 @@
 
 pub mod buffer;
 pub mod chunker;
+pub mod crypto_offload;
 pub mod message_chunk;
 pub mod message_chunk_info;
 pub mod secure_channel;

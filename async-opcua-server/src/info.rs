@@ -254,6 +254,9 @@ pub struct ServerInfo {
     pub(crate) next_session_id: std::sync::atomic::AtomicU32,
     /// Per-server map of numeric session id -> negotiated locale ids (feature 049).
     pub(crate) session_locale_ids: dashmap::DashMap<u32, Vec<opcua_types::UAString>>,
+    /// Dedicated lower-priority executor for server-side asymmetric crypto
+    /// (T010A). `None` means fall back to the shared `spawn_blocking` pool.
+    pub crypto_executor: Option<Arc<crate::crypto_executor::CryptoExecutor>>,
 }
 
 pub(crate) struct X509UserCertificateValidation {

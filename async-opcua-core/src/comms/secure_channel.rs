@@ -69,6 +69,374 @@ fn security_byte(buf: &[u8], index: usize) -> Result<u8, Error> {
         .ok_or_else(|| Error::new(StatusCode::BadSecurityChecksFailed, "invalid byte index"))
 }
 
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn asymmetric_sign_and_encrypt_owned(
+    security_policy: SecurityPolicy,
+    signing_key: PrivateKey,
+    encryption_key: Option<PublicKey>,
+    is_client_role: bool,
+    apply_channel_thumbprint: bool,
+    first_request_signature: Vec<u8>,
+    mut src: Vec<u8>,
+    encrypted_range: Range<usize>,
+) -> Result<(Vec<u8>, Option<Vec<u8>>), StatusCode> {
+    #[cfg(not(feature = "ecc"))]
+    let _ = (
+        is_client_role,
+        apply_channel_thumbprint,
+        &first_request_signature,
+    );
+
+    let header_size = encrypted_range.start;
+
+    let signing_key_size = signing_key.size();
+    let is_ecc = security_policy.is_ecc();
+
+    let signed_range_end = encrypted_range
+        .end
+        .checked_sub(signing_key_size)
+        .ok_or(StatusCode::BadSecurityChecksFailed)?;
+    let signed_range = 0..signed_range_end;
+    let signature_range = signed_range.end..encrypted_range.end;
+
+    trace!(
+        "Header size = {}, Encrypted range = {:?}, Signed range = {:?}, Signature range = {:?}, signature size = {}",
+        header_size, encrypted_range, signed_range, signature_range, signing_key_size
+    );
+
+    // Encryption will change the size of the chunk. Since we sign before encrypting, we need to
+    // compute that size and change the message header to be that new size.
+    let cipher_text_size = {
+        let plain_text_size = encrypted_range
+            .end
+            .checked_sub(encrypted_range.start)
+            .ok_or(StatusCode::BadSecurityChecksFailed)?;
+        let cipher_text_size = if let Some(encryption_key) = &encryption_key {
+            security_policy.calculate_cipher_text_size(plain_text_size, encryption_key)
+        } else {
+            plain_text_size
+        };
+        trace!(
+            "plain_text_size = {}, encrypted_text_size = {}",
+            plain_text_size,
+            cipher_text_size
+        );
+        cipher_text_size
+    };
+    let output_size = header_size
+        .checked_add(cipher_text_size)
+        .ok_or(StatusCode::BadSecurityChecksFailed)?;
+    let mut dst = vec![0; output_size];
+
+    SecureChannel::update_message_size(&mut src, output_size)?;
+    security_mut_slice(&mut dst, 0..encrypted_range.start)?
+        .copy_from_slice(security_slice(&src, 0..encrypted_range.start)?);
+
+    #[cfg(feature = "ecc")]
+    let mut first_request_signature_to_store = None;
+    #[cfg(not(feature = "ecc"))]
+    let first_request_signature_to_store = None;
+    {
+        // Sign the message header, security header, sequence header, body, padding.
+        let signed_and_signature = security_mut_slice(&mut src, 0..encrypted_range.end)?;
+        let (l, r) = signed_and_signature.split_at_mut(signed_range.end);
+        let signature = r
+            .get_mut(..signing_key_size)
+            .ok_or(StatusCode::BadSecurityChecksFailed)?;
+        if is_ecc {
+            #[cfg(feature = "ecc")]
+            {
+                if is_client_role {
+                    security_policy.asymmetric_sign(&signing_key, l, signature)?;
+                    first_request_signature_to_store = Some(signature.to_vec());
+                } else if apply_channel_thumbprint {
+                    let mut signed_data =
+                        Vec::with_capacity(l.len() + first_request_signature.len());
+                    signed_data.extend_from_slice(l);
+                    signed_data.extend_from_slice(&first_request_signature);
+                    security_policy.asymmetric_sign(&signing_key, &signed_data, signature)?;
+                } else {
+                    security_policy.asymmetric_sign(&signing_key, l, signature)?;
+                }
+            }
+        } else {
+            security_policy.asymmetric_sign(&signing_key, l, signature)?;
+        }
+    }
+
+    if encrypted_range.end != signature_range.end {
+        return Err(StatusCode::BadSecurityChecksFailed);
+    }
+
+    if is_ecc {
+        security_mut_slice(&mut dst, encrypted_range.clone())?
+            .copy_from_slice(security_slice(&src, encrypted_range.clone())?);
+        SecureChannel::log_crypto_data(
+            "Chunk after signing",
+            security_slice_to(&dst, signature_range.end)?,
+        );
+        return Ok((dst, first_request_signature_to_store));
+    }
+
+    SecureChannel::log_crypto_data(
+        "Chunk after signing",
+        security_slice_to(&dst, signature_range.end)?,
+    );
+
+    // Encrypt the sequence header, payload, signature portion into dst.
+    let encrypted_size = security_policy.asymmetric_encrypt(
+        encryption_key
+            .as_ref()
+            .ok_or(StatusCode::BadSecurityChecksFailed)?,
+        security_slice(&src, encrypted_range.clone())?,
+        security_mut_slice_from(&mut dst, encrypted_range.start)?,
+    )?;
+
+    // Validate encrypted size is right.
+    if encrypted_size != cipher_text_size {
+        return Err(StatusCode::BadSecurityChecksFailed);
+    }
+
+    //{
+    //    debug!("Encrypted size in bytes = {} compared to encrypted range {:?}", encrypted_size, encrypted_range);
+    //    SecureChannel::log_crypto_data("Decrypted data", &src);
+    //    SecureChannel::log_crypto_data("Encrypted data", &dst[0..encrypted_size]);
+    //}
+
+    Ok((dst, first_request_signature_to_store))
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn asymmetric_decrypt_and_verify_owned(
+    security_policy: SecurityPolicy,
+    our_private_key: PrivateKey,
+    our_cert: X509,
+    verification_key: PublicKey,
+    receiver_thumbprint: ByteString,
+    is_client_role: bool,
+    apply_channel_thumbprint: bool,
+    first_request_signature: Vec<u8>,
+    src: Vec<u8>,
+    encrypted_range: Range<usize>,
+) -> Result<Vec<u8>, Error> {
+    #[cfg(not(feature = "ecc"))]
+    let _ = (
+        is_client_role,
+        apply_channel_thumbprint,
+        &first_request_signature,
+    );
+
+    // Asymmetric encrypt requires the caller supply the security policy
+    if !security_policy.is_supported() {
+        return Err(Error::new(
+            StatusCode::BadSecurityPolicyRejected,
+            format!(
+                "Security policy {security_policy} is not supported by asymmetric_decrypt_and_verify and has been rejected"
+            ),
+        ));
+    }
+
+    // Unlike the symmetric_decrypt_and_verify, this code will ALWAYS decrypt and verify regardless
+    // of security mode. This is part of the OpenSecureChannel request on a sign / signencrypt
+    // mode connection.
+
+    // The sender_certificate is is the cert used to sign the message, i.e. the client's cert
+    //
+    // The receiver certificate thumbprint identifies which of our certs was used by the client
+    // to encrypt the message. We have to work out from the thumbprint which cert to use
+
+    let our_thumbprint = our_cert.thumbprint();
+    if our_thumbprint.value() != receiver_thumbprint.as_ref() {
+        return Err(Error::new(
+            StatusCode::BadNoValidCertificates,
+            "Supplied thumbprint does not match application certificate's thumbprint",
+        ));
+    }
+
+    let mut dst = vec![0u8; encrypted_range.end];
+
+    // Copy message, security header
+    dst.get_mut(..encrypted_range.start)
+        .ok_or_else(|| {
+            Error::new(
+                StatusCode::BadSecurityChecksFailed,
+                "invalid encrypted range",
+            )
+        })?
+        .copy_from_slice(src.get(..encrypted_range.start).ok_or_else(|| {
+            Error::new(
+                StatusCode::BadSecurityChecksFailed,
+                "invalid encrypted range",
+            )
+        })?);
+
+    let encrypted_size = encrypted_range
+        .end
+        .checked_sub(encrypted_range.start)
+        .ok_or_else(|| {
+            Error::new(
+                StatusCode::BadSecurityChecksFailed,
+                "invalid encrypted range",
+            )
+        })?;
+    let decrypted_size = if security_policy.is_ecc() {
+        dst.get_mut(encrypted_range.clone())
+            .ok_or_else(|| {
+                Error::new(
+                    StatusCode::BadSecurityChecksFailed,
+                    "invalid encrypted range",
+                )
+            })?
+            .copy_from_slice(src.get(encrypted_range.clone()).ok_or_else(|| {
+                Error::new(
+                    StatusCode::BadSecurityChecksFailed,
+                    "invalid encrypted range",
+                )
+            })?);
+        encrypted_size
+    } else {
+        // Note that the unencrypted size can be less than the encrypted size due to removal
+        // of padding, so the ranges that were supplied to this function must be offset to compensate.
+        trace!("Decrypting message range {:?}", encrypted_range);
+        let mut decrypted_tmp = vec![0u8; encrypted_size];
+
+        let decrypted_size = security_policy.asymmetric_decrypt(
+            &our_private_key,
+            src.get(encrypted_range.clone()).ok_or_else(|| {
+                Error::new(
+                    StatusCode::BadSecurityChecksFailed,
+                    "invalid encrypted range",
+                )
+            })?,
+            &mut decrypted_tmp,
+        )?;
+        let decrypted_end = encrypted_range
+            .start
+            .checked_add(decrypted_size)
+            .filter(|end| *end <= dst.len())
+            .ok_or_else(|| {
+                Error::new(
+                    StatusCode::BadSecurityChecksFailed,
+                    "decrypted chunk exceeds message buffer",
+                )
+            })?;
+
+        dst.get_mut(encrypted_range.start..decrypted_end)
+            .ok_or_else(|| {
+                Error::new(
+                    StatusCode::BadSecurityChecksFailed,
+                    "invalid decrypted range",
+                )
+            })?
+            .copy_from_slice(decrypted_tmp.get(..decrypted_size).ok_or_else(|| {
+                Error::new(
+                    StatusCode::BadSecurityChecksFailed,
+                    "invalid decrypted range",
+                )
+            })?);
+        decrypted_size
+    };
+    trace!(
+        "Decrypted bytes = {} compared to encrypted range {}",
+        decrypted_size,
+        encrypted_size
+    );
+    // SecureChannel::log_crypto_data("Decrypted Bytes = ", &decrypted_tmp[..decrypted_size]);
+
+    let verification_key_signature_size =
+        security_policy.asymmetric_signature_size(&verification_key);
+    trace!(
+        "Verification key size = {}",
+        verification_key_signature_size
+    );
+
+    let decrypted_end = encrypted_range
+        .start
+        .checked_add(decrypted_size)
+        .filter(|end| *end <= dst.len())
+        .ok_or_else(|| {
+            Error::new(
+                StatusCode::BadSecurityChecksFailed,
+                "decrypted chunk exceeds message buffer",
+            )
+        })?;
+
+    // The signature range is at the end of the decrypted block for the verification key's signature
+    let signature_dst_offset = decrypted_end
+        .checked_sub(verification_key_signature_size)
+        .ok_or_else(|| {
+            Error::new(
+                StatusCode::BadSecurityChecksFailed,
+                "decrypted chunk is smaller than the signature",
+            )
+        })?;
+    let signature_range_dst = signature_dst_offset..decrypted_end;
+
+    // The signed range is from 0 to the end of the plaintext except for key size
+    let signed_range_dst = 0..signature_dst_offset;
+
+    // SecureChannel::log_crypto_data("Decrypted data = ", &dst[..signature_range_dst.end]);
+
+    // Verify signature (contained encrypted portion) using verification key
+    trace!(
+        "Verifying signature range {:?} with signature at {:?}",
+        signed_range_dst,
+        signature_range_dst
+    );
+    // Keysize for padding is publickey length if avaiable
+    let key_size = if let Ok(cert) = our_cert.public_key() {
+        cert.size()
+    } else {
+        verification_key.size()
+    };
+    let signed_data = dst
+        .get(signed_range_dst)
+        .ok_or_else(|| Error::new(StatusCode::BadSecurityChecksFailed, "invalid signed range"))?;
+    let signature = dst.get(signature_range_dst.clone()).ok_or_else(|| {
+        Error::new(
+            StatusCode::BadSecurityChecksFailed,
+            "invalid signature range",
+        )
+    })?;
+    if security_policy.is_ecc() {
+        #[cfg(feature = "ecc")]
+        {
+            if is_client_role && apply_channel_thumbprint {
+                let mut signed_data_with_thumbprint =
+                    Vec::with_capacity(signed_data.len() + first_request_signature.len());
+                signed_data_with_thumbprint.extend_from_slice(signed_data);
+                signed_data_with_thumbprint.extend_from_slice(&first_request_signature);
+                security_policy.asymmetric_verify_signature(
+                    &verification_key,
+                    &signed_data_with_thumbprint,
+                    signature,
+                )?;
+            } else {
+                security_policy.asymmetric_verify_signature(
+                    &verification_key,
+                    signed_data,
+                    signature,
+                )?;
+            }
+        }
+    } else {
+        security_policy.asymmetric_verify_signature(&verification_key, signed_data, signature)?;
+    }
+
+    let decrypted_verified_size = if security_policy.is_ecc() {
+        signature_range_dst.start
+    } else {
+        // Verify that the padding is correct
+        let padding_range =
+            SecureChannel::verify_padding(&dst, key_size, signature_range_dst.start)?;
+
+        // Decrypted and verified into dst
+        padding_range.start
+    };
+    dst.truncate(decrypted_verified_size);
+    Ok(dst)
+}
+
 #[derive(Debug, PartialEq)]
 /// Role of an application in OPC-UA communication.
 pub enum Role {
@@ -84,6 +452,204 @@ pub enum Role {
 struct RemoteKeys {
     keys: AesDerivedKeys,
     expires_at: DateTime,
+}
+
+#[allow(clippy::large_enum_variant)]
+enum PreparedOscDecrypt {
+    Plain {
+        message_chunk: MessageChunk,
+        security_policy: SecurityPolicy,
+    },
+    Crypto(Box<PreparedOscDecryptCrypto>),
+}
+
+struct PreparedOscDecryptCrypto {
+    security_policy: SecurityPolicy,
+    our_private_key: PrivateKey,
+    our_cert: X509,
+    verification_key: PublicKey,
+    receiver_thumbprint: ByteString,
+    is_client_role: bool,
+    apply_channel_thumbprint: bool,
+    first_request_signature: Vec<u8>,
+    src: Vec<u8>,
+    encrypted_range: Range<usize>,
+    #[cfg(feature = "ecc")]
+    first_request_signature_to_store: Option<Result<Vec<u8>, Error>>,
+    /// Dedicated crypto executor (T010A). `None` falls back to spawn_blocking.
+    crypto_offload: Option<Arc<dyn super::crypto_offload::CryptoOffload>>,
+}
+
+struct CompletedOscDecrypt {
+    security_policy: SecurityPolicy,
+    decrypted_chunk: Vec<u8>,
+    #[cfg(feature = "ecc")]
+    first_request_signature_to_store: Option<Result<Vec<u8>, Error>>,
+}
+
+impl PreparedOscDecryptCrypto {
+    fn decrypt_inline(self) -> Result<CompletedOscDecrypt, Error> {
+        let PreparedOscDecryptCrypto {
+            security_policy,
+            our_private_key,
+            our_cert,
+            verification_key,
+            receiver_thumbprint,
+            is_client_role,
+            apply_channel_thumbprint,
+            first_request_signature,
+            src,
+            encrypted_range,
+            #[cfg(feature = "ecc")]
+            first_request_signature_to_store,
+            crypto_offload,
+        } = self;
+        // crypto_offload is unused in the inline path — only the async
+        // (blocking) path consults it. Drop to avoid clippy warnings.
+        drop(crypto_offload);
+
+        let decrypted_chunk = asymmetric_decrypt_and_verify_owned(
+            security_policy,
+            our_private_key,
+            our_cert,
+            verification_key,
+            receiver_thumbprint,
+            is_client_role,
+            apply_channel_thumbprint,
+            first_request_signature,
+            src,
+            encrypted_range,
+        )?;
+
+        Ok(CompletedOscDecrypt {
+            security_policy,
+            decrypted_chunk,
+            #[cfg(feature = "ecc")]
+            first_request_signature_to_store,
+        })
+    }
+
+    async fn decrypt_blocking(self) -> Result<CompletedOscDecrypt, Error> {
+        let PreparedOscDecryptCrypto {
+            security_policy,
+            our_private_key,
+            our_cert,
+            verification_key,
+            receiver_thumbprint,
+            is_client_role,
+            apply_channel_thumbprint,
+            first_request_signature,
+            src,
+            encrypted_range,
+            #[cfg(feature = "ecc")]
+            first_request_signature_to_store,
+            crypto_offload,
+        } = self;
+
+        let decrypted_chunk =
+            match super::crypto_offload::execute_offloaded(crypto_offload.as_deref(), move || {
+                asymmetric_decrypt_and_verify_owned(
+                    security_policy,
+                    our_private_key,
+                    our_cert,
+                    verification_key,
+                    receiver_thumbprint,
+                    is_client_role,
+                    apply_channel_thumbprint,
+                    first_request_signature,
+                    src,
+                    encrypted_range,
+                )
+            })
+            .await
+            {
+                Ok(inner) => inner?,
+                Err(_offload_err) => {
+                    return Err(Error::new(
+                        StatusCode::BadInternalError,
+                        "asymmetric decrypt task failed",
+                    ));
+                }
+            };
+
+        Ok(CompletedOscDecrypt {
+            security_policy,
+            decrypted_chunk,
+            #[cfg(feature = "ecc")]
+            first_request_signature_to_store,
+        })
+    }
+}
+
+/// Owned inputs for an offloaded outbound OpenSecureChannel sign+encrypt.
+///
+/// All material is cloned from the channel during preparation (before any
+/// `.await`), so the struct is `Send + 'static` and safe to move into
+/// `spawn_blocking`. OPC-10000-6 §6.7.2.
+struct PreparedOscSignCrypto {
+    security_policy: SecurityPolicy,
+    signing_key: PrivateKey,
+    encryption_key: Option<PublicKey>,
+    is_client_role: bool,
+    apply_channel_thumbprint: bool,
+    first_request_signature: Vec<u8>,
+    src: Vec<u8>,
+    encrypted_range: Range<usize>,
+    /// Dedicated crypto executor (T010A). `None` falls back to spawn_blocking.
+    crypto_offload: Option<Arc<dyn super::crypto_offload::CryptoOffload>>,
+}
+
+struct CompletedOscSign {
+    secured_chunk: Vec<u8>,
+    first_request_signature_to_store: Option<Vec<u8>>,
+}
+
+impl PreparedOscSignCrypto {
+    /// Run the asymmetric sign+encrypt core on the blocking pool or
+    /// dedicated crypto executor (T010A).
+    ///
+    /// Offload failure (worker panic/cancellation, executor closed) maps to
+    /// `BadInternalError`; the inner crypto `Err(status)` is returned
+    /// verbatim (C2/R6).
+    async fn sign_blocking(self) -> Result<CompletedOscSign, StatusCode> {
+        let PreparedOscSignCrypto {
+            security_policy,
+            signing_key,
+            encryption_key,
+            is_client_role,
+            apply_channel_thumbprint,
+            first_request_signature,
+            src,
+            encrypted_range,
+            crypto_offload,
+        } = self;
+
+        let (secured_chunk, first_request_signature_to_store) =
+            match super::crypto_offload::execute_offloaded(crypto_offload.as_deref(), move || {
+                asymmetric_sign_and_encrypt_owned(
+                    security_policy,
+                    signing_key,
+                    encryption_key,
+                    is_client_role,
+                    apply_channel_thumbprint,
+                    first_request_signature,
+                    src,
+                    encrypted_range,
+                )
+            })
+            .await
+            {
+                Ok(inner) => inner?,
+                Err(_offload_err) => {
+                    return Err(StatusCode::BadInternalError);
+                }
+            };
+
+        Ok(CompletedOscSign {
+            secured_chunk,
+            first_request_signature_to_store,
+        })
+    }
 }
 
 /// Holds all of the security information related to this session
@@ -143,6 +709,11 @@ pub struct SecureChannel {
     encoding_context: Arc<RwLock<ContextOwned>>,
     /// Whether the security policy has been pre-validated.
     security_policy_valid: bool,
+    /// Optional dedicated crypto offload executor for asymmetric OSC crypto
+    /// (T010A). When `Some`, handshake decrypt/verify and sign/encrypt run
+    /// on this executor's workers instead of the shared `spawn_blocking`
+    /// pool, giving the deployment a scheduling-priority seam.
+    crypto_offload: Option<Arc<dyn super::crypto_offload::CryptoOffload>>,
 }
 
 impl SecureChannel {
@@ -174,6 +745,7 @@ impl SecureChannel {
             encoding_context: Default::default(),
             remote_keys: HashMap::new(),
             security_policy_valid: false,
+            crypto_offload: None,
         }
     }
 
@@ -227,6 +799,7 @@ impl SecureChannel {
             encoding_context,
             remote_keys: HashMap::new(),
             security_policy_valid: false,
+            crypto_offload: None,
         }
     }
 
@@ -341,6 +914,15 @@ impl SecureChannel {
         self.token_id = 0;
         self.token_created_at = DateTime::now();
         self.token_lifetime = 0;
+    }
+
+    /// Attach a dedicated crypto offload executor (T010A). When set,
+    /// asymmetric OSC crypto (decrypt/verify, sign/encrypt) runs on this
+    /// executor's workers instead of the shared `spawn_blocking` pool,
+    /// giving the deployment a scheduling-priority seam for handshake
+    /// crypto.
+    pub fn set_crypto_offload(&mut self, executor: Arc<dyn super::crypto_offload::CryptoOffload>) {
+        self.crypto_offload = Some(executor);
     }
 
     /// Set the channel security token.
@@ -940,6 +1522,130 @@ impl SecureChannel {
         Ok(size)
     }
 
+    /// Prepare owned inputs for an offloaded outbound OpenSecureChannel
+    /// sign+encrypt. The thread-local padding scratch is used during
+    /// preparation and the borrow ends before this method returns, so the
+    /// resulting `PreparedOscSignCrypto` is `Send + 'static`.
+    fn prepare_open_secure_channel_sign(
+        &self,
+        message_chunk: &MessageChunk,
+        encrypted_data_offset: usize,
+    ) -> Result<PreparedOscSignCrypto, StatusCode> {
+        let signing_key = self
+            .private_key
+            .as_ref()
+            .ok_or(StatusCode::BadSecurityChecksFailed)?
+            .clone();
+
+        let is_ecc = self.security_policy.is_ecc();
+        let encryption_key = if is_ecc {
+            None
+        } else {
+            Some(
+                self.remote_cert
+                    .as_ref()
+                    .ok_or(StatusCode::BadSecurityChecksFailed)?
+                    .public_key()?,
+            )
+        };
+
+        let is_client_role = self.is_client_role();
+        #[cfg(feature = "ecc")]
+        let apply_channel_thumbprint = self.apply_channel_thumbprint;
+        #[cfg(not(feature = "ecc"))]
+        let apply_channel_thumbprint = false;
+        #[cfg(feature = "ecc")]
+        let first_request_signature = self.first_request_signature.lock().clone();
+        #[cfg(not(feature = "ecc"))]
+        let first_request_signature = Vec::new();
+
+        let src = PADDING_AND_SIGNATURE_SCRATCH.with(|scratch| {
+            let mut data = scratch.borrow_mut();
+            let message_size =
+                self.add_space_for_padding_and_signature_into(message_chunk, &mut data)?;
+            data.truncate(message_size);
+            Self::log_crypto_data("Chunk before padding", &message_chunk.data[..]);
+            Self::log_crypto_data("Chunk after padding", &data[..]);
+            Ok::<Vec<u8>, StatusCode>(data.clone())
+        })?;
+
+        let encrypted_range = encrypted_data_offset..src.len();
+
+        Ok(PreparedOscSignCrypto {
+            security_policy: self.security_policy,
+            signing_key,
+            encryption_key,
+            is_client_role,
+            apply_channel_thumbprint,
+            first_request_signature,
+            src,
+            encrypted_range,
+            crypto_offload: self.crypto_offload.clone(),
+        })
+    }
+
+    /// Async variant of [`apply_security`](Self::apply_security) that offloads
+    /// only the outbound OpenSecureChannel asymmetric sign+encrypt to Tokio's
+    /// blocking pool (C5: symmetric per-request path stays inline).
+    ///
+    /// For security policy `None`, symmetric chunks, and Ack/Error payloads,
+    /// this delegates to the existing synchronous `apply_security`.
+    /// OPC-10000-6 §6.7.2.
+    pub(crate) async fn apply_security_async(
+        &self,
+        message_chunk: &MessageChunk,
+        dst: &mut [u8],
+    ) -> Result<usize, StatusCode> {
+        let should_offload = self.security_policy != SecurityPolicy::None
+            && matches!(
+                self.security_mode,
+                MessageSecurityMode::Sign | MessageSecurityMode::SignAndEncrypt
+            )
+            && message_chunk.is_open_secure_channel(&self.decoding_options());
+
+        if !should_offload {
+            return self.apply_security(message_chunk, dst);
+        }
+
+        let encrypted_data_offset =
+            message_chunk.encrypted_data_offset(&self.decoding_options())?;
+
+        let prepared =
+            self.prepare_open_secure_channel_sign(message_chunk, encrypted_data_offset)?;
+
+        let CompletedOscSign {
+            secured_chunk,
+            first_request_signature_to_store,
+        } = prepared.sign_blocking().await?;
+
+        let secured_size = secured_chunk.len();
+        security_mut_slice(dst, 0..secured_size)?.copy_from_slice(&secured_chunk);
+
+        Self::log_crypto_data(
+            "Chunk after encryption",
+            security_slice_to(dst, secured_size)?,
+        );
+
+        // Store ECC client first_request_signature back, matching the sync
+        // wrapper semantics. On the server path is_client_role is false so
+        // this is a no-op; included for drop-in equivalence.
+        #[cfg(feature = "ecc")]
+        {
+            let is_client_role = self.is_client_role();
+            if is_client_role {
+                if let Some(sig) = first_request_signature_to_store {
+                    let mut first_request_signature = self.first_request_signature.lock();
+                    first_request_signature.clear();
+                    first_request_signature.extend_from_slice(&sig);
+                }
+            }
+        }
+        #[cfg(not(feature = "ecc"))]
+        let _ = first_request_signature_to_store;
+
+        Ok(secured_size)
+    }
+
     fn decode_message_header(
         &self,
         src: &[u8],
@@ -968,12 +1674,12 @@ impl SecureChannel {
         Ok((message_header, security_header, encrypted_data_offset))
     }
 
-    fn decrypt_open_secure_channel(
+    fn prepare_open_secure_channel_decrypt(
         &self,
         src: bytes::Bytes,
         security_header: SecurityHeader,
         encrypted_range: Range<usize>,
-    ) -> Result<(MessageChunk, SecurityPolicy), Error> {
+    ) -> Result<PreparedOscDecrypt, Error> {
         // The OpenSecureChannel is the first thing we receive so we must examine
         // the security policy and use it to determine if the packet must be decrypted.
 
@@ -1005,13 +1711,13 @@ impl SecureChannel {
             }
             SecurityPolicy::None => {
                 // Nothing to do
-                return Ok((
-                    MessageChunk {
+                return Ok(PreparedOscDecrypt::Plain {
+                    message_chunk: MessageChunk {
                         data: src,
                         cached_chunk_info: std::sync::OnceLock::new(),
                     },
                     security_policy,
-                ));
+                });
             }
             _ => {}
         }
@@ -1076,18 +1782,92 @@ impl SecureChannel {
         let receiver_thumbprint = security_header.receiver_certificate_thumbprint;
         trace!("Receiver thumbprint = {:?}", receiver_thumbprint);
 
-        let mut decrypted_data = vec![0u8; encrypted_range.end];
-        let decrypted_size = self.asymmetric_decrypt_and_verify(
+        let our_cert = self.cert.as_ref().ok_or_else(|| {
+            Error::new(
+                StatusCode::BadCertificateInvalid,
+                "Missing local application certificate",
+            )
+        })?;
+        let our_private_key = self.private_key.as_ref().ok_or_else(|| {
+            Error::new(StatusCode::BadSecurityChecksFailed, "Missing private key")
+        })?;
+        let is_client_role = self.is_client_role();
+        #[cfg(feature = "ecc")]
+        let apply_channel_thumbprint = self.apply_channel_thumbprint;
+        #[cfg(not(feature = "ecc"))]
+        let apply_channel_thumbprint = false;
+        #[cfg(feature = "ecc")]
+        let first_request_signature = self.first_request_signature.lock().clone();
+        #[cfg(not(feature = "ecc"))]
+        let first_request_signature = Vec::new();
+        #[cfg(feature = "ecc")]
+        let first_request_signature_to_store = if security_policy.is_ecc() && !is_client_role {
+            let signature_size = security_policy.asymmetric_signature_size(&verification_key);
+            let signature_end = encrypted_range.end;
+            Some(
+                signature_end
+                    .checked_sub(signature_size)
+                    .ok_or_else(|| {
+                        Error::new(
+                            StatusCode::BadSecurityChecksFailed,
+                            "decrypted chunk is smaller than the signature",
+                        )
+                    })
+                    .and_then(|signature_start| {
+                        src.get(signature_start..signature_end)
+                            .ok_or_else(|| {
+                                Error::new(
+                                    StatusCode::BadSecurityChecksFailed,
+                                    "invalid signature range",
+                                )
+                            })
+                            .map(|signature| signature.to_vec())
+                    }),
+            )
+        } else {
+            None
+        };
+
+        Ok(PreparedOscDecrypt::Crypto(Box::new(
+            PreparedOscDecryptCrypto {
+                security_policy,
+                our_private_key: our_private_key.clone(),
+                our_cert: our_cert.clone(),
+                verification_key,
+                receiver_thumbprint,
+                is_client_role,
+                apply_channel_thumbprint,
+                first_request_signature,
+                src: src.to_vec(),
+                encrypted_range,
+                #[cfg(feature = "ecc")]
+                first_request_signature_to_store,
+                crypto_offload: self.crypto_offload.clone(),
+            },
+        )))
+    }
+
+    fn finish_open_secure_channel_decrypt(
+        &self,
+        completed: CompletedOscDecrypt,
+    ) -> Result<(MessageChunk, SecurityPolicy), Error> {
+        let CompletedOscDecrypt {
             security_policy,
-            &verification_key,
-            receiver_thumbprint,
-            &src,
-            encrypted_range,
-            &mut decrypted_data,
-        )?;
+            decrypted_chunk,
+            #[cfg(feature = "ecc")]
+            first_request_signature_to_store,
+        } = completed;
 
-        let msg = Self::update_message_size_and_truncate(decrypted_data, decrypted_size)?;
+        #[cfg(feature = "ecc")]
+        if let Some(first_request_signature_to_store) = first_request_signature_to_store {
+            let first_request_signature_to_store = first_request_signature_to_store?;
+            let mut first_request_signature = self.first_request_signature.lock();
+            first_request_signature.clear();
+            first_request_signature.extend_from_slice(&first_request_signature_to_store);
+        }
 
+        let decrypted_size = decrypted_chunk.len();
+        let msg = Self::update_message_size_and_truncate(decrypted_chunk, decrypted_size)?;
         Ok((
             MessageChunk {
                 data: msg.into(),
@@ -1095,6 +1875,40 @@ impl SecureChannel {
             },
             security_policy,
         ))
+    }
+
+    fn decrypt_open_secure_channel(
+        &self,
+        src: bytes::Bytes,
+        security_header: SecurityHeader,
+        encrypted_range: Range<usize>,
+    ) -> Result<(MessageChunk, SecurityPolicy), Error> {
+        match self.prepare_open_secure_channel_decrypt(src, security_header, encrypted_range)? {
+            PreparedOscDecrypt::Plain {
+                message_chunk,
+                security_policy,
+            } => Ok((message_chunk, security_policy)),
+            PreparedOscDecrypt::Crypto(prepared) => {
+                self.finish_open_secure_channel_decrypt((*prepared).decrypt_inline()?)
+            }
+        }
+    }
+
+    async fn decrypt_open_secure_channel_async(
+        &self,
+        src: bytes::Bytes,
+        security_header: SecurityHeader,
+        encrypted_range: Range<usize>,
+    ) -> Result<(MessageChunk, SecurityPolicy), Error> {
+        match self.prepare_open_secure_channel_decrypt(src, security_header, encrypted_range)? {
+            PreparedOscDecrypt::Plain {
+                message_chunk,
+                security_policy,
+            } => Ok((message_chunk, security_policy)),
+            PreparedOscDecrypt::Crypto(prepared) => {
+                self.finish_open_secure_channel_decrypt((*prepared).decrypt_blocking().await?)
+            }
+        }
     }
 
     fn decrypt_chunk(
@@ -1262,8 +2076,58 @@ impl SecureChannel {
         }
     }
 
+    /// Decrypts and verifies the body data if the mode / policy requires it.
+    ///
+    /// Server-side async variant that offloads only the OpenSecureChannel
+    /// asymmetric decrypt/verify leaf to Tokio's blocking pool.
+    pub async fn verify_and_remove_security_server_async(
+        &mut self,
+        src: bytes::Bytes,
+        decrypted_data: &mut DecryptedChunkStorage,
+    ) -> Result<MessageChunk, Error> {
+        // Get message & security header from data
+        let (message_header, security_header, encrypted_data_offset) =
+            self.decode_message_header(&src)?;
+        let message_size = message_header.message_size as usize;
+
+        // S - Message Header
+        // S - Security Header
+        // S - Sequence Header - E
+        // S - Body            - E
+        // S - Padding         - E
+        //     Signature       - E
+        if message_header.message_type.is_open_secure_channel() {
+            // The OpenSecureChannel is the first thing we receive so we must examine
+            // the security policy and use it to determine if the packet must be decrypted.
+
+            let (_, encrypted_range) =
+                Self::secure_message_ranges(message_size, encrypted_data_offset, 0)?;
+            let (decrypted_chunk, security_policy) = self
+                .decrypt_open_secure_channel_async(src, security_header, encrypted_range)
+                .await?;
+            self.set_security_policy(security_policy);
+            Ok(decrypted_chunk)
+        } else if self.is_secure_connection() {
+            let signature_size = self.security_policy.symmetric_signature_size();
+            let (signed_range, encrypted_range) =
+                Self::secure_message_ranges(message_size, encrypted_data_offset, signature_size)?;
+            self.decrypt_chunk(
+                src,
+                security_header,
+                signed_range,
+                encrypted_range,
+                decrypted_data,
+            )
+        } else {
+            Ok(MessageChunk {
+                data: src,
+                cached_chunk_info: std::sync::OnceLock::new(),
+            })
+        }
+    }
+
     /// Use the security policy to asymmetric encrypt and sign the specified chunk of data.
-    /// Signs the source data in place.
+    /// Keeps the borrowed-buffer API while delegating crypto to the owned core.
     fn asymmetric_sign_and_encrypt(
         &self,
         security_policy: SecurityPolicy,
@@ -1271,22 +2135,12 @@ impl SecureChannel {
         encrypted_range: Range<usize>,
         dst: &mut [u8],
     ) -> Result<usize, StatusCode> {
-        let header_size = encrypted_range.start;
-
         let signing_key = self
             .private_key
             .as_ref()
-            .ok_or(StatusCode::BadSecurityChecksFailed)?;
-        let signing_key_size = signing_key.size();
+            .ok_or(StatusCode::BadSecurityChecksFailed)?
+            .clone();
         let is_ecc = security_policy.is_ecc();
-
-        let signed_range = 0..(encrypted_range.end - signing_key_size);
-        let signature_range = signed_range.end..encrypted_range.end;
-
-        trace!(
-            "Header size = {}, Encrypted range = {:?}, Signed range = {:?}, Signature range = {:?}, signature size = {}",
-            header_size, encrypted_range, signed_range, signature_range, signing_key_size
-        );
 
         let encryption_key = if is_ecc {
             None
@@ -1299,94 +2153,42 @@ impl SecureChannel {
             )
         };
 
-        // Encryption will change the size of the chunk. Since we sign before encrypting, we need to
-        // compute that size and change the message header to be that new size
-        let cipher_text_size = {
-            let plain_text_size = encrypted_range.end - encrypted_range.start;
-            let cipher_text_size = if let Some(encryption_key) = &encryption_key {
-                security_policy.calculate_cipher_text_size(plain_text_size, encryption_key)
-            } else {
-                plain_text_size
-            };
-            trace!(
-                "plain_text_size = {}, encrypted_text_size = {}",
-                plain_text_size,
-                cipher_text_size
-            );
-            cipher_text_size
-        };
-        Self::update_message_size(src, header_size + cipher_text_size)?;
-        security_mut_slice(dst, 0..encrypted_range.start)?
-            .copy_from_slice(security_slice(src, 0..encrypted_range.start)?);
+        let is_client_role = self.is_client_role();
+        #[cfg(feature = "ecc")]
+        let apply_channel_thumbprint = self.apply_channel_thumbprint;
+        #[cfg(not(feature = "ecc"))]
+        let apply_channel_thumbprint = false;
+        #[cfg(feature = "ecc")]
+        let first_request_signature = self.first_request_signature.lock().clone();
+        #[cfg(not(feature = "ecc"))]
+        let first_request_signature = Vec::new();
 
-        // Sign the message header, security header, sequence header, body, padding
-        let (l, r) = src.split_at_mut(signed_range.end);
-        let signature = r
-            .get_mut(..signing_key_size)
-            .ok_or(StatusCode::BadSecurityChecksFailed)?;
-        if is_ecc {
-            #[cfg(feature = "ecc")]
-            {
-                if self.is_client_role() {
-                    security_policy.asymmetric_sign(signing_key, l, signature)?;
-                    let mut first_request_signature = self.first_request_signature.lock();
-                    first_request_signature.clear();
-                    first_request_signature.extend_from_slice(signature);
-                } else if self.apply_channel_thumbprint {
-                    let first_request_signature = self.first_request_signature.lock();
-                    let mut signed_data =
-                        Vec::with_capacity(l.len() + first_request_signature.len());
-                    signed_data.extend_from_slice(l);
-                    signed_data.extend_from_slice(&first_request_signature);
-                    security_policy.asymmetric_sign(signing_key, &signed_data, signature)?;
-                } else {
-                    security_policy.asymmetric_sign(signing_key, l, signature)?;
-                }
-            }
-        } else {
-            security_policy.asymmetric_sign(signing_key, l, signature)?;
-        }
-
-        if encrypted_range.end != signature_range.end {
-            return Err(StatusCode::BadSecurityChecksFailed);
-        }
-
-        if is_ecc {
-            security_mut_slice(dst, encrypted_range.clone())?
-                .copy_from_slice(security_slice(src, encrypted_range.clone())?);
-            Self::log_crypto_data(
-                "Chunk after signing",
-                security_slice_to(dst, signature_range.end)?,
-            );
-            return Ok(signature_range.end);
-        }
-
-        Self::log_crypto_data(
-            "Chunk after signing",
-            security_slice_to(dst, signature_range.end)?,
-        );
-
-        // Encrypt the sequence header, payload, signature portion into dst
-        let encrypted_size = security_policy.asymmetric_encrypt(
-            encryption_key
-                .as_ref()
-                .ok_or(StatusCode::BadSecurityChecksFailed)?,
-            security_slice(src, encrypted_range.clone())?,
-            security_mut_slice_from(dst, encrypted_range.start)?,
+        let (secured_chunk, first_request_signature_to_store) = asymmetric_sign_and_encrypt_owned(
+            security_policy,
+            signing_key,
+            encryption_key,
+            is_client_role,
+            apply_channel_thumbprint,
+            first_request_signature,
+            src.to_vec(),
+            encrypted_range,
         )?;
 
-        // Validate encrypted size is right
-        if encrypted_size != cipher_text_size {
-            return Err(StatusCode::BadSecurityChecksFailed);
+        let secured_size = secured_chunk.len();
+        security_mut_slice(dst, 0..secured_size)?.copy_from_slice(&secured_chunk);
+
+        #[cfg(feature = "ecc")]
+        if is_client_role {
+            if let Some(first_request_signature_to_store) = first_request_signature_to_store {
+                let mut first_request_signature = self.first_request_signature.lock();
+                first_request_signature.clear();
+                first_request_signature.extend_from_slice(&first_request_signature_to_store);
+            }
         }
+        #[cfg(not(feature = "ecc"))]
+        let _ = first_request_signature_to_store;
 
-        //{
-        //    debug!("Encrypted size in bytes = {} compared to encrypted range {:?}", encrypted_size, encrypted_range);
-        //    Self::log_crypto_data("Decrypted data", src);
-        //    Self::log_crypto_data("Encrypted data", &dst[0..encrypted_size]);
-        //}
-
-        Ok(header_size + encrypted_size)
+        Ok(secured_size)
     }
 
     fn check_padding_bytes(
@@ -1414,7 +2216,6 @@ impl SecureChannel {
     ///
     /// Function returns the padding range so caller can strip the range if it so desires.
     fn verify_padding(
-        &self,
         src: &[u8],
         key_size: usize,
         padding_end: usize,
@@ -1491,238 +2292,6 @@ impl SecureChannel {
         };
         trace!("padding_range = {:?}", padding_range);
         Ok(padding_range)
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn asymmetric_decrypt_and_verify(
-        &self,
-        security_policy: SecurityPolicy,
-        verification_key: &PublicKey,
-        receiver_thumbprint: ByteString,
-        src: &[u8],
-        encrypted_range: Range<usize>,
-        dst: &mut [u8],
-    ) -> Result<usize, Error> {
-        // Asymmetric encrypt requires the caller supply the security policy
-        if !security_policy.is_supported() {
-            return Err(Error::new(
-                StatusCode::BadSecurityPolicyRejected,
-                format!(
-                    "Security policy {security_policy} is not supported by asymmetric_decrypt_and_verify and has been rejected"
-                ),
-            ));
-        }
-
-        // Unlike the symmetric_decrypt_and_verify, this code will ALWAYS decrypt and verify regardless
-        // of security mode. This is part of the OpenSecureChannel request on a sign / signencrypt
-        // mode connection.
-
-        // The sender_certificate is is the cert used to sign the message, i.e. the client's cert
-        //
-        // The receiver certificate thumbprint identifies which of our certs was used by the client
-        // to encrypt the message. We have to work out from the thumbprint which cert to use
-
-        let our_cert = self.cert.as_ref().ok_or_else(|| {
-            Error::new(
-                StatusCode::BadCertificateInvalid,
-                "Missing local application certificate",
-            )
-        })?;
-        let our_thumbprint = our_cert.thumbprint();
-        if our_thumbprint.value() != receiver_thumbprint.as_ref() {
-            Err(Error::new(
-                StatusCode::BadNoValidCertificates,
-                "Supplied thumbprint does not match application certificate's thumbprint",
-            ))
-        } else {
-            // Copy message, security header
-            dst.get_mut(..encrypted_range.start)
-                .ok_or_else(|| {
-                    Error::new(
-                        StatusCode::BadSecurityChecksFailed,
-                        "invalid encrypted range",
-                    )
-                })?
-                .copy_from_slice(src.get(..encrypted_range.start).ok_or_else(|| {
-                    Error::new(
-                        StatusCode::BadSecurityChecksFailed,
-                        "invalid encrypted range",
-                    )
-                })?);
-
-            let encrypted_size = encrypted_range.end - encrypted_range.start;
-            let decrypted_size = if security_policy.is_ecc() {
-                dst.get_mut(encrypted_range.clone())
-                    .ok_or_else(|| {
-                        Error::new(
-                            StatusCode::BadSecurityChecksFailed,
-                            "invalid encrypted range",
-                        )
-                    })?
-                    .copy_from_slice(src.get(encrypted_range.clone()).ok_or_else(|| {
-                        Error::new(
-                            StatusCode::BadSecurityChecksFailed,
-                            "invalid encrypted range",
-                        )
-                    })?);
-                encrypted_size
-            } else {
-                // Note that the unencrypted size can be less than the encrypted size due to removal
-                // of padding, so the ranges that were supplied to this function must be offset to compensate.
-                trace!("Decrypting message range {:?}", encrypted_range);
-                let mut decrypted_tmp = vec![0u8; encrypted_size];
-
-                let private_key = self.private_key.as_ref().ok_or_else(|| {
-                    Error::new(StatusCode::BadSecurityChecksFailed, "Missing private key")
-                })?;
-                let decrypted_size = security_policy.asymmetric_decrypt(
-                    private_key,
-                    src.get(encrypted_range.clone()).ok_or_else(|| {
-                        Error::new(
-                            StatusCode::BadSecurityChecksFailed,
-                            "invalid encrypted range",
-                        )
-                    })?,
-                    &mut decrypted_tmp,
-                )?;
-                let decrypted_end = encrypted_range
-                    .start
-                    .checked_add(decrypted_size)
-                    .filter(|end| *end <= dst.len())
-                    .ok_or_else(|| {
-                        Error::new(
-                            StatusCode::BadSecurityChecksFailed,
-                            "decrypted chunk exceeds message buffer",
-                        )
-                    })?;
-
-                dst.get_mut(encrypted_range.start..decrypted_end)
-                    .ok_or_else(|| {
-                        Error::new(
-                            StatusCode::BadSecurityChecksFailed,
-                            "invalid decrypted range",
-                        )
-                    })?
-                    .copy_from_slice(decrypted_tmp.get(..decrypted_size).ok_or_else(|| {
-                        Error::new(
-                            StatusCode::BadSecurityChecksFailed,
-                            "invalid decrypted range",
-                        )
-                    })?);
-                decrypted_size
-            };
-            trace!(
-                "Decrypted bytes = {} compared to encrypted range {}",
-                decrypted_size,
-                encrypted_size
-            );
-            // Self::log_crypto_data("Decrypted Bytes = ", &decrypted_tmp[..decrypted_size]);
-
-            let verification_key_signature_size =
-                security_policy.asymmetric_signature_size(verification_key);
-            trace!(
-                "Verification key size = {}",
-                verification_key_signature_size
-            );
-
-            let decrypted_end = encrypted_range
-                .start
-                .checked_add(decrypted_size)
-                .filter(|end| *end <= dst.len())
-                .ok_or_else(|| {
-                    Error::new(
-                        StatusCode::BadSecurityChecksFailed,
-                        "decrypted chunk exceeds message buffer",
-                    )
-                })?;
-
-            // The signature range is at the end of the decrypted block for the verification key's signature
-            let signature_dst_offset = decrypted_end
-                .checked_sub(verification_key_signature_size)
-                .ok_or_else(|| {
-                Error::new(
-                    StatusCode::BadSecurityChecksFailed,
-                    "decrypted chunk is smaller than the signature",
-                )
-            })?;
-            let signature_range_dst = signature_dst_offset..decrypted_end;
-
-            // The signed range is from 0 to the end of the plaintext except for key size
-            let signed_range_dst = 0..signature_dst_offset;
-
-            // Self::log_crypto_data("Decrypted data = ", &dst[..signature_range_dst.end]);
-
-            // Verify signature (contained encrypted portion) using verification key
-            trace!(
-                "Verifying signature range {:?} with signature at {:?}",
-                signed_range_dst,
-                signature_range_dst
-            );
-            // Keysize for padding is publickey length if avaiable
-            let key_size = if let Some(rem) = &self.cert {
-                if let Ok(cert) = rem.public_key() {
-                    cert.size()
-                } else {
-                    verification_key.size()
-                }
-            } else {
-                verification_key.size()
-            };
-            let signed_data = dst.get(signed_range_dst).ok_or_else(|| {
-                Error::new(StatusCode::BadSecurityChecksFailed, "invalid signed range")
-            })?;
-            let signature = dst.get(signature_range_dst.clone()).ok_or_else(|| {
-                Error::new(
-                    StatusCode::BadSecurityChecksFailed,
-                    "invalid signature range",
-                )
-            })?;
-            if security_policy.is_ecc() {
-                #[cfg(feature = "ecc")]
-                {
-                    if self.is_client_role() && self.apply_channel_thumbprint {
-                        let first_request_signature = self.first_request_signature.lock();
-                        let mut signed_data_with_thumbprint =
-                            Vec::with_capacity(signed_data.len() + first_request_signature.len());
-                        signed_data_with_thumbprint.extend_from_slice(signed_data);
-                        signed_data_with_thumbprint.extend_from_slice(&first_request_signature);
-                        security_policy.asymmetric_verify_signature(
-                            verification_key,
-                            &signed_data_with_thumbprint,
-                            signature,
-                        )?;
-                    } else {
-                        security_policy.asymmetric_verify_signature(
-                            verification_key,
-                            signed_data,
-                            signature,
-                        )?;
-                        if !self.is_client_role() {
-                            let mut first_request_signature = self.first_request_signature.lock();
-                            first_request_signature.clear();
-                            first_request_signature.extend_from_slice(signature);
-                        }
-                    }
-                }
-            } else {
-                security_policy.asymmetric_verify_signature(
-                    verification_key,
-                    signed_data,
-                    signature,
-                )?;
-            }
-
-            if security_policy.is_ecc() {
-                Ok(signature_range_dst.start)
-            } else {
-                // Verify that the padding is correct
-                let padding_range =
-                    self.verify_padding(dst, key_size, signature_range_dst.start)?;
-
-                // Decrypted and verified into dst
-                Ok(padding_range.start)
-            }
-        }
     }
 
     /// Get the local nonce.
@@ -2078,7 +2647,7 @@ impl SecureChannel {
                 let key_size = self.security_policy.encrypting_key_length();
 
                 // Verify that the padding is correct and get the padded range.
-                let padding_range = self.verify_padding(dst, key_size, signature_start)?;
+                let padding_range = Self::verify_padding(dst, key_size, signature_start)?;
 
                 // Decrypted range minus padding and signature.
                 Ok(padding_range.start)

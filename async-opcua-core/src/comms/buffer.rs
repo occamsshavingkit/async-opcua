@@ -187,6 +187,46 @@ impl SendBuffer {
         Ok(())
     }
 
+    /// Async variant of [`encode_next_chunk`](Self::encode_next_chunk) that
+    /// offloads the outbound OpenSecureChannel sign+encrypt to Tokio's
+    /// blocking pool. OPC-10000-6 §6.7.2.4.
+    ///
+    /// The transport MUST `.await` this before encoding the next chunk,
+    /// preserving the monotonic per-`MessageChunk` sequence number (C3/R5).
+    /// Ack/Error payloads and symmetric chunks stay synchronous.
+    pub async fn encode_next_chunk_async(
+        &mut self,
+        secure_channel: &SecureChannel,
+    ) -> Result<(), StatusCode> {
+        if matches!(self.state, SendBufferState::Reading(_)) {
+            return Err(StatusCode::BadInvalidState);
+        }
+
+        let Some(next_chunk) = self.chunks.pop_front() else {
+            return Ok(());
+        };
+
+        let size = match next_chunk {
+            PendingPayload::Chunk(c) => {
+                secure_channel
+                    .apply_security_async(&c, self.buffer.get_mut())
+                    .await?
+            }
+            PendingPayload::Ack(a) => {
+                a.encode(&mut self.buffer)?;
+                self.buffer.position() as usize
+            }
+            PendingPayload::Error(e) => {
+                e.encode(&mut self.buffer)?;
+                self.buffer.position() as usize
+            }
+        };
+        self.buffer.set_position(0);
+        self.state = SendBufferState::Reading(size);
+
+        Ok(())
+    }
+
     /// Set whether we are using legacy sequence numbers or not.
     /// This depends on the active security policy.
     pub fn set_sequence_number_legacy(&mut self, is_legacy: bool) {

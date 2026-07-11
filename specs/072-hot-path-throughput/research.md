@@ -339,3 +339,22 @@ P3 would. **Recommendation:** treat P3 (central network agent / per-message SPSC
 reject; go to P4 next — RCU cold-side (matters as write-lock contention grows with core count) + then graft
 the shard runtime into async-opcua-server. The architecture delta measured here (+29% read / +75% write) is
 what should partially transfer to the real server.
+
+### R18. MEASUREMENT-VALIDITY CORRECTION to R17 — bench cores were contended (2026-07-11)
+
+The R17 magnitudes are **overstated and not trustworthy**. Re-measurement exposed the problem: the shard/multi
+read ratio at 3 cores swung from **1.29× to 1.06×** between runs, and a core-scaling sweep the same morning
+gave 1core 1.01× / 2core 1.07× / 3core 1.06×. Cause: cores 3,4,5 are **not isolated** (boot `isolcpus` only
+covers CPU 11), and the box was carrying real background load during the R17 run (`opencode` ~20% CPU, a
+VirtualBox VM ~6%, python) that floats onto the bench cores.
+
+The contamination is **asymmetric**: under CPU contention the work-stealing (multi) runtime degrades *more*
+than the shard runtime (workers preempted mid-task + migrated), so background load **inflates** the apparent
+shard advantage. The 1-core control (shard≈multi, 1.01×) confirms no harness bias.
+
+**What survives:** the DIRECTION — shard beat multi in *every* run, both ops, every core count (1.01–1.75×),
+never lost. **What does NOT survive:** the specific R17 magnitudes (+29% read / +75% write). A quieter (still
+not clean) reading suggests the real read advantage at 3 cores is closer to **~6–10%**, with writes higher.
+**Clean-core measurement is still owed** (isolated bench cores, quiesced box) before any magnitude is
+recorded as fact or used to justify the async-opcua-server graft. Measure-first: do not graft on R17's
+numbers.

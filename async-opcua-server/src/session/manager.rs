@@ -323,11 +323,11 @@ impl CreateSessionServerSignature {
         //
         // T007: clone the key out of the read guard so no parking_lot guard
         // crosses the spawn_blocking await boundary (R6/G1). The cloned key
-        // is also reused for the inline ECC section below.
+        // is also reused for the offloaded ECC keygen below (T008).
         let server_pkey = info.server_pkey.read().clone();
 
-        // T007: offload only the RSA server-signature signing onto the
-        // blocking pool. The ECC ephemeral keygen (T008) stays inline.
+        // T007: offload the RSA server-signature signing onto the blocking
+        // pool. The ECC ephemeral keygen (T008) is offloaded below.
         let server_signature = if let Some(ref pkey) = server_pkey {
             let signing_key = pkey.clone();
             let client_certificate = request.client_certificate.clone();
@@ -375,23 +375,26 @@ impl CreateSessionServerSignature {
             SecurityPolicy,
         )> = None;
         #[cfg(feature = "ecc")]
-        let ecdh_response_header = {
-            match opcua_crypto::ecc::read_ecdh_policy_uri(&request.request_header.additional_header)
-            {
-                Some(uri) => match server_pkey.as_ref() {
-                    Some(pkey) => match opcua_crypto::ecc::issue_server_ephemeral_key(&uri, pkey) {
-                        Ok((keypair, ephemeral_key)) => {
-                            issued_ecdh_key = Some((keypair, SecurityPolicy::from_uri(&uri)));
-                            Some(opcua_crypto::ecc::build_ecdh_key_response(ephemeral_key))
-                        }
-                        Err(e) => Some(opcua_crypto::ecc::build_ecdh_key_error(e.status())),
-                    },
-                    None => Some(opcua_crypto::ecc::build_ecdh_key_error(
-                        StatusCode::BadSecurityPolicyRejected,
-                    )),
-                },
-                None => None,
+        let ecdh_response_header = match opcua_crypto::ecc::read_ecdh_policy_uri(
+            &request.request_header.additional_header,
+        ) {
+            Some(uri) => {
+                let policy = SecurityPolicy::from_uri(&uri);
+                // T008: offload ECC ephemeral keygen onto the blocking pool.
+                // server_pkey was cloned out of the read guard in T007; move
+                // it here (last use) so no guard crosses the await.
+                match issue_server_ephemeral_key_blocking(uri, server_pkey).await {
+                    EcdhKeygenOutcome::Issued {
+                        keypair,
+                        ephemeral_key,
+                    } => {
+                        issued_ecdh_key = Some((keypair, policy));
+                        Some(opcua_crypto::ecc::build_ecdh_key_response(ephemeral_key))
+                    }
+                    EcdhKeygenOutcome::Error { header } => Some(header),
+                }
             }
+            None => None,
         };
 
         Ok(Self {
@@ -401,6 +404,62 @@ impl CreateSessionServerSignature {
             #[cfg(feature = "ecc")]
             ecdh_response_header,
         })
+    }
+}
+
+/// Outcome of offloading ECC ephemeral key generation onto the blocking pool
+/// (T008, OPC-10000-6 §6.8.2).
+#[cfg(feature = "ecc")]
+enum EcdhKeygenOutcome {
+    /// Key pair generated successfully; caller stores the keypair and builds
+    /// the response header from `ephemeral_key`.
+    Issued {
+        keypair: opcua_crypto::ecc::EphemeralKeyPair,
+        ephemeral_key: opcua_types::EphemeralKeyType,
+    },
+    /// A pre-built response header carrying the error status (inner crypto
+    /// failure, missing server key, or blocking-task join failure).
+    Error {
+        header: opcua_types::ExtensionObject,
+    },
+}
+
+/// Offload `opcua_crypto::ecc::issue_server_ephemeral_key` onto the Tokio
+/// blocking pool so ECC ephemeral keygen does not occupy a request-processing
+/// thread (T008, OPC-10000-6 §6.8.2 / OPC-10000-4 §5.7.2).
+///
+/// `server_pkey` must already be cloned out of its read guard — no lock guard
+/// crosses the `.await` boundary (R6/G1). A `None` key preserves the existing
+/// `BadSecurityPolicyRejected` response. A `JoinError` produces a distinct
+/// `BadInternalError` without masking specific crypto status codes (C2/R6).
+#[cfg(feature = "ecc")]
+async fn issue_server_ephemeral_key_blocking(
+    policy_uri: String,
+    server_pkey: Option<opcua_crypto::PrivateKey>,
+) -> EcdhKeygenOutcome {
+    let Some(key) = server_pkey else {
+        return EcdhKeygenOutcome::Error {
+            header: opcua_crypto::ecc::build_ecdh_key_error(StatusCode::BadSecurityPolicyRejected),
+        };
+    };
+    match tokio::task::spawn_blocking(move || {
+        opcua_crypto::ecc::issue_server_ephemeral_key(&policy_uri, &key)
+    })
+    .await
+    {
+        Ok(Ok((keypair, ephemeral_key))) => EcdhKeygenOutcome::Issued {
+            keypair,
+            ephemeral_key,
+        },
+        Ok(Err(e)) => EcdhKeygenOutcome::Error {
+            header: opcua_crypto::ecc::build_ecdh_key_error(e.status()),
+        },
+        Err(join_err) => {
+            error!("ECC ephemeral key blocking task failed: {:?}", join_err);
+            EcdhKeygenOutcome::Error {
+                header: opcua_crypto::ecc::build_ecdh_key_error(StatusCode::BadInternalError),
+            }
+        }
     }
 }
 
@@ -1553,34 +1612,47 @@ pub(crate) async fn activate_session(
     #[cfg(feature = "ecc")]
     let ecdh_response_header = {
         use opcua_crypto::ecc::EcdhKeyAction;
-        let mut session = trace_write_lock!(session_lck);
-        let requested_uri =
-            opcua_crypto::ecc::read_ecdh_policy_uri(&request.request_header.additional_header);
-        let previous_policy = session.ecdh_ephemeral_key().map(|(_, policy)| *policy);
-        if ecc_secret_consumed {
-            session.mark_ecdh_key_consumed();
-        }
-        let previous_key_consumed = session.ecdh_key_consumed();
-        match opcua_crypto::ecc::decide_ecdh_key_action(
-            requested_uri.as_deref(),
-            previous_policy,
-            previous_key_consumed,
-        ) {
+
+        // Phase 1 — acquire the session write lock only long enough to read
+        // state, mark the key consumed if applicable, and decide the action.
+        // Drop before any await (T008: no session guard crosses .await).
+        let ecdh_action = {
+            let mut session = trace_write_lock!(session_lck);
+            let requested_uri =
+                opcua_crypto::ecc::read_ecdh_policy_uri(&request.request_header.additional_header);
+            let previous_policy = session.ecdh_ephemeral_key().map(|(_, policy)| *policy);
+            if ecc_secret_consumed {
+                session.mark_ecdh_key_consumed();
+            }
+            let previous_key_consumed = session.ecdh_key_consumed();
+            opcua_crypto::ecc::decide_ecdh_key_action(
+                requested_uri.as_deref(),
+                previous_policy,
+                previous_key_consumed,
+            )
+        };
+
+        // Phase 2 — execute the action without holding the session lock.
+        match ecdh_action {
             EcdhKeyAction::Issue(policy) => {
-                let server_pkey = info.server_pkey.read();
-                match server_pkey.as_ref() {
-                    Some(pkey) => {
-                        match opcua_crypto::ecc::issue_server_ephemeral_key(policy.to_uri(), pkey) {
-                            Ok((keypair, ephemeral_key)) => {
-                                session.set_ecdh_ephemeral_key(keypair, policy);
-                                Some(opcua_crypto::ecc::build_ecdh_key_response(ephemeral_key))
-                            }
-                            Err(e) => Some(opcua_crypto::ecc::build_ecdh_key_error(e.status())),
-                        }
+                // Clone the key out of the read guard so no guard crosses the
+                // await boundary (T008/R6).
+                let server_pkey = info.server_pkey.read().clone();
+                match issue_server_ephemeral_key_blocking(policy.to_uri().to_owned(), server_pkey)
+                    .await
+                {
+                    EcdhKeygenOutcome::Issued {
+                        keypair,
+                        ephemeral_key,
+                    } => {
+                        // Reacquire the write lock only to store the new key.
+                        // On error the session state is left untouched,
+                        // matching the previous inline behavior.
+                        let mut session = trace_write_lock!(session_lck);
+                        session.set_ecdh_ephemeral_key(keypair, policy);
+                        Some(opcua_crypto::ecc::build_ecdh_key_response(ephemeral_key))
                     }
-                    None => Some(opcua_crypto::ecc::build_ecdh_key_error(
-                        StatusCode::BadSecurityPolicyRejected,
-                    )),
+                    EcdhKeygenOutcome::Error { header } => Some(header),
                 }
             }
             EcdhKeyAction::Reject => Some(opcua_crypto::ecc::build_ecdh_key_error(

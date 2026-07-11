@@ -358,3 +358,38 @@ not clean) reading suggests the real read advantage at 3 cores is closer to **~6
 **Clean-core measurement is still owed** (isolated bench cores, quiesced box) before any magnitude is
 recorded as fact or used to justify the async-opcua-server graft. Measure-first: do not graft on R17's
 numbers.
+
+### R19. US2 P2 CLEAN measurement — the real magnitude is ~+10% (2026-07-11)
+
+Evacuated all movable tasks (438 of them, via `taskset` to phys 0,1,2 = cores 0,1,2,6,7,8) off the server
+cores; verified 3,4,5 at 96–100% idle before measuring; restored afterward. Server on 3,4,5 (clean, siblings
+9,10,11 idle), clients on 0,1,2,6,7,8, interleaved, 5 rounds each.
+
+| op | M | multi (med) | shard (med) | shard/multi |
+|----|--:|------------:|------------:|:-----------:|
+| read  |  6 | 630,903 | 707,510 | 1.12× |
+| read  | 12 | 698,587 | 766,249 | 1.10× |
+| read  | 24 | 715,202 | 788,046 | 1.10× |
+| read  | 48 | 692,878 | 791,013 | 1.14× |
+| write | 12 | 731,651 | 802,030 | 1.10× |
+| write | 24 | 757,981 | 812,136 | 1.07× |
+| write | 48 | 706,652 | 821,627 | 1.16× |
+
+**The honest number: shard-per-core beats work-stealing by ~+10% (read +10–14%, write +7–16%), clean and
+stable.** The R17 figures (+29% read / +75% write) were **~2.5× inflated by background-CPU contention** —
+work-stealing degrades more under contention, so a loaded box exaggerates the shard advantage. Confirmed:
+clean, multi writes run ~730K (NOT the "capped ~290K" R17 saw) — that collapse was pure contamination.
+
+**Consequences for the rest of US2:**
+- **P4 RCU is low-value.** The shared `parking_lot::RwLock` address space is NOT a bottleneck at 3 cores —
+  clean multi *and* shard writes both scale fine (~700–820K). RCU only matters at far higher core counts /
+  write rates than this. Deprioritize.
+- **P3 network-agent/SPSC stays rejected** (R17 reasoning holds independent of magnitude: P2's per-shard I/O
+  is already leaner).
+- **The graft cost/benefit shifts.** ~+10% (of which the real server captures a *fraction*) for an invasive
+  transport/session-layer rewrite is a much weaker case than the contaminated numbers implied. The
+  architecture is validated and the win is real, but modest — a decision point, not an automatic go.
+
+**Caveat:** the R16 spike (+21–29% read, separate processes) was measured under the SAME contaminated
+conditions and is therefore also likely inflated; the clean ~+10% supersedes it as the trustworthy estimate
+of the thread-per-core advantage on this box.

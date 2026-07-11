@@ -49,15 +49,15 @@ description: "Task list for Transport Asymmetric Crypto Offload"
 
 ### Implementation for User Story 1
 
-- [ ] T005 [US1] Site 1 (the DoS lever, **pre-auth**): offload the server inbound OSC decrypt+verify onto `spawn_blocking` in `async-opcua-server/src/transport/tcp.rs` — the `SecureChannel::verify_and_remove_security_server` (`secure_channel.rs:1220`) path calling `asymmetric_decrypt_and_verify_owned`; extract owned inputs (brief borrow, no lock across `.await`), unwrap the inner crypto `Result` first, and add a distinct `JoinError` arm that drops the connection with a transport fault without masking a specific crypto fault (C2/R6). OPC-10000-4 §5.5.2 (OpenSecureChannel).
-- [ ] T006 [US1] Site 2: offload the server outbound OSC sign+encrypt onto `spawn_blocking` at the OSC-encode seam — `SendBuffer::encode_next_chunk` (`async-opcua-core/src/comms/buffer.rs:164`) async path driven by `async-opcua-server/src/transport/tcp.rs` send; the transport MUST `.await` the offloaded chunk before emitting the next (sequence ordering C3/R5). OPC-10000-6 §6.7.2.
-- [ ] T007 [US1] Site 4a: offload CreateSession server-signature RSA signing onto `spawn_blocking` in `async-opcua-server/src/session/controller.rs` (`CreateSessionDraft::prepare_endpoint_preflight` ~:565 — already outside the session-manager write lock). OPC-10000-4 §5.6.2 (CreateSession).
-- [ ] T008 [US1] Site 4b: offload ECC ephemeral-key generation onto `spawn_blocking` in `async-opcua-server/src/session/manager.rs` (`issue_server_ephemeral_key` ~:357 and the renew site ~:1539). OPC-10000-4 §5.6.2 / §6.8 (ECC ephemeral keys).
+- [ ] T005 [US1] Site 1 (the DoS lever, **pre-auth**): offload the server inbound OSC decrypt+verify onto `spawn_blocking` in `async-opcua-server/src/transport/tcp.rs` — the `SecureChannel::verify_and_remove_security_server` (`secure_channel.rs:1220`) path calling `asymmetric_decrypt_and_verify_owned`; extract owned inputs (brief borrow, no lock across `.await`), unwrap the inner crypto `Result` first, and add a distinct `JoinError` arm that drops the connection with a transport fault without masking a specific crypto fault (C2/R6). OPC-10000-4 §5.6.2 (OpenSecureChannel Service); message security OPC-10000-6 §6.7.2.
+- [ ] T006 [US1] Site 2: offload the server outbound OSC sign+encrypt onto `spawn_blocking` at the OSC-encode seam — `SendBuffer::encode_next_chunk` (`async-opcua-core/src/comms/buffer.rs:164`) async path driven by `async-opcua-server/src/transport/tcp.rs` send; the transport MUST `.await` the offloaded chunk before emitting the next, preserving the monotonic per-`MessageChunk` sequence number (OPC-10000-6 §6.7.2.4 Sequence Header; C3/R5). No dedicated reorder test is needed — OSC is a single `MessageChunk` per channel establishment, so reordering is structurally impossible; the existing chunk/sequence tests guard the general path.
+- [ ] T007 [US1] Site 4a: offload CreateSession server-signature RSA signing onto `spawn_blocking` in `async-opcua-server/src/session/controller.rs` (`CreateSessionDraft::prepare_endpoint_preflight` ~:565 — already outside the session-manager write lock). OPC-10000-4 §5.7.2 (CreateSession Service — serverSignature over clientCertificate + clientNonce).
+- [ ] T008 [US1] Site 4b: offload ECC ephemeral-key generation onto `spawn_blocking` in `async-opcua-server/src/session/manager.rs` (`issue_server_ephemeral_key` ~:357 and the renew site ~:1539). OPC-10000-6 §6.8.2 (ECC EphemeralKey returned in the CreateSession response for UserIdentityToken encryption) + OPC-10000-4 §5.7.2 (CreateSession Service) / §7.15 (EphemeralKeyType).
 
 ### Tests for User Story 1
 
 - [ ] T009 [US1] Structural proof test (load-bearing, C6) in `async-opcua-server/tests/`: an OSC handshake on `#[tokio::test(flavor = "current_thread")]` while the single worker is kept busy — it can only complete if the crypto runs on the blocking pool. Distinguishes "actually offloaded" from "merely refactored".
-- [ ] T010 [US1] `#[ignore]`'d 50-client handshake-storm test (SC-001) in `async-opcua-server/tests/`: ≥50 concurrent channel-openers while one established session issues reads; assert the established session's p99 latency stays bounded (does not scale with handshake count). Manual, `taskset -c <core>` per repo benchmarking convention.
+- [ ] T010 [US1] `#[ignore]`'d 50-client handshake-storm test (SC-001) in `async-opcua-server/tests/`: ≥50 concurrent channel-openers while one established session issues reads; assert the established session's p99 read latency **under the storm is ≤ 2× its p99 measured with no concurrent handshakes** — a fixed relative bound (not an absolute latency), so it cannot scale with handshake count. Manual, `taskset -c <core>` per repo benchmarking convention.
 
 **Checkpoint**: Server-side crypto is off the request threads; the DoS lever is closed. MVP — stop and validate here.
 
@@ -67,12 +67,14 @@ description: "Task list for Transport Asymmetric Crypto Offload"
 
 **Goal**: Prove the offload changed *where* crypto runs, not *what* goes on the wire.
 
+**Note**: US2 is a *verification gate over US1*, not a standalone increment — it has no implementation of its own and cannot be exercised until US1's server offloads (T005–T008) are in place. It stays P1 because byte-identical wire is a release gate, not a nice-to-have.
+
 **Independent Test**: The full security-policy × mode × identity-token conformance matrix passes unchanged, and handshake/session message bytes match the T001 baseline.
 
 ### Tests for User Story 2
 
 - [ ] T011 [P] [US2] All-policies handshake + session correctness test in `async-opcua-server/tests/`: RSA `Basic256Sha256` + `Aes256Sha256RsaPss` and ECC `NistP256`/`NistP384`, each in `Sign` and `SignAndEncrypt`, all establish a channel and activate a session (SC-005, FR-009).
-- [ ] T012 [US2] Equivalence guard: confirm `async-opcua/tests/integration/conformance.rs` passes with no diff vs the T001 baseline (SC-002), and verify byte-identical handshake/session wire output for identical inputs (SC-004). OPC-10000-6 §6.7 / OPC-10000-4 §6.
+- [ ] T012 [US2] Equivalence guard: confirm `async-opcua/tests/integration/conformance.rs` passes with no diff vs the T001 baseline (SC-002), and verify byte-identical handshake/session wire output for identical inputs (SC-004). OPC-10000-6 §6.7.2 (message security) + OPC-10000-4 §5.6.2/§5.7.2 (the OSC/Session service bytes that must not change).
 
 **Checkpoint**: No conformant peer can tell the change happened.
 
@@ -84,7 +86,7 @@ description: "Task list for Transport Asymmetric Crypto Offload"
 
 ### Implementation for User Story 3
 
-- [ ] T013 [US3] Site 3: offload the client OSC sign+encrypt + response decrypt onto `spawn_blocking` in `async-opcua-client/src/transport/stream.rs` (~:286 `encode_next_chunk` + inbound verify), reusing the owned-input cores and the same `JoinError` arm (FR-008). Lower priority — client opens one channel.
+- [ ] T013 [US3] Site 3: offload the client OSC sign+encrypt + response decrypt onto `spawn_blocking` in `async-opcua-client/src/transport/stream.rs` (~:286 `encode_next_chunk` + inbound verify), reusing the owned-input cores and the same `JoinError` arm (FR-008). OPC-10000-4 §5.6.2 (OpenSecureChannel Service) / OPC-10000-6 §6.7.2 (message security — byte-identical). Lower priority — client opens one channel.
 
 ### Tests for User Story 3
 
@@ -97,7 +99,7 @@ description: "Task list for Transport Asymmetric Crypto Offload"
 ## Phase 6: Polish & Cross-Cutting Concerns
 
 - [ ] T015 [P] Verify the symmetric per-request path is untouched (C5/FR-007): the hot-path lock/callback tests (`async-opcua-server/tests/hot_path_*`) stay green, and confirm by inspection that no `spawn_blocking` was introduced on the symmetric (`else`) branch of `apply_security` / `verify_and_remove_security`.
-- [ ] T016 Full pre-PR gate: `tools/ci-playbook.sh --ci` (incl. `clippy --workspace --all-targets --all-features` and the `-Dwarnings` no-default legs), then retire the T086–T090 deferral note in feature-070's records and update `research.md`/memory to mark 071 done.
+- [ ] T016 Full pre-PR gate: `tools/ci-playbook.sh --ci` (incl. `clippy --workspace --all-targets --all-features` and the `-Dwarnings` no-default legs); confirm by inspection that the offload closures log no key material (Principle IV — the cloned `PrivateKey` lives transiently on the blocking thread and drops at closure end per R10); then retire the T086–T090 deferral note in feature-070's records and update `research.md`/memory to mark 071 done.
 
 ---
 

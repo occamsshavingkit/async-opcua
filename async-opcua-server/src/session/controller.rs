@@ -249,6 +249,14 @@ impl<T: ConnectionTransport> SessionController<T> {
             Arc::new(RwLock::new(info.initial_encoding_context())),
         );
         channel.set_allow_deprecated(info.config.allow_legacy_crypto);
+        // T010A: attach the dedicated lower-priority crypto executor so
+        // handshake RSA/ECC runs on separate workers, not the shared
+        // spawn_blocking pool.
+        if let Some(ref executor) = info.crypto_executor {
+            channel
+                .set_crypto_offload(Arc::clone(executor)
+                    as Arc<dyn opcua_core::comms::crypto_offload::CryptoOffload>);
+        }
 
         Self {
             channel,

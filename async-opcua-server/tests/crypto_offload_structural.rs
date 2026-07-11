@@ -1,18 +1,18 @@
 //! T009 [US1] Structural proof (load-bearing, C6): the OpenSecureChannel
-//! asymmetric crypto path is actually offloaded to Tokio's blocking pool,
-//! not merely refactored into owned-input functions that still run inline.
+//! asymmetric crypto path is actually offloaded off the async worker thread.
 //!
 //! On a `current_thread` runtime there is exactly one async worker thread.
 //! If the server-side OSC decrypt/verify and sign/encrypt stayed inline on
-//! that worker, no blocking-pool threads would ever be created during the
-//! handshake. We build a custom `current_thread` runtime with an
-//! `on_thread_start` hook that counts every OS thread the runtime spawns.
-//! On this runtime the ONLY source of new threads is `spawn_blocking` (the
-//! main worker is the caller's own thread and does not trigger
-//! `on_thread_start`). A real secured OSC handshake (Basic256Sha256 /
-//! SignAndEncrypt, which requires RSA-2048 asymmetric sign+encrypt and
-//! decrypt+verify) must therefore produce a positive delta in the thread
-//! count, proving the crypto actually ran on the blocking pool.
+//! that worker, the liveness probe stalls and the dedicated crypto
+//! executor's job counter stays at zero.
+//!
+//! Before T010A the crypto ran on `spawn_blocking` (proven by counting
+//! blocking-pool threads via `on_thread_start`). T010A moved the crypto to
+//! a dedicated lower-priority executor (`CryptoExecutor`), so
+//! `on_thread_start` no longer fires for crypto — instead, the executor's
+//! `jobs_dispatched` counter increments. We now check both: the executor
+//! processed crypto AND the liveness probe shows the async worker was
+//! responsive.
 //!
 //! A cooperative liveness probe (`yield_now` counter + periodic heartbeat)
 //! runs concurrently with the handshake to demonstrate that the single
@@ -40,10 +40,10 @@ const TEST_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// C6 structural contract: on a `current_thread` runtime whose single worker
 /// is kept busy by a liveness probe, a secured OSC handshake can only complete
-/// if the asymmetric crypto runs on the blocking pool. We prove offloading by
-/// counting blocking-pool threads via `on_thread_start`; the count increases
-/// during the handshake because `spawn_blocking` is the sole source of new
-/// threads on a single-worker runtime.
+/// if the asymmetric crypto runs off-thread. We prove offloading by checking
+/// the dedicated crypto executor's `jobs_dispatched` counter — it must
+/// increase during the handshake, proving the crypto was dispatched to the
+/// dedicated lower-priority workers (T010A).
 #[test]
 fn osc_asymmetric_crypto_offloaded_to_blocking_pool() {
     let blocking_threads = Arc::new(AtomicUsize::new(0));
@@ -165,6 +165,15 @@ async fn osc_offload_proof(blocking_threads: Arc<AtomicUsize>) {
     let threads_before = blocking_threads.load(Ordering::Relaxed);
     let yields_before = yield_count.load(Ordering::Relaxed);
     let heartbeats_before = heartbeat_count.load(Ordering::Relaxed);
+    // T010A: count jobs dispatched by the dedicated crypto executor.
+    // If no executor is configured (falling back to spawn_blocking),
+    // jobs_before stays 0 and the threads-delta assertion covers the proof.
+    let jobs_before = handle
+        .info()
+        .crypto_executor
+        .as_ref()
+        .map(|e| e.jobs_dispatched())
+        .unwrap_or(0);
 
     // -- OSC handshake with real RSA-2048 asymmetric crypto --
     let handshake_result = client
@@ -175,6 +184,12 @@ async fn osc_offload_proof(blocking_threads: Arc<AtomicUsize>) {
     let threads_after = blocking_threads.load(Ordering::Relaxed);
     let yields_after = yield_count.load(Ordering::Relaxed);
     let heartbeats_after = heartbeat_count.load(Ordering::Relaxed);
+    let jobs_after = handle
+        .info()
+        .crypto_executor
+        .as_ref()
+        .map(|e| e.jobs_dispatched())
+        .unwrap_or(0);
 
     liveness_probe.abort();
 
@@ -197,19 +212,19 @@ async fn osc_offload_proof(blocking_threads: Arc<AtomicUsize>) {
     drop(temp_dir);
 
     // -- C6 Structural assertion (load-bearing): crypto was offloaded --
-    // On a current_thread runtime, on_thread_start fires ONLY for
-    // blocking-pool threads (the main worker is the caller's thread and
-    // does not trigger the callback). A positive delta proves that
-    // spawn_blocking was called during the handshake, which in the OSC
-    // path happens exclusively in the asymmetric crypto offload sites
-    // (decrypt_blocking / sign_blocking in secure_channel.rs). If the
-    // crypto were merely refactored into owned-input functions but NOT
-    // wrapped in spawn_blocking, the delta would be zero.
+    // With T010A, the crypto runs on the dedicated CryptoExecutor workers
+    // (dedicated OS threads, not the tokio blocking pool). We prove
+    // offloading by checking the executor's jobs_dispatched counter
+    // increased during the handshake. If no executor is configured, we
+    // fall back to checking that spawn_blocking threads increased.
+    let jobs_delta = jobs_after - jobs_before;
+    let threads_delta = threads_after - threads_before;
     assert!(
-        threads_after > threads_before,
-        "T009/C6: OSC handshake must offload asymmetric crypto to spawn_blocking. \
-         Blocking-pool threads: before={threads_before}, after={threads_after}. \
-         A zero delta means the crypto stayed inline on the current_thread worker."
+        jobs_delta > 0 || threads_delta > 0,
+        "T009/C6: OSC handshake must offload asymmetric crypto off the async worker. \
+         Executor jobs dispatched: before={jobs_before}, after={jobs_after} (delta={jobs_delta}). \
+         Blocking-pool threads: before={threads_before}, after={threads_after} (delta={threads_delta}). \
+         A zero delta on both means the crypto stayed inline on the current_thread worker."
     );
 
     // -- Liveness assertion: the single async worker stayed responsive --

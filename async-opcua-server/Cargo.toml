@@ -265,6 +265,7 @@ async-trait = { workspace = true }
 base64 = { workspace = true }
 bitflags = { workspace = true }
 chrono = { workspace = true }
+crossbeam-channel = "0.5"
 crossbeam-queue = "0.3"
 dashmap = "6.1"
 futures = { workspace = true }

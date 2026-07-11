@@ -473,6 +473,8 @@ struct PreparedOscDecryptCrypto {
     encrypted_range: Range<usize>,
     #[cfg(feature = "ecc")]
     first_request_signature_to_store: Option<Result<Vec<u8>, Error>>,
+    /// Dedicated crypto executor (T010A). `None` falls back to spawn_blocking.
+    crypto_offload: Option<Arc<dyn super::crypto_offload::CryptoOffload>>,
 }
 
 struct CompletedOscDecrypt {
@@ -497,7 +499,11 @@ impl PreparedOscDecryptCrypto {
             encrypted_range,
             #[cfg(feature = "ecc")]
             first_request_signature_to_store,
+            crypto_offload,
         } = self;
+        // crypto_offload is unused in the inline path — only the async
+        // (blocking) path consults it. Drop to avoid clippy warnings.
+        drop(crypto_offload);
 
         let decrypted_chunk = asymmetric_decrypt_and_verify_owned(
             security_policy,
@@ -534,32 +540,34 @@ impl PreparedOscDecryptCrypto {
             encrypted_range,
             #[cfg(feature = "ecc")]
             first_request_signature_to_store,
+            crypto_offload,
         } = self;
 
-        let decrypted_chunk = match tokio::task::spawn_blocking(move || {
-            asymmetric_decrypt_and_verify_owned(
-                security_policy,
-                our_private_key,
-                our_cert,
-                verification_key,
-                receiver_thumbprint,
-                is_client_role,
-                apply_channel_thumbprint,
-                first_request_signature,
-                src,
-                encrypted_range,
-            )
-        })
-        .await
-        {
-            Ok(inner) => inner?,
-            Err(_join_err) => {
-                return Err(Error::new(
-                    StatusCode::BadInternalError,
-                    "asymmetric decrypt task failed",
-                ));
-            }
-        };
+        let decrypted_chunk =
+            match super::crypto_offload::execute_offloaded(crypto_offload.as_deref(), move || {
+                asymmetric_decrypt_and_verify_owned(
+                    security_policy,
+                    our_private_key,
+                    our_cert,
+                    verification_key,
+                    receiver_thumbprint,
+                    is_client_role,
+                    apply_channel_thumbprint,
+                    first_request_signature,
+                    src,
+                    encrypted_range,
+                )
+            })
+            .await
+            {
+                Ok(inner) => inner?,
+                Err(_offload_err) => {
+                    return Err(Error::new(
+                        StatusCode::BadInternalError,
+                        "asymmetric decrypt task failed",
+                    ));
+                }
+            };
 
         Ok(CompletedOscDecrypt {
             security_policy,
@@ -584,6 +592,8 @@ struct PreparedOscSignCrypto {
     first_request_signature: Vec<u8>,
     src: Vec<u8>,
     encrypted_range: Range<usize>,
+    /// Dedicated crypto executor (T010A). `None` falls back to spawn_blocking.
+    crypto_offload: Option<Arc<dyn super::crypto_offload::CryptoOffload>>,
 }
 
 struct CompletedOscSign {
@@ -592,10 +602,12 @@ struct CompletedOscSign {
 }
 
 impl PreparedOscSignCrypto {
-    /// Run the asymmetric sign+encrypt core on the blocking pool.
+    /// Run the asymmetric sign+encrypt core on the blocking pool or
+    /// dedicated crypto executor (T010A).
     ///
-    /// `JoinError` (task panicked/cancelled) maps to `BadInternalError`;
-    /// the inner crypto `Err(status)` is returned verbatim (C2/R6).
+    /// Offload failure (worker panic/cancellation, executor closed) maps to
+    /// `BadInternalError`; the inner crypto `Err(status)` is returned
+    /// verbatim (C2/R6).
     async fn sign_blocking(self) -> Result<CompletedOscSign, StatusCode> {
         let PreparedOscSignCrypto {
             security_policy,
@@ -606,10 +618,11 @@ impl PreparedOscSignCrypto {
             first_request_signature,
             src,
             encrypted_range,
+            crypto_offload,
         } = self;
 
         let (secured_chunk, first_request_signature_to_store) =
-            match tokio::task::spawn_blocking(move || {
+            match super::crypto_offload::execute_offloaded(crypto_offload.as_deref(), move || {
                 asymmetric_sign_and_encrypt_owned(
                     security_policy,
                     signing_key,
@@ -624,7 +637,7 @@ impl PreparedOscSignCrypto {
             .await
             {
                 Ok(inner) => inner?,
-                Err(_join_err) => {
+                Err(_offload_err) => {
                     return Err(StatusCode::BadInternalError);
                 }
             };
@@ -693,6 +706,11 @@ pub struct SecureChannel {
     encoding_context: Arc<RwLock<ContextOwned>>,
     /// Whether the security policy has been pre-validated.
     security_policy_valid: bool,
+    /// Optional dedicated crypto offload executor for asymmetric OSC crypto
+    /// (T010A). When `Some`, handshake decrypt/verify and sign/encrypt run
+    /// on this executor's workers instead of the shared `spawn_blocking`
+    /// pool, giving the deployment a scheduling-priority seam.
+    crypto_offload: Option<Arc<dyn super::crypto_offload::CryptoOffload>>,
 }
 
 impl SecureChannel {
@@ -724,6 +742,7 @@ impl SecureChannel {
             encoding_context: Default::default(),
             remote_keys: HashMap::new(),
             security_policy_valid: false,
+            crypto_offload: None,
         }
     }
 
@@ -777,6 +796,7 @@ impl SecureChannel {
             encoding_context,
             remote_keys: HashMap::new(),
             security_policy_valid: false,
+            crypto_offload: None,
         }
     }
 
@@ -891,6 +911,15 @@ impl SecureChannel {
         self.token_id = 0;
         self.token_created_at = DateTime::now();
         self.token_lifetime = 0;
+    }
+
+    /// Attach a dedicated crypto offload executor (T010A). When set,
+    /// asymmetric OSC crypto (decrypt/verify, sign/encrypt) runs on this
+    /// executor's workers instead of the shared `spawn_blocking` pool,
+    /// giving the deployment a scheduling-priority seam for handshake
+    /// crypto.
+    pub fn set_crypto_offload(&mut self, executor: Arc<dyn super::crypto_offload::CryptoOffload>) {
+        self.crypto_offload = Some(executor);
     }
 
     /// Set the channel security token.
@@ -1548,6 +1577,7 @@ impl SecureChannel {
             first_request_signature,
             src,
             encrypted_range,
+            crypto_offload: self.crypto_offload.clone(),
         })
     }
 
@@ -1809,6 +1839,7 @@ impl SecureChannel {
                 encrypted_range,
                 #[cfg(feature = "ecc")]
                 first_request_signature_to_store,
+                crypto_offload: self.crypto_offload.clone(),
             },
         )))
     }

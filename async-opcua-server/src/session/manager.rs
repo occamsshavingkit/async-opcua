@@ -326,20 +326,29 @@ impl CreateSessionServerSignature {
         // is also reused for the offloaded ECC keygen below (T008).
         let server_pkey = info.server_pkey.read().clone();
 
-        // T007: offload the RSA server-signature signing onto the blocking
-        // pool. The ECC ephemeral keygen (T008) is offloaded below.
+        // T007/T010A: offload the RSA server-signature signing onto the
+        // dedicated crypto executor (falls back to spawn_blocking if no
+        // executor is configured). The ECC ephemeral keygen (T008) is
+        // offloaded below.
         let server_signature = if let Some(ref pkey) = server_pkey {
             let signing_key = pkey.clone();
             let client_certificate = request.client_certificate.clone();
             let client_nonce = request.client_nonce.clone();
-            match tokio::task::spawn_blocking(move || {
-                opcua_crypto::create_signature_data(
-                    &signing_key,
-                    security_policy,
-                    &client_certificate,
-                    &client_nonce,
-                )
-            })
+            let executor = info
+                .crypto_executor
+                .as_ref()
+                .map(|e| e.clone() as Arc<dyn opcua_core::comms::crypto_offload::CryptoOffload>);
+            match opcua_core::comms::crypto_offload::execute_offloaded(
+                executor.as_deref(),
+                move || {
+                    opcua_crypto::create_signature_data(
+                        &signing_key,
+                        security_policy,
+                        &client_certificate,
+                        &client_nonce,
+                    )
+                },
+            )
             .await
             {
                 Ok(Ok(signature)) => signature,
@@ -353,15 +362,12 @@ impl CreateSessionServerSignature {
                     }
                     SignatureData::null()
                 }
-                // JoinError: the blocking task panicked or was cancelled —
+                // Offload failure (worker panic/cancellation, executor closed):
                 // distinct from an inner crypto error (C2/R6). Map to a
                 // generic internal error without masking the specific crypto
                 // status codes handled above.
-                Err(join_err) => {
-                    error!(
-                        "CreateSession server-signature blocking task failed: {:?}",
-                        join_err
-                    );
+                Err(_offload_err) => {
+                    error!("CreateSession server-signature crypto executor task failed");
                     return Err(StatusCode::BadInternalError);
                 }
             }
@@ -380,10 +386,14 @@ impl CreateSessionServerSignature {
         ) {
             Some(uri) => {
                 let policy = SecurityPolicy::from_uri(&uri);
-                // T008: offload ECC ephemeral keygen onto the blocking pool.
-                // server_pkey was cloned out of the read guard in T007; move
-                // it here (last use) so no guard crosses the await.
-                match issue_server_ephemeral_key_blocking(uri, server_pkey).await {
+                // T008/T010A: offload ECC ephemeral keygen onto the
+                // dedicated crypto executor. server_pkey was cloned out of
+                // the read guard in T007; move it here (last use) so no
+                // guard crosses the await.
+                let ecc_executor = info.crypto_executor.as_ref().map(|e| {
+                    e.clone() as Arc<dyn opcua_core::comms::crypto_offload::CryptoOffload>
+                });
+                match issue_server_ephemeral_key_blocking(uri, server_pkey, ecc_executor).await {
                     EcdhKeygenOutcome::Issued {
                         keypair,
                         ephemeral_key,
@@ -424,25 +434,28 @@ enum EcdhKeygenOutcome {
     },
 }
 
-/// Offload `opcua_crypto::ecc::issue_server_ephemeral_key` onto the Tokio
-/// blocking pool so ECC ephemeral keygen does not occupy a request-processing
-/// thread (T008, OPC-10000-6 §6.8.2 / OPC-10000-4 §5.7.2).
+/// Offload `opcua_crypto::ecc::issue_server_ephemeral_key` onto the
+/// dedicated crypto executor (or spawn_blocking fallback) so ECC ephemeral
+/// keygen does not occupy a request-processing thread (T008/T010A,
+/// OPC-10000-6 §6.8.2 / OPC-10000-4 §5.7.2).
 ///
 /// `server_pkey` must already be cloned out of its read guard — no lock guard
 /// crosses the `.await` boundary (R6/G1). A `None` key preserves the existing
-/// `BadSecurityPolicyRejected` response. A `JoinError` produces a distinct
-/// `BadInternalError` without masking specific crypto status codes (C2/R6).
+/// `BadSecurityPolicyRejected` response. An offload failure produces a
+/// distinct `BadInternalError` without masking specific crypto status codes
+/// (C2/R6).
 #[cfg(feature = "ecc")]
 async fn issue_server_ephemeral_key_blocking(
     policy_uri: String,
     server_pkey: Option<opcua_crypto::PrivateKey>,
+    executor: Option<Arc<dyn opcua_core::comms::crypto_offload::CryptoOffload>>,
 ) -> EcdhKeygenOutcome {
     let Some(key) = server_pkey else {
         return EcdhKeygenOutcome::Error {
             header: opcua_crypto::ecc::build_ecdh_key_error(StatusCode::BadSecurityPolicyRejected),
         };
     };
-    match tokio::task::spawn_blocking(move || {
+    match opcua_core::comms::crypto_offload::execute_offloaded(executor.as_deref(), move || {
         opcua_crypto::ecc::issue_server_ephemeral_key(&policy_uri, &key)
     })
     .await
@@ -454,8 +467,8 @@ async fn issue_server_ephemeral_key_blocking(
         Ok(Err(e)) => EcdhKeygenOutcome::Error {
             header: opcua_crypto::ecc::build_ecdh_key_error(e.status()),
         },
-        Err(join_err) => {
-            error!("ECC ephemeral key blocking task failed: {:?}", join_err);
+        Err(_offload_err) => {
+            error!("ECC ephemeral key crypto executor task failed");
             EcdhKeygenOutcome::Error {
                 header: opcua_crypto::ecc::build_ecdh_key_error(StatusCode::BadInternalError),
             }
@@ -1638,8 +1651,14 @@ pub(crate) async fn activate_session(
                 // Clone the key out of the read guard so no guard crosses the
                 // await boundary (T008/R6).
                 let server_pkey = info.server_pkey.read().clone();
-                match issue_server_ephemeral_key_blocking(policy.to_uri().to_owned(), server_pkey)
-                    .await
+                match issue_server_ephemeral_key_blocking(
+                    policy.to_uri().to_owned(),
+                    server_pkey,
+                    info.crypto_executor.as_ref().map(|e| {
+                        e.clone() as Arc<dyn opcua_core::comms::crypto_offload::CryptoOffload>
+                    }),
+                )
+                .await
                 {
                     EcdhKeygenOutcome::Issued {
                         keypair,

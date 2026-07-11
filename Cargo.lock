@@ -717,6 +717,7 @@ dependencies = [
  "const-oid",
  "core_affinity",
  "criterion",
+ "crossbeam-channel",
  "crossbeam-queue",
  "dashmap",
  "futures",

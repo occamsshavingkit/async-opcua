@@ -1008,7 +1008,7 @@ impl SecureChannel {
                 return Ok((
                     MessageChunk {
                         data: src,
-                        cached_chunk_info: std::sync::Mutex::new(None),
+                        cached_chunk_info: std::sync::OnceLock::new(),
                     },
                     security_policy,
                 ));
@@ -1091,7 +1091,7 @@ impl SecureChannel {
         Ok((
             MessageChunk {
                 data: msg.into(),
-                cached_chunk_info: std::sync::Mutex::new(None),
+                cached_chunk_info: std::sync::OnceLock::new(),
             },
             security_policy,
         ))
@@ -1135,7 +1135,7 @@ impl SecureChannel {
         decrypted_data.reserve(src.len());
         Ok(MessageChunk {
             data,
-            cached_chunk_info: std::sync::Mutex::new(None),
+            cached_chunk_info: std::sync::OnceLock::new(),
         })
     }
 
@@ -1208,7 +1208,7 @@ impl SecureChannel {
         } else {
             Ok(MessageChunk {
                 data: src,
-                cached_chunk_info: std::sync::Mutex::new(None),
+                cached_chunk_info: std::sync::OnceLock::new(),
             })
         }
     }
@@ -1257,7 +1257,7 @@ impl SecureChannel {
         } else {
             Ok(MessageChunk {
                 data: src,
-                cached_chunk_info: std::sync::Mutex::new(None),
+                cached_chunk_info: std::sync::OnceLock::new(),
             })
         }
     }

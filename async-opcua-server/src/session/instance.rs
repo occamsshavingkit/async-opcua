@@ -1,7 +1,7 @@
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use arc_swap::ArcSwap;
 use tracing::error;
 
 #[cfg(feature = "history")]
@@ -110,7 +110,10 @@ pub struct Session {
     /// Time the session was created.
     created_at: Instant,
     /// Time of last service request.
-    last_service_request: ArcSwap<Instant>,
+    /// Monotonic nanoseconds since `created_at` at the last service request, used for the
+    /// timeout check. An `AtomicU64` (not `ArcSwap<Instant>`) so the per-request touch is a
+    /// lock-free, allocation-free store rather than a heap `Arc` allocation (feature 072 S1a).
+    last_service_request_nanos: AtomicU64,
     /// Continuation points for browse.
     browse_continuation_points: ContinuationPointCache<BrowseContinuationPoint>,
     /// Continuation points for history.
@@ -184,7 +187,7 @@ impl Session {
                 Duration::from_millis(base.max(info.config.min_session_timeout_ms))
             },
             created_at: now,
-            last_service_request: ArcSwap::new(Arc::new(now)),
+            last_service_request_nanos: AtomicU64::new(0),
             user_identity,
             locale_ids: None,
             max_request_message_size,
@@ -222,9 +225,15 @@ impl Session {
     /// Check whether this session has timed out and return the appropriate error if it has.
     #[inline]
     pub(crate) fn validate_timed_out(&self) -> Result<(), StatusCode> {
-        let elapsed = Instant::now() - **self.last_service_request.load();
+        // Read the clock once and derive `elapsed` arithmetically; store the same value.
+        let now_nanos = Instant::now()
+            .saturating_duration_since(self.created_at)
+            .as_nanos() as u64;
+        let last_nanos = self.last_service_request_nanos.load(Ordering::Relaxed);
+        let elapsed = Duration::from_nanos(now_nanos.saturating_sub(last_nanos));
 
-        self.last_service_request.store(Arc::new(Instant::now()));
+        self.last_service_request_nanos
+            .store(now_nanos, Ordering::Relaxed);
 
         if self.session_timeout < elapsed {
             // This will eventually be collected by the timeout monitor.
@@ -240,7 +249,8 @@ impl Session {
 
     /// Get the session timeout deadline.
     pub fn deadline(&self) -> Instant {
-        **self.last_service_request.load() + self.session_timeout
+        let last_nanos = self.last_service_request_nanos.load(Ordering::Relaxed);
+        self.created_at + Duration::from_nanos(last_nanos) + self.session_timeout
     }
 
     /// Get the session creation time.

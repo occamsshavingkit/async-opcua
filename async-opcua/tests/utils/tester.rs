@@ -67,6 +67,27 @@ pub async fn setup() -> (Tester, Arc<TestNodeManager>, Arc<Session>) {
     (tester, nm, session)
 }
 
+/// Like [`setup`], but runs the server in sharded (thread-per-core) mode across
+/// the given cores. Requires the `sharded` feature.
+#[cfg(feature = "sharded")]
+#[allow(unused)]
+pub async fn setup_sharded(cores: Vec<usize>) -> (Tester, Arc<TestNodeManager>, Arc<Session>) {
+    let server = test_server();
+    let mut tester = Tester::new_sharded(server, cores, false).await;
+    let nm = tester
+        .handle
+        .node_managers()
+        .get_of_type::<TestNodeManager>()
+        .unwrap();
+    let (session, lp) = tester.connect_default().await.unwrap();
+    lp.spawn();
+    tokio::time::timeout(Duration::from_secs(5), session.wait_for_connection())
+        .await
+        .unwrap();
+
+    (tester, nm, session)
+}
+
 #[allow(unused)]
 pub fn client_user_token() -> IdentityToken {
     IdentityToken::UserName(
@@ -372,6 +393,60 @@ impl Tester {
         let (server, handle) = server.build().unwrap();
 
         tokio::task::spawn(server.run_with(listener));
+
+        let client = default_client(test_id, quick_timeout).client().unwrap();
+
+        Self {
+            _guard: handle.token().clone().drop_guard(),
+            handle,
+            client,
+            addr,
+            test_id,
+        }
+    }
+
+    /// Stand up a server running in sharded (thread-per-core) mode across the
+    /// given cores. SO_REUSEPORT needs a fixed shared port, so a free one is
+    /// grabbed and each shard rebinds it. Requires the `sharded` feature.
+    #[cfg(feature = "sharded")]
+    #[allow(unused)]
+    pub async fn new_sharded(
+        server: ServerBuilder,
+        cores: Vec<usize>,
+        quick_timeout: bool,
+    ) -> Self {
+        let _ = env_logger::try_init();
+
+        let test_id = TEST_COUNTER.fetch_add(1, Ordering::Relaxed);
+
+        // Grab a free port for the shards to share (reuse_address covers the
+        // tiny drop/rebind window).
+        let probe = Self::listener().await;
+        let addr = probe.local_addr().unwrap();
+        drop(probe);
+
+        let server = server
+            .host(hostname())
+            .port(addr.port())
+            .pki_dir(format!("./pki-server/{test_id}"))
+            .discovery_urls(vec![format!("opc.tcp://{}:{}", hostname(), addr.port())]);
+
+        copy_shared_certs(test_id, &server.config().application_description());
+        trust_configured_x509_user_certs(test_id, &server);
+
+        let (server, handle) = server.build().unwrap();
+
+        tokio::task::spawn(server.run_sharded(cores));
+
+        // Shards bind their SO_REUSEPORT listeners on their own runtimes; wait
+        // until one is accepting so the client doesn't race startup.
+        let ready_addr = format!("{}:{}", hostname(), addr.port());
+        for _ in 0..250 {
+            if tokio::net::TcpStream::connect(&ready_addr).await.is_ok() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
 
         let client = default_client(test_id, quick_timeout).client().unwrap();
 

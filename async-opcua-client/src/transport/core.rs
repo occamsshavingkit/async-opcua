@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, OnceLock};
 use std::time::Instant;
 
 use futures::future::Either;
@@ -420,7 +420,7 @@ impl TransportState {
                 .ok_or_else(|| Error::decoding("Message contained no chunks"))?;
             return Ok(vec![MessageChunk {
                 data: chunk.data_with_header,
-                cached_chunk_info: Mutex::new(None),
+                cached_chunk_info: OnceLock::new(),
             }]);
         }
         chunks.sort_by(|a, b| {
@@ -447,7 +447,7 @@ impl TransportState {
             expect_sequence_number = expect_sequence_number.wrapping_add(1);
             ret.push(MessageChunk {
                 data: c.data_with_header,
-                cached_chunk_info: Mutex::new(None),
+                cached_chunk_info: OnceLock::new(),
             });
         }
         Ok(ret)

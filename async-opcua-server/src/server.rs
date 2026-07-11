@@ -69,6 +69,7 @@ struct ConnectionSlots<'a> {
     connection_map: &'a mut HashMap<u32, ConnectionInfo>,
 }
 
+#[cfg_attr(feature = "sharded", derive(Clone))]
 struct TcpConnectionDeps {
     max_connections: usize,
     max_connections_per_ip: usize,
@@ -1050,6 +1051,133 @@ impl Server {
         .await
     }
 
+    /// Run the server in thread-per-core (sharded) mode: one pinned
+    /// `current_thread` runtime per core in `cores`, each binding its own
+    /// `SO_REUSEPORT` listener on the configured address, so the kernel spreads
+    /// incoming connections across cores and each connection is handled
+    /// end-to-end on one core (per-shard I/O). The node managers and the shared
+    /// session manager are the same instances the default path uses — only
+    /// *where* connections run changes.
+    ///
+    /// The singleton background tasks (subscription cleanup, session expiry,
+    /// discovery, mDNS) run once on the caller's runtime. Reverse connections
+    /// are not driven in sharded mode.
+    ///
+    /// Opt-in; requires the `sharded` feature.
+    #[cfg(feature = "sharded")]
+    pub async fn run_sharded(self, cores: Vec<usize>) -> Result<(), String> {
+        if cores.is_empty() {
+            return Err("run_sharded requires at least one core".to_string());
+        }
+        let context = self.server_context();
+        self.prepare_to_run(&context).await?;
+
+        let Some(addr) = self.get_socket_address() else {
+            error!("Cannot resolve server address, check server configuration");
+            return Err("Cannot resolve server address, check server configuration".to_owned());
+        };
+        self.info
+            .port
+            .store(addr.port(), std::sync::atomic::Ordering::Relaxed);
+        info!(
+            "Now listening for connections on {addr} across {} sharded cores: {cores:?}",
+            cores.len()
+        );
+        self.log_endpoint_info();
+
+        let deps = self.tcp_connection_deps();
+        let counter = Arc::new(std::sync::atomic::AtomicU32::new(0));
+
+        let mut handles = Vec::with_capacity(cores.len());
+        for core in cores {
+            let deps = deps.clone();
+            let token = self.token.clone();
+            let counter = counter.clone();
+            let handle = std::thread::Builder::new()
+                .name(format!("opcua-shard-{core}"))
+                .spawn(move || {
+                    if !core_affinity::set_for_current(core_affinity::CoreId { id: core }) {
+                        warn!("Failed to pin shard thread to core {core}");
+                    }
+                    let rt = match tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                    {
+                        Ok(rt) => rt,
+                        Err(e) => {
+                            error!("Failed to build runtime for shard core {core}: {e}");
+                            return;
+                        }
+                    };
+                    rt.block_on(async move {
+                        let listener = match bind_reuse_port(addr) {
+                            Ok(l) => l,
+                            Err(e) => {
+                                error!("Shard core {core} failed to bind {addr}: {e}");
+                                return;
+                            }
+                        };
+                        shard_accept_loop(deps, token, counter, listener).await;
+                    });
+                })
+                .map_err(|e| format!("Failed to spawn shard thread for core {core}: {e}"))?;
+            handles.push(handle);
+        }
+
+        // Singleton background tasks on the caller's runtime; returns on cancel.
+        self.run_background_tasks(&context).await;
+
+        // Cancellation propagates to shards via the shared token.
+        for handle in handles {
+            let _ = handle.join();
+        }
+        Ok(())
+    }
+
+    /// Drive the singleton background tasks (subscription cleanup, session
+    /// expiry, discovery, mDNS) once, until the cancellation token fires. Used
+    /// by [`run_sharded`](Self::run_sharded) so these are not replicated per
+    /// shard (the subscription cleanup receiver is once-only).
+    #[cfg(feature = "sharded")]
+    async fn run_background_tasks(
+        &self,
+        #[cfg_attr(not(feature = "subscriptions"), allow(unused_variables))]
+        context: &ServerContext,
+    ) {
+        #[cfg(feature = "discovery-server-registration")]
+        let discovery_fut = Self::run_discovery_server_registration(self.info.clone());
+        #[cfg(not(feature = "discovery-server-registration"))]
+        let discovery_fut = futures::future::pending::<()>();
+        pin!(discovery_fut);
+
+        #[cfg(feature = "discovery-mdns")]
+        let mdns_fut = crate::discovery_mdns::run_mdns_discovery(self.info.clone());
+        #[cfg(not(feature = "discovery-mdns"))]
+        let mdns_fut = futures::future::pending::<()>();
+        pin!(mdns_fut);
+
+        #[cfg(feature = "subscriptions")]
+        let subscription_fut =
+            Self::run_subscription_ticks(self.config.subscription_poll_interval_ms, context);
+        #[cfg(not(feature = "subscriptions"))]
+        let subscription_fut = futures::future::pending::<()>();
+        pin!(subscription_fut);
+
+        let session_expiry_fut =
+            Self::run_session_expiry(&self.session_manager, &self.session_notify);
+        pin!(session_expiry_fut);
+
+        loop {
+            tokio::select! {
+                _ = &mut subscription_fut => {}
+                _ = &mut discovery_fut => {}
+                _ = &mut mdns_fut => {}
+                _ = &mut session_expiry_fut => {}
+                _ = self.token.cancelled() => break,
+            }
+        }
+    }
+
     /// Run the server. The provided `token` can be used to stop the server gracefully.
     pub async fn run(self) -> Result<(), String> {
         let addr = self.get_socket_address();
@@ -1130,6 +1258,86 @@ impl Server {
             addrs_iter.next()
         } else {
             None
+        }
+    }
+}
+
+/// Bind a `SO_REUSEPORT` TCP listener so multiple shard runtimes can share the
+/// same address and let the kernel distribute incoming connections across them.
+#[cfg(feature = "sharded")]
+fn bind_reuse_port(addr: SocketAddr) -> std::io::Result<TcpListener> {
+    let socket = socket2::Socket::new(
+        socket2::Domain::for_address(addr),
+        socket2::Type::STREAM,
+        Some(socket2::Protocol::TCP),
+    )?;
+    socket.set_reuse_address(true)?;
+    socket.set_reuse_port(true)?;
+    socket.set_nonblocking(true)?;
+    socket.bind(&addr.into())?;
+    socket.listen(1024)?;
+    TcpListener::from_std(socket.into())
+}
+
+/// The accept + reap loop for one shard. Owns its own connection bookkeeping,
+/// reuses the shared [`TcpConnectionDeps`] to spawn per-connection tasks on this
+/// shard's runtime, and stops when the shared token is cancelled. This is the
+/// accept subset of [`Server::run_connection_loop`], minus the singleton
+/// background tasks and reverse-connect (which run once, elsewhere).
+#[cfg(feature = "sharded")]
+async fn shard_accept_loop(
+    deps: TcpConnectionDeps,
+    token: CancellationToken,
+    counter: Arc<std::sync::atomic::AtomicU32>,
+    listener: TcpListener,
+) {
+    let mut connections: FuturesUnordered<JoinHandle<u32>> = FuturesUnordered::new();
+    let mut connection_map: HashMap<u32, ConnectionInfo> = HashMap::new();
+    let mut source = ConnectionSource::<()>::Listener(listener);
+
+    loop {
+        if source.is_closed() && connections.is_empty() {
+            break;
+        }
+        let conn_fut = if connections.is_empty() {
+            if token.is_cancelled() {
+                break;
+            }
+            Either::Left(futures::future::pending::<Option<Result<u32, JoinError>>>())
+        } else {
+            Either::Right(connections.next())
+        };
+
+        tokio::select! {
+            conn_res = conn_fut => {
+                match conn_res.unwrap() {
+                    Ok(id) => {
+                        info!("Connection {id} terminated");
+                        connection_map.remove(&id);
+                        deps.info.metrics.record_connection_closed();
+                    }
+                    Err(e) => error!("Connection panic! {e}"),
+                }
+            }
+            rs = source.next() => {
+                match rs {
+                    Some(Ok((socket, addr, tok))) => {
+                        let id = counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        let mut slots = ConnectionSlots {
+                            connections: &mut connections,
+                            connection_map: &mut connection_map,
+                        };
+                        deps.accept(&mut slots, socket, addr, tok, id, AcceptedTransport::Tcp);
+                    }
+                    Some(Err(e)) => error!("Failed to accept client connection: {e:?}"),
+                    None => source = ConnectionSource::Closed,
+                }
+            }
+            _ = token.cancelled() => {
+                for conn in connection_map.values() {
+                    let _ = conn.command_send.send(ControllerCommand::Close).await;
+                }
+            }
         }
     }
 }

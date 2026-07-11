@@ -45,6 +45,9 @@ ecc = [
 # opc.wss (WebSocket) transport (feature 009 / R5 / FR-044). Forwards to whichever of
 # the client/server crates is enabled; TLS is layered on the in-tree rustls 0.23.
 wss = ["async-opcua-client?/wss", "async-opcua-server?/wss"]
+# Feature 072 US2: opt-in thread-per-core (sharded) server run mode. Forwards to
+# async-opcua-server; adds `Server::run_sharded`. Default OFF.
+sharded = ["async-opcua-server?/sharded"]
 # Server default settings (includes pubsub + history-sqlite — feature 055)
 server = ["base-server", "generated-address-space", "pubsub", "history"]
 # Base server, without the core address space. Forwards ALL subsystem gates (feature

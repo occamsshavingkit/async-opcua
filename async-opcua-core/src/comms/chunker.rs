@@ -6,7 +6,7 @@
 
 use std::{
     io::{Read, Write},
-    sync::Mutex,
+    sync::OnceLock,
 };
 
 use crate::{
@@ -263,7 +263,7 @@ impl<'a, 'b> ChunkingStream<'a, 'b> {
         let data = self.storage.split_to(chunk_len).freeze();
         self.out.push(MessageChunk {
             data,
-            cached_chunk_info: Mutex::new(None),
+            cached_chunk_info: OnceLock::new(),
         });
         self.chunks_emitted += 1;
         self.chunk_started = false;

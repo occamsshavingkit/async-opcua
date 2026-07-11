@@ -25,6 +25,8 @@ mod rsa_kem;
 mod sampling_transition;
 mod secure_channel;
 mod session_audit;
+#[cfg(feature = "sharded")]
+mod sharded;
 mod subscriptions;
 mod tier_a;
 mod triggering;

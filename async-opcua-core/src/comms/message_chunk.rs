@@ -7,7 +7,7 @@
 
 use std::{
     io::{Cursor, Read, Write},
-    sync::Mutex,
+    sync::OnceLock,
 };
 
 use opcua_types::{
@@ -147,15 +147,17 @@ pub struct MessageChunk {
     /// All of the chunk's data including headers, payload, padding, signature
     pub data: bytes::Bytes,
     /// Chunk metadata parsed once and reused across validate and decode passes
-    /// per OPC 10000-6 §6.7.2.2.
-    pub cached_chunk_info: Mutex<Option<ChunkInfo>>,
+    /// per OPC 10000-6 §6.7.2.2. A chunk is single-owner, so a lock-free
+    /// `OnceLock` memoizes without the per-call `Mutex` acquisition the hot
+    /// path took on every one of its ~5 `chunk_info()` calls per request.
+    pub cached_chunk_info: OnceLock<ChunkInfo>,
 }
 
 impl Clone for MessageChunk {
     fn clone(&self) -> Self {
         MessageChunk {
             data: self.data.clone(),
-            cached_chunk_info: Mutex::new(None),
+            cached_chunk_info: OnceLock::new(),
         }
     }
 }
@@ -214,7 +216,7 @@ impl SimpleBinaryDecodable for MessageChunk {
 
             Ok(MessageChunk {
                 data: bytes::Bytes::from(data),
-                cached_chunk_info: Mutex::new(None),
+                cached_chunk_info: OnceLock::new(),
             })
         }
     }
@@ -269,7 +271,7 @@ impl MessageChunk {
 
         Ok(MessageChunk {
             data: src.split_to(message_size),
-            cached_chunk_info: Mutex::new(None),
+            cached_chunk_info: OnceLock::new(),
         })
     }
 
@@ -321,7 +323,7 @@ impl MessageChunk {
 
         Ok(MessageChunk {
             data: bytes::Bytes::from(buf),
-            cached_chunk_info: Mutex::new(None),
+            cached_chunk_info: OnceLock::new(),
         })
     }
 
@@ -432,15 +434,13 @@ impl MessageChunk {
 
     /// Decode info about this chunk. Parsed once and cached per OPC 10000-6 §6.7.2.2.
     pub fn chunk_info(&self, secure_channel: &SecureChannel) -> EncodingResult<ChunkInfo> {
-        let mut cache = self
-            .cached_chunk_info
-            .lock()
-            .map_err(|_| Error::decoding("Mutex poisoned while reading chunk info cache"))?;
-        if let Some(ref info) = *cache {
+        if let Some(info) = self.cached_chunk_info.get() {
             return Ok(info.clone());
         }
         let info = ChunkInfo::new(self, secure_channel)?;
-        *cache = Some(info.clone());
+        // A chunk is single-owner in practice, so `set` succeeds. If a benign
+        // race ever lost it, we still return the freshly-computed value.
+        let _ = self.cached_chunk_info.set(info.clone());
         Ok(info)
     }
 

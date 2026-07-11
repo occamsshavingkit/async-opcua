@@ -42,16 +42,20 @@ use crate::{
     subscriptions::{PendingPublish, SubscriptionCache},
 };
 #[cfg(feature = "subscriptions")]
-use opcua_types::{AttributeId, PublishRequest};
+use opcua_types::{AttributeId, PublishRequest, ReadValueId};
 use opcua_types::{
-    CancelResponse, DataValue, DiagnosticBits, DiagnosticInfo, NamespaceMap, NodeId, ReadRequest,
-    ReadResponse, ReadValueId, ResponseHeader, ServiceFault, StatusCode, TimestampsToReturn,
-    UAString, WriteRequest, WriteResponse,
+    CancelResponse, DiagnosticBits, DiagnosticInfo, NamespaceMap, NodeId, ReadRequest,
+    ReadResponse, ResponseHeader, ServiceFault, StatusCode, TimestampsToReturn, UAString,
+    WriteRequest, WriteResponse,
 };
 #[cfg(feature = "subscriptions-standard")]
 use opcua_types::{SetTriggeringRequest, SetTriggeringResponse};
 
-use super::{actor::SessionMessage, controller::Response, instance::Session};
+use super::{
+    actor::{SessionActor, SessionMessage},
+    controller::Response,
+    instance::Session,
+};
 
 /// Type that takes care of incoming requests that have passed
 /// the initial validation stage, meaning that they have a session and a valid
@@ -729,15 +733,27 @@ impl MessageHandler {
 
     fn read(&self, request: Box<ReadRequest>, data: RequestData) -> HandleMessageResult {
         let info = self.info.clone();
+        let node_managers = self.node_managers.clone();
+        // Build the request context here (the actor is bypassed for reads, S2).
+        let context = request_context_from_parts(
+            data.session.clone(),
+            info.clone(),
+            data.token.clone(),
+            #[cfg(feature = "subscriptions")]
+            self.subscriptions.clone(),
+            data.session_id,
+        );
         HandleMessageResult::AsyncMessage(tokio::task::spawn(async move {
-            Self::read_via_actor(request, data, info).await
+            Self::read_request(request, data, info, node_managers, context).await
         }))
     }
 
-    async fn read_via_actor(
+    async fn read_request(
         request: Box<ReadRequest>,
         data: RequestData,
         info: Arc<ServerInfo>,
+        node_managers: NodeManagers,
+        context: RequestContext,
     ) -> Response {
         let request = *request;
         if request.max_age < 0.0 {
@@ -757,15 +773,19 @@ impl MessageHandler {
             return Self::service_fault(&data, StatusCode::BadTooManyOperations);
         }
 
-        let Some(actor_sender) = data.actor_sender.clone() else {
+        // Reads bypass the per-session actor and run directly against the node
+        // managers (feature 072 S2). Keep the closed-session gate — a missing
+        // actor sender means the session is gone.
+        if data.actor_sender.is_none() {
             return Self::service_fault(&data, StatusCode::BadSessionClosed);
-        };
+        }
         let include_diagnostics = !request.request_header.return_diagnostics.is_empty();
 
-        // The whole batch is one actor round-trip; node managers run
-        // concurrently within it.
-        let batch = match Self::actor_read(
-            &actor_sender,
+        // Node managers run concurrently within the batch; read_nodes is
+        // panic-isolated so a faulty node manager faults only this request.
+        let batch = match SessionActor::read_nodes(
+            context,
+            &node_managers,
             nodes_to_read,
             request.max_age,
             request.timestamps_to_return,
@@ -774,8 +794,6 @@ impl MessageHandler {
         .await
         {
             Ok(r) => r,
-            // The actor faulted (node manager panic) or the session is
-            // gone; fail the whole service call like the pre-actor path.
             Err(status) => return Self::service_fault(&data, status),
         };
 
@@ -797,31 +815,6 @@ impl MessageHandler {
             .into(),
             request_id: data.request_id,
         }
-    }
-
-    async fn actor_read(
-        actor_sender: &mpsc::Sender<SessionMessage>,
-        nodes: Vec<ReadValueId>,
-        max_age: f64,
-        timestamps_to_return: TimestampsToReturn,
-        return_diagnostics: DiagnosticBits,
-    ) -> Result<Vec<(DataValue, Option<DiagnosticInfo>)>, StatusCode> {
-        let (response, recv) = oneshot::channel();
-        if actor_sender
-            .send(SessionMessage::Read {
-                nodes,
-                max_age,
-                timestamps_to_return,
-                return_diagnostics,
-                response,
-            })
-            .await
-            .is_err()
-        {
-            return Err(StatusCode::BadSessionClosed);
-        }
-
-        recv.await.unwrap_or(Err(StatusCode::BadSessionClosed))
     }
 
     fn write(&self, request: Box<WriteRequest>, data: RequestData) -> HandleMessageResult {

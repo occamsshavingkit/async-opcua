@@ -297,3 +297,45 @@ per-core allocator behavior determine how much). Next measured step is the **sim
 (SO_REUSEPORT accept-sharding + per-core `current_thread` runtimes + shared lock-free address space) before
 the full SPSC-ring / network-agent / accept-time-load-balancer design — build up only if the simple version
 leaves headroom vs this upper bound.
+
+### R17. US2 P1+P2 — from-scratch shard-per-core prototype: architecture wins with SHARED state (2026-07-11)
+
+Built the full-design prototype in the bench harness (`shard-server/`, reuses async-opcua-core codec +
+`SecureChannel(None)` + `Chunker`; ~370 LOC of connection/session state machine + tiny address space).
+
+**P1 (correctness):** a from-scratch server that open62541's `bench_client` drives cleanly — Hello/Ack →
+OpenSecureChannel(None) → GetEndpoints → CreateSession → ActivateSession(anon) → Read/Write → Close. Single
+client, release: **135,699 read / 135,513 write ops/s, 0 bad** (minimal server = faster per-request than the
+full server's ~100K single-core). Protocol bug caught by building against the real C client: writes failed
+`BadNodeIdUnknown` until the server served `NamespaceArray` (i=2255) — open62541 applies its namespace map on
+the write path, collapsing an unmapped index to 0xFFFD.
+
+**P2 (shard runtime):** dedicated accept loop → accept-time least-loaded balancer → raw-fd handoff to a
+pinned `current_thread` shard per core → shared address space (`parking_lot::RwLock`, single process). Added
+a `multi` mode (same code, one work-stealing runtime) for a clean A/B that isolates the *architecture* from
+the minimal-server effect. 3 cores (3,4,5), clients on 0,1,2,6,7,8, interleaved:
+
+| op | M | multi (med) | shard (med) | shard/multi |
+|----|--:|------------:|------------:|:-----------:|
+| read  |  6 | 388,166 | 572,392 | **1.47×** |
+| read  | 12 | 458,891 | 587,604 | **1.28×** |
+| read  | 24 | 479,591 | 619,419 | **1.29×** |
+| read  | 48 | 477,320 | 557,549 | **1.17×** |
+| write | 12 | 287,812 | 449,834 | **1.56×** |
+| write | 24 | 289,406 | 507,694 | **1.75×** |
+| write | 48 | 291,283 | 468,833 | **1.61×** |
+
+**Verdict: architecture wins with a SHARED address space, single process — +17–47% read, +56–75% write.**
+The shared `RwLock` did NOT eat the win: read-locks are concurrent, and even the write path (exclusive lock)
+beats multi by more than reads do (multi writes are capped ~290K by work-stealing + lock convoy; shard reads
+~508K). The upper-bound caveat from R16 is largely dissolved — shared state is cheap here at 3 cores.
+
+**Design improvement discovered by building it:** P2's accept→shard handoff channel is used **once per
+connection** (to move the socket), NOT per request — each shard then reads its *own* sockets via its *own*
+reactor and processes inline. That is the seastar/glommio **per-shard I/O** model, which is *leaner* than the
+design doc's "central network agent + per-message SPSC rings" (P3): the central agent centralizes I/O and
+adds a per-message hop P2 doesn't have. So P2 already meets the design's core-locality goal more cheaply than
+P3 would. **Recommendation:** treat P3 (central network agent / per-message SPSC) as measure-then-likely-
+reject; go to P4 next — RCU cold-side (matters as write-lock contention grows with core count) + then graft
+the shard runtime into async-opcua-server. The architecture delta measured here (+29% read / +75% write) is
+what should partially transfer to the real server.

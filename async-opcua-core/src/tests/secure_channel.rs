@@ -651,3 +651,52 @@ fn ecc_channel_thumbprint_binds_response_to_first_request_signature() {
          — proves the request signature is genuinely bound into the response signature"
     );
 }
+
+/// Feature 071 (T004): prove the extracted owned crypto cores are `Send + 'static`,
+/// i.e. they can actually be moved into a `tokio::spawn_blocking` closure — which is
+/// the whole prerequisite for the transport crypto offload (contract G1). The crypto
+/// itself is never run here (no valid inputs needed); this compiles *only if* the
+/// closures a `spawn_blocking` would move are `Send + 'static`. Byte-identical
+/// equivalence (G2), including the ECC channel-thumbprint path, is covered by the
+/// asymmetric round-trip + ChannelThumbprint tests above, which now route through
+/// these same cores via the thin `&self` wrappers.
+#[test]
+fn owned_crypto_cores_are_offloadable() {
+    fn assert_send_static<T: Send + 'static>(_: T) {}
+
+    // The sign-core closure a `spawn_blocking` would move.
+    let (sign_cert, sign_key) = make_test_cert_2048();
+    let encryption_key = sign_cert.public_key().unwrap();
+    let sign_src = vec![0u8; 256];
+    assert_send_static(move || {
+        crate::comms::secure_channel::asymmetric_sign_and_encrypt_owned(
+            SecurityPolicy::Basic256Sha256,
+            sign_key,
+            Some(encryption_key),
+            false,
+            false,
+            Vec::new(),
+            sign_src,
+            0..128,
+        )
+    });
+
+    // The decrypt-core closure a `spawn_blocking` would move.
+    let (our_cert, our_key) = make_test_cert_2048();
+    let verification_key = our_cert.public_key().unwrap();
+    let decrypt_src = vec![0u8; 256];
+    assert_send_static(move || {
+        crate::comms::secure_channel::asymmetric_decrypt_and_verify_owned(
+            SecurityPolicy::Basic256Sha256,
+            our_key,
+            our_cert,
+            verification_key,
+            ByteString::null(),
+            false,
+            false,
+            Vec::new(),
+            decrypt_src,
+            0..128,
+        )
+    });
+}

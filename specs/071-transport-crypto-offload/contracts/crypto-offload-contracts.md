@@ -23,16 +23,20 @@ asymmetric_sign_and_encrypt_owned(
     //      (Some only in the ECC client-role case; None otherwise)
 
 asymmetric_decrypt_and_verify_owned(
-    security_policy:     SecurityPolicy,
-    our_private_key:     PrivateKey,
-    our_cert:            X509,
-    verification_key:    PublicKey,
-    receiver_thumbprint: ByteString,
-    src:                 Vec<u8>,
-    encrypted_range:     Range<usize>,
+    security_policy:          SecurityPolicy,
+    our_private_key:          PrivateKey,
+    our_cert:                 X509,
+    verification_key:         PublicKey,
+    receiver_thumbprint:      ByteString,
+    is_client_role:           bool,        // (corrected) ECC verify-with-thumbprint branch
+    apply_channel_thumbprint: bool,        // (corrected)
+    first_request_signature:  Vec<u8>,      // (corrected) READ-only here (mixed into the verified data); no write-back
+    src:                      Vec<u8>,
+    encrypted_range:          Range<usize>,
 ) -> Result<Vec<u8>, Error>
-    // AUDIT during extraction: confirm the verify half touches no additional &self/ECC state
-    // (e.g. first_request_signature) beyond the params above; if it does, thread it as an owned input too.
+    // AUDIT confirmed (secure_channel.rs:1753-1766): the ECC verify half reads is_client_role /
+    // apply_channel_thumbprint / first_request_signature. Unlike the sign core, decrypt only READS
+    // first_request_signature (no write-back), so no tuple return is needed.
 ```
 
 **Contract-correction note (discovered during implementation, 2026-07-11):** the original `_sign_and_encrypt_owned`

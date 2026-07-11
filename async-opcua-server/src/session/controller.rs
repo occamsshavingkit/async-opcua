@@ -503,9 +503,9 @@ impl<T: ConnectionTransport> SessionController<T> {
                     r.requested_lifetime,
                     osc_status,
                 );
-                if res.is_ok() {
+                if matches!(res, Ok(ResponseMessage::OpenSecureChannel(_))) {
                     self.deadline = self.channel.token_renewal_deadline();
-                } else {
+                } else if res.is_err() {
                     #[cfg(feature = "diagnostics")]
                     {
                         self.info.diagnostics.inc_rejected_requests();

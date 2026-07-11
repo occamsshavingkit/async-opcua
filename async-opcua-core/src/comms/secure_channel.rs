@@ -254,22 +254,41 @@ pub(crate) fn asymmetric_decrypt_and_verify_owned(
 
     // Copy message, security header
     dst.get_mut(..encrypted_range.start)
-        .ok_or_else(|| Error::new(StatusCode::BadSecurityChecksFailed, "invalid encrypted range"))?
+        .ok_or_else(|| {
+            Error::new(
+                StatusCode::BadSecurityChecksFailed,
+                "invalid encrypted range",
+            )
+        })?
         .copy_from_slice(src.get(..encrypted_range.start).ok_or_else(|| {
-            Error::new(StatusCode::BadSecurityChecksFailed, "invalid encrypted range")
+            Error::new(
+                StatusCode::BadSecurityChecksFailed,
+                "invalid encrypted range",
+            )
         })?);
 
     let encrypted_size = encrypted_range
         .end
         .checked_sub(encrypted_range.start)
-        .ok_or_else(|| Error::new(StatusCode::BadSecurityChecksFailed, "invalid encrypted range"))?;
+        .ok_or_else(|| {
+            Error::new(
+                StatusCode::BadSecurityChecksFailed,
+                "invalid encrypted range",
+            )
+        })?;
     let decrypted_size = if security_policy.is_ecc() {
         dst.get_mut(encrypted_range.clone())
             .ok_or_else(|| {
-                Error::new(StatusCode::BadSecurityChecksFailed, "invalid encrypted range")
+                Error::new(
+                    StatusCode::BadSecurityChecksFailed,
+                    "invalid encrypted range",
+                )
             })?
             .copy_from_slice(src.get(encrypted_range.clone()).ok_or_else(|| {
-                Error::new(StatusCode::BadSecurityChecksFailed, "invalid encrypted range")
+                Error::new(
+                    StatusCode::BadSecurityChecksFailed,
+                    "invalid encrypted range",
+                )
             })?);
         encrypted_size
     } else {
@@ -281,7 +300,10 @@ pub(crate) fn asymmetric_decrypt_and_verify_owned(
         let decrypted_size = security_policy.asymmetric_decrypt(
             &our_private_key,
             src.get(encrypted_range.clone()).ok_or_else(|| {
-                Error::new(StatusCode::BadSecurityChecksFailed, "invalid encrypted range")
+                Error::new(
+                    StatusCode::BadSecurityChecksFailed,
+                    "invalid encrypted range",
+                )
             })?,
             &mut decrypted_tmp,
         )?;
@@ -298,16 +320,23 @@ pub(crate) fn asymmetric_decrypt_and_verify_owned(
 
         dst.get_mut(encrypted_range.start..decrypted_end)
             .ok_or_else(|| {
-                Error::new(StatusCode::BadSecurityChecksFailed, "invalid decrypted range")
+                Error::new(
+                    StatusCode::BadSecurityChecksFailed,
+                    "invalid decrypted range",
+                )
             })?
             .copy_from_slice(decrypted_tmp.get(..decrypted_size).ok_or_else(|| {
-                Error::new(StatusCode::BadSecurityChecksFailed, "invalid decrypted range")
+                Error::new(
+                    StatusCode::BadSecurityChecksFailed,
+                    "invalid decrypted range",
+                )
             })?);
         decrypted_size
     };
     trace!(
         "Decrypted bytes = {} compared to encrypted range {}",
-        decrypted_size, encrypted_size
+        decrypted_size,
+        encrypted_size
     );
     // SecureChannel::log_crypto_data("Decrypted Bytes = ", &decrypted_tmp[..decrypted_size]);
 
@@ -330,15 +359,14 @@ pub(crate) fn asymmetric_decrypt_and_verify_owned(
         })?;
 
     // The signature range is at the end of the decrypted block for the verification key's signature
-    let signature_dst_offset =
-        decrypted_end
-            .checked_sub(verification_key_signature_size)
-            .ok_or_else(|| {
-                Error::new(
-                    StatusCode::BadSecurityChecksFailed,
-                    "decrypted chunk is smaller than the signature",
-                )
-            })?;
+    let signature_dst_offset = decrypted_end
+        .checked_sub(verification_key_signature_size)
+        .ok_or_else(|| {
+            Error::new(
+                StatusCode::BadSecurityChecksFailed,
+                "decrypted chunk is smaller than the signature",
+            )
+        })?;
     let signature_range_dst = signature_dst_offset..decrypted_end;
 
     // The signed range is from 0 to the end of the plaintext except for key size
@@ -349,7 +377,8 @@ pub(crate) fn asymmetric_decrypt_and_verify_owned(
     // Verify signature (contained encrypted portion) using verification key
     trace!(
         "Verifying signature range {:?} with signature at {:?}",
-        signed_range_dst, signature_range_dst
+        signed_range_dst,
+        signature_range_dst
     );
     // Keysize for padding is publickey length if avaiable
     let key_size = if let Ok(cert) = our_cert.public_key() {
@@ -357,9 +386,9 @@ pub(crate) fn asymmetric_decrypt_and_verify_owned(
     } else {
         verification_key.size()
     };
-    let signed_data = dst.get(signed_range_dst).ok_or_else(|| {
-        Error::new(StatusCode::BadSecurityChecksFailed, "invalid signed range")
-    })?;
+    let signed_data = dst
+        .get(signed_range_dst)
+        .ok_or_else(|| Error::new(StatusCode::BadSecurityChecksFailed, "invalid signed range"))?;
     let signature = dst.get(signature_range_dst.clone()).ok_or_else(|| {
         Error::new(
             StatusCode::BadSecurityChecksFailed,
@@ -536,6 +565,72 @@ impl PreparedOscDecryptCrypto {
             security_policy,
             decrypted_chunk,
             #[cfg(feature = "ecc")]
+            first_request_signature_to_store,
+        })
+    }
+}
+
+/// Owned inputs for an offloaded outbound OpenSecureChannel sign+encrypt.
+///
+/// All material is cloned from the channel during preparation (before any
+/// `.await`), so the struct is `Send + 'static` and safe to move into
+/// `spawn_blocking`. OPC-10000-6 §6.7.2.
+struct PreparedOscSignCrypto {
+    security_policy: SecurityPolicy,
+    signing_key: PrivateKey,
+    encryption_key: Option<PublicKey>,
+    is_client_role: bool,
+    apply_channel_thumbprint: bool,
+    first_request_signature: Vec<u8>,
+    src: Vec<u8>,
+    encrypted_range: Range<usize>,
+}
+
+struct CompletedOscSign {
+    secured_chunk: Vec<u8>,
+    first_request_signature_to_store: Option<Vec<u8>>,
+}
+
+impl PreparedOscSignCrypto {
+    /// Run the asymmetric sign+encrypt core on the blocking pool.
+    ///
+    /// `JoinError` (task panicked/cancelled) maps to `BadInternalError`;
+    /// the inner crypto `Err(status)` is returned verbatim (C2/R6).
+    async fn sign_blocking(self) -> Result<CompletedOscSign, StatusCode> {
+        let PreparedOscSignCrypto {
+            security_policy,
+            signing_key,
+            encryption_key,
+            is_client_role,
+            apply_channel_thumbprint,
+            first_request_signature,
+            src,
+            encrypted_range,
+        } = self;
+
+        let (secured_chunk, first_request_signature_to_store) =
+            match tokio::task::spawn_blocking(move || {
+                asymmetric_sign_and_encrypt_owned(
+                    security_policy,
+                    signing_key,
+                    encryption_key,
+                    is_client_role,
+                    apply_channel_thumbprint,
+                    first_request_signature,
+                    src,
+                    encrypted_range,
+                )
+            })
+            .await
+            {
+                Ok(inner) => inner?,
+                Err(_join_err) => {
+                    return Err(StatusCode::BadInternalError);
+                }
+            };
+
+        Ok(CompletedOscSign {
+            secured_chunk,
             first_request_signature_to_store,
         })
     }
@@ -1395,6 +1490,129 @@ impl SecureChannel {
         Ok(size)
     }
 
+    /// Prepare owned inputs for an offloaded outbound OpenSecureChannel
+    /// sign+encrypt. The thread-local padding scratch is used during
+    /// preparation and the borrow ends before this method returns, so the
+    /// resulting `PreparedOscSignCrypto` is `Send + 'static`.
+    fn prepare_open_secure_channel_sign(
+        &self,
+        message_chunk: &MessageChunk,
+        encrypted_data_offset: usize,
+    ) -> Result<PreparedOscSignCrypto, StatusCode> {
+        let signing_key = self
+            .private_key
+            .as_ref()
+            .ok_or(StatusCode::BadSecurityChecksFailed)?
+            .clone();
+
+        let is_ecc = self.security_policy.is_ecc();
+        let encryption_key = if is_ecc {
+            None
+        } else {
+            Some(
+                self.remote_cert
+                    .as_ref()
+                    .ok_or(StatusCode::BadSecurityChecksFailed)?
+                    .public_key()?,
+            )
+        };
+
+        let is_client_role = self.is_client_role();
+        #[cfg(feature = "ecc")]
+        let apply_channel_thumbprint = self.apply_channel_thumbprint;
+        #[cfg(not(feature = "ecc"))]
+        let apply_channel_thumbprint = false;
+        #[cfg(feature = "ecc")]
+        let first_request_signature = self.first_request_signature.lock().clone();
+        #[cfg(not(feature = "ecc"))]
+        let first_request_signature = Vec::new();
+
+        let src = PADDING_AND_SIGNATURE_SCRATCH.with(|scratch| {
+            let mut data = scratch.borrow_mut();
+            let message_size =
+                self.add_space_for_padding_and_signature_into(message_chunk, &mut data)?;
+            data.truncate(message_size);
+            Self::log_crypto_data("Chunk before padding", &message_chunk.data[..]);
+            Self::log_crypto_data("Chunk after padding", &data[..]);
+            Ok::<Vec<u8>, StatusCode>(data.clone())
+        })?;
+
+        let encrypted_range = encrypted_data_offset..src.len();
+
+        Ok(PreparedOscSignCrypto {
+            security_policy: self.security_policy,
+            signing_key,
+            encryption_key,
+            is_client_role,
+            apply_channel_thumbprint,
+            first_request_signature,
+            src,
+            encrypted_range,
+        })
+    }
+
+    /// Async variant of [`apply_security`](Self::apply_security) that offloads
+    /// only the outbound OpenSecureChannel asymmetric sign+encrypt to Tokio's
+    /// blocking pool (C5: symmetric per-request path stays inline).
+    ///
+    /// For security policy `None`, symmetric chunks, and Ack/Error payloads,
+    /// this delegates to the existing synchronous `apply_security`.
+    /// OPC-10000-6 §6.7.2.
+    pub(crate) async fn apply_security_async(
+        &self,
+        message_chunk: &MessageChunk,
+        dst: &mut [u8],
+    ) -> Result<usize, StatusCode> {
+        let should_offload = self.security_policy != SecurityPolicy::None
+            && matches!(
+                self.security_mode,
+                MessageSecurityMode::Sign | MessageSecurityMode::SignAndEncrypt
+            )
+            && message_chunk.is_open_secure_channel(&self.decoding_options());
+
+        if !should_offload {
+            return self.apply_security(message_chunk, dst);
+        }
+
+        let encrypted_data_offset =
+            message_chunk.encrypted_data_offset(&self.decoding_options())?;
+
+        let prepared =
+            self.prepare_open_secure_channel_sign(message_chunk, encrypted_data_offset)?;
+
+        let CompletedOscSign {
+            secured_chunk,
+            first_request_signature_to_store,
+        } = prepared.sign_blocking().await?;
+
+        let secured_size = secured_chunk.len();
+        security_mut_slice(dst, 0..secured_size)?.copy_from_slice(&secured_chunk);
+
+        Self::log_crypto_data(
+            "Chunk after encryption",
+            security_slice_to(dst, secured_size)?,
+        );
+
+        // Store ECC client first_request_signature back, matching the sync
+        // wrapper semantics. On the server path is_client_role is false so
+        // this is a no-op; included for drop-in equivalence.
+        #[cfg(feature = "ecc")]
+        {
+            let is_client_role = self.is_client_role();
+            if is_client_role {
+                if let Some(sig) = first_request_signature_to_store {
+                    let mut first_request_signature = self.first_request_signature.lock();
+                    first_request_signature.clear();
+                    first_request_signature.extend_from_slice(&sig);
+                }
+            }
+        }
+        #[cfg(not(feature = "ecc"))]
+        let _ = first_request_signature_to_store;
+
+        Ok(secured_size)
+    }
+
     fn decode_message_header(
         &self,
         src: &[u8],
@@ -1911,17 +2129,16 @@ impl SecureChannel {
         #[cfg(not(feature = "ecc"))]
         let first_request_signature = Vec::new();
 
-        let (secured_chunk, first_request_signature_to_store) =
-            asymmetric_sign_and_encrypt_owned(
-                security_policy,
-                signing_key,
-                encryption_key,
-                is_client_role,
-                apply_channel_thumbprint,
-                first_request_signature,
-                src.to_vec(),
-                encrypted_range,
-            )?;
+        let (secured_chunk, first_request_signature_to_store) = asymmetric_sign_and_encrypt_owned(
+            security_policy,
+            signing_key,
+            encryption_key,
+            is_client_role,
+            apply_channel_thumbprint,
+            first_request_signature,
+            src.to_vec(),
+            encrypted_range,
+        )?;
 
         let secured_size = secured_chunk.len();
         security_mut_slice(dst, 0..secured_size)?.copy_from_slice(&secured_chunk);

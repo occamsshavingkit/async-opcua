@@ -441,7 +441,10 @@ where
         // If there's nothing in the send buffer, but there are chunks available,
         // write them to the send buffer before proceeding.
         if self.send_buffer.should_encode_chunks() {
-            if let Err(e) = self.send_buffer.encode_next_chunk(channel) {
+            // OPC-10000-6 §6.7.2.4: offload outbound OSC sign+encrypt to the
+            // blocking pool; symmetric chunks stay inline. The transport
+            // awaits each chunk before encoding the next (C3/R5).
+            if let Err(e) = self.send_buffer.encode_next_chunk_async(channel).await {
                 return TransportPollResult::Error(e);
             }
         }

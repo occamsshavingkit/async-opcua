@@ -393,3 +393,39 @@ clean, multi writes run ~730K (NOT the "capped ~290K" R17 saw) — that collapse
 **Caveat:** the R16 spike (+21–29% read, separate processes) was measured under the SAME contaminated
 conditions and is therefore also likely inflated; the clean ~+10% supersedes it as the trustworthy estimate
 of the thread-per-core advantage on this box.
+
+### R20. Minimal-real graft LANDED — sharded run mode in async-opcua-server captures +11–18% (2026-07-11)
+
+Grafted the validated thread-per-core model into the **real** server (not the prototype) as an opt-in,
+default-off `sharded` feature: `Server::run_sharded(cores)` spins N pinned `current_thread` runtimes, each
+binding its own `SO_REUSEPORT` listener (socket2, already a dep), sharing the existing node managers +
+session manager. Singleton background tasks (subscription cleanup, session expiry, discovery, mDNS) run once;
+per-shard I/O (each shard reads its own sockets), no central network agent, no SPSC rings, no worker pool —
+the prototype's lessons applied. ~150 LOC, default path untouched. Commit `84b3594d5` on `072-us2-sharded-run`.
+
+Correctness: `bench_client` reads + writes cleanly against the real sharded server across 3 pinned shards
+(zero bad), incl. concurrent multi-shard clients. Clean-core A/B (evacuated + verified 97–100% idle, 5
+interleaved rounds), real bench server sharded vs default multi_thread on cores 3,4,5:
+
+| op | M | multi (med) | sharded (med) | sharded/multi |
+|----|--:|------------:|--------------:|:-------------:|
+| read  |  6 | 383,344 | 365,110 | 0.95× |
+| read  | 12 | 427,672 | 504,296 | **1.18×** |
+| read  | 24 | 432,486 | 502,125 | **1.16×** |
+| read  | 48 | 432,678 | 480,393 | **1.11×** |
+| write | 12 | 384,432 | 450,940 | **1.17×** |
+| write | 24 | 389,350 | 454,637 | **1.17×** |
+| write | 48 | 372,660 | 441,437 | **1.18×** |
+
+**The real server captures +11–18% at saturation (M≥12) — matching/exceeding the prototype's clean ~+10%.**
+It captures *more* than the lean prototype because the full server has more per-request machinery (session
+actor, etc.) whose cross-core migration under work-stealing costs more, so eliminating that migration helps
+more. **Honest wrinkle:** at very low concurrency (M=6, fewer clients than shards keep busy) sharded is
+~neutral-to-slightly-down (0.95×) — thread-per-core shines under load and slightly trails work-stealing when
+cores sit idle. Guidance: enable `sharded` for high-connection-count deployments, not low-concurrency ones.
+
+**US2 verdict: DONE.** Thread-per-core is worth +11–18% under load and is now available in the real server
+behind an opt-in flag with zero default-path change. The elaborate SPSC/RCU/worker-pool machinery from the
+original design proved unnecessary (P3/P4 rejected by measurement + the per-shard-I/O insight). Remaining
+before merge: full CI/conformance gate (`tools/ci-playbook.sh --ci`), and consider a sharded-mode integration
+test. Scaling past 3 cores untested (box limit).

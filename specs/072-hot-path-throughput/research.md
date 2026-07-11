@@ -259,3 +259,41 @@ neutral-not-worse lock-removal + simplification aligned with AGENTS.md's "prefer
 **not** a throughput lever, so US1's headline result stands at S1a+S2 (**plateau ~569K**). S1b thus joins
 S1c/S1d as measured-and-marginal; the real single-core gap remains structural (per-request `tokio::spawn` +
 syscalls + serialization), which is US2's target.
+
+### R16. US2 spike — thread-per-core UPPER BOUND validates the direction (2026-07-11)
+
+Cheapest possible test of the US2 hypothesis, **needing zero new architecture**: the server is
+runtime-agnostic (bare `tokio::spawn`, no flavor assumption — the bundled `minimal-server`/foundation-profile
+samples already run `current_thread`). So we compared, same cores + same clients, interleaved:
+- **multi**: 1 `multi_thread` (work-stealing) server, `RT_WORKERS=3`, pinned `taskset -c 3,4,5`.
+- **shard**: 3 pinned single-core `current_thread` server instances (own port, own address space) on cores
+  3/4/5 — the **upper bound** of shard-per-core (N independent servers, zero shared state).
+
+Clean core split (no server/client physical-core overlap): server on physical cores 3,4,5 (logical 3,4,5,
+HT siblings 9,10,11 left idle); clients on 0,1,2,6,7,8. `governor=performance`. bench server rebuilt with an
+env-selectable runtime (`RT_FLAVOR`/`RT_WORKERS`).
+
+| op | M | multi (median) | shard (median) | shard/multi |
+|----|--:|---------------:|---------------:|:-----------:|
+| read  |  6 | 367,794 | 474,325 | **1.29×** |
+| read  | 12 | 405,871 | 496,536 | **1.22×** |
+| read  | 24 | 409,088 | 494,428 | **1.21×** |
+| read  | 48 | 380,241 | 471,397 | **1.24×** |
+| write | 12 | 345,431 | 436,619 | **1.26×** |
+| write | 24 | 355,765 | 433,902 | **1.22×** |
+| write | 48 | 351,415 | 403,440 | **1.15×** |
+
+**Verdict: US2 direction VALIDATED.** Thread-per-core beats the work-stealing runtime by **+21–29% read /
++15–26% write**, consistent across all client counts and all rounds. The `multi_thread` plateau is ~409K on
+3 cores (2.3× the 176K single-core saturated ceiling); shard reaches ~496K (≈2.8×) — work-stealing
+coordination + cross-core task migration costs ~half a core of efficiency, and shard-per-core recovers most
+of it. Crucially this is **not** kernel/syscall/network-bound (that hypothesis is refuted — a different
+runtime moved the number by 20%+), so the SPSC/RCU build is worth pursuing.
+
+**Caveat — this is an UPPER BOUND.** Separate processes = separate address spaces *and* separate allocators
+(no cross-core shared-state or malloc contention). The real single-process shared-address-space version will
+capture some *fraction* of this (reads are already lock-free via `node_map` DashMap; the cold-side RCU +
+per-core allocator behavior determine how much). Next measured step is the **simplest real version**
+(SO_REUSEPORT accept-sharding + per-core `current_thread` runtimes + shared lock-free address space) before
+the full SPSC-ring / network-agent / accept-time-load-balancer design — build up only if the simple version
+leaves headroom vs this upper bound.

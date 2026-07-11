@@ -80,6 +80,10 @@ programs = ["method-call"]
 # Distinct from discovery-server-registration (registering OURSELVES with an LDS).
 lds = []
 # --- end feature 054 gates ---
+# Feature 072 US2: opt-in thread-per-core (sharded) run mode. N pinned
+# current_thread runtimes, each with its own SO_REUSEPORT listener, sharing the
+# node managers / session manager. Adds `Server::run_sharded`. Default OFF.
+sharded = ["dep:core_affinity"]
 aws-lc-rs = [
   "async-opcua-client?/aws-lc-rs",
   "async-opcua-core/aws-lc-rs",
@@ -271,6 +275,7 @@ regex = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 socket2 = { version = "0.6", features = ["all"] }
+core_affinity = { version = "0.8", optional = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 tracing = { workspace = true }

@@ -13,8 +13,8 @@ use opcua::{
         node_manager::{typed_method, typed_method_with_context, RequestContext},
     },
     types::{
-        AttributeId, CallMethodRequest, DataTypeId, NodeId, ObjectId, StatusCode, Variant,
-        VariantTypeId,
+        AttributeId, CallMethodRequest, DataTypeId, MethodId, NodeId, ObjectId, StatusCode,
+        Variant, VariantTypeId,
     },
 };
 use opcua_types::{
@@ -227,6 +227,33 @@ async fn call_fail() {
         .await
         .unwrap();
     assert_eq!(r.status_code, StatusCode::BadTooManyArguments);
+}
+
+#[tokio::test]
+async fn call_null_node_ids_are_invalid_operation_node_ids() {
+    // OPC UA Part 4 §5.12.2.4 Table 61: Call operation-level results include
+    // Bad_NodeIdInvalid for a NodeId that is not valid for the operation.
+    let (_tester, _nm, session) = setup().await;
+
+    let null_object = session
+        .call_one(CallMethodRequest {
+            object_id: NodeId::null(),
+            method_id: MethodId::Server_GetMonitoredItems.into(),
+            input_arguments: None,
+        })
+        .await
+        .unwrap();
+    assert_eq!(null_object.status_code, StatusCode::BadNodeIdInvalid);
+
+    let null_method = session
+        .call_one(CallMethodRequest {
+            object_id: ObjectId::Server.into(),
+            method_id: NodeId::null(),
+            input_arguments: None,
+        })
+        .await
+        .unwrap();
+    assert_eq!(null_method.status_code, StatusCode::BadNodeIdInvalid);
 }
 
 #[tokio::test]

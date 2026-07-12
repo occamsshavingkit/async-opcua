@@ -831,6 +831,26 @@ async fn read_mixed() {
 }
 
 #[tokio::test]
+async fn read_null_node_id_is_invalid_operation_node_id() {
+    // OPC UA Part 4 §5.11.2.4 Table 49: Read operation-level results include
+    // Bad_NodeIdInvalid for a NodeId that is not valid for the operation.
+    let (_tester, _nm, session) = setup().await;
+
+    let r = session
+        .read(
+            &[read_value_id(AttributeId::Value, NodeId::null())],
+            TimestampsToReturn::Both,
+            0.0,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(r.len(), 1);
+    assert_eq!(r[0].status, Some(StatusCode::BadNodeIdInvalid));
+    assert_eq!(r[0].value, None);
+}
+
+#[tokio::test]
 async fn read_limits() {
     let (tester, _nm, session) = setup().await;
 

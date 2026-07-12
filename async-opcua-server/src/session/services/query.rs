@@ -137,24 +137,8 @@ pub(crate) async fn query_first(
             .instrument(debug_span!("Query", node_manager = %node_manager.name()))
             .await
         {
-            let pairs: Vec<(ParsingResult, Option<DiagnosticInfo>)> = parsing_results
-                .into_iter()
-                .map(|parsing_result| (parsing_result, None))
-                .collect();
-            let (parsing_results, diagnostic_infos) = consume_results(pairs, return_diagnostics);
-
-            return Response {
-                message: QueryFirstResponse {
-                    response_header: ResponseHeader::new_service_result(request.request_handle, e),
-                    query_data_sets: None,
-                    continuation_point: ByteString::null(),
-                    parsing_results,
-                    filter_result,
-                    diagnostic_infos,
-                }
-                .into(),
-                request_id: request.request_id,
-            };
+            info!(%e, "Node manager query failed, continuing to next node manager");
+            continue;
         }
 
         if query_request.is_completed() {

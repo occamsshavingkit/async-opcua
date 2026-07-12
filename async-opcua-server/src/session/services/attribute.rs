@@ -368,7 +368,15 @@ pub(crate) async fn history_update(
             (result, diagnostic_info)
         })
         .collect();
-    let (results, diagnostic_infos) = consume_results(pairs, return_diagnostics);
+    let (mut results, diagnostic_infos) = consume_results(pairs, return_diagnostics);
+
+    if let Some(results) = &mut results {
+        for result in results.iter_mut() {
+            if result.status_code == StatusCode::BadNothingToDo {
+                result.status_code = StatusCode::BadHistoryOperationUnsupported;
+            }
+        }
+    }
 
     Response {
         message: HistoryUpdateResponse {

@@ -27,3 +27,8 @@ features = ["all", "ecc"]
 default = ["json", "xml"]
 json = ["async-opcua/json"]
 xml = ["async-opcua/xml"]
+# OPC UA Part 14 PubSub subscriber wiring. Gates the `start_subscribers()`
+# call in main.rs. `async-opcua` already enables `pubsub` transitively via
+# `all` → `server` → `pubsub`, but this feature gates the demo-server-side
+# subscriber startup code (OPC-10000-14 §5.4.6.2.2).
+pubsub = ["async-opcua/pubsub"]

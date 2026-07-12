@@ -208,6 +208,12 @@ async fn main() {
             .unwrap();
         let ns = handle.get_namespace_index(NAMESPACE_URI).unwrap();
 
+        // Clone the address space Arc before `node_manager` is moved into
+        // `history::add_history` below — the PubSub engine needs it to start
+        // subscriber receive loops (OPC-10000-14 §5.4.6.2.2).
+        #[cfg(feature = "pubsub")]
+        let pubsub_address_space = node_manager.address_space().clone();
+
         let token = handle.token();
 
         // Define some custom types
@@ -253,6 +259,19 @@ async fn main() {
         let history_backend =
             Arc::new(opcua_history_sqlite::SqliteHistoryBackend::new_in_memory().unwrap());
         history::add_history(node_manager, history_backend, ns).await;
+
+        // Start PubSub subscriber receive loops after server initialization is
+        // complete. The engine binds UDP sockets for configured DataSetReaders
+        // (OPC-10000-14 §5.4.6.2.2 broker-less model). With no reader groups
+        // configured this is a no-op returning Ok(()).
+        #[cfg(feature = "pubsub")]
+        let _pubsub_engine = {
+            let mut engine = opcua::pubsub::PubSubEngine::new(pubsub_address_space);
+            if let Err(status) = engine.start_subscribers() {
+                error!("Failed to start PubSub subscribers: {:?}", status);
+            }
+            engine
+        };
 
         server.run().await.unwrap();
     }

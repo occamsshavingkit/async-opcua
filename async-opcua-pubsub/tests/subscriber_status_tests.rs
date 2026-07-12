@@ -167,6 +167,34 @@ fn metadata_major_version_gap_errors_after_receive_timeout() {
 }
 
 #[test]
+fn duplicate_sequence_does_not_reset_receive_timeout() {
+    let (space, target) = target_space();
+    let now = Instant::now();
+    let mut runtime = SubscriberRuntime::with_connections(space, vec![connection(target)]).unwrap();
+    runtime
+        .process_network_message_at(&message(1), now)
+        .unwrap();
+
+    let mid = now + Duration::from_millis(5);
+    runtime
+        .process_network_message_at(&message(1), mid)
+        .unwrap();
+
+    let status = runtime.reader_status(1).unwrap();
+    assert_eq!(status.duplicate_count, 1);
+    assert_eq!(status.state, PubSubState::Operational);
+
+    runtime.check_timeouts_at(now + Duration::from_millis(11));
+
+    let status = runtime.reader_status(1).unwrap();
+    assert_eq!(status.state, PubSubState::Error);
+    assert_eq!(
+        status.last_error,
+        Some(SubscriberError::MessageReceiveTimeout)
+    );
+}
+
+#[test]
 fn unknown_reader_metadata_observation_returns_bad_not_found() {
     let (space, target) = target_space();
     let mut runtime = SubscriberRuntime::with_connections(space, vec![connection(target)]).unwrap();

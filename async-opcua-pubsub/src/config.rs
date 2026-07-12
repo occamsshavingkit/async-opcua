@@ -297,7 +297,10 @@ impl DataSetReaderConfig {
     }
 
     fn validate(&self) -> Result<(), StatusCode> {
-        if self.message_encoding != MessageEncoding::Uadp {
+        if !matches!(
+            self.message_encoding,
+            MessageEncoding::Uadp | MessageEncoding::Json
+        ) {
             return Err(StatusCode::BadNotSupported);
         }
         if self.field_encoding != DataSetFieldEncoding::Variant {
@@ -373,7 +376,11 @@ impl PubSubConnectionConfig {
             return Ok(());
         }
 
-        if !self.address.trim().starts_with("udp://") {
+        let address = self.address.trim();
+        let is_subscriber_transport = address.starts_with("udp://")
+            || address.starts_with("mqtt://")
+            || address.starts_with("mqtts://");
+        if !is_subscriber_transport {
             return Err(StatusCode::BadNotSupported);
         }
 

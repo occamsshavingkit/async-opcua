@@ -42,7 +42,7 @@ pub use config::{
 };
 pub use config_methods::{register_pubsub_config_methods, PubSubConfigManager};
 
-pub use engine::{PubSubEngine, TransportKind};
+pub use engine::{DatagramQueue, PubSubEngine, TransportKind, PUBSUB_DATAGRAM_QUEUE_CAPACITY};
 pub use fx::{ConnectionManager, EstablishedConnection};
 pub use reservation::{configuration_version_compatible, IdReservation};
 pub use security::{

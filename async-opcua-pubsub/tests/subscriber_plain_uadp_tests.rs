@@ -7,8 +7,8 @@ use opcua_core::sync::RwLock;
 use opcua_pubsub::{
     transport::udp::{bind_subscriber_socket, UdpSubscriberEndpoint},
     DataSetFieldEncoding, DataSetMessageKind, DataSetReaderConfig, FieldTargetConfig,
-    MessageEncoding, PubSubConnectionConfig, PublisherId, ReaderGroupConfig, SubscriberError,
-    SubscriberRuntime, UadpDataSetMessage, UadpNetworkMessage,
+    PubSubConnectionConfig, PublisherId, ReaderGroupConfig, SubscriberError, SubscriberRuntime,
+    UadpDataSetMessage, UadpNetworkMessage,
 };
 use opcua_server::address_space::{AddressSpace, VariableBuilder};
 use opcua_types::{
@@ -290,17 +290,14 @@ fn process_datagram_rejects_custom_udp_fragment_header() {
 
 #[test]
 fn validation_rejects_unsupported_subscriber_modes() {
-    let mut broker = connection(reader(Vec::new()));
-    broker.address = "mqtt://broker.local:1883".to_string();
+    // MQTT subscriber dispatch is wired (T012, OPC-10000-14 §6.4.2), so an
+    // `mqtt://` address is now a supported subscriber transport. Use a scheme
+    // no PubSub subscriber implements to exercise the unsupported-transport
+    // rejection path.
+    let mut unsupported = connection(reader(Vec::new()));
+    unsupported.address = "http://broker.local:8080".to_string();
     assert_eq!(
-        broker.validate_subscriber_config().unwrap_err(),
-        StatusCode::BadNotSupported
-    );
-
-    let mut json = reader(Vec::new());
-    json.message_encoding = MessageEncoding::Json;
-    assert_eq!(
-        connection(json).validate_subscriber_config().unwrap_err(),
+        unsupported.validate_subscriber_config().unwrap_err(),
         StatusCode::BadNotSupported
     );
 

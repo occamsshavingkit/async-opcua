@@ -166,6 +166,7 @@ fn add_nodes_impl(
 
     {
         let as_read = address_space.read();
+        let type_tree = context.type_tree.read();
         for item in nodes_to_add.iter_mut() {
             if item.status() != StatusCode::BadNotSupported {
                 continue;
@@ -183,6 +184,19 @@ fn add_nodes_impl(
                 && as_read.find(item.requested_new_node_id()).is_some()
             {
                 item.set_result(NodeId::null(), StatusCode::BadNodeIdExists);
+                continue;
+            }
+
+            if !type_tree
+                .get(item.reference_type_id())
+                .is_some_and(|node_class| node_class == NodeClass::ReferenceType)
+            {
+                item.set_result(NodeId::null(), StatusCode::BadReferenceTypeIdInvalid);
+                continue;
+            }
+
+            if let Err(status) = validate_type_definition(&as_read, &*type_tree, item) {
+                item.set_result(NodeId::null(), status);
                 continue;
             }
         }
@@ -332,6 +346,15 @@ fn delete_nodes_impl(
             }
 
             if as_read.node_exists(item.node_id()) {
+                if !authorize_node_management_permission(
+                    context,
+                    &as_read,
+                    item.node_id(),
+                    PermissionType::DeleteNode,
+                ) {
+                    item.set_result(StatusCode::BadUserAccessDenied);
+                    continue;
+                }
                 item.set_result(StatusCode::BadNotSupported);
             }
         }
@@ -444,6 +467,35 @@ fn add_references_impl(
                 if handle_target && item.target_status() == StatusCode::BadNotSupported {
                     item.set_target_result(StatusCode::BadReferenceTypeIdInvalid);
                 }
+                continue;
+            }
+
+            if source_exists && target_exists {
+                let (source_node, target_node) = if item.is_forward() {
+                    (item.source_node_id(), &item.target_node_id().node_id)
+                } else {
+                    (&item.target_node_id().node_id, item.source_node_id())
+                };
+
+                if source_node == target_node {
+                    if handle_source && item.source_status() == StatusCode::BadNotSupported {
+                        item.set_source_result(StatusCode::BadInvalidSelfReference);
+                    }
+                    if handle_target && item.target_status() == StatusCode::BadNotSupported {
+                        item.set_target_result(StatusCode::BadInvalidSelfReference);
+                    }
+                    continue;
+                }
+
+                if as_read.has_reference(source_node, target_node, item.reference_type_id()) {
+                    if handle_source && item.source_status() == StatusCode::BadNotSupported {
+                        item.set_source_result(StatusCode::BadDuplicateReferenceNotAllowed);
+                    }
+                    if handle_target && item.target_status() == StatusCode::BadNotSupported {
+                        item.set_target_result(StatusCode::BadDuplicateReferenceNotAllowed);
+                    }
+                    continue;
+                }
             }
         }
     }
@@ -483,6 +535,19 @@ fn add_references_impl(
 
             let source_exists = address_space.node_exists(item.source_node_id());
             let target_exists = address_space.node_exists(&item.target_node_id().node_id);
+
+            if source_owned && item.source_status() == StatusCode::BadSourceNodeIdInvalid {
+                if target_owned && item.target_status() == StatusCode::BadNotSupported {
+                    item.set_target_result(StatusCode::BadSourceNodeIdInvalid);
+                }
+                continue;
+            }
+            if target_owned && item.target_status() == StatusCode::BadTargetNodeIdInvalid {
+                if source_owned && item.source_status() == StatusCode::BadNotSupported {
+                    item.set_source_result(StatusCode::BadTargetNodeIdInvalid);
+                }
+                continue;
+            }
 
             if source_exists
                 && !authorize_node_management_permission(
@@ -526,6 +591,10 @@ fn add_references_impl(
                 item.set_target_result(StatusCode::BadTargetNodeIdInvalid);
             }
 
+            if (handle_source && !source_exists) || (handle_target && !target_exists) {
+                continue;
+            }
+
             let source_ready = handle_source && source_exists;
             let target_ready = handle_target && target_exists;
             if !source_ready && !target_ready {
@@ -534,10 +603,10 @@ fn add_references_impl(
 
             if item.source_node_id() == &item.target_node_id().node_id {
                 if source_ready {
-                    item.set_source_result(StatusCode::BadSourceNodeIdInvalid);
+                    item.set_source_result(StatusCode::BadInvalidSelfReference);
                 }
                 if target_ready {
-                    item.set_target_result(StatusCode::BadTargetNodeIdInvalid);
+                    item.set_target_result(StatusCode::BadInvalidSelfReference);
                 }
                 continue;
             }
@@ -728,6 +797,19 @@ fn delete_references_impl(
             let source_exists = address_space.node_exists(item.source_node_id());
             let target_exists = address_space.node_exists(&item.target_node_id().node_id);
 
+            if source_owned && item.source_status() == StatusCode::BadSourceNodeIdInvalid {
+                if target_owned && item.target_status() == StatusCode::BadNotSupported {
+                    item.set_target_result(StatusCode::BadSourceNodeIdInvalid);
+                }
+                continue;
+            }
+            if target_owned && item.target_status() == StatusCode::BadTargetNodeIdInvalid {
+                if source_owned && item.source_status() == StatusCode::BadNotSupported {
+                    item.set_source_result(StatusCode::BadTargetNodeIdInvalid);
+                }
+                continue;
+            }
+
             if source_exists
                 && !authorize_node_management_permission(
                     context,
@@ -759,6 +841,10 @@ fn delete_references_impl(
             }
             if handle_target && !target_exists {
                 item.set_target_result(StatusCode::BadTargetNodeIdInvalid);
+            }
+
+            if (handle_source && !source_exists) || (handle_target && !target_exists) {
+                continue;
             }
 
             let source_ready = handle_source && source_exists;

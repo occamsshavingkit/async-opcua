@@ -70,7 +70,12 @@ pub(crate) async fn add_nodes(
                 return false;
             }
             if item.requested_new_node_id().is_null() {
+                let has_explicit_handler = node_managers
+                    .iter()
+                    .any(|candidate| candidate.handle_new_node(item.parent_node_id()));
                 node_manager.handle_new_node(item.parent_node_id())
+                    || (!has_explicit_handler
+                        && node_manager.owns_node(&item.parent_node_id().node_id))
             } else {
                 node_manager.owns_node(item.requested_new_node_id())
             }

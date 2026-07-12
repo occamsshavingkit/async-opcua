@@ -613,6 +613,20 @@ async fn write_limits() {
 }
 
 #[tokio::test]
+async fn write_null_node_id_is_invalid_operation_node_id() {
+    // OPC UA Part 4 §5.11.4.4 Table 55: Write operation-level results include
+    // Bad_NodeIdInvalid for a NodeId that is not valid for the operation.
+    let (_tester, _nm, session) = setup().await;
+
+    let r = session
+        .write(&[write_value(AttributeId::Value, 123, NodeId::null())])
+        .await
+        .unwrap();
+
+    assert_eq!(r, vec![StatusCode::BadNodeIdInvalid]);
+}
+
+#[tokio::test]
 async fn write_bytestring_to_byte_array() {
     let (tester, nm, session) = setup().await;
 

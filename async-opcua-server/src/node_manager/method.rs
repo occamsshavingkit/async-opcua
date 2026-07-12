@@ -21,11 +21,17 @@ pub struct MethodCall {
 
 impl MethodCall {
     pub(crate) fn new(request: CallMethodRequest, diagnostic_bits: DiagnosticBits) -> Self {
+        let status = if request.object_id.is_null() || request.method_id.is_null() {
+            StatusCode::BadNodeIdInvalid
+        } else {
+            StatusCode::BadMethodInvalid
+        };
+
         Self {
             object_id: request.object_id,
             method_id: request.method_id,
             arguments: request.input_arguments.unwrap_or_default(),
-            status: StatusCode::BadMethodInvalid,
+            status,
             argument_results: Vec::new(),
             outputs: Vec::new(),
             diagnostic_bits,

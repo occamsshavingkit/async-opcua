@@ -77,6 +77,10 @@ impl ReadNode {
             }
         };
 
+        if node.node_id.is_null() && status == StatusCode::BadNodeIdUnknown {
+            status = StatusCode::BadNodeIdInvalid;
+        }
+
         Self {
             node,
             result: DataValue {
@@ -206,6 +210,10 @@ impl WriteNode {
                 ParsedWriteValue::null()
             }
         };
+
+        if value.node_id.is_null() && status == StatusCode::BadNodeIdUnknown {
+            status = StatusCode::BadNodeIdInvalid;
+        }
 
         Self {
             value,

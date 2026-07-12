@@ -144,9 +144,55 @@ fn add_nodes_impl(
     address_space: &RwLock<AddressSpace>,
     nodes_to_add: &mut [&mut AddNodeItem],
 ) {
+    // Validate inputs before checking the gate flag. This ensures that
+    // per-item errors (BadParentNodeIdInvalid, BadNodeIdExists) are reported
+    // regardless of whether clients_can_modify_address_space is enabled.
+    //
+    // Items whose parent is being added earlier in the same batch are skipped
+    // for the parent-existence check — the implementation phase processes the
+    // batch in order and will resolve the in-batch parent then.
+    let batch_new_ids: Vec<NodeId> = nodes_to_add
+        .iter()
+        .filter(|item| item.status() == StatusCode::BadNotSupported)
+        .filter_map(|item| {
+            let id = item.requested_new_node_id();
+            if id.is_null() {
+                None
+            } else {
+                Some(id.clone())
+            }
+        })
+        .collect();
+
+    {
+        let as_read = address_space.read();
+        for item in nodes_to_add.iter_mut() {
+            if item.status() != StatusCode::BadNotSupported {
+                continue;
+            }
+
+            let parent_id = item.parent_node_id().node_id.clone();
+            if (parent_id.is_null() || as_read.find(&parent_id).is_none())
+                && !batch_new_ids.contains(&parent_id)
+            {
+                item.set_result(NodeId::null(), StatusCode::BadParentNodeIdInvalid);
+                continue;
+            }
+
+            if !item.requested_new_node_id().is_null()
+                && as_read.find(item.requested_new_node_id()).is_some()
+            {
+                item.set_result(NodeId::null(), StatusCode::BadNodeIdExists);
+                continue;
+            }
+        }
+    }
+
     if !clients_can_modify_address_space(context) {
         for item in nodes_to_add {
-            item.set_result(NodeId::null(), StatusCode::BadServiceUnsupported);
+            if item.status() == StatusCode::BadNotSupported {
+                item.set_result(NodeId::null(), StatusCode::BadServiceUnsupported);
+            }
         }
         return;
     }
@@ -274,9 +320,28 @@ fn delete_nodes_impl(
     address_space: &RwLock<AddressSpace>,
     nodes_to_delete: &mut [&mut DeleteNodeItem],
 ) {
+    // Validate node existence before checking the gate flag. Items arrive
+    // with BadNodeIdUnknown (the routing "pending" status). If the node
+    // exists, transition to BadNotSupported so the gate can distinguish
+    // "node exists, service unsupported" from "node doesn't exist".
+    {
+        let as_read = address_space.read();
+        for item in nodes_to_delete.iter_mut() {
+            if item.status() != StatusCode::BadNodeIdUnknown {
+                continue;
+            }
+
+            if as_read.node_exists(item.node_id()) {
+                item.set_result(StatusCode::BadNotSupported);
+            }
+        }
+    }
+
     if !clients_can_modify_address_space(context) {
         for item in nodes_to_delete {
-            item.set_result(StatusCode::BadServiceUnsupported);
+            if item.status() == StatusCode::BadNotSupported {
+                item.set_result(StatusCode::BadServiceUnsupported);
+            }
         }
         return;
     }
@@ -288,6 +353,10 @@ fn delete_nodes_impl(
         let address_space = address_space.write();
 
         for item in nodes_to_delete.iter_mut() {
+            if item.status().is_bad() && item.status() != StatusCode::BadNotSupported {
+                continue;
+            }
+
             if item.node_id().is_null() {
                 item.set_result(StatusCode::BadNodeIdInvalid);
                 continue;
@@ -327,10 +396,66 @@ fn add_references_impl(
     address_space: &RwLock<AddressSpace>,
     references_to_add: &mut [&mut AddReferenceItem],
 ) {
+    // Validate inputs before checking the gate flag. This ensures that
+    // per-item errors (BadSourceNodeIdInvalid, BadTargetNodeIdInvalid,
+    // BadReferenceTypeIdInvalid) are reported regardless of whether
+    // clients_can_modify_address_space is enabled.
+    {
+        let as_read = address_space.read();
+        let type_tree = context.type_tree.read();
+
+        for item in references_to_add.iter_mut() {
+            if item.source_status() != StatusCode::BadNotSupported
+                && item.target_status() != StatusCode::BadNotSupported
+            {
+                continue;
+            }
+
+            let source_owned = as_read
+                .namespaces()
+                .contains_key(&item.source_node_id().namespace);
+            let target_owned = as_read
+                .namespaces()
+                .contains_key(&item.target_node_id().node_id.namespace);
+
+            let handle_source = source_owned && item.source_status() == StatusCode::BadNotSupported;
+            let handle_target = target_owned && item.target_status() == StatusCode::BadNotSupported;
+            if !handle_source && !handle_target {
+                continue;
+            }
+
+            let source_exists = as_read.node_exists(item.source_node_id());
+            let target_exists = as_read.node_exists(&item.target_node_id().node_id);
+
+            if handle_source && !source_exists {
+                item.set_source_result(StatusCode::BadSourceNodeIdInvalid);
+            }
+            if handle_target && !target_exists {
+                item.set_target_result(StatusCode::BadTargetNodeIdInvalid);
+            }
+
+            if !type_tree
+                .get(item.reference_type_id())
+                .is_some_and(|node_class| node_class == NodeClass::ReferenceType)
+            {
+                if handle_source && item.source_status() == StatusCode::BadNotSupported {
+                    item.set_source_result(StatusCode::BadReferenceTypeIdInvalid);
+                }
+                if handle_target && item.target_status() == StatusCode::BadNotSupported {
+                    item.set_target_result(StatusCode::BadReferenceTypeIdInvalid);
+                }
+            }
+        }
+    }
+
     if !clients_can_modify_address_space(context) {
         for item in references_to_add {
-            item.set_source_result(StatusCode::BadServiceUnsupported);
-            item.set_target_result(StatusCode::BadServiceUnsupported);
+            if item.source_status() == StatusCode::BadNotSupported {
+                item.set_source_result(StatusCode::BadServiceUnsupported);
+            }
+            if item.target_status() == StatusCode::BadNotSupported {
+                item.set_target_result(StatusCode::BadServiceUnsupported);
+            }
         }
         return;
     }
@@ -515,10 +640,66 @@ fn delete_references_impl(
     address_space: &RwLock<AddressSpace>,
     references_to_delete: &mut [&mut DeleteReferenceItem],
 ) {
+    // Validate inputs before checking the gate flag. This ensures that
+    // per-item errors (BadSourceNodeIdInvalid, BadTargetNodeIdInvalid,
+    // BadReferenceTypeIdInvalid) are reported regardless of whether
+    // clients_can_modify_address_space is enabled.
+    {
+        let as_read = address_space.read();
+        let type_tree = context.type_tree.read();
+
+        for item in references_to_delete.iter_mut() {
+            if item.source_status() != StatusCode::BadNotSupported
+                && item.target_status() != StatusCode::BadNotSupported
+            {
+                continue;
+            }
+
+            let source_owned = as_read
+                .namespaces()
+                .contains_key(&item.source_node_id().namespace);
+            let target_owned = as_read
+                .namespaces()
+                .contains_key(&item.target_node_id().node_id.namespace);
+
+            let handle_source = source_owned && item.source_status() == StatusCode::BadNotSupported;
+            let handle_target = target_owned && item.target_status() == StatusCode::BadNotSupported;
+            if !handle_source && !handle_target {
+                continue;
+            }
+
+            let source_exists = as_read.node_exists(item.source_node_id());
+            let target_exists = as_read.node_exists(&item.target_node_id().node_id);
+
+            if handle_source && !source_exists {
+                item.set_source_result(StatusCode::BadSourceNodeIdInvalid);
+            }
+            if handle_target && !target_exists {
+                item.set_target_result(StatusCode::BadTargetNodeIdInvalid);
+            }
+
+            if !type_tree
+                .get(item.reference_type_id())
+                .is_some_and(|node_class| node_class == NodeClass::ReferenceType)
+            {
+                if handle_source && item.source_status() == StatusCode::BadNotSupported {
+                    item.set_source_result(StatusCode::BadReferenceTypeIdInvalid);
+                }
+                if handle_target && item.target_status() == StatusCode::BadNotSupported {
+                    item.set_target_result(StatusCode::BadReferenceTypeIdInvalid);
+                }
+            }
+        }
+    }
+
     if !clients_can_modify_address_space(context) {
         for item in references_to_delete {
-            item.set_source_result(StatusCode::BadServiceUnsupported);
-            item.set_target_result(StatusCode::BadServiceUnsupported);
+            if item.source_status() == StatusCode::BadNotSupported {
+                item.set_source_result(StatusCode::BadServiceUnsupported);
+            }
+            if item.target_status() == StatusCode::BadNotSupported {
+                item.set_target_result(StatusCode::BadServiceUnsupported);
+            }
         }
         return;
     }

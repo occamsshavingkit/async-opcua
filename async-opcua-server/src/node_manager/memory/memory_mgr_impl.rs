@@ -187,10 +187,7 @@ fn add_nodes_impl(
                 continue;
             }
 
-            if !type_tree
-                .get(item.reference_type_id())
-                .is_some_and(|node_class| node_class == NodeClass::ReferenceType)
-            {
+            if !reference_type_is_known(&*type_tree, item.reference_type_id()) {
                 item.set_result(NodeId::null(), StatusCode::BadReferenceTypeIdInvalid);
                 continue;
             }
@@ -1017,6 +1014,14 @@ fn reference_type_is_abstract(address_space: &AddressSpace, reference_type_id: &
     }
 
     standard_reference_type_is_abstract(reference_type_id)
+}
+
+#[cfg(feature = "node-management")]
+fn reference_type_is_known(type_tree: &dyn TypeTree, reference_type_id: &NodeId) -> bool {
+    type_tree
+        .get(reference_type_id)
+        .is_some_and(|node_class| node_class == NodeClass::ReferenceType)
+        || reference_type_id.as_reference_type_id().is_ok()
 }
 
 #[cfg(feature = "node-management")]

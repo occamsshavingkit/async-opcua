@@ -19,17 +19,32 @@ pub fn json_value_to_opcua<T: JsonDecodable>(val: &Value, ctx: &Context<'_>) -> 
     opcua_types::json::from_bytes(json_str.as_bytes(), ctx)
 }
 
+/// Decode a JSON-encoded OPC-UA PubSub NetworkMessage from raw bytes.
+///
+/// Implements the JSON NetworkMessage decoding per OPC-10000-14 §7.2.5.4.
+/// The payload is first parsed into a generic [`Value`] tree and then
+/// deserialized into a [`JsonNetworkMessage`], yielding a structured
+/// [`Error::decoding`] diagnostic when the bytes are not valid JSON or do not
+/// match the expected schema (`MessageId`, `MessageType`, `PublisherId` and the
+/// `Messages` array of DataSetMessages).
+pub fn decode_network_message(payload: &[u8]) -> Result<JsonNetworkMessage, Error> {
+    let value: Value = serde_json::from_slice(payload)
+        .map_err(|e| Error::decoding(format!("invalid JSON network message: {e}")))?;
+    serde_json::from_value::<JsonNetworkMessage>(value)
+        .map_err(|e| Error::decoding(format!("network message schema mismatch: {e}")))
+}
+
 /// A DataSetMessage formatted as JSON.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct JsonDataSetMessage {
     /// Unique identifier for the dataset writer.
-    #[serde(rename = "DataSetWriterId")]
+    #[serde(rename = "DataSetWriterId", default)]
     pub dataset_writer_id: u16,
     /// Cyclic sequence number of the dataset message.
-    #[serde(rename = "SequenceNumber")]
+    #[serde(rename = "SequenceNumber", default)]
     pub sequence_number: u16,
     /// The payload containing the keys mapped to serialized JSON values.
-    #[serde(rename = "Payload")]
+    #[serde(rename = "Payload", default)]
     pub payload: HashMap<String, Value>,
 }
 
@@ -46,7 +61,7 @@ pub struct JsonNetworkMessage {
     #[serde(rename = "PublisherId")]
     pub publisher_id: String,
     /// Unique identifier for the writer group.
-    #[serde(rename = "WriterGroupId")]
+    #[serde(rename = "WriterGroupId", default)]
     pub writer_group_id: u16,
     /// List of dataset messages included in the payload.
     #[serde(rename = "Messages")]

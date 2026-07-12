@@ -10,11 +10,18 @@ use opcua_core::sync::RwLock;
 use opcua_server::address_space::{AddressSpace, NodeType};
 use opcua_types::{
     AttributeId, BinaryDecodable, Context, DataValue, MessageSecurityMode, PubSubState, StatusCode,
+    UAString, Variant,
 };
 
 use crate::{
-    codec::uadp::{PublisherId, UadpDataSetMessage, UadpNetworkMessage},
-    config::{DataSetReaderConfig, FieldTargetConfig, PubSubConnectionConfig, ReaderGroupConfig},
+    codec::{
+        json::{decode_network_message, JsonDataSetMessage, JsonNetworkMessage},
+        uadp::{PublisherId, UadpDataSetMessage, UadpNetworkMessage},
+    },
+    config::{
+        DataSetReaderConfig, FieldTargetConfig, MessageEncoding, PubSubConnectionConfig,
+        ReaderGroupConfig,
+    },
     transport::udp::is_custom_fragment_datagram,
 };
 
@@ -161,6 +168,20 @@ impl SubscriberRuntime {
         payload: &[u8],
         ctx: &Context<'_>,
     ) -> Result<SubscriberApplyOutcome, StatusCode> {
+        // Dispatch to the appropriate decode path based on the configured
+        // DataSetReader message encoding. When a reader is configured with a
+        // JsonDataSetReaderMessageDataType (OPC-10000-14 §6.3.2.4.3), payloads
+        // must be routed through the JSON decode path instead of UADP.
+        let any_json_reader = self
+            .reader_groups
+            .iter()
+            .flat_map(|reader_group| reader_group.dataset_readers.iter())
+            .any(|reader| reader.message_encoding == MessageEncoding::Json);
+
+        if any_json_reader {
+            return self.process_json_datagram(payload, ctx);
+        }
+
         if is_custom_fragment_datagram(payload) {
             self.record_drop_for_all(SubscriberError::UnsupportedTarget);
             return Err(StatusCode::BadNotSupported);
@@ -169,6 +190,55 @@ impl SubscriberRuntime {
         let message =
             UadpNetworkMessage::decode(&mut &payload[..], ctx).map_err(|error| error.status())?;
         self.process_network_message(&message)
+    }
+
+    /// Decodes a JSON-encoded PubSub NetworkMessage and applies matching DataSetReaders.
+    ///
+    /// This is the JSON dispatch branch referenced from [`process_datagram`]. It handles
+    /// payloads received for DataSetReaders configured with
+    /// `JsonDataSetReaderMessageDataType` (OPC-10000-14 §6.3.2.4.3), parsing the JSON
+    /// envelope defined in §7.2.5.4 instead of the UADP binary wire format.
+    fn process_json_datagram(
+        &mut self,
+        payload: &[u8],
+        _ctx: &Context<'_>,
+    ) -> Result<SubscriberApplyOutcome, StatusCode> {
+        let message = decode_network_message(payload)?;
+        let now = Instant::now();
+        let mut outcome = SubscriberApplyOutcome::default();
+
+        for json_msg in &message.messages {
+            let readers: Vec<DataSetReaderConfig> = self
+                .reader_groups
+                .iter()
+                .flat_map(|reader_group| reader_group.dataset_readers.iter())
+                .cloned()
+                .collect();
+
+            for reader in readers {
+                if !json_reader_matches(&reader, &message, json_msg) {
+                    outcome.filtered_readers += 1;
+                    if let Some(status) = self.statuses.get_mut(&reader.dataset_reader_id) {
+                        status.filtered_count += 1;
+                    }
+                    continue;
+                }
+
+                outcome.matched_readers += 1;
+                match self.apply_json_reader(&reader, json_msg, now) {
+                    Ok(()) => outcome.applied_readers += 1,
+                    Err(error) => {
+                        if let Some(status) = self.statuses.get_mut(&reader.dataset_reader_id) {
+                            status.last_error = Some(error);
+                            status.dropped_count += 1;
+                            status.state = PubSubState::Error;
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(outcome)
     }
 
     /// Processes an already decoded and verified UADP NetworkMessage.
@@ -334,15 +404,45 @@ impl SubscriberRuntime {
         }
 
         if let Some(status) = self.statuses.get_mut(&reader.dataset_reader_id) {
-            update_sequence_status(status, dataset_message.sequence_number);
+            let was_operational = status.state == PubSubState::Operational;
+            let is_new = update_sequence_status(status, dataset_message.sequence_number);
             status.state = PubSubState::Operational;
-            status.last_receive_time = Some(now);
+            if !was_operational || is_new {
+                status.last_receive_time = Some(now);
+            }
             status.last_error = None;
             status.metadata_mismatch_since = None;
             status.accepted_count += 1;
         }
 
         Ok(())
+    }
+
+    fn apply_json_reader(
+        &mut self,
+        reader: &DataSetReaderConfig,
+        dataset_msg: &JsonDataSetMessage,
+        now: Instant,
+    ) -> Result<(), SubscriberError> {
+        // JSON payload is a map of field names to values. Deterministic field
+        // ordering is established by sorting keys so dataset_field_index maps
+        // consistently to the same position.
+        let mut keys: Vec<&String> = dataset_msg.payload.keys().collect();
+        keys.sort();
+        let fields: Vec<Variant> = keys
+            .iter()
+            .map(|k| json_value_to_variant(&dataset_msg.payload[*k]))
+            .collect();
+
+        let synthetic = UadpDataSetMessage {
+            dataset_writer_id: dataset_msg.dataset_writer_id,
+            sequence_number: dataset_msg.sequence_number,
+            timestamp: None,
+            status: None,
+            fields,
+        };
+
+        self.apply_reader(reader, &synthetic, now)
     }
 
     fn record_drop_for_all(&mut self, error: SubscriberError) {
@@ -443,6 +543,62 @@ fn publisher_matches(expected: Option<&PublisherId>, actual: &PublisherId) -> bo
     }
 }
 
+/// Matches a configured reader against a decoded JSON NetworkMessage.
+///
+/// JSON messages (OPC-10000-14 §7.2.5.4) carry `PublisherId` as a string and
+/// `WriterGroupId`/`DataSetWriterId` as integers, so the filter logic differs
+/// slightly from the UADP binary path.
+fn json_reader_matches(
+    reader: &DataSetReaderConfig,
+    message: &JsonNetworkMessage,
+    dataset_msg: &JsonDataSetMessage,
+) -> bool {
+    json_publisher_matches(reader.publisher_id.as_ref(), &message.publisher_id)
+        && optional_u16_matches(reader.writer_group_id, message.writer_group_id)
+        && dataset_writer_matches(reader.dataset_writer_id, dataset_msg.dataset_writer_id)
+}
+
+fn json_publisher_matches(expected: Option<&PublisherId>, actual: &str) -> bool {
+    match expected {
+        None | Some(PublisherId::None) => true,
+        Some(PublisherId::Byte(0))
+        | Some(PublisherId::UInt16(0))
+        | Some(PublisherId::UInt32(0))
+        | Some(PublisherId::UInt64(0)) => true,
+        Some(PublisherId::String(value)) if value.is_empty() => true,
+        Some(expected) => publisher_id_to_json_string(expected) == actual,
+    }
+}
+
+fn publisher_id_to_json_string(id: &PublisherId) -> String {
+    match id {
+        PublisherId::None => String::new(),
+        PublisherId::Byte(v) => v.to_string(),
+        PublisherId::UInt16(v) => v.to_string(),
+        PublisherId::UInt32(v) => v.to_string(),
+        PublisherId::UInt64(v) => v.to_string(),
+        PublisherId::String(v) => v.clone(),
+    }
+}
+
+/// Converts a raw JSON value into a best-effort OPC-UA `Variant`.
+///
+/// JSON DataSetMessage payloads (OPC-10000-14 §7.2.5.4.3) may contain plain
+/// JSON primitives. Numeric values are mapped to `Double` to match the
+/// loose typing of JSON numbers.
+fn json_value_to_variant(value: &serde_json::Value) -> Variant {
+    match value {
+        serde_json::Value::Null => Variant::Empty,
+        serde_json::Value::Bool(b) => Variant::Boolean(*b),
+        serde_json::Value::Number(n) => match n.as_f64() {
+            Some(f) => Variant::Double(f),
+            None => Variant::Empty,
+        },
+        serde_json::Value::String(s) => Variant::String(UAString::from(s.as_str())),
+        _ => Variant::Empty,
+    }
+}
+
 fn optional_u16_matches(expected: Option<u16>, actual: u16) -> bool {
     match expected {
         Some(expected) => expected == actual,
@@ -493,23 +649,29 @@ pub(crate) fn effective_security_config(
     })
 }
 
-fn update_sequence_status(status: &mut DataSetReaderStatus, sequence_number: u16) {
-    if let Some(last) = status.last_sequence_number {
-        let last = last as u16;
-        if sequence_number == last {
-            status.duplicate_count += 1;
-        } else {
-            let expected = last.wrapping_add(1);
-            if sequence_number != expected {
-                let forward_distance = sequence_number.wrapping_sub(last);
-                if forward_distance < (u16::MAX / 2) {
-                    status.sequence_gap_count += 1;
-                } else {
-                    status.out_of_order_count += 1;
+fn update_sequence_status(status: &mut DataSetReaderStatus, sequence_number: u16) -> bool {
+    let is_new = match status.last_sequence_number {
+        None => true,
+        Some(last) => {
+            let last = last as u16;
+            if sequence_number == last {
+                status.duplicate_count += 1;
+                false
+            } else {
+                let expected = last.wrapping_add(1);
+                if sequence_number != expected {
+                    let forward_distance = sequence_number.wrapping_sub(last);
+                    if forward_distance < (u16::MAX / 2) {
+                        status.sequence_gap_count += 1;
+                    } else {
+                        status.out_of_order_count += 1;
+                    }
                 }
+                true
             }
         }
-    }
+    };
 
     status.last_sequence_number = Some(sequence_number as u64);
+    is_new
 }

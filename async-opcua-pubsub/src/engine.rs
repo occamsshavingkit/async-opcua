@@ -6,6 +6,7 @@ use opcua_core::sync::RwLock;
 use opcua_crypto::SecurityPolicy;
 use opcua_server::address_space::AddressSpace;
 use opcua_types::{Context, ContextOwned, MessageSecurityMode, StatusCode};
+use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
@@ -71,6 +72,68 @@ impl TransportKind {
     }
 }
 
+/// Default PubSub datagram queue capacity.
+///
+/// `OperationalLimits` (Part 4) only covers service-call bounds, so the
+/// PubSub datagram bound is a crate-level constant. Override per engine with
+/// [`PubSubEngine::set_datagram_queue_capacity`].
+pub const PUBSUB_DATAGRAM_QUEUE_CAPACITY: usize = 1024;
+
+/// Bounded queue for incoming PubSub datagrams (OPC-10000-14 §9.1.10.1).
+///
+/// Enforces a processing limit on received PubSub NetworkMessages. When the
+/// queue is full, [`DatagramQueue::try_enqueue`] returns
+/// `StatusCode::BadTooManyPublishRequests` and the caller drops the datagram
+/// rather than accumulating unbounded backpressure.
+#[derive(Debug)]
+pub struct DatagramQueue {
+    tx: mpsc::Sender<Vec<u8>>,
+    capacity: usize,
+}
+
+impl DatagramQueue {
+    /// Creates a new bounded datagram queue with the requested capacity.
+    ///
+    /// The capacity is clamped to a minimum of 1 so a misconfigured zero
+    /// capacity does not reject every datagram.
+    pub fn new(capacity: usize) -> (Self, mpsc::Receiver<Vec<u8>>) {
+        let capacity = capacity.max(1);
+        let (tx, rx) = mpsc::channel(capacity);
+        (Self { tx, capacity }, rx)
+    }
+
+    /// Attempts to enqueue a datagram without blocking.
+    ///
+    /// Returns:
+    /// - `Ok(())` when the datagram was accepted.
+    /// - `Err(StatusCode::BadTooManyPublishRequests)` when the queue is full
+    ///   (OPC-10000-14 §9.1.10.1 processing-limit enforcement).
+    /// - `Err(StatusCode::BadNoCommunication)` when the consumer has dropped
+    ///   its receiver (e.g. the engine is shutting down).
+    pub fn try_enqueue(&self, payload: Vec<u8>) -> Result<(), StatusCode> {
+        self.tx.try_send(payload).map_err(|err| match err {
+            mpsc::error::TrySendError::Full(_) => StatusCode::BadTooManyPublishRequests,
+            mpsc::error::TrySendError::Closed(_) => StatusCode::BadNoCommunication,
+        })
+    }
+
+    /// Returns the configured queue capacity.
+    #[must_use]
+    pub fn capacity(&self) -> usize {
+        self.capacity
+    }
+
+    /// Returns a clone of the underlying sender for transport tasks that own
+    /// their own receive loops (e.g. the MQTT broker subscriber).
+    ///
+    /// Callers that use this raw sender must call `try_send` and treat
+    /// `TrySendError::Full` as `StatusCode::BadTooManyPublishRequests` to
+    /// honour OPC-10000-14 §9.1.10.1.
+    pub fn sender(&self) -> mpsc::Sender<Vec<u8>> {
+        self.tx.clone()
+    }
+}
+
 /// Coordinates PubSub connection configurations and transport publishing loops.
 pub struct PubSubEngine {
     address_space: Arc<RwLock<AddressSpace>>,
@@ -82,6 +145,7 @@ pub struct PubSubEngine {
     subscriber_runtime: Option<Arc<RwLock<SubscriberRuntime>>>,
     subscriber_cancel_token: Option<CancellationToken>,
     subscriber_handles: Vec<JoinHandle<()>>,
+    datagram_queue_capacity: usize,
 }
 
 impl PubSubEngine {
@@ -97,6 +161,7 @@ impl PubSubEngine {
             subscriber_runtime: None,
             subscriber_cancel_token: None,
             subscriber_handles: Vec::new(),
+            datagram_queue_capacity: PUBSUB_DATAGRAM_QUEUE_CAPACITY,
         }
     }
 
@@ -115,6 +180,7 @@ impl PubSubEngine {
             subscriber_runtime: None,
             subscriber_cancel_token: None,
             subscriber_handles: Vec::new(),
+            datagram_queue_capacity: PUBSUB_DATAGRAM_QUEUE_CAPACITY,
         }
     }
 
@@ -124,6 +190,23 @@ impl PubSubEngine {
         if self.subscriber_cancel_token.is_none() {
             self.subscriber_runtime = None;
         }
+    }
+
+    /// Sets the bounded datagram queue capacity used by subscriber receive
+    /// loops (OPC-10000-14 §9.1.10.1).
+    ///
+    /// Datagrams received while the queue is full are rejected with
+    /// `StatusCode::BadTooManyPublishRequests`. Must be called before
+    /// [`PubSubEngine::start_subscribers`]; later changes only apply to the
+    /// next subscriber start. The capacity is clamped to a minimum of 1.
+    pub fn set_datagram_queue_capacity(&mut self, capacity: usize) {
+        self.datagram_queue_capacity = capacity.max(1);
+    }
+
+    /// Returns the configured datagram queue capacity.
+    #[must_use]
+    pub fn datagram_queue_capacity(&self) -> usize {
+        self.datagram_queue_capacity
     }
 
     /// Removes a connection configuration by connection id.
@@ -365,7 +448,13 @@ impl PubSubEngine {
         }
     }
 
-    /// Starts UDP subscriber receive loops for configured ReaderGroups.
+    /// Starts subscriber receive loops for configured ReaderGroups.
+    ///
+    /// Dispatches by transport mapping (OPC-10000-14 §6.4): UDP connections
+    /// spawn datagram receive loops (§6.4.1), while MQTT (`mqtt://`/`mqtts://`)
+    /// connections spawn one broker subscriber task per DataSetReader (§6.4.2).
+    /// Other broker transports are logged and skipped so a single unsupported
+    /// connection does not abort subscriber startup.
     pub fn start_subscribers(&mut self) -> Result<(), StatusCode> {
         if self.subscribers_are_running() {
             return Ok(());
@@ -390,53 +479,37 @@ impl PubSubEngine {
         let mut handles = Vec::with_capacity(connections.len());
 
         for connection in connections {
-            let endpoint = UdpSubscriberEndpoint::parse(&connection.address)?;
-            let runtime = runtime.clone();
-            let cancel_token = cancel_token.clone();
-            let connection_id = connection.connection_id;
-
-            handles.push(tokio::spawn(async move {
-                let socket = match bind_subscriber_socket(endpoint).await {
-                    Ok(socket) => socket,
-                    Err(status) => {
-                        tracing::error!(
-                            ?status,
-                            %connection_id,
-                            "failed to bind PubSub subscriber UDP socket"
-                        );
-                        return;
-                    }
-                };
-                let mut buf = vec![0_u8; 65_535];
-
-                loop {
-                    tokio::select! {
-                        _ = cancel_token.cancelled() => break,
-                        received = socket.recv_from(&mut buf) => {
-                            match received {
-                                Ok((len, _peer)) => {
-                                    let ctx_owned = ContextOwned::default();
-                                    let ctx = ctx_owned.context();
-                                    if let Err(status) = runtime.write().process_datagram(&buf[..len], &ctx) {
-                                        tracing::debug!(
-                                            ?status,
-                                            %connection_id,
-                                            "dropped PubSub subscriber UDP datagram"
-                                        );
-                                    }
-                                }
-                                Err(error) => {
-                                    tracing::warn!(
-                                        ?error,
-                                        %connection_id,
-                                        "failed to receive PubSub subscriber UDP datagram"
-                                    );
-                                }
-                            }
-                        }
-                    }
+            let kind = TransportKind::from_address(&connection.address)?;
+            let connection_id = connection.connection_id.clone();
+            match kind {
+                TransportKind::Udp => {
+                    handles.extend(self.spawn_udp_subscriber(
+                        connection,
+                        runtime.clone(),
+                        cancel_token.clone(),
+                    )?);
                 }
-            }));
+                TransportKind::Mqtt => {
+                    handles.extend(self.spawn_mqtt_subscribers(
+                        connection,
+                        runtime.clone(),
+                        cancel_token.clone(),
+                    ));
+                }
+                TransportKind::Amqp | TransportKind::WebSocket => {
+                    tracing::warn!(
+                        %connection_id,
+                        "subscriber dispatch not yet supported for this PubSub transport; ignoring connection"
+                    );
+                }
+                #[cfg(feature = "tsn")]
+                TransportKind::Tsn => {
+                    tracing::warn!(
+                        %connection_id,
+                        "TSN subscriber dispatch not yet supported; ignoring connection"
+                    );
+                }
+            }
         }
 
         self.subscriber_cancel_token = Some(cancel_token);
@@ -453,6 +526,203 @@ impl PubSubEngine {
         while let Some(handle) = self.subscriber_handles.pop() {
             let _ = handle.await;
         }
+    }
+
+    /// Spawns a single UDP datagram receive loop for a broker-less PubSub
+    /// connection (OPC-10000-14 §6.4.1).
+    ///
+    /// Received payloads are forwarded across a bounded
+    /// [`DatagramQueue`] (OPC-10000-14 §9.1.10.1) to a consumer task that
+    /// hands them to `SubscriberRuntime::process_datagram`. When the queue is
+    /// full (processing can't keep up), the producer rejects the datagram with
+    /// `StatusCode::BadTooManyPublishRequests` and drops it rather than
+    /// blocking the receive loop or growing memory without bound.
+    ///
+    /// Returns the producer and consumer task handles so the engine can await
+    /// both on shutdown.
+    fn spawn_udp_subscriber(
+        &self,
+        connection: PubSubConnectionConfig,
+        runtime: Arc<RwLock<SubscriberRuntime>>,
+        cancel_token: CancellationToken,
+    ) -> Result<Vec<JoinHandle<()>>, StatusCode> {
+        let endpoint = UdpSubscriberEndpoint::parse(&connection.address)?;
+        let connection_id = connection.connection_id;
+        let (queue, payload_rx) = DatagramQueue::new(self.datagram_queue_capacity);
+        let mut handles = Vec::with_capacity(2);
+
+        // Consumer task: drains the bounded queue and runs the (synchronous)
+        // subscriber runtime processing. Exits on cancellation or once the
+        // producer drops its sender and the queue drains.
+        let consumer_runtime = runtime.clone();
+        let consumer_cancel = cancel_token.clone();
+        let consumer_connection_id = connection_id.clone();
+        handles.push(tokio::spawn(async move {
+            let mut payload_rx = payload_rx;
+            loop {
+                tokio::select! {
+                    _ = consumer_cancel.cancelled() => break,
+                    payload = payload_rx.recv() => {
+                        let Some(payload) = payload else { break };
+                        let ctx_owned = ContextOwned::default();
+                        let ctx = ctx_owned.context();
+                        if let Err(status) = consumer_runtime
+                            .write()
+                            .process_datagram(&payload, &ctx)
+                        {
+                            tracing::debug!(
+                                ?status,
+                                %consumer_connection_id,
+                                "dropped PubSub subscriber UDP datagram"
+                            );
+                        }
+                    }
+                }
+            }
+        }));
+
+        // Producer task: receives UDP datagrams and enqueues them on the
+        // bounded queue. On `BadTooManyPublishRequests` the datagram is
+        // dropped (logged) so the receive loop never blocks on a full queue.
+        handles.push(tokio::spawn(async move {
+            let socket = match bind_subscriber_socket(endpoint).await {
+                Ok(socket) => socket,
+                Err(status) => {
+                    tracing::error!(
+                        ?status,
+                        %connection_id,
+                        "failed to bind PubSub subscriber UDP socket"
+                    );
+                    return;
+                }
+            };
+            let mut buf = vec![0_u8; 65_535];
+
+            loop {
+                tokio::select! {
+                    _ = cancel_token.cancelled() => break,
+                    received = socket.recv_from(&mut buf) => {
+                        match received {
+                            Ok((len, _peer)) => {
+                                if let Err(status) = queue.try_enqueue(buf[..len].to_vec()) {
+                                    if status == StatusCode::BadTooManyPublishRequests {
+                                        tracing::warn!(
+                                            ?status,
+                                            %connection_id,
+                                            "PubSub subscriber UDP datagram rejected; \
+                                             datagram queue full"
+                                        );
+                                    } else {
+                                        tracing::debug!(
+                                            ?status,
+                                            %connection_id,
+                                            "PubSub subscriber UDP datagram not enqueued; \
+                                             queue closed"
+                                        );
+                                    }
+                                }
+                            }
+                            Err(error) => {
+                                tracing::warn!(
+                                    ?error,
+                                    %connection_id,
+                                    "failed to receive PubSub subscriber UDP datagram"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }));
+
+        Ok(handles)
+    }
+
+    /// Spawns MQTT broker subscriber tasks for each DataSetReader in the
+    /// connection's ReaderGroups (OPC-10000-14 §6.4.2).
+    ///
+    /// Each DataSetReader maps to one MQTT topic subscription. The broker
+    /// subscriber (`transport::mqtt::start_mqtt_subscriber`) forwards received
+    /// payload bytes over an mpsc channel; a per-reader forwarder task drains
+    /// that channel and hands each payload to
+    /// `SubscriberRuntime::process_datagram`. Broker connection failures are
+    /// logged and retried with backoff inside the subscriber task, so they
+    /// never crash the engine or abort the remaining readers.
+    ///
+    /// TODO(config): the topic filter should come from the reader's
+    /// `BrokerDataSetReaderTransportDataType.QueueName` (§6.4.1.6.4) once the
+    /// config model exposes it. Until then it is derived from the reader's
+    /// writer-group filter to match the publisher's
+    /// `opcua/telemetry/{writer_group_id}` topic convention.
+    fn spawn_mqtt_subscribers(
+        &self,
+        connection: PubSubConnectionConfig,
+        runtime: Arc<RwLock<SubscriberRuntime>>,
+        cancel_token: CancellationToken,
+    ) -> Vec<JoinHandle<()>> {
+        let connection_id = connection.connection_id.clone();
+        let broker_address = connection.address.clone();
+        let mut handles = Vec::new();
+
+        for reader_group in &connection.reader_groups {
+            for reader in &reader_group.dataset_readers {
+                let reader_id = reader.dataset_reader_id;
+                let topic_filter = match reader.writer_group_id {
+                    Some(writer_group_id) => format!("opcua/telemetry/{writer_group_id}"),
+                    None => format!("opcua/telemetry/{}", reader_group.reader_group_id),
+                };
+
+                let (queue, mut payload_rx) = DatagramQueue::new(self.datagram_queue_capacity);
+                // Raw sender for the broker subscriber task, which uses
+                // `try_send` and treats `Full` as `BadTooManyPublishRequests`
+                // (see `transport::mqtt::start_mqtt_subscriber`).
+                let payload_tx = queue.sender();
+
+                // Subscriber task: connects to the broker (with reconnect
+                // backoff) and forwards published payloads to the channel.
+                let subscriber_handle = crate::transport::mqtt::start_mqtt_subscriber(
+                    broker_address.clone(),
+                    topic_filter.clone(),
+                    payload_tx,
+                );
+                handles.push(subscriber_handle);
+
+                // Forwarder task: drains received payloads into the subscriber
+                // runtime. Exits on cancellation or when the subscriber drops
+                // its sender (e.g. unrecoverable broker loss), which in turn
+                // lets the subscriber task wind down.
+                let runtime = runtime.clone();
+                let cancel = cancel_token.clone();
+                let connection_id = connection_id.clone();
+                let topic = topic_filter.clone();
+                handles.push(tokio::spawn(async move {
+                    loop {
+                        tokio::select! {
+                            _ = cancel.cancelled() => break,
+                            payload = payload_rx.recv() => {
+                                let Some(payload) = payload else { break };
+                                let ctx_owned = ContextOwned::default();
+                                let ctx = ctx_owned.context();
+                                if let Err(status) = runtime
+                                    .write()
+                                    .process_datagram(&payload, &ctx)
+                                {
+                                    tracing::debug!(
+                                        ?status,
+                                        %connection_id,
+                                        %topic,
+                                        reader_id,
+                                        "dropped PubSub subscriber MQTT payload"
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }));
+            }
+        }
+
+        handles
     }
 
     fn start_connection(

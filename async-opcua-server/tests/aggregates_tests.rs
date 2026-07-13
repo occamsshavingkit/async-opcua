@@ -33,6 +33,42 @@ fn calculate_aggregate(
     )
 }
 
+/// Helper for bounded-aggregate probes: a Good Double value at a given timestamp.
+fn good_double(timestamp: DateTime, value: f64) -> DataValue {
+    DataValue {
+        value: Some(Variant::Double(value)),
+        status: Some(StatusCode::Good),
+        source_timestamp: Some(timestamp),
+        server_timestamp: Some(timestamp),
+        ..Default::default()
+    }
+}
+
+/// Drive a single aggregate over one interval with explicit prior/next bounds.
+fn bounded_aggregate(
+    values: &[&DataValue],
+    prior: Option<&DataValue>,
+    next: Option<&DataValue>,
+    aggregate_type: &NodeId,
+    start: DateTime,
+    end: DateTime,
+) -> DataValue {
+    let config = AggregateConfiguration::default();
+    dispatch_aggregate(
+        aggregate_type,
+        &AggregateInput {
+            values,
+            annotations: &[],
+            prior,
+            next,
+            interval_start: start,
+            interval_end: end,
+            config: &config,
+            stepped: true,
+        },
+    )
+}
+
 #[test]
 fn aggregate_node_ids_match_the_standard_registry() {
     // Conformance: the aggregate NodeIds must be the canonical Part 6 AggregateFunction ids, not
@@ -1293,4 +1329,60 @@ fn annotation_count_edge_intervals_do_not_panic() {
         "the range must produce at least one interval"
     );
     assert!(excluded.iter().all(|v| v.value == Some(Variant::Int32(0))));
+}
+
+// ===========================================================================
+// Part 13 focused oracle probe: StartBound/EndBound/DeltaBounds use Simple
+// Bounding Values (OPC 10000-13). With stepped=true the value held at the
+// interval start is the prior, and the value held at the interval end is the
+// last in-interval value.
+// ===========================================================================
+
+#[test]
+fn part13_start_end_and_delta_bounds_use_simple_bounds() {
+    let before = DateTime::from((2026, 7, 13, 12, 0, 0));
+    let start = DateTime::from((2026, 7, 13, 12, 0, 10));
+    let inside = DateTime::from((2026, 7, 13, 12, 0, 15));
+    let end = DateTime::from((2026, 7, 13, 12, 0, 20));
+    let after = DateTime::from((2026, 7, 13, 12, 0, 30));
+
+    let prior = good_double(before, 5.0);
+    let in_interval = good_double(inside, 11.0);
+    let next = good_double(after, 23.0);
+
+    // StartBound (i=11505): simple bound = prior value held at interval_start = 5.0.
+    let start_bound = bounded_aggregate(
+        &[&in_interval],
+        Some(&prior),
+        Some(&next),
+        &NodeId::new(0u16, 11505u32),
+        start,
+        end,
+    );
+    assert_eq!(start_bound.status, Some(StatusCode::Good));
+    assert_eq!(start_bound.value, Some(Variant::Double(5.0)));
+
+    // EndBound (i=11506): simple bound = last in-interval value held at interval_end = 11.0.
+    let end_bound = bounded_aggregate(
+        &[&in_interval],
+        Some(&prior),
+        Some(&next),
+        &NodeId::new(0u16, 11506u32),
+        start,
+        end,
+    );
+    assert_eq!(end_bound.status, Some(StatusCode::Good));
+    assert_eq!(end_bound.value, Some(Variant::Double(11.0)));
+
+    // DeltaBounds (i=11507): EndBound - StartBound = 11.0 - 5.0 = 6.0.
+    let delta_bounds = bounded_aggregate(
+        &[&in_interval],
+        Some(&prior),
+        Some(&next),
+        &NodeId::new(0u16, 11507u32),
+        start,
+        end,
+    );
+    assert_eq!(delta_bounds.status, Some(StatusCode::Good));
+    assert_eq!(delta_bounds.value, Some(Variant::Double(6.0)));
 }

@@ -270,7 +270,7 @@ pub(crate) struct EndpointAuthentication {
     pub x509_user_certificate_validation: Option<X509UserCertificateValidation>,
 }
 
-#[cfg(feature = "lds")]
+#[cfg(all(feature = "lds", not(feature = "discovery-mdns")))]
 struct ServerOnNetworkCandidate {
     sort_key: String,
     server_name: UAString,
@@ -694,7 +694,7 @@ impl ServerInfo {
         }
     }
 
-    #[cfg(feature = "lds")]
+    #[cfg(all(feature = "lds", not(feature = "discovery-mdns")))]
     fn local_server_on_network_candidate(&self) -> ServerOnNetworkCandidate {
         ServerOnNetworkCandidate {
             sort_key: self.config.application_uri.clone(),

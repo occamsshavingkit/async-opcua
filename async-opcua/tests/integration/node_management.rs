@@ -223,6 +223,25 @@ async fn simple_writable_error_statuses() {
 }
 
 #[tokio::test]
+async fn add_nodes_server_assigned_id_with_missing_parent_returns_bad_parent_node_id_invalid() {
+    let (_tester, _nm, ns, _parent, session) = setup_simple(true).await;
+
+    // OPC UA Part 4 5.8.2.4 Table 24: invalid parentNodeId is an operation-level
+    // BadParentNodeIdInvalid even when the server would assign the new NodeId.
+    let result = session
+        .add_nodes(&[object_item(
+            NodeId::new(ns, 99999),
+            ns,
+            "ServerAssignedOrphan",
+            ExpandedNodeId::null(),
+        )])
+        .await
+        .unwrap();
+
+    assert_eq!(result[0].status_code, StatusCode::BadParentNodeIdInvalid);
+}
+
+#[tokio::test]
 async fn add_nodes_duplicate_browse_name_returns_bad_browse_name_duplicated() {
     let (_tester, _nm, ns, parent, session) = setup_simple(true).await;
 
@@ -291,6 +310,42 @@ async fn add_nodes_foreign_namespace_returns_bad_node_id_rejected() {
 }
 
 #[tokio::test]
+async fn add_nodes_gate_off_still_reports_invalid_reference_type_and_type_definition() {
+    let (_tester, _nm, ns, parent, session) = setup_simple(false).await;
+
+    let mut invalid_reference_type = object_item(
+        parent.clone(),
+        ns,
+        "InvalidReferenceTypeBeforeGate",
+        NodeId::new(ns, "InvalidReferenceTypeBeforeGate").into(),
+    );
+    invalid_reference_type.reference_type_id = NodeId::new(ns, 99999);
+
+    let mut invalid_type_definition = object_item(
+        parent,
+        ns,
+        "InvalidTypeDefinitionBeforeGate",
+        NodeId::new(ns, "InvalidTypeDefinitionBeforeGate").into(),
+    );
+    invalid_type_definition.type_definition = NodeId::new(ns, 99999).into();
+
+    // OPC UA Part 4 5.8.2.4 Table 24: operation-level validation errors are
+    // returned per item before the implementation capability gate is considered.
+    let result = session
+        .add_nodes(&[invalid_reference_type, invalid_type_definition])
+        .await
+        .unwrap();
+
+    assert_eq!(
+        result.iter().map(|r| r.status_code).collect::<Vec<_>>(),
+        vec![
+            StatusCode::BadReferenceTypeIdInvalid,
+            StatusCode::BadTypeDefinitionInvalid,
+        ]
+    );
+}
+
+#[tokio::test]
 async fn simple_gate_off_refuses_modification() {
     let (_tester, _nm, ns, parent, session) = setup_simple(false).await;
 
@@ -329,6 +384,38 @@ async fn simple_gate_off_refuses_modification() {
         .await
         .unwrap();
     assert_eq!(rr, vec![StatusCode::BadServiceUnsupported]);
+}
+
+#[tokio::test]
+async fn delete_nodes_gate_off_still_reports_user_access_denied() {
+    let (_tester, nm, ns, parent, session) = setup_simple_rbac(false, true).await;
+    let denied = NodeId::new(ns, "DeleteNodeDeniedBeforeGate");
+    {
+        let sp = nm.address_space().write();
+        ObjectBuilder::new(
+            &denied,
+            "DeleteNodeDeniedBeforeGate",
+            "DeleteNodeDeniedBeforeGate",
+        )
+        .organized_by(parent)
+        .role_permissions(vec![RolePermissionType {
+            role_id: NodeId::new(0, 15680), // Operator only; anonymous session lacks it.
+            permissions: PermissionType::DeleteNode,
+        }])
+        .insert(&*sp);
+    }
+
+    // OPC UA Part 4 5.8.4.4 Table 30: authorization failures are operation-level
+    // BadUserAccessDenied and should not be hidden by the implementation capability gate.
+    let result = session
+        .delete_nodes(&[DeleteNodesItem {
+            node_id: denied,
+            delete_target_references: true,
+        }])
+        .await
+        .unwrap();
+
+    assert_eq!(result, vec![StatusCode::BadUserAccessDenied]);
 }
 
 /// Seed an Object owned by the SimpleNodeManager, organized under `parent`.
@@ -456,6 +543,144 @@ async fn simple_writable_reference_errors() {
     // Null reference type (rejected at item validation) -> BadReferenceTypeIdInvalid.
     let r = add(&session, a.clone(), a.clone(), NodeId::null()).await;
     assert_eq!(r, vec![StatusCode::BadReferenceTypeIdInvalid]);
+}
+
+#[tokio::test]
+async fn add_references_existing_source_unknown_target_returns_bad_target_node_id_invalid() {
+    let (_tester, nm, ns, parent, session) = setup_simple(true).await;
+    let source = NodeId::new(ns, "KnownReferenceSource");
+    seed_object(&nm, &parent, &source, "KnownReferenceSource");
+
+    // OPC UA Part 4 5.8.3.4 Table 27: an invalid targetNodeId is BadTargetNodeIdInvalid;
+    // a valid local source must not make the operation succeed with a dangling reference.
+    let result = session
+        .add_references(&[AddReferencesItem {
+            source_node_id: source,
+            reference_type_id: ReferenceTypeId::Organizes.into(),
+            is_forward: true,
+            target_server_uri: Default::default(),
+            target_node_id: NodeId::new(ns, 99999).into(),
+            target_node_class: NodeClass::Object,
+        }])
+        .await
+        .unwrap();
+
+    assert_eq!(result, vec![StatusCode::BadTargetNodeIdInvalid]);
+}
+
+#[tokio::test]
+async fn add_references_duplicate_reference_returns_bad_duplicate_reference_not_allowed() {
+    let (_tester, nm, ns, parent, session) = setup_simple(true).await;
+    let source = NodeId::new(ns, "DuplicateReferenceSource");
+    let target = NodeId::new(ns, "DuplicateReferenceTarget");
+    seed_object(&nm, &parent, &source, "DuplicateReferenceSource");
+    seed_object(&nm, &parent, &target, "DuplicateReferenceTarget");
+    {
+        let sp = nm.address_space().write();
+        sp.insert_reference(&source, &target, ReferenceTypeId::Organizes);
+    }
+
+    // OPC UA Part 4 5.8.3.4 Table 27: adding an already existing reference is rejected.
+    let result = session
+        .add_references(&[AddReferencesItem {
+            source_node_id: source,
+            reference_type_id: ReferenceTypeId::Organizes.into(),
+            is_forward: true,
+            target_server_uri: Default::default(),
+            target_node_id: target.into(),
+            target_node_class: NodeClass::Object,
+        }])
+        .await
+        .unwrap();
+
+    assert_eq!(result, vec![StatusCode::BadDuplicateReferenceNotAllowed]);
+}
+
+#[tokio::test]
+async fn add_references_self_reference_returns_bad_invalid_self_reference() {
+    let (_tester, nm, ns, parent, session) = setup_simple(true).await;
+    let source = NodeId::new(ns, "SelfReferenceSource");
+    seed_object(&nm, &parent, &source, "SelfReferenceSource");
+
+    // OPC UA Part 4 5.8.3.4 Table 27: invalid self-references have their own status code.
+    let result = session
+        .add_references(&[AddReferencesItem {
+            source_node_id: source.clone(),
+            reference_type_id: ReferenceTypeId::Organizes.into(),
+            is_forward: true,
+            target_server_uri: Default::default(),
+            target_node_id: source.into(),
+            target_node_class: NodeClass::Object,
+        }])
+        .await
+        .unwrap();
+
+    assert_eq!(result, vec![StatusCode::BadInvalidSelfReference]);
+}
+
+#[tokio::test]
+async fn add_references_gate_off_still_reports_duplicate_and_self_reference_errors() {
+    let (_tester, nm, ns, parent, session) = setup_simple(false).await;
+    let source = NodeId::new(ns, "GateOffReferenceSource");
+    let target = NodeId::new(ns, "GateOffReferenceTarget");
+    seed_object(&nm, &parent, &source, "GateOffReferenceSource");
+    seed_object(&nm, &parent, &target, "GateOffReferenceTarget");
+    {
+        let sp = nm.address_space().write();
+        sp.insert_reference(&source, &target, ReferenceTypeId::Organizes);
+    }
+
+    // OPC UA Part 4 5.8.3.4 Table 27 errors are reported before the mutation gate.
+    let result = session
+        .add_references(&[
+            AddReferencesItem {
+                source_node_id: source.clone(),
+                reference_type_id: ReferenceTypeId::Organizes.into(),
+                is_forward: true,
+                target_server_uri: Default::default(),
+                target_node_id: target.into(),
+                target_node_class: NodeClass::Object,
+            },
+            AddReferencesItem {
+                source_node_id: source.clone(),
+                reference_type_id: ReferenceTypeId::Organizes.into(),
+                is_forward: true,
+                target_server_uri: Default::default(),
+                target_node_id: source.into(),
+                target_node_class: NodeClass::Object,
+            },
+        ])
+        .await
+        .unwrap();
+
+    assert_eq!(
+        result,
+        vec![
+            StatusCode::BadDuplicateReferenceNotAllowed,
+            StatusCode::BadInvalidSelfReference,
+        ]
+    );
+}
+
+#[tokio::test]
+async fn delete_references_existing_source_unknown_target_returns_bad_target_node_id_invalid() {
+    let (_tester, nm, ns, parent, session) = setup_simple(true).await;
+    let source = NodeId::new(ns, "DeleteReferenceKnownSource");
+    seed_object(&nm, &parent, &source, "DeleteReferenceKnownSource");
+
+    // OPC UA Part 4 5.8.5.4 Table 31: an invalid targetNodeId is BadTargetNodeIdInvalid.
+    let result = session
+        .delete_references(&[DeleteReferencesItem {
+            source_node_id: source,
+            reference_type_id: ReferenceTypeId::Organizes.into(),
+            is_forward: true,
+            target_node_id: NodeId::new(ns, 99999).into(),
+            delete_bidirectional: true,
+        }])
+        .await
+        .unwrap();
+
+    assert_eq!(result, vec![StatusCode::BadTargetNodeIdInvalid]);
 }
 
 #[tokio::test]

@@ -19,11 +19,11 @@ use opcua::{
         ObjectTypeBuilder, ReferenceTypeBuilder, VariableBuilder, VariableTypeBuilder, ViewBuilder,
     },
     types::{
-        AttributeId, DataTypeId, DataValue, DateTime, HistoryData, HistoryReadValueId,
-        LocalizedText, NodeClass, NodeId, ObjectId, ObjectTypeId, QualifiedName,
-        ReadRawModifiedDetails, ReadValueId, ReferenceTypeId, SessionDiagnosticsDataType,
-        StatusCode, SubscriptionDiagnosticsDataType, TimestampsToReturn, VariableId,
-        VariableTypeId, Variant, WriteMask, WriteValue,
+        AggregateConfiguration, AttributeId, DataTypeId, DataValue, DateTime, HistoryData,
+        HistoryReadValueId, LocalizedText, NodeClass, NodeId, ObjectId, ObjectTypeId,
+        QualifiedName, ReadProcessedDetails, ReadRawModifiedDetails, ReadValueId, ReferenceTypeId,
+        SessionDiagnosticsDataType, StatusCode, SubscriptionDiagnosticsDataType,
+        TimestampsToReturn, VariableId, VariableTypeId, Variant, WriteMask, WriteValue,
     },
 };
 use opcua_client::{services::Read, DefaultRetryPolicy, ExponentialBackoff, UARequest};
@@ -2382,4 +2382,118 @@ async fn access_level_ex_extended_bits_configurable_and_writable() {
         alx & AccessLevelExType::NonatomicRead.bits() as u32,
         "write replaced the extended bits"
     );
+}
+
+#[tokio::test]
+async fn history_read_processed_returns_history_data_values() {
+    use opcua::server::{
+        diagnostics::NamespaceMetadata,
+        node_manager::memory::{simple_node_manager, SimpleNodeManager},
+        InMemoryDataHistory,
+    };
+    use opcua::types::PerformUpdateType;
+
+    // Install a SimpleNodeManager with the in-memory data history backend so that
+    // ReadProcessedDetails is served (the default test node manager has no history backend,
+    // so it would return BadHistoryOperationUnsupported).
+    let namespace = NamespaceMetadata {
+        namespace_uri: "urn:rustopcuatestserver".to_owned(),
+        namespace_index: 2,
+        ..Default::default()
+    };
+    let server = default_server().with_node_manager(simple_node_manager(namespace, "test"));
+    let mut tester = Tester::new(server, false).await;
+    let nm = tester
+        .handle
+        .node_managers()
+        .get_of_type::<SimpleNodeManager>()
+        .expect("SimpleNodeManager not found");
+    nm.inner()
+        .set_history_backend(Arc::new(InMemoryDataHistory::new()));
+    let (session, lp) = tester.connect_default().await.unwrap();
+    lp.spawn();
+    tokio::time::timeout(Duration::from_secs(2), session.wait_for_connection())
+        .await
+        .unwrap();
+
+    let id = NodeId::new(2, "ProcessedVar");
+    {
+        let space = nm.address_space().write();
+        let var = VariableBuilder::new(&id, "ProcessedVar", "ProcessedVar")
+            .data_type(DataTypeId::Double)
+            .historizing(true)
+            .value(0.0f64)
+            .user_access_level(
+                AccessLevel::HISTORY_READ | AccessLevel::HISTORY_WRITE | AccessLevel::CURRENT_READ,
+            )
+            .access_level(
+                AccessLevel::HISTORY_READ | AccessLevel::HISTORY_WRITE | AccessLevel::CURRENT_READ,
+            )
+            .build();
+        space.insert(var, None::<&[(_, &NodeId, _)]>);
+    }
+
+    let start = DateTime::now() - TimeDelta::try_seconds(30).unwrap();
+    let values: Vec<DataValue> = [0.0f64, 10.0, 20.0]
+        .into_iter()
+        .enumerate()
+        .map(|(idx, value)| {
+            let timestamp = start + TimeDelta::try_seconds((idx as i64) * 10).unwrap();
+            DataValue {
+                value: Some(Variant::Double(value)),
+                status: Some(StatusCode::Good),
+                source_timestamp: Some(timestamp),
+                server_timestamp: Some(timestamp),
+                ..Default::default()
+            }
+        })
+        .collect();
+
+    // Insert values through the backend-supported path (HistoryUpdate) so the
+    // in-memory history backend can serve ReadProcessed.
+    let update_results = session
+        .history_update_data(id.clone(), PerformUpdateType::Insert, values)
+        .await
+        .unwrap();
+    for status in update_results {
+        assert!(
+            status.is_good() || status == StatusCode::GoodEntryInserted,
+            "history update failed: {status}"
+        );
+    }
+
+    let results = session
+        .history_read(
+            HistoryReadAction::ReadProcessedDetails(ReadProcessedDetails {
+                start_time: start,
+                end_time: start + TimeDelta::try_seconds(20).unwrap(),
+                processing_interval: 20_000.0,
+                aggregate_type: Some(vec![NodeId::new(0u16, 2343u32)]),
+                aggregate_configuration: AggregateConfiguration::default(),
+            }),
+            TimestampsToReturn::Both,
+            false,
+            &[HistoryReadValueId {
+                node_id: id,
+                index_range: Default::default(),
+                data_encoding: Default::default(),
+                continuation_point: Default::default(),
+            }],
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].status_code, StatusCode::Good);
+    let history_data = results[0]
+        .history_data
+        .inner_as::<HistoryData>()
+        .expect("processed HistoryRead should return HistoryData");
+    let data_values = history_data
+        .data_values
+        .as_ref()
+        .expect("processed HistoryRead should include DataValues");
+    assert_eq!(data_values.len(), 1);
+    assert_eq!(data_values[0].status, Some(StatusCode::Good));
+    assert!(data_values[0].value.is_some());
 }

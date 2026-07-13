@@ -3,8 +3,9 @@
 
 use super::utils::{default_server, Tester};
 use opcua::types::{
-    ApplicationType, EndpointDescription, ExtensionObject, LocalizedText,
-    MdnsDiscoveryConfiguration, MessageSecurityMode, RegisteredServer, StatusCode, UAString,
+    ApplicationType, CallMethodRequest, EndpointDescription, ExtensionObject, LocalizedText,
+    MdnsDiscoveryConfiguration, MessageSecurityMode, NodeId, RegisteredServer, StatusCode,
+    UAString, Variant,
 };
 
 // Part 12 §7.5: a server may only register itself — the registration's serverUri must match the
@@ -388,13 +389,17 @@ async fn find_servers_on_network_returns_registered_servers() {
     let url = tester.endpoint();
     let endpoint = secured_endpoint(&tester).await;
 
-    // Nothing registered yet -> no records.
+    // The local server is always advertised before external registrations.
     let before = tester
         .client
         .find_servers_on_network(url.clone(), 0, 0, None)
         .await
         .unwrap();
-    assert!(before.servers.unwrap_or_default().is_empty());
+    let baseline = before.servers.unwrap_or_default();
+    assert!(baseline.iter().any(|server| {
+        server.server_name.as_ref() == "integration_server"
+            && server.discovery_url.as_ref() == url.trim_end_matches('/')
+    }));
 
     tester
         .client
@@ -409,12 +414,12 @@ async fn find_servers_on_network_returns_registered_servers() {
         .await
         .unwrap();
     let servers = after.servers.unwrap_or_default();
-    assert_eq!(servers.len(), 1);
-    assert_eq!(
-        servers[0].discovery_url.as_ref(),
-        "opc.tcp://registered-host:4840/"
-    );
-    assert_eq!(servers[0].server_name.as_ref(), "Registered Test Server");
+    assert_eq!(servers.len(), baseline.len() + 1);
+    let registered = servers
+        .iter()
+        .find(|server| server.discovery_url.as_ref() == "opc.tcp://registered-host:4840/")
+        .expect("registered server should appear in FindServersOnNetwork");
+    assert_eq!(registered.server_name.as_ref(), "Registered Test Server");
 
     // A non-empty capability filter matches nothing (we do not track per-server capabilities).
     let filtered = tester
@@ -423,6 +428,70 @@ async fn find_servers_on_network_returns_registered_servers() {
         .await
         .unwrap();
     assert!(filtered.servers.unwrap_or_default().is_empty());
+}
+
+#[tokio::test]
+async fn find_servers_on_network_includes_local_server() {
+    // Part 12 §5.3: an LDS that supports FindServersOnNetwork should include the local server,
+    // not return Good with an empty server list for an otherwise valid request.
+    let tester = Tester::new_default_server(true).await;
+    let url = tester.endpoint();
+
+    let response = tester
+        .client
+        .find_servers_on_network(url.clone(), 0, 0, None)
+        .await
+        .unwrap();
+    let servers = response.servers.unwrap_or_default();
+
+    assert!(
+        servers.iter().any(|server| {
+            server.server_name.as_ref() == "integration_server"
+                && server.discovery_url.as_ref() == url.trim_end_matches('/')
+        }),
+        "FindServersOnNetwork should include the local server for {url}; got {servers:?}"
+    );
+}
+
+#[tokio::test]
+async fn unsupported_gds_directory_methods_return_service_unsupported() {
+    // Part 12 optional GDS Directory methods are not implemented unless the GDS NodeSet is imported.
+    // Return an explicit unsupported status instead of a missing method or an empty output payload.
+    let mut tester = Tester::new_default_server(true).await;
+    let (session, event_loop) = tester.connect_default().await.unwrap();
+    event_loop.spawn();
+    tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        session.wait_for_connection(),
+    )
+    .await
+    .unwrap();
+
+    let legacy_register_application = session
+        .call_one(CallMethodRequest {
+            object_id: NodeId::new(0, 22384),
+            method_id: NodeId::new(0, 22385),
+            input_arguments: None,
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        legacy_register_application.status_code,
+        StatusCode::BadServiceUnsupported
+    );
+
+    let gds_get_certificate_groups = session
+        .call_one(CallMethodRequest {
+            object_id: NodeId::new(1, 141),
+            method_id: NodeId::new(1, 508),
+            input_arguments: Some(vec![Variant::NodeId(Box::new(NodeId::null()))]),
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        gds_get_certificate_groups.status_code,
+        StatusCode::BadServiceUnsupported
+    );
 }
 
 #[tokio::test]

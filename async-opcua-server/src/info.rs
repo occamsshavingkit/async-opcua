@@ -270,6 +270,14 @@ pub(crate) struct EndpointAuthentication {
     pub x509_user_certificate_validation: Option<X509UserCertificateValidation>,
 }
 
+#[cfg(feature = "lds")]
+struct ServerOnNetworkCandidate {
+    sort_key: String,
+    server_name: UAString,
+    discovery_url: UAString,
+    caps: Option<Vec<String>>,
+}
+
 impl EndpointAuthentication {
     fn new(user_token: UserToken, claims: Option<opcua_crypto::identity::ClaimProfile>) -> Self {
         Self {
@@ -529,18 +537,11 @@ impl ServerInfo {
                 .as_ref()
                 .is_some_and(|f| f.iter().any(|c| !c.is_null() && !c.is_empty()));
             let registered = self.registered_servers.read();
-            let mut servers: Vec<_> = registered.values().collect();
-            servers.sort_by(|a, b| a.server_uri.as_ref().cmp(b.server_uri.as_ref()));
-
-            servers
-                .into_iter()
-                .enumerate()
-                .map(|(i, server)| ((i + 1) as u32, server))
-                .filter(|(record_id, _)| *record_id > starting_record_id)
-                // We do not track per-server capabilities, so we can only satisfy an empty filter.
-                .filter(|_| !want_caps)
-                .map(|(record_id, server)| opcua_types::ServerOnNetwork {
-                    record_id,
+            let mut servers = vec![self.local_server_on_network_candidate()];
+            let mut registered_servers: Vec<_> = registered
+                .values()
+                .map(|server| ServerOnNetworkCandidate {
+                    sort_key: server.server_uri.as_ref().to_owned(),
                     server_name: server
                         .server_names
                         .as_ref()
@@ -553,7 +554,36 @@ impl ServerInfo {
                         .and_then(|u| u.first())
                         .cloned()
                         .unwrap_or_default(),
-                    server_capabilities: None,
+                    caps: None,
+                })
+                .collect();
+            registered_servers.sort_by(|a, b| a.sort_key.cmp(&b.sort_key));
+            servers.extend(registered_servers);
+
+            servers
+                .into_iter()
+                .enumerate()
+                .map(|(i, server)| ((i + 1) as u32, server))
+                .filter(|(record_id, _)| *record_id > starting_record_id)
+                .filter(|(_, server)| {
+                    !want_caps
+                        || server.caps.as_ref().is_some_and(|caps| {
+                            capability_filter.as_ref().is_none_or(|filter| {
+                                filter.iter().all(|wanted| {
+                                    wanted.is_null()
+                                        || wanted.is_empty()
+                                        || caps.iter().any(|cap| cap.as_str() == wanted.as_ref())
+                                })
+                            })
+                        })
+                })
+                .map(|(record_id, server)| opcua_types::ServerOnNetwork {
+                    record_id,
+                    server_name: server.server_name,
+                    discovery_url: server.discovery_url,
+                    server_capabilities: server
+                        .caps
+                        .map(|caps| caps.into_iter().map(UAString::from).collect()),
                 })
                 .take(if max_records_to_return == 0 {
                     usize::MAX
@@ -579,9 +609,14 @@ impl ServerInfo {
             #[cfg(feature = "lds")]
             let mut candidates: Vec<Candidate> = {
                 let registered = self.registered_servers.read();
-                registered
-                    .values()
-                    .map(|server| Candidate {
+                let mut candidates = vec![Candidate {
+                    sort_key: self.config.application_uri.clone(),
+                    server_name: UAString::from(self.config.application_name.as_str()),
+                    discovery_url: UAString::from(self.local_discovery_url()),
+                    caps: Some(vec!["NA".to_string()]),
+                }];
+                candidates.extend(registered.values().map(|server| {
+                    Candidate {
                         sort_key: server.server_uri.as_ref().to_owned(),
                         server_name: server
                             .server_names
@@ -596,8 +631,9 @@ impl ServerInfo {
                             .cloned()
                             .unwrap_or_default(),
                         caps: None,
-                    })
-                    .collect()
+                    }
+                }));
+                candidates
             };
             #[cfg(not(feature = "lds"))]
             let mut candidates: Vec<Candidate> = Vec::new();
@@ -656,6 +692,25 @@ impl ServerInfo {
             let _ = (starting_record_id, max_records_to_return, capability_filter);
             Vec::new()
         }
+    }
+
+    #[cfg(feature = "lds")]
+    fn local_server_on_network_candidate(&self) -> ServerOnNetworkCandidate {
+        ServerOnNetworkCandidate {
+            sort_key: self.config.application_uri.clone(),
+            server_name: UAString::from(self.config.application_name.as_str()),
+            discovery_url: UAString::from(self.local_discovery_url()),
+            caps: Some(vec!["NA".to_string()]),
+        }
+    }
+
+    #[cfg(feature = "lds")]
+    fn local_discovery_url(&self) -> String {
+        let base_endpoint_url = self.base_endpoint();
+        self.config
+            .default_endpoint()
+            .map(|endpoint| endpoint.endpoint_url(&base_endpoint_url))
+            .unwrap_or(base_endpoint_url)
     }
 
     /// Returns registered servers as application descriptions for FindServers.
@@ -1799,9 +1854,16 @@ mod tests {
             StatusCode::Good
         );
 
-        // No filter → the registered server is returned.
-        assert_eq!(info.find_servers_on_network(0, 0, &None).len(), 1);
-        // A non-empty capability filter matches nothing (registered servers carry no caps).
+        // No filter → the local server and registered server are returned.
+        let servers = info.find_servers_on_network(0, 0, &None);
+        assert_eq!(servers.len(), 2);
+        assert!(servers
+            .iter()
+            .any(|server| server.server_name.as_ref() == "PullOnly"));
+        assert!(servers
+            .iter()
+            .any(|server| server.server_name.as_ref() == "Test"));
+        // A non-empty capability filter that does not match local NA caps matches nothing.
         assert!(info
             .find_servers_on_network(0, 0, &Some(vec!["DA".into()]))
             .is_empty());
@@ -1864,14 +1926,15 @@ mod tests {
         cache.insert(dv("DiscExpired", "opc.tcp://10.0.0.9:4840/", &["DA"], past)); // FR-006
         cache.insert(dv("MdnsMerge", "opc.tcp://10.0.0.3:4840/", &["DA"], future)); // self (FR-005)
 
-        // No filter → registered ("Test") + DiscA + DiscB; expired + self excluded.
+        // No filter → local + registered ("Test") + DiscA + DiscB; expired + self excluded.
         let all = info.find_servers_on_network(0, 0, &None);
         let names: Vec<String> = all.iter().map(|s| s.server_name.to_string()).collect();
         assert_eq!(
             all.len(),
-            3,
-            "registered + 2 live discovered; got {names:?}"
+            4,
+            "local + registered + 2 live discovered; got {names:?}"
         );
+        assert!(names.iter().any(|n| n == "MdnsMerge"), "local present");
         assert!(
             names.iter().any(|n| n == "Test"),
             "registered present: {names:?}"
@@ -1882,7 +1945,11 @@ mod tests {
             !names.iter().any(|n| n == "DiscExpired"),
             "expired excluded"
         );
-        assert!(!names.iter().any(|n| n == "MdnsMerge"), "self excluded");
+        assert_eq!(
+            names.iter().filter(|n| *n == "MdnsMerge").count(),
+            1,
+            "only the local server, not the discovered self record, should be present"
+        );
 
         // Filter ["DA"] → only DiscA (DiscB advertises HD/AC; registered has no caps).
         let da = info.find_servers_on_network(0, 0, &Some(vec!["DA".into()]));

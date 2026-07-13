@@ -9,7 +9,7 @@ use crate::{
         services::{invoke_service_concurrently_mut, ServiceCb},
     },
 };
-use opcua_types::{CallRequest, CallResponse, ResponseHeader, StatusCode, UAString};
+use opcua_types::{CallRequest, CallResponse, NodeId, ResponseHeader, StatusCode, UAString};
 use tracing::debug_span;
 use tracing_futures::Instrument;
 
@@ -95,6 +95,14 @@ pub(crate) async fn call(node_managers: NodeManagers, request: Request<CallReque
     )
     .await;
 
+    for call in &mut calls {
+        if call.status() == StatusCode::BadMethodInvalid
+            && is_unsupported_gds_directory_method(call.object_id(), call.method_id())
+        {
+            call.set_status(StatusCode::BadServiceUnsupported);
+        }
+    }
+
     for call in &calls {
         audit::dispatch_method_audit(
             #[cfg(feature = "events")]
@@ -118,4 +126,10 @@ pub(crate) async fn call(node_managers: NodeManagers, request: Request<CallReque
         .into(),
         request_id: request.request_id,
     }
+}
+
+fn is_unsupported_gds_directory_method(object_id: &NodeId, method_id: &NodeId) -> bool {
+    (object_id == &NodeId::new(0, 22384) && method_id == &NodeId::new(0, 22385))
+        || (object_id == &NodeId::new(1, 141)
+            && (method_id == &NodeId::new(1, 146) || method_id == &NodeId::new(1, 508)))
 }

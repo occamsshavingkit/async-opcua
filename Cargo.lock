@@ -471,6 +471,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "async-opcua-cu-coverage-report"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "async-opcua-demo-server"
 version = "0.13.0"
 dependencies = [

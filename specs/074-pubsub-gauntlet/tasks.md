@@ -69,10 +69,11 @@ Evidence used for reconciliation:
   - Evidence: `async-opcua-pubsub/src/transport/mqtt.rs` defines `start_mqtt_subscriber`, subscribes with `rumqttc`, forwards published payloads over `mpsc`, and reconnects with backoff.
   - Caveat: QoS is currently hard-coded to `AtLeastOnce`; the config model does not yet pass a per-reader `RequestedDeliveryGuarantee` into this function.
 - [x] T012 [P] [US3] In `async-opcua-pubsub/src/engine.rs`, wire MQTT subscriber transport dispatch. When `start_subscribers()` encounters a PubSubConnection with `BrokerDataSetReaderTransportDataType`, spawn an MQTT subscriber task for each DataSetReader in its ReaderGroups. Before implementing, read §6.4.2 MQTT transport protocol mapping overview.
-  - Evidence: `PubSubEngine::start_subscribers` dispatches `TransportKind::Mqtt` to `spawn_mqtt_subscribers`, which starts one MQTT task and one runtime-forwarder task per DataSetReader.
+  - Evidence: `PubSubEngine::start_subscribers` dispatches `TransportKind::Mqtt` to `spawn_mqtt_subscribers`, which starts one cancellation-aware MQTT task and one runtime-forwarder task per DataSetReader.
   - Caveat: topic selection is derived from `writer_group_id`/`reader_group_id`; `BrokerDataSetReaderTransportDataType.QueueName` is not exposed by the config model yet.
-- [ ] T013 [P] [US3] Add integration test `mqtt_subscriber_receives_uadp` in `async-opcua-pubsub/tests/subscriber_mqtt_tests.rs`. Start a local mosquitto instance. Configure MQTT PubSubConnection + UADP DataSetReader. Publish a UADP NetworkMessage to the topic. Assert the subscriber receives and processes it.
-  - Current state: partial test coverage exists in `subscriber_mqtt_tests.rs`, but it explicitly avoids a live broker and only mirrors the channel-to-runtime handoff. This task remains open because it does not satisfy the planned live mosquitto integration test.
+- [x] T013 [P] [US3] Add integration test `mqtt_subscriber_receives_uadp` in `async-opcua-pubsub/tests/subscriber_mqtt_tests.rs`. Start a local mosquitto instance. Configure MQTT PubSubConnection + UADP DataSetReader. Publish a UADP NetworkMessage to the topic. Assert the subscriber receives and processes it.
+  - Evidence: `async-opcua-pubsub/tests/subscriber_mqtt_tests.rs` now includes `mqtt_subscriber_receives_uadp_from_live_mosquitto`, which starts a local mosquitto broker when available, starts `PubSubEngine::start_subscribers`, publishes a UADP payload to `opcua/telemetry/7`, and asserts the target variable is updated through the real broker path.
+  - Local verification: `cargo test -p async-opcua-pubsub --test subscriber_mqtt_tests -- --nocapture` passed, including `start_mqtt_subscriber_stops_when_cancelled`. The live broker case compiled and reported `skipping live MQTT broker test: mosquitto not found on PATH` in this environment because mosquitto is not installed.
 
 ## Phase 6: User Story 4 — PubSub Status Codes and Limits (Priority: P3)
 
@@ -96,6 +97,8 @@ Evidence used for reconciliation:
   - Evidence: `cargo build -p async-opcua-demo-server` and `cargo build --release -p async-opcua-demo-server` passed with PubSub enabled by default.
 - [x] T019 Run `tools/ci-playbook.sh --ci` — verify full local CI gate passes, including existing interop tests
   - Evidence: `tools/ci-playbook.sh --ci` completed with `CI gate complete.` on branch `092-pubsub-ledger`.
+- [x] T020 Run the live MQTT broker test on a host with `mosquitto` installed — `cargo test -p async-opcua-pubsub --test subscriber_mqtt_tests mqtt_subscriber_receives_uadp_from_live_mosquitto -- --nocapture`
+  - Evidence: command passed locally after `mosquitto` was installed; output reported `test mqtt_subscriber_receives_uadp_from_live_mosquitto ... ok` with 1 passed, 0 failed, and no skip message.
 
 ## Current Unresolved Conformance Gap
 

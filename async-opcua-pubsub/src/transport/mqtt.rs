@@ -288,10 +288,29 @@ pub fn start_mqtt_subscriber(
     topic_filter: String,
     sender: tokio::sync::mpsc::Sender<Vec<u8>>,
 ) -> tokio::task::JoinHandle<()> {
+    start_mqtt_subscriber_with_cancel(
+        broker_address,
+        topic_filter,
+        sender,
+        CancellationToken::new(),
+    )
+}
+
+/// Starts an MQTT subscriber that exits when `cancel_token` is cancelled.
+pub fn start_mqtt_subscriber_with_cancel(
+    broker_address: String,
+    topic_filter: String,
+    sender: tokio::sync::mpsc::Sender<Vec<u8>>,
+    cancel_token: CancellationToken,
+) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut backoff = Duration::from_secs(1);
 
         loop {
+            if cancel_token.is_cancelled() {
+                break;
+            }
+
             // Parse host and port from address (mirrors MqttPublisher).
             let addr = broker_address
                 .strip_prefix("mqtt://")
@@ -321,7 +340,10 @@ pub fn start_mqtt_subscriber(
                     ?error,
                     "failed to subscribe to MQTT topic filter"
                 );
-                sleep(backoff).await;
+                tokio::select! {
+                    _ = cancel_token.cancelled() => break,
+                    _ = sleep(backoff) => {}
+                }
                 backoff = std::cmp::min(backoff * 2, Duration::from_secs(60));
                 continue;
             }
@@ -329,7 +351,12 @@ pub fn start_mqtt_subscriber(
             tracing::info!(topic = %topic_filter, "MQTT subscriber connected and subscribed");
 
             loop {
-                match event_loop.poll().await {
+                let event = tokio::select! {
+                    _ = cancel_token.cancelled() => return,
+                    event = event_loop.poll() => event,
+                };
+
+                match event {
                     Ok(Event::Incoming(Incoming::Publish(publish))) => {
                         backoff = Duration::from_secs(1);
                         let payload = publish.payload.to_vec();
@@ -368,7 +395,10 @@ pub fn start_mqtt_subscriber(
                             ?error,
                             "MQTT subscriber connection lost; reconnecting"
                         );
-                        sleep(backoff).await;
+                        tokio::select! {
+                            _ = cancel_token.cancelled() => return,
+                            _ = sleep(backoff) => {}
+                        }
                         backoff = std::cmp::min(backoff * 2, Duration::from_secs(60));
                         break;
                     }

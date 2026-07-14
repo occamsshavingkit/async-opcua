@@ -688,10 +688,11 @@ impl PubSubEngine {
 
                 // Subscriber task: connects to the broker (with reconnect
                 // backoff) and forwards published payloads to the channel.
-                let subscriber_handle = crate::transport::mqtt::start_mqtt_subscriber(
+                let subscriber_handle = crate::transport::mqtt::start_mqtt_subscriber_with_cancel(
                     broker_address.clone(),
                     topic_filter.clone(),
                     payload_tx,
+                    cancel_token.clone(),
                 );
                 handles.push(subscriber_handle);
 

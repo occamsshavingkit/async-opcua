@@ -2,29 +2,47 @@
 //!
 //! These tests exercise the broker DataSetReader receive path that T011
 //! (`transport::mqtt::start_mqtt_subscriber`) and T012 (engine wiring) added.
-//! mosquitto is not assumed to be available in the test environment, so rather
-//! than requiring a live broker we replicate the channel→runtime handoff that
-//! `PubSubEngine::spawn_mqtt_subscribers` performs (see `engine.rs`): an mpsc
-//! channel carries opaque payload bytes from the subscriber task to a
-//! forwarder that feeds `SubscriberRuntime::process_datagram`.
+//! mosquitto is not assumed to be available in every test environment. The
+//! live-broker test starts it when the binary is present; the remaining tests
+//! cover the channel→runtime handoff that `PubSubEngine::spawn_mqtt_subscribers`
+//! performs (see `engine.rs`).
 //!
 //! Reference: OPC-10000-14 §6.4.2.6 (Broker DataSetReader transport).
 
+use std::fs;
+use std::net::TcpListener;
+use std::path::PathBuf;
+use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
 use std::time::Duration;
 
 use opcua_core::sync::RwLock;
 use opcua_pubsub::{
-    transport::mqtt::start_mqtt_subscriber, DataSetReaderConfig, FieldTargetConfig,
-    PubSubConnectionConfig, PublisherId, ReaderGroupConfig, SubscriberRuntime, UadpDataSetMessage,
-    UadpNetworkMessage,
+    transport::mqtt::{start_mqtt_subscriber, start_mqtt_subscriber_with_cancel},
+    DataSetReaderConfig, FieldTargetConfig, PubSubConnectionConfig, PubSubEngine, PublisherId,
+    ReaderGroupConfig, SubscriberRuntime, UadpDataSetMessage, UadpNetworkMessage,
 };
 use opcua_server::address_space::{AddressSpace, VariableBuilder};
 use opcua_types::{
     AttributeId, BinaryEncodable, ContextOwned, DataEncoding, DataTypeId, NodeId, NumericRange,
     TimestampsToReturn, Variant,
 };
+use rumqttc::{AsyncClient, MqttOptions, QoS};
 use tokio_util::sync::CancellationToken;
+
+struct MosquittoBroker {
+    child: Child,
+    config_path: PathBuf,
+    port: u16,
+}
+
+impl Drop for MosquittoBroker {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+        let _ = fs::remove_file(&self.config_path);
+    }
+}
 
 fn target_value(space: &AddressSpace, node: &NodeId) -> Option<Variant> {
     space
@@ -46,6 +64,60 @@ fn insert_target(space: &AddressSpace, name: &str, value: Variant) -> NodeId {
         .value(value)
         .insert(space);
     node_id
+}
+
+async fn start_mosquitto_broker() -> Option<MosquittoBroker> {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind ephemeral MQTT port");
+    let port = listener.local_addr().expect("read MQTT port").port();
+    drop(listener);
+
+    let config_path = std::env::temp_dir().join(format!(
+        "async-opcua-mosquitto-{}-{port}.conf",
+        std::process::id()
+    ));
+    fs::write(
+        &config_path,
+        format!("listener {port} 127.0.0.1\nallow_anonymous true\n"),
+    )
+    .expect("write mosquitto test config");
+
+    let child = match Command::new("mosquitto")
+        .arg("-c")
+        .arg(&config_path)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+    {
+        Ok(child) => child,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            let _ = fs::remove_file(&config_path);
+            eprintln!("skipping live MQTT broker test: mosquitto not found on PATH");
+            return None;
+        }
+        Err(error) => panic!("failed to start mosquitto: {error}"),
+    };
+
+    for _ in 0..100 {
+        if tokio::net::TcpStream::connect(("127.0.0.1", port))
+            .await
+            .is_ok()
+        {
+            return Some(MosquittoBroker {
+                child,
+                config_path,
+                port,
+            });
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    let mut broker = MosquittoBroker {
+        child,
+        config_path,
+        port,
+    };
+    let _ = broker.child.kill();
+    panic!("mosquitto did not listen on port {port}");
 }
 
 fn dataset_msg(
@@ -93,11 +165,11 @@ fn reader(targets: Vec<NodeId>) -> DataSetReaderConfig {
 /// Mirrors the UDP test's `connection` helper but uses an `mqtt://` address so
 /// the config classifies as a supported subscriber transport
 /// (`validate_subscriber_config` accepts `mqtt://` per T012).
-fn mqtt_connection(reader: DataSetReaderConfig) -> PubSubConnectionConfig {
+fn mqtt_connection_at(address: String, reader: DataSetReaderConfig) -> PubSubConnectionConfig {
     PubSubConnectionConfig {
         connection_id: "mqtt-conn".to_string(),
         name: "mqtt-conn".to_string(),
-        address: "mqtt://127.0.0.1:1883".to_string(),
+        address,
         writer_groups: Vec::new(),
         reader_groups: vec![ReaderGroupConfig {
             reader_group_id: 1,
@@ -105,6 +177,10 @@ fn mqtt_connection(reader: DataSetReaderConfig) -> PubSubConnectionConfig {
             ..ReaderGroupConfig::default()
         }],
     }
+}
+
+fn mqtt_connection(reader: DataSetReaderConfig) -> PubSubConnectionConfig {
+    mqtt_connection_at("mqtt://127.0.0.1:1883".to_string(), reader)
 }
 
 /// Replicates the forwarder task from `PubSubEngine::spawn_mqtt_subscribers`
@@ -145,6 +221,118 @@ async fn await_target(space: Arc<RwLock<AddressSpace>>, target: &NodeId, expecte
         expected,
         target_value(&space.read(), target)
     );
+}
+
+async fn target_reaches(
+    space: Arc<RwLock<AddressSpace>>,
+    target: &NodeId,
+    expected: Variant,
+    timeout: Duration,
+) -> bool {
+    let deadline = tokio::time::Instant::now() + timeout;
+    while tokio::time::Instant::now() < deadline {
+        if target_value(&space.read(), target) == Some(expected.clone()) {
+            return true;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    false
+}
+
+#[tokio::test]
+async fn mqtt_subscriber_receives_uadp_from_live_mosquitto() {
+    let Some(broker) = start_mosquitto_broker().await else {
+        return;
+    };
+
+    let space = AddressSpace::new();
+    space.add_namespace("urn:test", 1);
+    let target = insert_target(&space, "LiveMqttTarget", Variant::Double(0.0));
+    let address_space = Arc::new(RwLock::new(space));
+    let mut engine = PubSubEngine::with_connections(
+        address_space.clone(),
+        vec![mqtt_connection_at(
+            format!("mqtt://127.0.0.1:{}", broker.port),
+            reader(vec![target.clone()]),
+        )],
+    );
+    engine.start_subscribers().unwrap();
+
+    let mut options = MqttOptions::new(
+        format!("async-opcua-test-publisher-{}", std::process::id()),
+        "127.0.0.1",
+        broker.port,
+    );
+    options.set_keep_alive(Duration::from_secs(5));
+    let (client, mut event_loop) = AsyncClient::new(options, 10);
+    let event_loop_handle = tokio::spawn(async move {
+        loop {
+            if event_loop.poll().await.is_err() {
+                break;
+            }
+        }
+    });
+
+    let ctx_owned = ContextOwned::default();
+    let ctx = ctx_owned.context();
+    let payload = network_msg(dataset_msg(42, 1, vec![Variant::Double(123.5)])).encode_to_vec(&ctx);
+
+    let mut observed = false;
+    for _ in 0..20 {
+        client
+            .publish(
+                "opcua/telemetry/7",
+                QoS::AtLeastOnce,
+                false,
+                payload.clone(),
+            )
+            .await
+            .unwrap();
+
+        if target_reaches(
+            address_space.clone(),
+            &target,
+            Variant::Double(123.5),
+            Duration::from_millis(100),
+        )
+        .await
+        {
+            observed = true;
+            break;
+        }
+    }
+
+    event_loop_handle.abort();
+    let _ = event_loop_handle.await;
+    engine.stop_subscribers().await;
+
+    assert!(
+        observed,
+        "target {:?} never reached {:?} through live MQTT broker (got {:?})",
+        target,
+        Variant::Double(123.5),
+        target_value(&address_space.read(), &target)
+    );
+}
+
+#[tokio::test]
+async fn start_mqtt_subscriber_stops_when_cancelled() {
+    let (payload_tx, _payload_rx) = tokio::sync::mpsc::channel::<Vec<u8>>(1);
+    let cancel = CancellationToken::new();
+    let handle = start_mqtt_subscriber_with_cancel(
+        "mqtt://127.0.0.1:1".to_string(),
+        "opcua/telemetry/7".to_string(),
+        payload_tx,
+        cancel.clone(),
+    );
+
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    cancel.cancel();
+
+    tokio::time::timeout(Duration::from_secs(1), handle)
+        .await
+        .expect("MQTT subscriber should stop after cancellation")
+        .expect("MQTT subscriber task should not panic");
 }
 
 #[tokio::test]

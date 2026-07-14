@@ -6,8 +6,9 @@ use std::time::Duration;
 use opcua_core::sync::RwLock;
 use opcua_crypto::SecurityPolicy;
 use opcua_pubsub::{
-    engine::PubSubEngine, PubSubConnectionConfig, PublisherId, SecurityGroup, TransportKind,
-    UadpDataSetMessage, UadpNetworkMessage, UadpSecurityCodec, WriterGroupConfig,
+    engine::PubSubEngine, DataSetReaderConfig, PubSubConnectionConfig, PublisherId,
+    ReaderGroupConfig, SecurityGroup, TransportKind, UadpDataSetMessage, UadpNetworkMessage,
+    UadpSecurityCodec, WriterGroupConfig,
 };
 use opcua_server::address_space::AddressSpace;
 use opcua_types::{
@@ -67,6 +68,43 @@ async fn manages_connection_configs_and_udp_publisher_lifecycle() {
 
     assert!(!engine.is_running());
     assert_eq!(engine.active_handle_count(), 0);
+}
+
+#[test]
+fn replaces_connection_configs_from_config_snapshot() {
+    let mut engine = PubSubEngine::new(address_space());
+    let initial = empty_connection("udp-1", "udp://127.0.0.1:4840");
+    let replacement = empty_connection("mqtt-1", "mqtt://broker.local:1883");
+    engine.add_connection(initial);
+
+    engine.replace_connections(vec![replacement.clone()]);
+
+    assert_eq!(engine.connection_configs(), &[replacement]);
+}
+
+#[tokio::test]
+async fn replacing_connections_while_subscribers_run_invalidates_runtime() {
+    let mut engine = PubSubEngine::new(address_space());
+    let mut initial = empty_connection("udp-1", "udp://127.0.0.1:0");
+    initial.reader_groups.push(ReaderGroupConfig {
+        reader_group_id: 1,
+        dataset_readers: vec![DataSetReaderConfig {
+            dataset_reader_id: 9,
+            dataset_writer_id: 7,
+            ..DataSetReaderConfig::default()
+        }],
+        ..ReaderGroupConfig::default()
+    });
+    engine.add_connection(initial);
+
+    engine.start_subscribers().unwrap();
+    assert!(engine.subscriber_status(9).is_some());
+
+    engine.replace_connections(Vec::new());
+    engine.stop_subscribers().await;
+    engine.start_subscribers().unwrap();
+
+    assert!(engine.subscriber_status(9).is_none());
 }
 
 #[test]

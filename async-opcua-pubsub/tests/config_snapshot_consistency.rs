@@ -8,8 +8,10 @@ use opcua_pubsub::{
 };
 use opcua_server::address_space::AddressSpace;
 use opcua_types::{
-    AttributeId, DataEncoding, DataSetReaderDataType, DataSetWriterDataType, MessageSecurityMode,
-    NodeId, NumericRange, PubSubConnectionDataType, PubSubState, ReaderGroupDataType,
+    AttributeId, DataEncoding, DataSetReaderDataType, DataSetWriterDataType, ExtensionObject,
+    FieldTargetDataType, JsonDataSetReaderMessageDataType, MessageSecurityMode,
+    NetworkAddressUrlDataType, NodeId, NumericRange, OverrideValueHandling,
+    PubSubConnectionDataType, PubSubState, ReaderGroupDataType, TargetVariablesDataType,
     TimestampsToReturn, UAString, Variant, WriterGroupDataType,
 };
 use std::sync::Arc;
@@ -119,6 +121,53 @@ fn config_snapshot_consistency_part14_pubsub_connection_preserves_supported_fiel
         reader.security_group_id.as_deref(),
         Some("security-group-a")
     );
+}
+
+#[test]
+fn config_snapshot_consistency_connection_uses_network_address_url() {
+    let source = PubSubConnectionDataType {
+        name: UAString::from("BrokerConnection"),
+        transport_profile_uri: UAString::from(
+            "http://opcfoundation.org/UA-Profile/Transport/pubsub-mqtt",
+        ),
+        address: ExtensionObject::from_message(NetworkAddressUrlDataType {
+            network_interface: UAString::null(),
+            url: UAString::from("mqtt://broker.local:1883"),
+        }),
+        ..PubSubConnectionDataType::default()
+    };
+
+    let snapshot = PubSubConnectionConfig::from_data_type(&source, "conn-1".to_string());
+
+    assert_eq!(snapshot.address, "mqtt://broker.local:1883");
+}
+
+#[test]
+fn config_snapshot_consistency_dataset_reader_preserves_target_variables_and_json_mapping() {
+    let target = NodeId::new(2, 1001);
+    let source = DataSetReaderDataType {
+        name: UAString::from("json-reader"),
+        writer_group_id: 12,
+        data_set_writer_id: 34,
+        message_settings: ExtensionObject::from_message(JsonDataSetReaderMessageDataType::default()),
+        subscribed_data_set: ExtensionObject::from_message(TargetVariablesDataType {
+            target_variables: Some(vec![FieldTargetDataType {
+                target_node_id: target.clone(),
+                attribute_id: AttributeId::Value as u32,
+                override_value_handling: OverrideValueHandling::Disabled,
+                ..FieldTargetDataType::default()
+            }]),
+        }),
+        ..DataSetReaderDataType::default()
+    };
+
+    let snapshot = DataSetReaderConfig::from_data_type(&source, 7);
+
+    assert_eq!(snapshot.message_encoding, MessageEncoding::Json);
+    assert_eq!(snapshot.target_variables.len(), 1);
+    let mapped_target = &snapshot.target_variables[0];
+    assert_eq!(mapped_target.target_node_id, target);
+    assert_eq!(mapped_target.attribute_id, AttributeId::Value);
 }
 
 #[test]

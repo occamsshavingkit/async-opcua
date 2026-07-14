@@ -213,6 +213,24 @@ async fn main() {
         // subscriber receive loops (OPC-10000-14 §5.4.6.2.2).
         #[cfg(feature = "pubsub")]
         let pubsub_address_space = node_manager.address_space().clone();
+        #[cfg(feature = "pubsub")]
+        let (pubsub_config_tx, mut pubsub_config_rx) = tokio::sync::watch::channel(Vec::new());
+        #[cfg(feature = "pubsub")]
+        {
+            let pubsub_manager = Arc::new(opcua::core::sync::Mutex::new(
+                opcua::pubsub::PubSubConfigManager::new(ns),
+            ));
+            opcua::pubsub::register_pubsub_config_methods_with_updates(
+                &core_node_manager,
+                pubsub_address_space.clone(),
+                pubsub_manager,
+                Arc::new(move |connections| {
+                    if pubsub_config_tx.send(connections).is_err() {
+                        warn!("Dropped PubSub config update because the receiver was dropped");
+                    }
+                }),
+            );
+        }
 
         let token = handle.token();
 
@@ -270,7 +288,17 @@ async fn main() {
             if let Err(status) = engine.start_subscribers() {
                 error!("Failed to start PubSub subscribers: {:?}", status);
             }
-            engine
+            tokio::spawn(async move {
+                while pubsub_config_rx.changed().await.is_ok() {
+                    let connections = pubsub_config_rx.borrow().clone();
+                    engine.stop_subscribers().await;
+                    engine.replace_connections(connections);
+                    if let Err(status) = engine.start_subscribers() {
+                        error!("Failed to apply PubSub config update: {:?}", status);
+                    }
+                }
+                engine.stop().await;
+            })
         };
 
         server.run().await.unwrap();

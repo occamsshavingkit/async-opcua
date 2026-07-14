@@ -222,6 +222,12 @@ impl PubSubEngine {
         Some(removed)
     }
 
+    /// Replaces all connection configurations with a fresh writable-config snapshot.
+    pub fn replace_connections(&mut self, connections: Vec<PubSubConnectionConfig>) {
+        self.connections = connections;
+        self.subscriber_runtime = None;
+    }
+
     /// Returns the configured PubSub connections.
     pub fn connection_configs(&self) -> &[PubSubConnectionConfig] {
         &self.connections
@@ -680,10 +686,11 @@ impl PubSubEngine {
 
                 // Subscriber task: connects to the broker (with reconnect
                 // backoff) and forwards published payloads to the channel.
-                let subscriber_handle = crate::transport::mqtt::start_mqtt_subscriber(
+                let subscriber_handle = crate::transport::mqtt::start_mqtt_subscriber_with_cancel(
                     broker_address.clone(),
                     topic_filter.clone(),
                     payload_tx,
+                    cancel_token.clone(),
                 );
                 handles.push(subscriber_handle);
 

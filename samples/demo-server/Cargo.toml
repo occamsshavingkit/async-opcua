@@ -24,7 +24,7 @@ path = "../../async-opcua"
 features = ["all", "ecc"]
 
 [features]
-default = ["json", "xml"]
+default = ["json", "xml", "pubsub"]
 json = ["async-opcua/json"]
 xml = ["async-opcua/xml"]
 # OPC UA Part 14 PubSub subscriber wiring. Gates the `start_subscribers()`

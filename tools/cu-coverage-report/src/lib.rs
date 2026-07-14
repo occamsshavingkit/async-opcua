@@ -122,10 +122,8 @@ pub fn generate_markdown_report(snapshot: &NormalizedSnapshot) -> String {
 
 fn markdown_cell(value: &str) -> String {
     value
-        .replace('\n', " ")
-        .replace('\r', " ")
-        .replace('–', "-")
-        .replace('—', "-")
+        .replace(['\n', '\r'], " ")
+        .replace(['–', '—'], "-")
         .replace('’', "'")
 }
 

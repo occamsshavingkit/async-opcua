@@ -362,6 +362,63 @@ async fn pubsub_add_remove_connection_methods() {
     assert!(!core_nm.address_space().read().node_exists(&new_id));
 }
 
+#[tokio::test]
+async fn pubsub_config_methods_notify_connection_snapshot_updates() {
+    use crate::utils::setup;
+    use opcua::core::sync::Mutex;
+    use opcua::server::node_manager::memory::CoreNodeManager;
+    use opcua::types::{
+        CallMethodRequest, ExtensionObject, MethodId, ObjectId, PubSubConnectionDataType,
+        StatusCode,
+    };
+    use opcua_pubsub::{
+        register_pubsub_config_methods_with_updates, PubSubConfigManager, PubSubConnectionConfig,
+    };
+    use std::sync::mpsc;
+
+    let (tester, _nm, session) = setup().await;
+    let core_nm = tester
+        .handle
+        .node_managers()
+        .get_of_type::<CoreNodeManager>()
+        .expect("CoreNodeManager");
+
+    let pubsub_ns = 53;
+    core_nm
+        .address_space()
+        .write()
+        .add_namespace("urn:pubsub-update-test", pubsub_ns);
+    let manager = Arc::new(Mutex::new(PubSubConfigManager::new(pubsub_ns)));
+    let (tx, rx) = mpsc::channel::<Vec<PubSubConnectionConfig>>();
+    register_pubsub_config_methods_with_updates(
+        &core_nm,
+        core_nm.address_space().clone(),
+        manager,
+        Arc::new(move |connections| {
+            tx.send(connections).expect("snapshot receiver live");
+        }),
+    );
+
+    let conn = PubSubConnectionDataType {
+        name: "NotifyConn".into(),
+        transport_profile_uri: "udp://239.0.0.1:4841".into(),
+        ..Default::default()
+    };
+    let add = session
+        .call_one(CallMethodRequest {
+            object_id: ObjectId::PublishSubscribe.into(),
+            method_id: MethodId::PublishSubscribe_AddConnection.into(),
+            input_arguments: Some(vec![Variant::from(ExtensionObject::from_message(conn))]),
+        })
+        .await
+        .unwrap();
+    assert_eq!(add.status_code, StatusCode::Good);
+
+    let snapshot = rx.recv().expect("AddConnection publishes updated snapshot");
+    assert_eq!(snapshot.len(), 1);
+    assert_eq!(snapshot[0].name, "NotifyConn");
+}
+
 /// Part 14 §9.1.4: the per-instance connection / group Methods make the nested PubSub configuration
 /// (writer groups, reader groups, and their dataset writers/readers) writable over the address space.
 #[tokio::test]

@@ -40,7 +40,10 @@ pub use config::{
     FieldTargetConfig, MessageEncoding, PubSubConnectionConfig, PublishedDataItemsConfig,
     PublishedDataSetConfig, ReaderGroupConfig, WriterGroupConfig,
 };
-pub use config_methods::{register_pubsub_config_methods, PubSubConfigManager};
+pub use config_methods::{
+    register_pubsub_config_methods, register_pubsub_config_methods_with_updates,
+    PubSubConfigManager, PubSubConfigUpdateCallback,
+};
 
 pub use engine::{DatagramQueue, PubSubEngine, TransportKind, PUBSUB_DATAGRAM_QUEUE_CAPACITY};
 pub use fx::{ConnectionManager, EstablishedConnection};

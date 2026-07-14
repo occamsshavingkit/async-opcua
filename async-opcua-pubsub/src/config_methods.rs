@@ -5,9 +5,11 @@ use std::sync::Arc;
 use opcua_core::sync::{Mutex, RwLock};
 use opcua_server::{address_space::AddressSpace, node_manager::memory::CoreNodeManager};
 use opcua_types::{
-    ConfigurationVersionDataType, DataSetReaderDataType, DataSetWriterDataType, ExtensionObject,
-    MessageSecurityMode, MethodId, NodeId, PubSubConnectionDataType, PublishedVariableDataType,
-    ReaderGroupDataType, StatusCode, UAString, Variant, WriterGroupDataType,
+    AttributeId, ConfigurationVersionDataType, DataSetReaderDataType, DataSetWriterDataType,
+    ExtensionObject, FieldTargetDataType, JsonDataSetReaderMessageDataType, MessageSecurityMode,
+    MethodId, NodeId, NumericRange, PubSubConnectionDataType, PublishedVariableDataType,
+    ReaderGroupDataType, StatusCode, TargetVariablesDataType, UAString, Variant,
+    WriterGroupDataType,
 };
 
 use crate::{
@@ -33,6 +35,9 @@ pub struct PubSubConfigManager {
     pub published_data_sets: Vec<PublishedDataItemsConfig>,
     namespace: u16,
 }
+
+/// Receives a full connection snapshot after writable PubSub configuration changes.
+pub type PubSubConfigUpdateCallback = Arc<dyn Fn(Vec<PubSubConnectionConfig>) + Send + Sync>;
 
 impl PubSubConfigManager {
     /// Creates an empty writable PubSub configuration manager for `namespace`.
@@ -261,10 +266,61 @@ impl DataSetReaderConfig {
             security_mode: security_mode_option(value.security_mode),
             security_policy_uri: None,
             security_group_id: non_empty_ua_string(&value.security_group_id),
-            target_variables: Vec::new(),
+            message_encoding: message_encoding_from_settings(&value.message_settings),
+            target_variables: target_variables_from_subscribed_data_set(&value.subscribed_data_set),
             subscribed_variables: Vec::new(),
             ..DataSetReaderConfig::default()
         }
+    }
+}
+
+fn message_encoding_from_settings(settings: &ExtensionObject) -> MessageEncoding {
+    if settings.inner_is::<JsonDataSetReaderMessageDataType>() {
+        MessageEncoding::Json
+    } else {
+        MessageEncoding::Uadp
+    }
+}
+
+fn target_variables_from_subscribed_data_set(
+    subscribed_data_set: &ExtensionObject,
+) -> Vec<crate::config::FieldTargetConfig> {
+    let Some(targets) = subscribed_data_set.inner_as::<TargetVariablesDataType>() else {
+        return Vec::new();
+    };
+    targets
+        .target_variables
+        .as_deref()
+        .unwrap_or_default()
+        .iter()
+        .enumerate()
+        .map(|(index, target)| field_target_from_data_type(index, target))
+        .collect()
+}
+
+fn field_target_from_data_type(
+    dataset_field_index: usize,
+    target: &FieldTargetDataType,
+) -> crate::config::FieldTargetConfig {
+    crate::config::FieldTargetConfig {
+        dataset_field_index,
+        dataset_field_id: if target.data_set_field_id == opcua_types::Guid::null() {
+            None
+        } else {
+            Some(target.data_set_field_id.clone())
+        },
+        target_node_id: target.target_node_id.clone(),
+        attribute_id: AttributeId::from_u32(target.attribute_id).unwrap_or(AttributeId::Value),
+        index_range: numeric_range_to_option(&target.write_index_range),
+        override_value_handling: target.override_value_handling,
+    }
+}
+
+fn numeric_range_to_option(range: &NumericRange) -> Option<String> {
+    if range.is_none() {
+        None
+    } else {
+        Some(range.to_string())
     }
 }
 
@@ -279,11 +335,30 @@ pub fn register_pubsub_config_methods(
     address_space: Arc<RwLock<AddressSpace>>,
     manager: Arc<Mutex<PubSubConfigManager>>,
 ) {
+    register_pubsub_config_methods_with_updates(
+        core_node_manager,
+        address_space,
+        manager,
+        Arc::new(|_| {}),
+    );
+}
+
+/// Registers writable PubSub configuration Methods and notifies `on_update`
+/// with a full connection snapshot after connection, group, writer, or reader
+/// changes. The callback is intentionally synchronous and small; callers that
+/// need async work should enqueue the snapshot for a task that owns the runtime.
+pub fn register_pubsub_config_methods_with_updates(
+    core_node_manager: &CoreNodeManager,
+    address_space: Arc<RwLock<AddressSpace>>,
+    manager: Arc<Mutex<PubSubConfigManager>>,
+    on_update: PubSubConfigUpdateCallback,
+) {
     // (Method node id, handler). Each handler gets the called object's NodeId so per-instance
     // Methods can resolve the target connection / group from the deterministic reflected ids.
     type Handler = fn(
         &Arc<RwLock<AddressSpace>>,
         &Arc<Mutex<PubSubConfigManager>>,
+        &PubSubConfigUpdateCallback,
         &NodeId,
         &[Variant],
     ) -> Result<Vec<Variant>, StatusCode>;
@@ -341,9 +416,12 @@ pub fn register_pubsub_config_methods(
     for (method_id, handler) in methods {
         let address_space = Arc::clone(&address_space);
         let manager = Arc::clone(&manager);
+        let on_update = Arc::clone(&on_update);
         core_node_manager.inner().add_method_callback_with_context(
             method_id.into(),
-            move |_context, object_id, args| handler(&address_space, &manager, object_id, args),
+            move |_context, object_id, args| {
+                handler(&address_space, &manager, &on_update, object_id, args)
+            },
         );
     }
 }
@@ -351,6 +429,7 @@ pub fn register_pubsub_config_methods(
 fn add_connection(
     address_space: &Arc<RwLock<AddressSpace>>,
     manager: &Arc<Mutex<PubSubConfigManager>>,
+    on_update: &PubSubConfigUpdateCallback,
     _object_id: &NodeId,
     args: &[Variant],
 ) -> Result<Vec<Variant>, StatusCode> {
@@ -366,6 +445,7 @@ fn add_connection(
         (ns, connection_id, manager.connections.clone())
     };
 
+    (on_update)(connections_snapshot.clone());
     let space = address_space.write();
     let _ = reflect_pubsub_config(&space, ns, &connections_snapshot);
     Ok(vec![Variant::from(connection_node_id(ns, &connection_id))])
@@ -374,6 +454,7 @@ fn add_connection(
 fn remove_connection(
     address_space: &Arc<RwLock<AddressSpace>>,
     manager: &Arc<Mutex<PubSubConfigManager>>,
+    on_update: &PubSubConfigUpdateCallback,
     _object_id: &NodeId,
     args: &[Variant],
 ) -> Result<Vec<Variant>, StatusCode> {
@@ -391,6 +472,7 @@ fn remove_connection(
         (ns, removed, manager.connections.clone())
     };
 
+    (on_update)(connections_snapshot.clone());
     let space = address_space.write();
     delete_connection_nodes(&space, ns, &removed);
     let _ = reflect_pubsub_config(&space, ns, &connections_snapshot);
@@ -400,6 +482,7 @@ fn remove_connection(
 fn add_writer_group(
     address_space: &Arc<RwLock<AddressSpace>>,
     manager: &Arc<Mutex<PubSubConfigManager>>,
+    on_update: &PubSubConfigUpdateCallback,
     object_id: &NodeId,
     args: &[Variant],
 ) -> Result<Vec<Variant>, StatusCode> {
@@ -438,6 +521,7 @@ fn add_writer_group(
         )
     };
 
+    (on_update)(connections_snapshot.clone());
     let space = address_space.write();
     let _ = reflect_pubsub_config(&space, ns, &connections_snapshot);
     Ok(vec![Variant::from(writer_group_node_id(
@@ -450,6 +534,7 @@ fn add_writer_group(
 fn add_reader_group(
     address_space: &Arc<RwLock<AddressSpace>>,
     manager: &Arc<Mutex<PubSubConfigManager>>,
+    on_update: &PubSubConfigUpdateCallback,
     object_id: &NodeId,
     args: &[Variant],
 ) -> Result<Vec<Variant>, StatusCode> {
@@ -482,6 +567,7 @@ fn add_reader_group(
         )
     };
 
+    (on_update)(connections_snapshot.clone());
     let space = address_space.write();
     let _ = reflect_pubsub_config(&space, ns, &connections_snapshot);
     Ok(vec![Variant::from(reader_group_node_id(
@@ -494,6 +580,7 @@ fn add_reader_group(
 fn remove_group(
     address_space: &Arc<RwLock<AddressSpace>>,
     manager: &Arc<Mutex<PubSubConfigManager>>,
+    on_update: &PubSubConfigUpdateCallback,
     object_id: &NodeId,
     args: &[Variant],
 ) -> Result<Vec<Variant>, StatusCode> {
@@ -538,6 +625,7 @@ fn remove_group(
             }
         };
 
+    (on_update)(connections_snapshot.clone());
     let space = address_space.write();
     match removed {
         RemovedGroup::Writer(group) => {
@@ -554,6 +642,7 @@ fn remove_group(
 fn add_dataset_writer(
     address_space: &Arc<RwLock<AddressSpace>>,
     manager: &Arc<Mutex<PubSubConfigManager>>,
+    on_update: &PubSubConfigUpdateCallback,
     object_id: &NodeId,
     args: &[Variant],
 ) -> Result<Vec<Variant>, StatusCode> {
@@ -585,6 +674,7 @@ fn add_dataset_writer(
         )
     };
 
+    (on_update)(connections_snapshot.clone());
     let space = address_space.write();
     let _ = reflect_pubsub_config(&space, ns, &connections_snapshot);
     Ok(vec![Variant::from(dataset_writer_node_id(
@@ -597,6 +687,7 @@ fn add_dataset_writer(
 fn remove_dataset_writer(
     address_space: &Arc<RwLock<AddressSpace>>,
     manager: &Arc<Mutex<PubSubConfigManager>>,
+    on_update: &PubSubConfigUpdateCallback,
     object_id: &NodeId,
     args: &[Variant],
 ) -> Result<Vec<Variant>, StatusCode> {
@@ -621,6 +712,7 @@ fn remove_dataset_writer(
         (ns, connection_id, removed, manager.connections.clone())
     };
 
+    (on_update)(connections_snapshot.clone());
     let space = address_space.write();
     delete_dataset_writer_nodes(&space, ns, &connection_id, &removed);
     let _ = reflect_pubsub_config(&space, ns, &connections_snapshot);
@@ -630,6 +722,7 @@ fn remove_dataset_writer(
 fn add_dataset_reader(
     address_space: &Arc<RwLock<AddressSpace>>,
     manager: &Arc<Mutex<PubSubConfigManager>>,
+    on_update: &PubSubConfigUpdateCallback,
     object_id: &NodeId,
     args: &[Variant],
 ) -> Result<Vec<Variant>, StatusCode> {
@@ -656,6 +749,7 @@ fn add_dataset_reader(
         )
     };
 
+    (on_update)(connections_snapshot.clone());
     let space = address_space.write();
     let _ = reflect_pubsub_config(&space, ns, &connections_snapshot);
     Ok(vec![Variant::from(dataset_reader_node_id(
@@ -668,6 +762,7 @@ fn add_dataset_reader(
 fn remove_dataset_reader(
     address_space: &Arc<RwLock<AddressSpace>>,
     manager: &Arc<Mutex<PubSubConfigManager>>,
+    on_update: &PubSubConfigUpdateCallback,
     object_id: &NodeId,
     args: &[Variant],
 ) -> Result<Vec<Variant>, StatusCode> {
@@ -692,6 +787,7 @@ fn remove_dataset_reader(
         (ns, connection_id, removed, manager.connections.clone())
     };
 
+    (on_update)(connections_snapshot.clone());
     let space = address_space.write();
     delete_dataset_reader_nodes(&space, ns, &connection_id, &removed);
     let _ = reflect_pubsub_config(&space, ns, &connections_snapshot);
@@ -703,6 +799,7 @@ fn remove_dataset_reader(
 fn add_published_data_items(
     address_space: &Arc<RwLock<AddressSpace>>,
     manager: &Arc<Mutex<PubSubConfigManager>>,
+    _on_update: &PubSubConfigUpdateCallback,
     _object_id: &NodeId,
     args: &[Variant],
 ) -> Result<Vec<Variant>, StatusCode> {
@@ -741,6 +838,7 @@ fn add_published_data_items(
 fn remove_published_data_set(
     address_space: &Arc<RwLock<AddressSpace>>,
     manager: &Arc<Mutex<PubSubConfigManager>>,
+    _on_update: &PubSubConfigUpdateCallback,
     _object_id: &NodeId,
     args: &[Variant],
 ) -> Result<Vec<Variant>, StatusCode> {
@@ -765,6 +863,7 @@ fn remove_published_data_set(
 fn add_variables(
     address_space: &Arc<RwLock<AddressSpace>>,
     manager: &Arc<Mutex<PubSubConfigManager>>,
+    _on_update: &PubSubConfigUpdateCallback,
     object_id: &NodeId,
     args: &[Variant],
 ) -> Result<Vec<Variant>, StatusCode> {
@@ -808,6 +907,7 @@ fn add_variables(
 fn remove_variables(
     address_space: &Arc<RwLock<AddressSpace>>,
     manager: &Arc<Mutex<PubSubConfigManager>>,
+    _on_update: &PubSubConfigUpdateCallback,
     object_id: &NodeId,
     args: &[Variant],
 ) -> Result<Vec<Variant>, StatusCode> {

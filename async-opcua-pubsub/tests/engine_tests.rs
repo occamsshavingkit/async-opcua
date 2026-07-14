@@ -70,6 +70,18 @@ async fn manages_connection_configs_and_udp_publisher_lifecycle() {
 }
 
 #[test]
+fn replaces_connection_configs_from_config_snapshot() {
+    let mut engine = PubSubEngine::new(address_space());
+    let initial = empty_connection("udp-1", "udp://127.0.0.1:4840");
+    let replacement = empty_connection("mqtt-1", "mqtt://broker.local:1883");
+    engine.add_connection(initial);
+
+    engine.replace_connections(vec![replacement.clone()]);
+
+    assert_eq!(engine.connection_configs(), &[replacement]);
+}
+
+#[test]
 fn rejects_unknown_transport_addresses() {
     assert!(TransportKind::from_address("ftp://broker.local/pubsub").is_err());
 }

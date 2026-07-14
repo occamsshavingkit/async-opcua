@@ -214,7 +214,7 @@ async fn main() {
         #[cfg(feature = "pubsub")]
         let pubsub_address_space = node_manager.address_space().clone();
         #[cfg(feature = "pubsub")]
-        let (pubsub_config_tx, mut pubsub_config_rx) = tokio::sync::mpsc::channel(8);
+        let (pubsub_config_tx, mut pubsub_config_rx) = tokio::sync::watch::channel(Vec::new());
         #[cfg(feature = "pubsub")]
         {
             let pubsub_manager = Arc::new(opcua::core::sync::Mutex::new(
@@ -225,10 +225,8 @@ async fn main() {
                 pubsub_address_space.clone(),
                 pubsub_manager,
                 Arc::new(move |connections| {
-                    if pubsub_config_tx.try_send(connections).is_err() {
-                        warn!(
-                            "Dropped PubSub config update because the runtime update queue is full"
-                        );
+                    if pubsub_config_tx.send(connections).is_err() {
+                        warn!("Dropped PubSub config update because the receiver was dropped");
                     }
                 }),
             );
@@ -291,7 +289,8 @@ async fn main() {
                 error!("Failed to start PubSub subscribers: {:?}", status);
             }
             tokio::spawn(async move {
-                while let Some(connections) = pubsub_config_rx.recv().await {
+                while pubsub_config_rx.changed().await.is_ok() {
+                    let connections = pubsub_config_rx.borrow().clone();
                     engine.stop_subscribers().await;
                     engine.replace_connections(connections);
                     if let Err(status) = engine.start_subscribers() {

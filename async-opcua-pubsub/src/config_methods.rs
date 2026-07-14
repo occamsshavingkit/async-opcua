@@ -7,9 +7,9 @@ use opcua_server::{address_space::AddressSpace, node_manager::memory::CoreNodeMa
 use opcua_types::{
     AttributeId, ConfigurationVersionDataType, DataSetReaderDataType, DataSetWriterDataType,
     ExtensionObject, FieldTargetDataType, JsonDataSetReaderMessageDataType, MessageSecurityMode,
-    MethodId, NodeId, NumericRange, PubSubConnectionDataType, PublishedVariableDataType,
-    ReaderGroupDataType, StatusCode, TargetVariablesDataType, UAString, Variant,
-    WriterGroupDataType,
+    MethodId, NetworkAddressUrlDataType, NodeId, NumericRange, PubSubConnectionDataType,
+    PublishedVariableDataType, ReaderGroupDataType, StatusCode, TargetVariablesDataType, UAString,
+    Variant, WriterGroupDataType,
 };
 
 use crate::{
@@ -165,7 +165,7 @@ impl PubSubConnectionConfig {
         PubSubConnectionConfig {
             connection_id,
             name: ua_string_to_string(&value.name),
-            address: ua_string_to_string(&value.transport_profile_uri),
+            address: connection_address(value),
             writer_groups: value
                 .writer_groups
                 .as_deref()
@@ -185,6 +185,15 @@ impl PubSubConnectionConfig {
                 .collect(),
         }
     }
+}
+
+fn connection_address(value: &PubSubConnectionDataType) -> String {
+    value
+        .address
+        .inner_as::<NetworkAddressUrlDataType>()
+        .map(|address| ua_string_to_string(&address.url))
+        .filter(|url| !url.is_empty())
+        .unwrap_or_else(|| ua_string_to_string(&value.transport_profile_uri))
 }
 
 impl WriterGroupConfig {

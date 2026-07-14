@@ -9,10 +9,10 @@ use opcua_pubsub::{
 use opcua_server::address_space::AddressSpace;
 use opcua_types::{
     AttributeId, DataEncoding, DataSetReaderDataType, DataSetWriterDataType, ExtensionObject,
-    FieldTargetDataType, JsonDataSetReaderMessageDataType, MessageSecurityMode, NodeId,
-    NumericRange, OverrideValueHandling, PubSubConnectionDataType, PubSubState,
-    ReaderGroupDataType, TargetVariablesDataType, TimestampsToReturn, UAString, Variant,
-    WriterGroupDataType,
+    FieldTargetDataType, JsonDataSetReaderMessageDataType, MessageSecurityMode,
+    NetworkAddressUrlDataType, NodeId, NumericRange, OverrideValueHandling,
+    PubSubConnectionDataType, PubSubState, ReaderGroupDataType, TargetVariablesDataType,
+    TimestampsToReturn, UAString, Variant, WriterGroupDataType,
 };
 use std::sync::Arc;
 
@@ -121,6 +121,25 @@ fn config_snapshot_consistency_part14_pubsub_connection_preserves_supported_fiel
         reader.security_group_id.as_deref(),
         Some("security-group-a")
     );
+}
+
+#[test]
+fn config_snapshot_consistency_connection_uses_network_address_url() {
+    let source = PubSubConnectionDataType {
+        name: UAString::from("BrokerConnection"),
+        transport_profile_uri: UAString::from(
+            "http://opcfoundation.org/UA-Profile/Transport/pubsub-mqtt",
+        ),
+        address: ExtensionObject::from_message(NetworkAddressUrlDataType {
+            network_interface: UAString::null(),
+            url: UAString::from("mqtt://broker.local:1883"),
+        }),
+        ..PubSubConnectionDataType::default()
+    };
+
+    let snapshot = PubSubConnectionConfig::from_data_type(&source, "conn-1".to_string());
+
+    assert_eq!(snapshot.address, "mqtt://broker.local:1883");
 }
 
 #[test]

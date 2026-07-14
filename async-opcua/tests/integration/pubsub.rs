@@ -414,7 +414,9 @@ async fn pubsub_config_methods_notify_connection_snapshot_updates() {
         .unwrap();
     assert_eq!(add.status_code, StatusCode::Good);
 
-    let snapshot = rx.recv().expect("AddConnection publishes updated snapshot");
+    let snapshot = rx
+        .recv_timeout(std::time::Duration::from_secs(1))
+        .expect("AddConnection publishes updated snapshot");
     assert_eq!(snapshot.len(), 1);
     assert_eq!(snapshot[0].name, "NotifyConn");
 }

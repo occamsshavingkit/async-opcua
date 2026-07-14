@@ -225,9 +225,7 @@ impl PubSubEngine {
     /// Replaces all connection configurations with a fresh writable-config snapshot.
     pub fn replace_connections(&mut self, connections: Vec<PubSubConnectionConfig>) {
         self.connections = connections;
-        if self.subscriber_cancel_token.is_none() {
-            self.subscriber_runtime = None;
-        }
+        self.subscriber_runtime = None;
     }
 
     /// Returns the configured PubSub connections.

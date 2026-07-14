@@ -1,18 +1,20 @@
 # OPC UA Foundation Profile Roadmap
 
-This roadmap compares the canonical OPC UA Foundation profile snapshot in
-`/home/quackdcs/micro-opcua/profiles` with evidence currently present in this
-repository. It is intentionally conservative: code or generated namespace nodes
-alone are not treated as certification proof unless a test, conformance guide, or
-explicit profile smoke test exercises the behavior.
+This roadmap compares the canonical OPC UA Foundation profile snapshot supplied
+out-of-tree via `ASYNC_OPCUA_PROFILE_SNAPSHOT_DIR` with evidence currently
+present in this repository. The snapshot used for this pass lived at
+`/home/quackdcs/micro-opcua/profiles`; copy or generate the same snapshot tree
+before regenerating these counts. It is intentionally conservative: code or
+generated namespace nodes alone are not treated as certification proof unless a
+test, conformance guide, or explicit profile smoke test exercises the behavior.
 
 ## Inputs
 
 | Source | Observed content | Use in this roadmap |
 |---|---:|---|
-| `/home/quackdcs/micro-opcua/profiles/opcua-profile-normalized-snapshot.json` | 76 profiles, 7 facets, 1182 CUs, 4 canonical server profiles | Canonical source of profile-to-CU closures |
-| `/home/quackdcs/micro-opcua/profiles/opcua-profile-snapshot.json` | 4 profiles, 9 facets, 6 CUs | Raw/smaller snapshot, not sufficient for roadmap |
-| `/home/quackdcs/micro-opcua/profiles/opcua-profile-manifest.yaml` | JSON-formatted manifest with 6 profiles, 178 items, 21 capacities | Curated build/profile metadata |
+| `$ASYNC_OPCUA_PROFILE_SNAPSHOT_DIR/opcua-profile-normalized-snapshot.json` | 76 profiles, 7 facets, 1182 CUs, 4 canonical server profiles | Canonical source of profile-to-CU closures |
+| `$ASYNC_OPCUA_PROFILE_SNAPSHOT_DIR/opcua-profile-snapshot.json` | 4 profiles, 9 facets, 6 CUs | Raw/smaller snapshot, not sufficient for roadmap |
+| `$ASYNC_OPCUA_PROFILE_SNAPSHOT_DIR/opcua-profile-manifest.yaml` | JSON-formatted manifest with 6 profiles, 178 items, 21 capacities | Curated build/profile metadata |
 
 Canonical active server profile closures from the normalized snapshot:
 

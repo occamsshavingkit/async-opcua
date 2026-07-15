@@ -261,7 +261,7 @@ tier. Status is first-pass and evidence-driven, not a certification claim.
 
 1. Land the CU registry/report generator first. This prevents further manual drift.
 2. ~~Resolve Time Sync profile claims before advertising 2025 canonical profile parity.~~ Done — feature 093, see `docs/time-synchronization.md`.
-3. Add CU-specific Base Info and ServerCapabilities tests; most of this can be data-driven from NodeIds and the CU descriptions.
+3. ~~Add CU-specific Base Info and ServerCapabilities tests.~~ Superseded — 2026-07-15 ground-truth audit covers this and every other server-side facet (492 CUs across 76 profiles, not just the 4 canonical ones). See `docs/conformance-audit-2026-07-15.md` and `TODO.md`'s Remaining section for the resulting prioritized backlog.
 4. Strengthen Standard smoke tests for X509 user activation over SignAndEncrypt and observable RegisterServer/RegisterServer2 registration.
 5. Run the Windows UACTT pass documented in `docs/ctt-conformance.md` after the CU ledger is green.
 

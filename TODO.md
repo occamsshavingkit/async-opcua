@@ -4,11 +4,24 @@ Ideas that could be implemented.
 
 ## Remaining
 
-- **Base Info / Address Space CU proof**: add CU-specific checks for ServerCapabilities (`3911`, `3912`, `4055`), NamespaceMetadata (`3545`), AddIn references, LocalTime, SelectionList, OptionSet, diagnostics, Locations, Currency, and standard datatype/reference nodes.
-- **Attribute Write CU proof**: add CU-named tests for StatusCode/Timestamp writes (`2936`), IndexRange writes (`3147`), and AccessLevelEx `WriteFullArrayOnly` behavior (`2820`).
-- **GDS Push Model CU proof**: verify full Part 12 Global Certificate/TrustList Management push-model semantics for CU `2231` and tie existing GDS method tests to that CU.
+Conformance backlog below is derived from `docs/conformance-audit-2026-07-15.md`,
+a 2026-07-15 ground-truth audit covering all 76 OPC UA Foundation server
+profiles/facets (492 CUs), not just the 4 canonical composite profiles
+(123 CUs) previously tracked. See that doc for full per-theme evidence;
+`specs/conformance-tester/CU-COVERAGE.md` has the per-CU ledger.
+
+- **Alarms & Conditions state-variable block**: implement `TransitionTime`/`EffectiveTransitionTime`/`EffectiveDisplayName` on limit sub-states (CUs `5510`-`5567`, 58 CUs, currently zero implementation), plus Enable/Disable/Suppress/UnSuppress/OutOfService/Silence Methods and A&C Auditing (explicit TODO in code).
+- **GDS Directory / Authorization / KeyCredential services**: `RegisterApplication`/`QueryServers`/`QueryApplications` are explicitly `BadServiceUnsupported` (not missing by accident); Authorization Service (OAuth2 token issuance) and KeyCredential Service don't exist at all; JWT/OAuth2 authority discovery (issuer endpoint URL) is absent. CUs `2232`, `2233`, `2709`, `2817`, `2902`, `3182`, `3581`, `3584`, `3586`, `5292`, `5293`, `5301`, `5302`, `5303`.
+- **File Access / Temporary File Access**: `FileType` node metadata exists but no `add_method_cb` callback wired anywhere — Open/Read/Write/Close Methods are inert nodes, not functional I/O. CUs `3210`, `3211`, `3213`, `3810`-`3813`, `5791`.
+- **DataAccess variable-type instances**: `TwoState`/`MultiState`/`MultiStateValueDiscrete`/`DiscreteItemType`/`ArrayItemType` family never instantiated beyond `AnalogItemType`. CUs `2361`, `2426`, `2474`, `2776`, `2831`, `2988`, `3323`-`3327`.
+- **RBAC RolePermissions Write path**: no live Write-service path sets `RolePermissions`/`DefaultRolePermissions` (only settable at node-creation/config time); `UserWriteMask` is static, never per-user computed. CUs `2806`, `2873`, `2163`, `3026`.
+- **Historical `ReadAtTimeDetails`**: zero server-side implementation for any backend — `SimpleNodeManagerImpl` overrides every other `history_read_*` but not this one. CU `3020` (and dependents `2991`).
+- **Historical structured-data update/delete**: both backends' `update_structure_data` accept only `Annotation`-typed values, contrary to what several CUs require. CUs `2185`, `2332`, `2664`, `2740`, `2937`, `3015`.
+- **Attribute Write remaining gaps**: `WriteFullArrayOnly` bit stored but never enforced against IndexRange array writes (`2820`); Write doesn't have a test proving a value round-trips post-Write (`2936`). (IndexRange writes via `Variant::set_range_of`, CU `3147`, is done.)
+- **Subscription Durability**: `SetSubscriptionDurable` is an inert generated nodeset entry; zero "durable" references in the server crate. CUs `3642`, `5795`.
+- **Scheduler / Redundancy / Sessionless**: all three are unimplemented beyond generated stubs — Scheduler is not the same as the existing Part-10 `ProgramStateMachine`; Redundancy has no failover/clustering code; sessionless enforcement has an explicit TODO (`rbac/decision.rs:147`). CUs `4500`-`4503`, `2258`, `3027`, `3994`, `2871`.
 - **PubSub MQTT config completion**: finish `specs/074-pubsub-gauntlet/tasks.md` T011/T012 by deriving QoS from `RequestedDeliveryGuarantee` and using configured `BrokerDataSetReaderTransportDataType.QueueName` topic filters instead of only writer/reader group IDs.
-- **Conformance known partials**: close or document the remaining JSON/XML cross-stack vector strategy, FindServersOnNetwork mDNS counterparty validation, broader Part 13 aggregate coverage, and audit-event coverage from `specs/conformance-tester/COVERAGE.md`.
+- **Conformance known partials**: close or document the remaining JSON/XML cross-stack vector strategy, FindServersOnNetwork mDNS counterparty validation, and audit-event coverage from `specs/conformance-tester/COVERAGE.md`. (Part 13 aggregate coverage: confirmed solid — 35/35 standard aggregates implemented and tested; Start/End variants and custom-aggregate extensibility are the only real gaps, see audit doc.)
 - **CTT certification run**: run the demo server against the OPC Foundation Compliance Test Tool on Windows. See `docs/ctt-conformance.md`.
 - ~~**Technical debt quick wins**: fix companion feature-name drift between `async-opcua-server/Cargo.toml` and `async-opcua-server/src/companion/mod.rs`; remove or narrow the `unexpected_cfgs` allowance; add a consistency check for declared companion features versus importer gates.~~
 - ~~**Spec Kit reconciliation**: update `specs/069-companion-specs/tasks.md` and related plan/spec artifacts so they match the current companion-spec implementation strategy, or document the intended migration path if runtime XML import is temporary.~~

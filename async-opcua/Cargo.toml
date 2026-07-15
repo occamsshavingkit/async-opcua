@@ -111,6 +111,8 @@ client = ["async-opcua-client"]
 discovery-server-registration = [
   "async-opcua-server/discovery-server-registration",
 ]
+# UA-based periodic time synchronization (OPC UA Time Sync CU 5505). Feature 093.
+time-sync-ua = ["async-opcua-server/time-sync-ua"]
 lds = ["async-opcua-server/lds"]
 discovery-mdns = ["async-opcua-server/discovery-mdns"]
 # Includes all the code to populate the address space with the default node set.

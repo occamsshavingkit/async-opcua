@@ -29,6 +29,7 @@ mod session_audit;
 mod sharded;
 mod subscriptions;
 mod tier_a;
+mod time_sync;
 mod triggering;
 mod walk_runner;
 mod write;

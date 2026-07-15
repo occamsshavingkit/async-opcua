@@ -19,12 +19,28 @@ implementation time so long as the behavioral contract holds.
 pub trait TimeSyncSource: Send + Sync {
     /// A cheap, non-blocking snapshot of current sync status.
     fn status(&self) -> TimeSyncStatus;
+
+    /// Optional background task keeping status current. Default: never
+    /// resolves (no background work needed). A source with a poll loop
+    /// (e.g. `UaHeaderTimeSyncSource`) overrides this.
+    fn run<'a>(&'a self) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
+        Box::pin(std::future::pending())
+    }
 }
 ```
 
 **Contract**:
 - `status()` MUST NOT block, panic, or perform I/O — it reads cached state.
-- Object-safe: no generic methods, no `async fn`.
+- Object-safe: no generic methods, no `async fn` (hence `run`'s boxed-future
+  shape, callable through `Arc<dyn TimeSyncSource>`).
+- **Implementation note (post-design refinement)**: `run` was added to the
+  trait itself, rather than having the server locate a concrete
+  `UaHeaderTimeSyncSource` via `Any`-downcasting of `Arc<dyn TimeSyncSource>`.
+  The server drives `time_sync_source.run()` unconditionally (no cfg-gating)
+  in the same singleton-task slots as `discovery_fut`/`mdns_fut` — the
+  default no-op means every other source costs nothing, and sharded mode's
+  existing per-shard/singleton split (`run_connection_loop` vs
+  `run_background_tasks`) already prevents duplication for free.
 
 ---
 
@@ -159,8 +175,13 @@ impl TimeSyncSource for UaHeaderTimeSyncSource { /* status() reads shared state 
 
 **Contract**:
 - `mechanism == UaHeaderBased`.
-- A background poll loop (spawned by the server at startup, `MissedTickBehavior::Skip`,
-  driven by a `CancellationToken`) calls C6 each `poll_interval`:
+- `new(...)`'s `poll_interval` is clamped up to `MIN_UA_POLL_INTERVAL` (1s) —
+  never used verbatim if smaller (constitution Principle IV: bound
+  self-inflicted resource use).
+- The poll loop is `TimeSyncSource::run(&self)` (C1) — driven by the server's
+  existing singleton-task select loop, `MissedTickBehavior::Skip`, and
+  dropped (not explicitly cancelled) on server shutdown, exactly like
+  `discovery_fut`. Each tick calls C6:
   - success → `synchronized = true`, `last_sync = server_ts`,
     `observed_skew = Some(|server_ts − local_now|)`;
   - failure → `synchronized = false` (FR-009); MUST NOT panic.

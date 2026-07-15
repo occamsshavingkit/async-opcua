@@ -24,7 +24,7 @@ use opcua_crypto::{
     CertificateStore, RevocationMode, SecurityPolicy, Thumbprint, ValidationOptions, X509,
 };
 use opcua_types::{
-    ApplicationDescription, ContextOwned, DecodingOptions, EndpointDescription, Error,
+    ApplicationDescription, ContextOwned, DateTime, DecodingOptions, EndpointDescription, Error,
     ExtensionObject, FindServersOnNetworkRequest, FindServersOnNetworkResponse, FindServersRequest,
     GetEndpointsRequest, MessageSecurityMode, NamespaceMap, RegisterServer2Request,
     RegisterServerRequest, RegisteredServer, StatusCode, UAString,
@@ -339,7 +339,7 @@ impl Client {
         channel: &AsyncSecureChannel,
         locale_ids: Option<Vec<UAString>>,
         profile_uris: Option<Vec<UAString>>,
-    ) -> Result<Vec<EndpointDescription>, Error> {
+    ) -> Result<(Vec<EndpointDescription>, DateTime), Error> {
         let request = GetEndpointsRequest {
             request_header: channel.make_request_header(self.config.request_timeout),
             endpoint_url: endpoint.endpoint_url.clone(),
@@ -350,9 +350,10 @@ impl Client {
         let response = channel.send(request, self.config.request_timeout).await?;
         if let ResponseMessage::GetEndpoints(response) = response {
             process_service_result(&response.response_header)?;
+            let timestamp = response.response_header.timestamp;
             match response.endpoints {
-                None => Ok(Vec::new()),
-                Some(endpoints) => Ok(endpoints),
+                None => Ok((Vec::new(), timestamp)),
+                Some(endpoints) => Ok((endpoints, timestamp)),
             }
         } else {
             Err(process_unexpected_response(response))
@@ -396,6 +397,40 @@ impl Client {
         locale_ids: &[&str],
         profile_uris: &[&str],
     ) -> Result<Vec<EndpointDescription>, Error> {
+        let (endpoints, _timestamp) = self
+            .get_endpoints_with_timestamp(server, locale_ids, profile_uris)
+            .await?;
+        Ok(endpoints)
+    }
+
+    /// Perform a `GetEndpoints` call against `server` and return the server's
+    /// `ResponseHeader.timestamp` (OPC 10000-4 §7.33) alongside the endpoint
+    /// list — the server's notion of current UTC time as of that response.
+    ///
+    /// This is a single, session-less discovery round-trip (OPC 10000-4
+    /// §5.5.4), suitable for periodic time-synchronization polling of a
+    /// well-known endpoint (e.g. by
+    /// `async-opcua-server`'s `UaHeaderTimeSyncSource`, OPC UA Time Sync
+    /// CU 5505).
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(DateTime)` - The server's response header timestamp.
+    /// * `Err(Error)` - Request failed, [Status code](StatusCode) is the reason for failure.
+    pub async fn get_server_time_via_endpoints(
+        &self,
+        server: impl ConnectorBuilder,
+    ) -> Result<DateTime, Error> {
+        let (_endpoints, timestamp) = self.get_endpoints_with_timestamp(server, &[], &[]).await?;
+        Ok(timestamp)
+    }
+
+    async fn get_endpoints_with_timestamp(
+        &self,
+        server: impl ConnectorBuilder,
+        locale_ids: &[&str],
+        profile_uris: &[&str],
+    ) -> Result<(Vec<EndpointDescription>, DateTime), Error> {
         let server = server.build()?;
         let preferred_locales = Vec::new();
         // Most of these fields mean nothing when getting endpoints
@@ -445,9 +480,9 @@ impl Client {
             }
         }
 
-        let endpoints = res?;
+        let (endpoints, timestamp) = res?;
         self.validate_discovery_endpoint_certificate_pins(&endpoints)?;
-        Ok(endpoints)
+        Ok((endpoints, timestamp))
     }
 
     async fn find_servers_inner(

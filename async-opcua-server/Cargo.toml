@@ -106,6 +106,12 @@ discovery-server-registration = ["async-opcua-client"]
 # OPC UA Part 12 multicast discovery (LDS-ME / FindServersOnNetwork over mDNS). Opt-in;
 # pulls the pure-Rust mdns-sd crate. Feature 036.
 discovery-mdns = ["dep:mdns-sd"]
+# UA-based periodic time synchronization (OPC UA Time Sync CU 5505): polls a
+# configured well-known OPC UA endpoint's response-header timestamps. Separate
+# from discovery-server-registration since the two capabilities are
+# independent; both reuse the optional async-opcua-client dependency. Feature
+# 093. Omitting the feature saves the client-crate dependency.
+time-sync-ua = ["async-opcua-client"]
 metrics-exporter = []
 test-utils = []
 legacy-crypto = [

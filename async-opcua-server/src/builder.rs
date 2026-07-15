@@ -36,6 +36,7 @@ pub struct ServerBuilder {
     pub(crate) config: ServerConfig,
     pub(crate) node_managers: Vec<Box<dyn NodeManagerBuilder>>,
     pub(crate) authenticator: Option<Arc<dyn AuthManager>>,
+    pub(crate) time_sync_source: Option<Arc<dyn crate::time_sync::TimeSyncSource>>,
     #[cfg(feature = "kerberos")]
     pub(crate) kerberos_validator: Option<GssapiIdentityValidator>,
     pub(crate) type_tree_getter: Option<Arc<dyn TypeTreeForUser>>,
@@ -50,6 +51,7 @@ impl Default for ServerBuilder {
             config: Default::default(),
             node_managers: Default::default(),
             authenticator: None,
+            time_sync_source: None,
             #[cfg(feature = "kerberos")]
             kerberos_validator: None,
             token: CancellationToken::new(),
@@ -247,6 +249,17 @@ impl ServerBuilder {
     /// Set a custom authenticator.
     pub fn with_authenticator(mut self, authenticator: Arc<dyn AuthManager>) -> Self {
         self.authenticator = Some(authenticator);
+        self
+    }
+
+    /// Set a custom time-synchronization source (OPC UA Time Sync conformance
+    /// units). If never called, the server defaults to
+    /// [`crate::time_sync::OsClockSource`].
+    pub fn with_time_sync_source(
+        mut self,
+        time_sync_source: Arc<dyn crate::time_sync::TimeSyncSource>,
+    ) -> Self {
+        self.time_sync_source = Some(time_sync_source);
         self
     }
 

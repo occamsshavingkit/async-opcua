@@ -75,6 +75,10 @@ pub mod session;
 mod session;
 #[cfg(feature = "subscriptions")]
 mod subscriptions;
+/// Time synchronization status reporting and the `TimeSyncSource` extensibility point.
+pub mod time_sync;
+#[cfg(feature = "time-sync-ua")]
+mod time_sync_ua;
 mod transport;
 
 pub use builder::ServerBuilder;
@@ -103,6 +107,9 @@ pub use subscriptions::{
     CreateMonitoredItem, MonitoredItem, MonitoredItemHandle, SessionSubscriptions, Subscription,
     SubscriptionCache, SubscriptionState,
 };
+pub use time_sync::{OsClockSource, TimeSyncMechanism, TimeSyncSource, TimeSyncStatus};
+#[cfg(feature = "time-sync-ua")]
+pub use time_sync_ua::UaHeaderTimeSyncSource;
 
 /// Notification allocation pooling utilities.
 #[cfg(feature = "subscriptions")]
@@ -133,6 +140,11 @@ pub mod constants {
     pub const DEFAULT_MAX_MONITORED_ITEMS_PER_SUB: usize = 10_000;
     /// Default, well known address for TCP discovery server
     pub const DEFAULT_DISCOVERY_SERVER_URL: &str = "opc.tcp://localhost:4840/UADiscovery";
+    /// Default acceptable clock skew tolerance in milliseconds (OPC UA Time Sync
+    /// CU 3802 "Configure Clock Skew"). The specification leaves the tolerance
+    /// application-defined; this is a conventional starting point that operators
+    /// can override via `ServerConfig::max_acceptable_clock_skew_ms`.
+    pub const DEFAULT_MAX_ACCEPTABLE_CLOCK_SKEW_MS: u64 = 5000;
 
     // Internally controlled values
 

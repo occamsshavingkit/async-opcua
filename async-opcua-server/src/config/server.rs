@@ -375,34 +375,61 @@ mod tests {
     fn max_acceptable_clock_skew_defaults_roundtrips_and_treats_zero_as_unset() {
         let default_config = ServerConfig::default();
         assert_eq!(
-            default_config.max_acceptable_clock_skew_ms,
-            crate::constants::DEFAULT_MAX_ACCEPTABLE_CLOCK_SKEW_MS
+            default_config.max_acceptable_clock_skew_ns,
+            crate::constants::DEFAULT_MAX_ACCEPTABLE_CLOCK_SKEW_NS
         );
         assert_eq!(
             default_config.max_acceptable_clock_skew(),
-            std::time::Duration::from_millis(
-                crate::constants::DEFAULT_MAX_ACCEPTABLE_CLOCK_SKEW_MS
-            )
+            std::time::Duration::from_nanos(crate::constants::DEFAULT_MAX_ACCEPTABLE_CLOCK_SKEW_NS)
         );
 
         let configured = ServerConfig {
-            max_acceptable_clock_skew_ms: 2000,
+            max_acceptable_clock_skew_ns: 2_000_000_000,
             ..Default::default()
         };
         assert_eq!(
             configured.max_acceptable_clock_skew(),
-            std::time::Duration::from_millis(2000)
+            std::time::Duration::from_secs(2)
         );
 
         let zeroed = ServerConfig {
-            max_acceptable_clock_skew_ms: 0,
+            max_acceptable_clock_skew_ns: 0,
             ..Default::default()
         };
         assert_eq!(
             zeroed.max_acceptable_clock_skew(),
-            std::time::Duration::from_millis(
-                crate::constants::DEFAULT_MAX_ACCEPTABLE_CLOCK_SKEW_MS
-            )
+            std::time::Duration::from_nanos(crate::constants::DEFAULT_MAX_ACCEPTABLE_CLOCK_SKEW_NS)
+        );
+    }
+
+    /// gPTP's typical target accuracy is sub-microsecond; a millisecond-
+    /// granular tolerance field could never express a meaningful bound for
+    /// it. Nanosecond granularity must support configuring tolerances well
+    /// below 1ms, and distinct sub-millisecond values must round-trip
+    /// exactly (no truncation to a coarser unit).
+    #[test]
+    fn max_acceptable_clock_skew_supports_ptp_grade_sub_millisecond_tolerances() {
+        let tight = ServerConfig {
+            max_acceptable_clock_skew_ns: 200, // 200ns, a realistic PTP-grade bound
+            ..Default::default()
+        };
+        assert_eq!(
+            tight.max_acceptable_clock_skew(),
+            std::time::Duration::from_nanos(200)
+        );
+
+        let one_microsecond = ServerConfig {
+            max_acceptable_clock_skew_ns: 1_000,
+            ..Default::default()
+        };
+        let ten_microseconds = ServerConfig {
+            max_acceptable_clock_skew_ns: 10_000,
+            ..Default::default()
+        };
+        assert_ne!(
+            one_microsecond.max_acceptable_clock_skew(),
+            ten_microseconds.max_acceptable_clock_skew(),
+            "distinct sub-millisecond tolerances must not collapse to the same value"
         );
     }
 
@@ -628,14 +655,18 @@ pub struct ServerConfig {
     /// unreasonably short timeout.
     #[serde(default = "defaults::min_session_timeout_ms")]
     pub min_session_timeout_ms: u64,
-    /// Acceptable clock skew tolerance, in milliseconds, used when reporting
+    /// Acceptable clock skew tolerance, in nanoseconds, used when reporting
     /// whether an observed time-sync offset (see [`crate::time_sync`]) is
     /// within tolerance (OPC UA Time Sync CU 3802 "Configure Clock Skew").
-    /// A value of `0` falls back to
-    /// [`crate::constants::DEFAULT_MAX_ACCEPTABLE_CLOCK_SKEW_MS`] rather than
+    /// Nanosecond granularity is required to express tolerances meaningful
+    /// for PTP/gPTP-class `TimeSyncSource`s (typically sub-microsecond
+    /// precision) — a millisecond-granular field could not express anything
+    /// finer than 1ms, several orders of magnitude too coarse. A value of
+    /// `0` falls back to
+    /// [`crate::constants::DEFAULT_MAX_ACCEPTABLE_CLOCK_SKEW_NS`] rather than
     /// being treated as "no tolerance".
-    #[serde(default = "defaults::max_acceptable_clock_skew_ms")]
-    pub max_acceptable_clock_skew_ms: u64,
+    #[serde(default = "defaults::max_acceptable_clock_skew_ns")]
+    pub max_acceptable_clock_skew_ns: u64,
     /// Enable server diagnostics.
     #[serde(default)]
     pub diagnostics: bool,
@@ -709,8 +740,8 @@ mod defaults {
         500
     }
 
-    pub(super) fn max_acceptable_clock_skew_ms() -> u64 {
-        constants::DEFAULT_MAX_ACCEPTABLE_CLOCK_SKEW_MS
+    pub(super) fn max_acceptable_clock_skew_ns() -> u64 {
+        constants::DEFAULT_MAX_ACCEPTABLE_CLOCK_SKEW_NS
     }
 
     pub(super) fn session_nonce_length() -> usize {
@@ -881,7 +912,7 @@ impl Default for ServerConfig {
             max_secure_channel_token_lifetime_ms: defaults::max_secure_channel_token_lifetime_ms(),
             max_session_timeout_ms: defaults::max_session_timeout_ms(),
             min_session_timeout_ms: defaults::min_session_timeout_ms(),
-            max_acceptable_clock_skew_ms: defaults::max_acceptable_clock_skew_ms(),
+            max_acceptable_clock_skew_ns: defaults::max_acceptable_clock_skew_ns(),
             diagnostics: false,
             session_nonce_length: defaults::session_nonce_length(),
             reverse_connect_failure_delay_ms: defaults::reverse_connect_failure_delay_ms(),
@@ -963,14 +994,14 @@ impl ServerConfig {
 
     /// The configured acceptable clock skew tolerance (OPC UA Time Sync
     /// CU 3802). A configured value of `0` is treated as unset and falls
-    /// back to [`crate::constants::DEFAULT_MAX_ACCEPTABLE_CLOCK_SKEW_MS`].
+    /// back to [`crate::constants::DEFAULT_MAX_ACCEPTABLE_CLOCK_SKEW_NS`].
     pub fn max_acceptable_clock_skew(&self) -> std::time::Duration {
-        let ms = if self.max_acceptable_clock_skew_ms == 0 {
-            constants::DEFAULT_MAX_ACCEPTABLE_CLOCK_SKEW_MS
+        let ns = if self.max_acceptable_clock_skew_ns == 0 {
+            constants::DEFAULT_MAX_ACCEPTABLE_CLOCK_SKEW_NS
         } else {
-            self.max_acceptable_clock_skew_ms
+            self.max_acceptable_clock_skew_ns
         };
-        std::time::Duration::from_millis(ms)
+        std::time::Duration::from_nanos(ns)
     }
 
     /// Add an endpoint to the server config.

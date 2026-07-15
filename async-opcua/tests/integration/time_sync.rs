@@ -88,7 +88,7 @@ mod ua_header_based {
         let source = UaHeaderTimeSyncSource::new(well_known.endpoint(), Duration::from_secs(1));
 
         let mut builder = default_server().with_time_sync_source(source);
-        builder.config_mut().max_acceptable_clock_skew_ms = 2000;
+        builder.config_mut().max_acceptable_clock_skew_ns = 2_000_000_000;
         let poller = Tester::new(builder, true).await;
 
         let deadline = std::time::Instant::now() + Duration::from_secs(10);

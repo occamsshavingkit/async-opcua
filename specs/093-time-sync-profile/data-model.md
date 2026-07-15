@@ -73,15 +73,21 @@ Built-in `TimeSyncSource` backed by a background poll loop.
 
 ## Configuration additions
 
-### ServerConfig.max_acceptable_clock_skew_ms
+### ServerConfig.max_acceptable_clock_skew_ns
 
 | Aspect | Value |
 |---|---|
-| Type | `u64` (milliseconds), serde field with `#[serde(default)]` |
-| Default | `DEFAULT_MAX_ACCEPTABLE_CLOCK_SKEW_MS` (constant in `constants` module, lib.rs); proposed 5000 |
+| Type | `u64` (**nanoseconds**), serde field with `#[serde(default)]` |
+| Default | `DEFAULT_MAX_ACCEPTABLE_CLOCK_SKEW_NS` (constant in `constants` module, lib.rs); 5_000_000_000 (5s) |
 | Validation | `0` → fall back to default (FR-005) |
-| Accessor | returns `Duration` |
+| Accessor | returns `Duration` (nanosecond-precise) |
 | CU | 3802 |
+
+**Correction (post-initial-implementation)**: originally shipped as `_ms`
+(milliseconds). Milliseconds cannot express a meaningful tolerance for
+PTP/gPTP-class `TimeSyncSource`s (typically sub-microsecond precision) — the
+finest expressible non-zero value, 1ms, is orders of magnitude too coarse.
+Changed to nanoseconds before this branch was pushed/merged.
 
 ### ServerInfo.time_sync_source
 

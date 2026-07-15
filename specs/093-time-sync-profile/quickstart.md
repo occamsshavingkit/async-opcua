@@ -22,19 +22,22 @@ systemd-timesyncd, w32time, …); the library reports OS-based support.
 
 ## 2. Configure acceptable clock skew — CU 3802
 
-Via config file (serde):
+Via config file (serde), in nanoseconds — chosen over milliseconds because
+PTP/gPTP sources (§4 below) typically operate at sub-microsecond precision,
+and a millisecond-granular field could never express a meaningful tolerance
+for them:
 
 ```json
-{ "max_acceptable_clock_skew_ms": 2000 }
+{ "max_acceptable_clock_skew_ns": 2000000000 }
 ```
 
 Or programmatically the field is on `ServerConfig`; read it back as a `Duration`:
 
 ```rust
-let tolerance = server_config.max_acceptable_clock_skew(); // Duration::from_millis(2000)
+let tolerance = server_config.max_acceptable_clock_skew(); // Duration::from_nanos(2_000_000_000)
 ```
 
-A `0` value falls back to `DEFAULT_MAX_ACCEPTABLE_CLOCK_SKEW_MS`.
+A `0` value falls back to `DEFAULT_MAX_ACCEPTABLE_CLOCK_SKEW_NS`.
 
 ## 3. UA-based periodic sync — CU 5505 (feature `time-sync-ua`)
 
@@ -99,7 +102,7 @@ A minimal compiling version of this ships as
 | CU | How verified |
 |---|---|
 | 2478 | Unit/integration test: default build reports `OsClock`, synchronized. |
-| 3802 | Unit test: config round-trips `max_acceptable_clock_skew_ms`; `0` → default. |
+| 3802 | Unit test: config round-trips `max_acceptable_clock_skew_ns` at sub-millisecond precision; `0` → default. |
 | 5505 | Integration test (`time-sync-ua`): two local instances; poller observes skew within one interval; unreachable → `synchronized = false`. |
 | 5793 | Satisfied by 2478/5505 being real; asserted in docs table. |
 | 2479/2480/2786 | `examples/custom_time_sync.rs` compiles; docs state the extension-point claim. |

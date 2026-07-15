@@ -113,8 +113,8 @@ impl ServerBuilder {
 
 ```rust
 // in ServerConfig
-#[serde(default = "defaults::max_acceptable_clock_skew_ms")]
-pub max_acceptable_clock_skew_ms: u64,
+#[serde(default = "defaults::max_acceptable_clock_skew_ns")]
+pub max_acceptable_clock_skew_ns: u64,
 
 // accessor
 impl ServerConfig {
@@ -122,7 +122,7 @@ impl ServerConfig {
 }
 
 // in the `constants` module (lib.rs)
-pub const DEFAULT_MAX_ACCEPTABLE_CLOCK_SKEW_MS: u64 = 5000;
+pub const DEFAULT_MAX_ACCEPTABLE_CLOCK_SKEW_NS: u64 = 5_000_000_000;
 ```
 
 **Contract**:
@@ -130,6 +130,11 @@ pub const DEFAULT_MAX_ACCEPTABLE_CLOCK_SKEW_MS: u64 = 5000;
 - Stored value of `0` → accessor returns the default `Duration` (FR-005), and the
   effective value is documented.
 - Satisfies CU 3802.
+- **Unit is nanoseconds, not milliseconds** (corrected post-review): PTP/gPTP
+  `TimeSyncSource`s (C1/C7) typically operate at sub-microsecond precision, so
+  a millisecond-granular field could not express a meaningful tolerance for
+  the feature's own extensibility target — the finest non-zero value
+  expressible would be 1ms.
 
 ---
 

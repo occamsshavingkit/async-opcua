@@ -9,7 +9,7 @@ resolves `TODO.md`'s "Time Sync profile decision" (feature 093).
 | CU | Name | Status | Mechanism |
 |---:|---|---|---|
 | 2478 | Time Sync – OS based support | **Claimed** | Built-in `OsClockSource` (default) |
-| 3802 | Time Sync – Configure Clock Skew | **Claimed** | `ServerConfig::max_acceptable_clock_skew_ms` |
+| 3802 | Time Sync – Configure Clock Skew | **Claimed** | `ServerConfig::max_acceptable_clock_skew_ns` |
 | 5505 | Time Sync – UA based support | **Claimed** (opt-in) | Built-in `UaHeaderTimeSyncSource`, `time-sync-ua` feature |
 | 5793 | Time Sync – Support (≥1 mechanism) | **Claimed** | Satisfied by 2478 and/or 5505 above |
 | 2479 | Time Sync – IEEE 1588 (PTP) | **Extensible** | User-supplied `TimeSyncSource` |
@@ -54,13 +54,21 @@ operating system").
 
 ### CU 3802 — Configure Clock Skew (claimed)
 
-`ServerConfig::max_acceptable_clock_skew_ms` (default 5000ms) sets the
-acceptable tolerance. Retrieve it as a `Duration` via
+`ServerConfig::max_acceptable_clock_skew_ns` (default 5,000,000,000ns = 5s)
+sets the acceptable tolerance, in nanoseconds. Retrieve it as a `Duration` via
 `ServerConfig::max_acceptable_clock_skew()`; a configured value of `0` falls
 back to the default rather than being treated as zero tolerance. Compare it
 against a `TimeSyncSource`'s `observed_skew` (when one reports it, e.g.
 `UaHeaderTimeSyncSource`) to determine whether the server's synchronization is
 within bounds.
+
+Nanosecond granularity matters here specifically because of the PTP/gPTP
+extension point below: those mechanisms typically operate at sub-microsecond
+precision, and a millisecond-granular field could never express a tolerance
+tight enough to be meaningful for them (the finest non-zero value expressible
+would be 1ms — several orders of magnitude too coarse). `TimeSyncStatus`'s
+`observed_skew` already carries full `Duration` (nanosecond) precision
+regardless of this field; this only affects the configurable *tolerance*.
 
 ### CU 5505 — UA-based support (claimed, opt-in via `time-sync-ua`)
 

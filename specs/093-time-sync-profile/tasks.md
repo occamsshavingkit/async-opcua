@@ -35,7 +35,7 @@ Report tool: `tools/cu-coverage-report/src/`. Docs: `docs/`.
 **Purpose**: Create the module skeleton the rest of the feature fills in.
 
 - [X] T001 Create `async-opcua-server/src/time_sync.rs` as an empty module (module doc comment only) and declare `pub mod time_sync;` in `async-opcua-server/src/lib.rs`.
-- [X] T002 Add `DEFAULT_MAX_ACCEPTABLE_CLOCK_SKEW_MS: u64 = 5000` to the `constants` module in `async-opcua-server/src/lib.rs` (documented as the CU 3802 default acceptable clock skew; OPC UA leaves the tolerance application-defined).
+- [X] T002 Add `DEFAULT_MAX_ACCEPTABLE_CLOCK_SKEW_NS: u64 = 5_000_000_000` to the `constants` module in `async-opcua-server/src/lib.rs` (documented as the CU 3802 default acceptable clock skew; OPC UA leaves the tolerance application-defined). **Correction (post-review, before push)**: renamed from `_MS`/5000 to `_NS`/5_000_000_000 — same effective 5s default, nanosecond unit — see T010's note for why (PTP/gPTP need sub-millisecond tolerance granularity).
 
 **Checkpoint**: Module and constant exist; workspace still builds.
 
@@ -64,18 +64,18 @@ depends on these types existing.**
 correctly claims OS-based time sync and operators can set the tolerance.
 
 **Independent Test**: A default-built server reports `OsClock`/synchronized; a
-config with `max_acceptable_clock_skew_ms` round-trips and `0` falls back to the
-default.
+config with `max_acceptable_clock_skew_ns` round-trips (including sub-millisecond
+values) and `0` falls back to the default.
 
 ### Tests for User Story 1
 
 - [X] T007 [P] [US1] Unit test in `async-opcua-server/src/time_sync.rs` (`#[cfg(test)]`): `OsClockSource::status()` returns `mechanism == OsClock`, `synchronized == true`, `last_sync.is_some()`, `observed_skew == None` (CU 2478; timestamps per OPC-10000-4 §7.33 use `DateTime`).
-- [X] T008 [P] [US1] Unit test in `async-opcua-server/src/config/server.rs` (`#[cfg(test)]`): `max_acceptable_clock_skew_ms` serde default applies when absent, a set value round-trips, and `0` → `max_acceptable_clock_skew()` returns the default `Duration` (CU 3802, FR-005).
+- [X] T008 [P] [US1] Unit test in `async-opcua-server/src/config/server.rs` (`#[cfg(test)]`): `max_acceptable_clock_skew_ns` serde default applies when absent, a set value round-trips, and `0` → `max_acceptable_clock_skew()` returns the default `Duration` (CU 3802, FR-005). Also added `max_acceptable_clock_skew_supports_ptp_grade_sub_millisecond_tolerances`, proving distinct sub-millisecond values (200ns, 1µs, 10µs) round-trip without collapsing — see the T010 correction note below.
 
 ### Implementation for User Story 1
 
 - [X] T009 [US1] Implement `OsClockSource` (unit struct, `Debug, Default, Clone`) and `impl TimeSyncSource for OsClockSource` in `async-opcua-server/src/time_sync.rs` per contract C3 (CU 2478); `last_sync = DateTime::now()`.
-- [X] T010 [US1] Add `max_acceptable_clock_skew_ms: u64` (`#[serde(default = ...)]` → `DEFAULT_MAX_ACCEPTABLE_CLOCK_SKEW_MS`) and a `max_acceptable_clock_skew(&self) -> Duration` accessor (with `0 → default`) to `ServerConfig` in `async-opcua-server/src/config/server.rs` per contract C5 (CU 3802).
+- [X] T010 [US1] Add `max_acceptable_clock_skew_ns: u64` (`#[serde(default = ...)]` → `DEFAULT_MAX_ACCEPTABLE_CLOCK_SKEW_NS`) and a `max_acceptable_clock_skew(&self) -> Duration` accessor (with `0 → default`) to `ServerConfig` in `async-opcua-server/src/config/server.rs` per contract C5 (CU 3802). **Correction (post-review, before push)**: originally shipped as `_ms` (milliseconds, default 5000). Renamed to `_ns` (nanoseconds, default 5_000_000_000 — same effective 5s default) because a millisecond-granular field cannot express a meaningful tolerance for the PTP/gPTP `TimeSyncSource`s this feature's own US3 extension point targets (sub-microsecond precision; 1ms was the finest expressible non-zero value). `TimeSyncStatus.observed_skew` was unaffected — `Duration` was nanosecond-precise from the start.
 - [X] T011 [US1] Add `ServerBuilder::with_time_sync_source(Arc<dyn TimeSyncSource>)` storing `Option<Arc<dyn TimeSyncSource>>`, and in `ServerBuilder::build()` install `Arc::new(OsClockSource)` when unset before constructing `ServerInfo`, in `async-opcua-server/src/builder.rs` per contract C4 (mirror `with_authenticator`; FR-002/FR-003).
 
 **Checkpoint**: Default server claims CU 2478; CU 3802 config works; US1 tests pass. **MVP complete.**

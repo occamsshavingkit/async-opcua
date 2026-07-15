@@ -57,6 +57,20 @@ starting point; documented and operator-overridable. (Not spec-mandated; OPC UA
 leaves the tolerance to the application, which is exactly why CU 3802 is
 "configure the acceptable clock skew".)
 
+**Correction (found in review, before push/merge)**: `_ms` granularity is
+wrong for this feature's own stated extensibility target. CU 2479/2480
+(PTP/gPTP) exist specifically because those mechanisms report sub-microsecond
+skew; a millisecond-granular tolerance field cannot express anything finer
+than 1ms, making the field useless for the exact use case the feature was
+built to support. Changed the field to `max_acceptable_clock_skew_ns: u64`
+(nanoseconds), default `5_000_000_000` (still 5s, same effective default,
+now just expressed in the finer unit). `TimeSyncStatus.observed_skew` was
+never affected — it was `Duration` (nanosecond-precise) from the start; only
+the configurable *tolerance* had the granularity defect. The `_ms` naming
+convention cited above (`subscription_poll_interval_ms`, etc.) is still the
+right default for durations in this codebase — this field is a deliberate,
+justified exception because of what it's being compared against.
+
 ## R4. Surfacing `ResponseHeader.timestamp` for the UA-based source (CU 5505).
 
 **Decision**: Add a focused method to the client's discovery surface

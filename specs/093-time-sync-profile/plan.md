@@ -87,8 +87,8 @@ async-opcua-server/
 │   ├── info.rs                 # ServerInfo gains time_sync_source: Arc<dyn TimeSyncSource>
 │   ├── server.rs               # spawn UaHeaderTimeSyncSource poll loop on startup (cfg-gated)
 │   └── config/
-│       ├── server.rs           # max_acceptable_clock_skew_ms field (serde) + accessor
-│       └── ...                 # constants.rs: DEFAULT_MAX_ACCEPTABLE_CLOCK_SKEW_MS
+│       ├── server.rs           # max_acceptable_clock_skew_ns field (serde) + accessor
+│       └── ...                 # constants.rs: DEFAULT_MAX_ACCEPTABLE_CLOCK_SKEW_NS
 ├── examples/
 │   └── custom_time_sync.rs     # NEW: US3 minimal custom TimeSyncSource (NTP/PTP/gPTP stand-in)
 └── Cargo.toml                  # NEW feature `time-sync-ua = ["async-opcua-client"]`

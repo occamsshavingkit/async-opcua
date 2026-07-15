@@ -140,11 +140,14 @@ pub mod constants {
     pub const DEFAULT_MAX_MONITORED_ITEMS_PER_SUB: usize = 10_000;
     /// Default, well known address for TCP discovery server
     pub const DEFAULT_DISCOVERY_SERVER_URL: &str = "opc.tcp://localhost:4840/UADiscovery";
-    /// Default acceptable clock skew tolerance in milliseconds (OPC UA Time Sync
+    /// Default acceptable clock skew tolerance in nanoseconds (OPC UA Time Sync
     /// CU 3802 "Configure Clock Skew"). The specification leaves the tolerance
     /// application-defined; this is a conventional starting point that operators
-    /// can override via `ServerConfig::max_acceptable_clock_skew_ms`.
-    pub const DEFAULT_MAX_ACCEPTABLE_CLOCK_SKEW_MS: u64 = 5000;
+    /// can override via `ServerConfig::max_acceptable_clock_skew_ns`. Nanosecond
+    /// granularity (rather than milliseconds) is required to express tolerances
+    /// meaningful for PTP/gPTP-class `TimeSyncSource`s, which typically operate
+    /// at sub-microsecond precision.
+    pub const DEFAULT_MAX_ACCEPTABLE_CLOCK_SKEW_NS: u64 = 5_000_000_000;
 
     // Internally controlled values
 

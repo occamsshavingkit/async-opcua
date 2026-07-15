@@ -110,8 +110,29 @@ fn transitive_closure(
 /// canonical composite server profiles, every other individually-selectable
 /// server facet in the snapshot, and a deduplicated ledger of every CU any of
 /// them reference.
-#[must_use]
-pub fn generate_markdown_report(snapshot: &NormalizedSnapshot) -> String {
+///
+/// # Errors
+///
+/// Returns `Err` if `snapshot.relationships` has neither
+/// `included_conformance_units` nor `included_profiles` populated. This
+/// tool's transitive-closure computation depends entirely on those two
+/// maps; a snapshot in the older shape (only a pre-computed
+/// `transitive_cu_closure`, which this tool no longer reads) would
+/// otherwise silently parse successfully and produce a report with every
+/// closure empty, rather than a clear error.
+pub fn generate_markdown_report(snapshot: &NormalizedSnapshot) -> Result<String, String> {
+    if snapshot.relationships.included_conformance_units.is_empty()
+        && snapshot.relationships.included_profiles.is_empty()
+    {
+        return Err(
+            "snapshot.relationships has neither `included_conformance_units` nor \
+             `included_profiles` populated. This tool requires that shape; the older \
+             `transitive_cu_closure`-only shape is no longer supported. Regenerate the \
+             snapshot with the current extractor."
+                .to_string(),
+        );
+    }
+
     let conformance_units = snapshot
         .conformance_units
         .iter()
@@ -181,14 +202,14 @@ pub fn generate_markdown_report(snapshot: &NormalizedSnapshot) -> String {
          Counts are per-status within that facet's own CU closure; a CU counted here may \
          also appear in another facet or in the Full CU Ledger below.\n\n",
     );
-    output.push_str("| Facet | OPC id | Closure | Implemented | Partial | Needs-proof | Extensible | Source-issue |\n");
-    output.push_str("|---|---:|---:|---:|---:|---:|---:|---:|\n");
+    output.push_str("| Facet | OPC id | Closure | Implemented | Partial | Gap | Needs-proof | Extensible | Source-issue |\n");
+    output.push_str("|---|---:|---:|---:|---:|---:|---:|---:|---:|\n");
     for facet in &facets {
         let closure = closure_of(facet.opc_id, &mut memo);
         if closure.is_empty() {
             continue;
         }
-        let mut counts = [0usize; 5];
+        let mut counts = [0usize; 6];
         for cu_id in &closure {
             let status = match conformance_units.get(cu_id) {
                 Some(_) => classify_cu(*cu_id),
@@ -197,13 +218,10 @@ pub fn generate_markdown_report(snapshot: &NormalizedSnapshot) -> String {
             let idx = match status {
                 EvidenceStatus::Implemented => 0,
                 EvidenceStatus::Partial => 1,
-                EvidenceStatus::NeedsProof => 2,
-                EvidenceStatus::Extensible => 3,
-                EvidenceStatus::SourceIssue => 4,
-                // Gap rolls into the "Needs-proof" summary column, which
-                // reads as "not yet claimed" either way; the Full CU Ledger
-                // and the per-CU tables above distinguish them precisely.
                 EvidenceStatus::Gap => 2,
+                EvidenceStatus::NeedsProof => 3,
+                EvidenceStatus::Extensible => 4,
+                EvidenceStatus::SourceIssue => 5,
             };
             counts[idx] += 1;
         }
@@ -241,7 +259,7 @@ pub fn generate_markdown_report(snapshot: &NormalizedSnapshot) -> String {
     ));
     write_cu_table(&mut output, &all_cus, &conformance_units);
 
-    output
+    Ok(output)
 }
 
 fn write_cu_table(
@@ -875,7 +893,7 @@ mod tests {
     #[test]
     fn report_classifies_cu_implemented_extensible_needsproof_and_source_issues() {
         let snapshot = parse_snapshot(FIXTURE).expect("fixture parses");
-        let report = generate_markdown_report(&snapshot);
+        let report = generate_markdown_report(&snapshot).expect("fixture has closure data");
 
         assert!(report.contains("Nano Embedded Device 2025 Server Profile"));
         // Audited 2026-07-15: OS-based time sync is claimed via the default OsClockSource.
@@ -899,7 +917,7 @@ mod tests {
             "Time Sync \u{2013} OS based support",
         );
         let snapshot = parse_snapshot(&fixture).expect("fixture parses");
-        let report = generate_markdown_report(&snapshot);
+        let report = generate_markdown_report(&snapshot).expect("fixture has closure data");
 
         assert!(report.contains("| 2478 | Time Sync - OS based support | implemented |"));
     }
@@ -907,11 +925,47 @@ mod tests {
     #[test]
     fn report_includes_additional_facets_not_in_the_four_canonical_profiles() {
         let snapshot = parse_snapshot(FIXTURE).expect("fixture parses");
-        let report = generate_markdown_report(&snapshot);
+        let report = generate_markdown_report(&snapshot).expect("fixture has closure data");
 
         assert!(report.contains("## Additional Server Facets (Summary)"));
         assert!(report.contains("Data Access Server Facet"));
         assert!(report.contains("## Full CU Ledger"));
+    }
+
+    #[test]
+    fn report_fails_fast_on_snapshot_missing_included_relationship_maps() {
+        // A snapshot in the older `transitive_cu_closure`-only shape (or any
+        // shape lacking both `included_conformance_units` and
+        // `included_profiles`) must be rejected explicitly, not silently
+        // produce a report with every closure empty.
+        let fixture = r#"
+{
+  "canonical_profiles": {
+    "nano": {
+      "display_name": "Nano Embedded Device 2025 Server Profile",
+      "name": "Nano Embedded Device 2025 Server Profile",
+      "opc_id": 2266,
+      "opc_profile_uri": "http://opcfoundation.org/UA-Profile/Server/NanoEmbeddedDevice2025"
+    }
+  },
+  "conformance_units": [
+    {"opc_id": 2478, "name": "Time Sync - OS based support"}
+  ],
+  "relationships": {
+    "transitive_cu_closure": {
+      "2266": [2478]
+    }
+  }
+}
+"#;
+        let snapshot = parse_snapshot(fixture).expect("fixture parses");
+        let result = generate_markdown_report(&snapshot);
+
+        assert!(
+            result.is_err(),
+            "a snapshot with no included_conformance_units/included_profiles must error, not \
+             silently render empty closures"
+        );
     }
 
     #[test]

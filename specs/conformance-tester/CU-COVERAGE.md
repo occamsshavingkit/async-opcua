@@ -402,80 +402,80 @@ independent passes over the codebase, one per subsystem cluster); see the
 
 One row per facet not already covered by the four canonical profiles above. Counts are per-status within that facet's own CU closure; a CU counted here may also appear in another facet or in the Full CU Ledger below.
 
-| Facet | OPC id | Closure | Implemented | Partial | Needs-proof | Extensible | Source-issue |
-|---|---:|---:|---:|---:|---:|---:|---:|
-| A & C Acknowledgeable Alarm 2022 Server Facet | 1565 | 34 | 16 | 5 | 13 | 0 | 0 |
-| A & C Address Space Instance 2022 Server Facet | 1562 | 1 | 1 | 0 | 0 | 0 | 0 |
-| A & C Alarm 2022 Server Facet | 1502 | 84 | 21 | 8 | 55 | 0 | 0 |
-| A & C Alarm Auditing Server Facet | 1503 | 8 | 0 | 0 | 8 | 0 | 0 |
-| A & C AlarmMetrics Server Facet | 887 | 1 | 0 | 0 | 1 | 0 | 0 |
-| A & C Base Condition 2022 Server Facet | 1551 | 26 | 14 | 5 | 7 | 0 | 0 |
-| A & C CertificateExpiration 2022 Server Facet | 1566 | 32 | 19 | 5 | 8 | 0 | 0 |
-| A & C Dialog 2022 Server Facet | 1504 | 32 | 15 | 6 | 11 | 0 | 0 |
-| A & C Enable 2022 Server Facet | 1563 | 31 | 15 | 6 | 10 | 0 | 0 |
-| A & C Exclusive Alarming 2022 Server Facet | 1500 | 100 | 25 | 8 | 67 | 0 | 0 |
-| A & C Non-Exclusive Alarming 2022 Server Facet | 1501 | 103 | 25 | 8 | 70 | 0 | 0 |
-| A & C Previous Instances 2022 Server Facet | 1564 | 27 | 15 | 5 | 7 | 0 | 0 |
-| A & C Refresh2 2022 Server Facet | 1568 | 27 | 15 | 5 | 7 | 0 | 0 |
-| A & E Wrapper 2022 Facet | 1346 | 18 | 13 | 2 | 3 | 0 | 0 |
-| Address Space Notifier Server Facet  | 744 | 2 | 0 | 1 | 1 | 0 | 0 |
-| Aggregate Subscription 2022 Server Facet | 1582 | 57 | 49 | 4 | 4 | 0 | 0 |
-| Attribute WriteMask Server 2023 Facet  | 1996 | 8 | 6 | 0 | 2 | 0 | 0 |
-| Attribute WriteMask Server Facet | 1997 | 7 | 5 | 0 | 2 | 0 | 0 |
-| Auditing 2022 Server Facet | 1328 | 30 | 15 | 8 | 7 | 0 | 0 |
-| Authorization Service Server Facet | 1629 | 1 | 0 | 0 | 1 | 0 | 0 |
-| Base Historical Event 2022 Server Facet | 1577 | 3 | 3 | 0 | 0 | 0 | 0 |
-| Base Server Behaviour Facet | 1715 | 4 | 3 | 0 | 1 | 0 | 0 |
-| Client Redundancy Server Facet | 661 | 1 | 1 | 0 | 0 | 0 | 0 |
-| ComplexType 2017 Server Facet | 1725 | 6 | 3 | 3 | 0 | 0 | 0 |
-| Data Access Server Facet | 1505 | 22 | 5 | 0 | 17 | 0 | 0 |
-| Dictionary Reference Server Facet | 1524 | 3 | 0 | 0 | 3 | 0 | 0 |
-| Documentation Server Facet | 768 | 6 | 4 | 0 | 2 | 0 | 0 |
-| Durable Subscription 2022 Server Facet | 2098 | 3 | 1 | 0 | 2 | 0 | 0 |
-| Embedded DataChange Subscription 2022 Server Facet | 2250 | 10 | 6 | 3 | 1 | 0 | 0 |
-| Exposes Type System Server Facet | 1219 | 46 | 42 | 1 | 3 | 0 | 0 |
-| File Access Server Facet | 1348 | 3 | 0 | 2 | 1 | 0 | 0 |
-| Global Certificate Management Server Facet | 1631 | 1 | 0 | 1 | 0 | 0 | 0 |
-| Global Discovery Server 2022 Profile | 1343 | 69 | 44 | 11 | 10 | 3 | 1 |
-| Global Discovery and Certificate Mgmt 2022 Server | 1344 | 94 | 52 | 20 | 18 | 3 | 1 |
-| Global Service Authorization Request Server Facet | 1026 | 1 | 0 | 0 | 1 | 0 | 0 |
-| Global Service KeyCredential Pull Facet | 1027 | 1 | 0 | 0 | 1 | 0 | 0 |
-| Historical Access Modified Data 2022 Server Facet | 1709 | 4 | 4 | 0 | 0 | 0 | 0 |
-| Historical Access Structured Data 2022 Server Facet | 1710 | 10 | 3 | 0 | 7 | 0 | 0 |
-| Historical Aggregate 2022 Server Facet | 1708 | 44 | 40 | 0 | 4 | 0 | 0 |
-| Historical Annotation 2022 Server Facet | 1572 | 6 | 6 | 0 | 0 | 0 | 0 |
-| Historical Data AtTime 2022 Server Facet | 1707 | 4 | 3 | 0 | 1 | 0 | 0 |
-| Historical Data Delete 2022 Server Facet | 1576 | 3 | 3 | 0 | 0 | 0 | 0 |
-| Historical Data Insert 2022 Server Facet | 1574 | 4 | 3 | 1 | 0 | 0 | 0 |
-| Historical Data Replace 2022 Server Facet | 1575 | 4 | 3 | 1 | 0 | 0 | 0 |
-| Historical Data Update 2022 Server Facet | 1573 | 4 | 3 | 1 | 0 | 0 | 0 |
-| Historical Event Delete 2022 Server Facet | 1581 | 3 | 3 | 0 | 0 | 0 | 0 |
-| Historical Event Insert 2022 Server Facet | 1579 | 3 | 3 | 0 | 0 | 0 | 0 |
-| Historical Event Replace 2022 Server Facet | 1580 | 3 | 3 | 0 | 0 | 0 | 0 |
-| Historical Event Update 2022 Server Facet | 1578 | 3 | 2 | 1 | 0 | 0 | 0 |
-| Historical Raw Data 2022 Server Facet | 1571 | 5 | 4 | 1 | 0 | 0 | 0 |
-| KeyCredential Service Server Facet | 2113 | 5 | 0 | 0 | 5 | 0 | 0 |
-| Method 2022 Server Facet | 1639 | 6 | 3 | 2 | 1 | 0 | 0 |
-| Model Change Event Server Facet | 1733 | 3 | 1 | 0 | 2 | 0 | 0 |
-| Node Management 2022 Server Facet | 1329 | 54 | 48 | 1 | 5 | 0 | 0 |
-| Redundancy Transparent Server Facet | 2249 | 1 | 0 | 0 | 1 | 0 | 0 |
-| Redundancy Visible Server Facet | 2252 | 1 | 0 | 0 | 1 | 0 | 0 |
-| Request State Change Server Facet | 1633 | 1 | 0 | 0 | 1 | 0 | 0 |
-| Reverse Connect Server Facet | 1632 | 1 | 1 | 0 | 0 | 0 | 0 |
-| Scheduler Base Server Facet | 1875 | 8 | 3 | 2 | 3 | 0 | 0 |
-| Scheduler Configuration Server Facet | 1876 | 10 | 3 | 2 | 5 | 0 | 0 |
-| Sessionless Server Facet | 1630 | 2 | 0 | 0 | 2 | 0 | 0 |
-| Standard DataChange Subscription 2022 Server Facet | 1324 | 17 | 12 | 4 | 1 | 0 | 0 |
-| Standard Event Subscription 2022 Server Facet | 2085 | 22 | 12 | 5 | 5 | 0 | 0 |
-| State Machine 2022 Server Facet | 1638 | 30 | 12 | 7 | 11 | 0 | 0 |
-| Subnet Discovery Server Facet | 2069 | 1 | 1 | 0 | 0 | 0 | 0 |
-| Temporary File Access Server Facet | 1525 | 5 | 0 | 0 | 5 | 0 | 0 |
-| User Role Base 2022 Server Facet | 1351 | 3 | 2 | 1 | 0 | 0 | 0 |
-| User Role Management 2022 Server Facet | 2080 | 14 | 6 | 4 | 4 | 0 | 0 |
-| User Token - Anonymous Server Facet | 1691 | 1 | 1 | 0 | 0 | 0 | 0 |
-| User Token - JWT Server Facet | 1697 | 7 | 2 | 1 | 4 | 0 | 0 |
-| User Token - User Name Password Server Facet | 1695 | 3 | 2 | 1 | 0 | 0 | 0 |
-| User Token - X509 Certificate Server Facet | 1696 | 2 | 1 | 1 | 0 | 0 | 0 |
+| Facet | OPC id | Closure | Implemented | Partial | Gap | Needs-proof | Extensible | Source-issue |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| A & C Acknowledgeable Alarm 2022 Server Facet | 1565 | 34 | 16 | 5 | 13 | 0 | 0 | 0 |
+| A & C Address Space Instance 2022 Server Facet | 1562 | 1 | 1 | 0 | 0 | 0 | 0 | 0 |
+| A & C Alarm 2022 Server Facet | 1502 | 84 | 21 | 8 | 55 | 0 | 0 | 0 |
+| A & C Alarm Auditing Server Facet | 1503 | 8 | 0 | 0 | 8 | 0 | 0 | 0 |
+| A & C AlarmMetrics Server Facet | 887 | 1 | 0 | 0 | 1 | 0 | 0 | 0 |
+| A & C Base Condition 2022 Server Facet | 1551 | 26 | 14 | 5 | 7 | 0 | 0 | 0 |
+| A & C CertificateExpiration 2022 Server Facet | 1566 | 32 | 19 | 5 | 8 | 0 | 0 | 0 |
+| A & C Dialog 2022 Server Facet | 1504 | 32 | 15 | 6 | 11 | 0 | 0 | 0 |
+| A & C Enable 2022 Server Facet | 1563 | 31 | 15 | 6 | 10 | 0 | 0 | 0 |
+| A & C Exclusive Alarming 2022 Server Facet | 1500 | 100 | 25 | 8 | 67 | 0 | 0 | 0 |
+| A & C Non-Exclusive Alarming 2022 Server Facet | 1501 | 103 | 25 | 8 | 70 | 0 | 0 | 0 |
+| A & C Previous Instances 2022 Server Facet | 1564 | 27 | 15 | 5 | 7 | 0 | 0 | 0 |
+| A & C Refresh2 2022 Server Facet | 1568 | 27 | 15 | 5 | 7 | 0 | 0 | 0 |
+| A & E Wrapper 2022 Facet | 1346 | 18 | 13 | 2 | 3 | 0 | 0 | 0 |
+| Address Space Notifier Server Facet  | 744 | 2 | 0 | 1 | 1 | 0 | 0 | 0 |
+| Aggregate Subscription 2022 Server Facet | 1582 | 57 | 49 | 4 | 4 | 0 | 0 | 0 |
+| Attribute WriteMask Server 2023 Facet  | 1996 | 8 | 6 | 0 | 2 | 0 | 0 | 0 |
+| Attribute WriteMask Server Facet | 1997 | 7 | 5 | 0 | 2 | 0 | 0 | 0 |
+| Auditing 2022 Server Facet | 1328 | 30 | 15 | 8 | 7 | 0 | 0 | 0 |
+| Authorization Service Server Facet | 1629 | 1 | 0 | 0 | 1 | 0 | 0 | 0 |
+| Base Historical Event 2022 Server Facet | 1577 | 3 | 3 | 0 | 0 | 0 | 0 | 0 |
+| Base Server Behaviour Facet | 1715 | 4 | 3 | 0 | 1 | 0 | 0 | 0 |
+| Client Redundancy Server Facet | 661 | 1 | 1 | 0 | 0 | 0 | 0 | 0 |
+| ComplexType 2017 Server Facet | 1725 | 6 | 3 | 3 | 0 | 0 | 0 | 0 |
+| Data Access Server Facet | 1505 | 22 | 5 | 0 | 17 | 0 | 0 | 0 |
+| Dictionary Reference Server Facet | 1524 | 3 | 0 | 0 | 3 | 0 | 0 | 0 |
+| Documentation Server Facet | 768 | 6 | 4 | 0 | 2 | 0 | 0 | 0 |
+| Durable Subscription 2022 Server Facet | 2098 | 3 | 1 | 0 | 2 | 0 | 0 | 0 |
+| Embedded DataChange Subscription 2022 Server Facet | 2250 | 10 | 6 | 3 | 1 | 0 | 0 | 0 |
+| Exposes Type System Server Facet | 1219 | 46 | 42 | 1 | 3 | 0 | 0 | 0 |
+| File Access Server Facet | 1348 | 3 | 0 | 2 | 1 | 0 | 0 | 0 |
+| Global Certificate Management Server Facet | 1631 | 1 | 0 | 1 | 0 | 0 | 0 | 0 |
+| Global Discovery Server 2022 Profile | 1343 | 69 | 44 | 11 | 10 | 0 | 3 | 1 |
+| Global Discovery and Certificate Mgmt 2022 Server | 1344 | 94 | 52 | 20 | 18 | 0 | 3 | 1 |
+| Global Service Authorization Request Server Facet | 1026 | 1 | 0 | 0 | 1 | 0 | 0 | 0 |
+| Global Service KeyCredential Pull Facet | 1027 | 1 | 0 | 0 | 1 | 0 | 0 | 0 |
+| Historical Access Modified Data 2022 Server Facet | 1709 | 4 | 4 | 0 | 0 | 0 | 0 | 0 |
+| Historical Access Structured Data 2022 Server Facet | 1710 | 10 | 3 | 0 | 7 | 0 | 0 | 0 |
+| Historical Aggregate 2022 Server Facet | 1708 | 44 | 40 | 0 | 4 | 0 | 0 | 0 |
+| Historical Annotation 2022 Server Facet | 1572 | 6 | 6 | 0 | 0 | 0 | 0 | 0 |
+| Historical Data AtTime 2022 Server Facet | 1707 | 4 | 3 | 0 | 1 | 0 | 0 | 0 |
+| Historical Data Delete 2022 Server Facet | 1576 | 3 | 3 | 0 | 0 | 0 | 0 | 0 |
+| Historical Data Insert 2022 Server Facet | 1574 | 4 | 3 | 1 | 0 | 0 | 0 | 0 |
+| Historical Data Replace 2022 Server Facet | 1575 | 4 | 3 | 1 | 0 | 0 | 0 | 0 |
+| Historical Data Update 2022 Server Facet | 1573 | 4 | 3 | 1 | 0 | 0 | 0 | 0 |
+| Historical Event Delete 2022 Server Facet | 1581 | 3 | 3 | 0 | 0 | 0 | 0 | 0 |
+| Historical Event Insert 2022 Server Facet | 1579 | 3 | 3 | 0 | 0 | 0 | 0 | 0 |
+| Historical Event Replace 2022 Server Facet | 1580 | 3 | 3 | 0 | 0 | 0 | 0 | 0 |
+| Historical Event Update 2022 Server Facet | 1578 | 3 | 2 | 1 | 0 | 0 | 0 | 0 |
+| Historical Raw Data 2022 Server Facet | 1571 | 5 | 4 | 1 | 0 | 0 | 0 | 0 |
+| KeyCredential Service Server Facet | 2113 | 5 | 0 | 0 | 5 | 0 | 0 | 0 |
+| Method 2022 Server Facet | 1639 | 6 | 3 | 2 | 1 | 0 | 0 | 0 |
+| Model Change Event Server Facet | 1733 | 3 | 1 | 0 | 2 | 0 | 0 | 0 |
+| Node Management 2022 Server Facet | 1329 | 54 | 48 | 1 | 5 | 0 | 0 | 0 |
+| Redundancy Transparent Server Facet | 2249 | 1 | 0 | 0 | 1 | 0 | 0 | 0 |
+| Redundancy Visible Server Facet | 2252 | 1 | 0 | 0 | 1 | 0 | 0 | 0 |
+| Request State Change Server Facet | 1633 | 1 | 0 | 0 | 1 | 0 | 0 | 0 |
+| Reverse Connect Server Facet | 1632 | 1 | 1 | 0 | 0 | 0 | 0 | 0 |
+| Scheduler Base Server Facet | 1875 | 8 | 3 | 2 | 3 | 0 | 0 | 0 |
+| Scheduler Configuration Server Facet | 1876 | 10 | 3 | 2 | 5 | 0 | 0 | 0 |
+| Sessionless Server Facet | 1630 | 2 | 0 | 0 | 2 | 0 | 0 | 0 |
+| Standard DataChange Subscription 2022 Server Facet | 1324 | 17 | 12 | 4 | 1 | 0 | 0 | 0 |
+| Standard Event Subscription 2022 Server Facet | 2085 | 22 | 12 | 5 | 5 | 0 | 0 | 0 |
+| State Machine 2022 Server Facet | 1638 | 30 | 12 | 7 | 11 | 0 | 0 | 0 |
+| Subnet Discovery Server Facet | 2069 | 1 | 1 | 0 | 0 | 0 | 0 | 0 |
+| Temporary File Access Server Facet | 1525 | 5 | 0 | 0 | 5 | 0 | 0 | 0 |
+| User Role Base 2022 Server Facet | 1351 | 3 | 2 | 1 | 0 | 0 | 0 | 0 |
+| User Role Management 2022 Server Facet | 2080 | 14 | 6 | 4 | 4 | 0 | 0 | 0 |
+| User Token - Anonymous Server Facet | 1691 | 1 | 1 | 0 | 0 | 0 | 0 | 0 |
+| User Token - JWT Server Facet | 1697 | 7 | 2 | 1 | 4 | 0 | 0 | 0 |
+| User Token - User Name Password Server Facet | 1695 | 3 | 2 | 1 | 0 | 0 | 0 | 0 |
+| User Token - X509 Certificate Server Facet | 1696 | 2 | 1 | 1 | 0 | 0 | 0 | 0 |
 
 ## Full CU Ledger
 

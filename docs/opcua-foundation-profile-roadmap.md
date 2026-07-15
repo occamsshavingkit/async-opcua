@@ -88,7 +88,7 @@ Priorities:
 
 | Priority | CUs / area | Current state | Next action |
 |---:|---|---|---|
-| 1 | Time Sync CUs: `2478`, `2479`, `2480`, `2786`, `3802`, `5505`, `5793` | No direct server-profile proof found. Existing code has response/request timestamps and client clock-skew compensation, but not documented/configurable server time-sync support. | Decide which time-sync mechanism each profile claims, then implement or explicitly exclude profile claims. Add docs and conformance tests. |
+| 1 | Time Sync CUs: `2478`, `2479`, `2480`, `2786`, `3802`, `5505`, `5793` | **Resolved (feature 093)**. See `docs/time-synchronization.md`: 2478/3802/5505/5793 claimed (OsClockSource default, configurable clock skew, opt-in UA-based poller); 2479/2480/2786 documented as a user-supplied `TimeSyncSource` extensibility point, grounded in OPC-10000-84 §6.6.3.6. | Closed. |
 | 2 | Base Info ServerCapabilities: `3911`, `3912`, `4055` | Nodes and tests exist for many capabilities, but CU-level completeness is not proven. | Add a CU-specific read/browse test that checks every mandatory property named in each CU description. |
 | 3 | NamespaceMetadata: `3545` | Tests browse/read NamespaceMetadata properties. | Tie tests to CU `3545` and verify all static namespaces expose required metadata. |
 | 4 | Security Administration / Role authorization: `2407`, `2808` | RBAC and security configuration tests exist. | Add profile-level assertions that configured roles, permissions, security policies, and trust behavior match the CU descriptions. |
@@ -128,12 +128,12 @@ tier. Status is first-pass and evidence-driven, not a certification claim.
 | 2446 | Address Space AddIn Reference | Needs CU-specific proof |
 | 2447 | Address Space AddIn DefaultInstanceBrowsename | Needs CU-specific proof |
 | 2476 | Base Info LocalTime | Needs CU-specific proof |
-| 2478 | Time Sync - OS based support | Gap / policy decision needed |
-| 2479 | Time Sync - IEEE 1588 (PTP) | Gap / policy decision needed |
-| 2480 | Time Sync - IEEE 802.1AS | Gap / policy decision needed |
+| 2478 | Time Sync - OS based support | Evidenced (feature 093; `docs/time-synchronization.md`) |
+| 2479 | Time Sync - IEEE 1588 (PTP) | Evidenced (extension point; feature 093) |
+| 2480 | Time Sync - IEEE 802.1AS | Evidenced (extension point; feature 093) |
 | 2600 | SecurityPolicy Support | Evidenced |
 | 2711 | Base Info Selection List | Needs CU-specific proof |
-| 2786 | Time Sync - NTP | Gap / policy decision needed |
+| 2786 | Time Sync - NTP | Evidenced (extension point; feature 093) |
 | 2808 | Security Role Server Authorization | Partial |
 | 2809 | Address Space Atomicity | Needs CU-specific proof |
 | 2820 | Address Space Full Array Only | Partial |
@@ -157,7 +157,7 @@ tier. Status is first-pass and evidence-driven, not a certification claim.
 | 3554 | Address Space Base | Partial |
 | 3560 | Address Space Interfaces | Partial |
 | 3721 | Security ECC Policy | Evidenced |
-| 3802 | Time Sync - Configure Clock Skew | Gap / policy decision needed |
+| 3802 | Time Sync - Configure Clock Skew | Evidenced (feature 093; `docs/time-synchronization.md`) |
 | 3808 | Documentation - Core Capacities | Partial |
 | 3912 | Base Info Server Capabilities 2 | Partial |
 | 3983 | Base Services Diagnostics | Partial |
@@ -165,9 +165,9 @@ tier. Status is first-pass and evidence-driven, not a certification claim.
 | 4053 | Base Info Locations Object | Partial |
 | 4237 | Address Space NonVolatile and Constant | Partial |
 | 5240 | Base Info Currency | Partial |
-| 5505 | Time Sync - UA based support | Gap / policy decision needed |
+| 5505 | Time Sync - UA based support | Evidenced (opt-in `time-sync-ua` feature; feature 093) |
 | 5592 | Missing from normalized CU list | Canonical data issue |
-| 5793 | Time Sync - Support | Gap / policy decision needed |
+| 5793 | Time Sync - Support | Evidenced (satisfied via 2478/5505; feature 093) |
 | 5814 | Security - No Application Authentication | Evidenced |
 
 ### Micro 2025 Additions
@@ -260,7 +260,7 @@ tier. Status is first-pass and evidence-driven, not a certification claim.
 ## Recommended Execution Order
 
 1. Land the CU registry/report generator first. This prevents further manual drift.
-2. Resolve Time Sync profile claims before advertising 2025 canonical profile parity.
+2. ~~Resolve Time Sync profile claims before advertising 2025 canonical profile parity.~~ Done — feature 093, see `docs/time-synchronization.md`.
 3. Add CU-specific Base Info and ServerCapabilities tests; most of this can be data-driven from NodeIds and the CU descriptions.
 4. Strengthen Standard smoke tests for X509 user activation over SignAndEncrypt and observable RegisterServer/RegisterServer2 registration.
 5. Run the Windows UACTT pass documented in `docs/ctt-conformance.md` after the CU ledger is green.

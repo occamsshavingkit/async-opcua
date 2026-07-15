@@ -20,12 +20,12 @@ Status labels are evidence categories, not certification claims.
 | 2446 | Address Space AddIn Reference | needs-proof | Generated nodes or broad coverage may exist; add CU-specific evidence. |
 | 2447 | Address Space AddIn DefaultInstanceBrowsename | needs-proof | Generated nodes or broad coverage may exist; add CU-specific evidence. |
 | 2476 | Base Info LocalTime | needs-proof | Generated nodes or broad coverage may exist; add CU-specific evidence. |
-| 2478 | Time Sync - OS based support | gap | No direct server-profile proof found; requires implementation or explicit profile exclusion. |
-| 2479 | Time Sync - IEEE 1588 (PTP) | gap | No direct server-profile proof found; requires implementation or explicit profile exclusion. |
-| 2480 | Time Sync - IEEE 802.1AS | gap | No direct server-profile proof found; requires implementation or explicit profile exclusion. |
+| 2478 | Time Sync - OS based support | implemented | Existing tests/docs provide direct evidence; verify CU tag coverage. |
+| 2479 | Time Sync - IEEE 1588 (PTP) | extensible | Satisfiable via user-supplied TimeSyncSource; documented extension point, not implemented in-library. |
+| 2480 | Time Sync - IEEE 802.1AS | extensible | Satisfiable via user-supplied TimeSyncSource; documented extension point, not implemented in-library. |
 | 2600 | SecurityPolicy Support | implemented | Existing tests/docs provide direct evidence; verify CU tag coverage. |
 | 2711 | Base Info Selection List | needs-proof | Generated nodes or broad coverage may exist; add CU-specific evidence. |
-| 2786 | Time Sync - NTP | gap | No direct server-profile proof found; requires implementation or explicit profile exclusion. |
+| 2786 | Time Sync - NTP | extensible | Satisfiable via user-supplied TimeSyncSource; documented extension point, not implemented in-library. |
 | 2808 | Security Role Server Authorization | needs-proof | Generated nodes or broad coverage may exist; add CU-specific evidence. |
 | 2809 | Address Space Atomicity | needs-proof | Generated nodes or broad coverage may exist; add CU-specific evidence. |
 | 2820 | Address Space Full Array Only | partial | Implementation or broad tests exist, but CU-specific proof is incomplete. |
@@ -49,7 +49,7 @@ Status labels are evidence categories, not certification claims.
 | 3554 | Address Space Base | partial | Implementation or broad tests exist, but CU-specific proof is incomplete. |
 | 3560 | Address Space Interfaces | partial | Implementation or broad tests exist, but CU-specific proof is incomplete. |
 | 3721 | Security ECC Policy | implemented | Existing tests/docs provide direct evidence; verify CU tag coverage. |
-| 3802 | Time Sync - Configure Clock Skew | gap | No direct server-profile proof found; requires implementation or explicit profile exclusion. |
+| 3802 | Time Sync - Configure Clock Skew | implemented | Existing tests/docs provide direct evidence; verify CU tag coverage. |
 | 3808 | Documentation - Core Capacities | partial | Implementation or broad tests exist, but CU-specific proof is incomplete. |
 | 3912 | Base Info Server Capabilities 2 | partial | Implementation or broad tests exist, but CU-specific proof is incomplete. |
 | 3983 | Base Services Diagnostics | partial | Implementation or broad tests exist, but CU-specific proof is incomplete. |
@@ -57,9 +57,9 @@ Status labels are evidence categories, not certification claims.
 | 4053 | Base Info Locations Object | partial | Implementation or broad tests exist, but CU-specific proof is incomplete. |
 | 4237 | Address Space NonVolatile and Constant | partial | Implementation or broad tests exist, but CU-specific proof is incomplete. |
 | 5240 | Base Info Currency | partial | Implementation or broad tests exist, but CU-specific proof is incomplete. |
-| 5505 | Time Sync - UA based support | gap | No direct server-profile proof found; requires implementation or explicit profile exclusion. |
+| 5505 | Time Sync - UA based support | implemented | Existing tests/docs provide direct evidence; verify CU tag coverage. |
 | 5592 | Missing from normalized CU list | source-issue | Referenced by closure but absent from conformance_units. |
-| 5793 | Time Sync - Support | gap | No direct server-profile proof found; requires implementation or explicit profile exclusion. |
+| 5793 | Time Sync - Support | implemented | Existing tests/docs provide direct evidence; verify CU tag coverage. |
 | 5814 | Security - No Application Authentication | implemented | Existing tests/docs provide direct evidence; verify CU tag coverage. |
 
 ## Micro Embedded Device 2025 Server Profile
@@ -80,12 +80,12 @@ Status labels are evidence categories, not certification claims.
 | 2446 | Address Space AddIn Reference | needs-proof | Generated nodes or broad coverage may exist; add CU-specific evidence. |
 | 2447 | Address Space AddIn DefaultInstanceBrowsename | needs-proof | Generated nodes or broad coverage may exist; add CU-specific evidence. |
 | 2476 | Base Info LocalTime | needs-proof | Generated nodes or broad coverage may exist; add CU-specific evidence. |
-| 2478 | Time Sync - OS based support | gap | No direct server-profile proof found; requires implementation or explicit profile exclusion. |
-| 2479 | Time Sync - IEEE 1588 (PTP) | gap | No direct server-profile proof found; requires implementation or explicit profile exclusion. |
-| 2480 | Time Sync - IEEE 802.1AS | gap | No direct server-profile proof found; requires implementation or explicit profile exclusion. |
+| 2478 | Time Sync - OS based support | implemented | Existing tests/docs provide direct evidence; verify CU tag coverage. |
+| 2479 | Time Sync - IEEE 1588 (PTP) | extensible | Satisfiable via user-supplied TimeSyncSource; documented extension point, not implemented in-library. |
+| 2480 | Time Sync - IEEE 802.1AS | extensible | Satisfiable via user-supplied TimeSyncSource; documented extension point, not implemented in-library. |
 | 2600 | SecurityPolicy Support | implemented | Existing tests/docs provide direct evidence; verify CU tag coverage. |
 | 2711 | Base Info Selection List | needs-proof | Generated nodes or broad coverage may exist; add CU-specific evidence. |
-| 2786 | Time Sync - NTP | gap | No direct server-profile proof found; requires implementation or explicit profile exclusion. |
+| 2786 | Time Sync - NTP | extensible | Satisfiable via user-supplied TimeSyncSource; documented extension point, not implemented in-library. |
 | 2808 | Security Role Server Authorization | needs-proof | Generated nodes or broad coverage may exist; add CU-specific evidence. |
 | 2809 | Address Space Atomicity | needs-proof | Generated nodes or broad coverage may exist; add CU-specific evidence. |
 | 2820 | Address Space Full Array Only | partial | Implementation or broad tests exist, but CU-specific proof is incomplete. |
@@ -113,7 +113,7 @@ Status labels are evidence categories, not certification claims.
 | 3560 | Address Space Interfaces | partial | Implementation or broad tests exist, but CU-specific proof is incomplete. |
 | 3721 | Security ECC Policy | implemented | Existing tests/docs provide direct evidence; verify CU tag coverage. |
 | 3727 | Subscription Basic | implemented | Existing tests/docs provide direct evidence; verify CU tag coverage. |
-| 3802 | Time Sync - Configure Clock Skew | gap | No direct server-profile proof found; requires implementation or explicit profile exclusion. |
+| 3802 | Time Sync - Configure Clock Skew | implemented | Existing tests/docs provide direct evidence; verify CU tag coverage. |
 | 3808 | Documentation - Core Capacities | partial | Implementation or broad tests exist, but CU-specific proof is incomplete. |
 | 3911 | Base Info Server Capabilities Subscriptions | partial | Implementation or broad tests exist, but CU-specific proof is incomplete. |
 | 3912 | Base Info Server Capabilities 2 | partial | Implementation or broad tests exist, but CU-specific proof is incomplete. |
@@ -128,9 +128,9 @@ Status labels are evidence categories, not certification claims.
 | 5207 | Monitor Items 2 | implemented | Existing tests/docs provide direct evidence; verify CU tag coverage. |
 | 5208 | Monitor Value Change V2 | implemented | Existing tests/docs provide direct evidence; verify CU tag coverage. |
 | 5240 | Base Info Currency | partial | Implementation or broad tests exist, but CU-specific proof is incomplete. |
-| 5505 | Time Sync - UA based support | gap | No direct server-profile proof found; requires implementation or explicit profile exclusion. |
+| 5505 | Time Sync - UA based support | implemented | Existing tests/docs provide direct evidence; verify CU tag coverage. |
 | 5592 | Missing from normalized CU list | source-issue | Referenced by closure but absent from conformance_units. |
-| 5793 | Time Sync - Support | gap | No direct server-profile proof found; requires implementation or explicit profile exclusion. |
+| 5793 | Time Sync - Support | implemented | Existing tests/docs provide direct evidence; verify CU tag coverage. |
 | 5814 | Security - No Application Authentication | implemented | Existing tests/docs provide direct evidence; verify CU tag coverage. |
 
 ## Embedded 2025 UA Server Profile
@@ -153,9 +153,9 @@ Status labels are evidence categories, not certification claims.
 | 2446 | Address Space AddIn Reference | needs-proof | Generated nodes or broad coverage may exist; add CU-specific evidence. |
 | 2447 | Address Space AddIn DefaultInstanceBrowsename | needs-proof | Generated nodes or broad coverage may exist; add CU-specific evidence. |
 | 2476 | Base Info LocalTime | needs-proof | Generated nodes or broad coverage may exist; add CU-specific evidence. |
-| 2478 | Time Sync - OS based support | gap | No direct server-profile proof found; requires implementation or explicit profile exclusion. |
-| 2479 | Time Sync - IEEE 1588 (PTP) | gap | No direct server-profile proof found; requires implementation or explicit profile exclusion. |
-| 2480 | Time Sync - IEEE 802.1AS | gap | No direct server-profile proof found; requires implementation or explicit profile exclusion. |
+| 2478 | Time Sync - OS based support | implemented | Existing tests/docs provide direct evidence; verify CU tag coverage. |
+| 2479 | Time Sync - IEEE 1588 (PTP) | extensible | Satisfiable via user-supplied TimeSyncSource; documented extension point, not implemented in-library. |
+| 2480 | Time Sync - IEEE 802.1AS | extensible | Satisfiable via user-supplied TimeSyncSource; documented extension point, not implemented in-library. |
 | 2481 | Base Info NormalizedString DataType | needs-proof | Generated nodes or broad coverage may exist; add CU-specific evidence. |
 | 2482 | Base Info DecimalString DataType | needs-proof | Generated nodes or broad coverage may exist; add CU-specific evidence. |
 | 2483 | Base Info Date DataTypes | needs-proof | Generated nodes or broad coverage may exist; add CU-specific evidence. |
@@ -173,7 +173,7 @@ Status labels are evidence categories, not certification claims.
 | 2536 | Base Info ContentFilter | needs-proof | Generated nodes or broad coverage may exist; add CU-specific evidence. |
 | 2600 | SecurityPolicy Support | implemented | Existing tests/docs provide direct evidence; verify CU tag coverage. |
 | 2711 | Base Info Selection List | needs-proof | Generated nodes or broad coverage may exist; add CU-specific evidence. |
-| 2786 | Time Sync - NTP | gap | No direct server-profile proof found; requires implementation or explicit profile exclusion. |
+| 2786 | Time Sync - NTP | extensible | Satisfiable via user-supplied TimeSyncSource; documented extension point, not implemented in-library. |
 | 2808 | Security Role Server Authorization | needs-proof | Generated nodes or broad coverage may exist; add CU-specific evidence. |
 | 2809 | Address Space Atomicity | needs-proof | Generated nodes or broad coverage may exist; add CU-specific evidence. |
 | 2820 | Address Space Full Array Only | partial | Implementation or broad tests exist, but CU-specific proof is incomplete. |
@@ -235,7 +235,7 @@ Status labels are evidence categories, not certification claims.
 | 3757 | Base Info HasPhysicalComponent | needs-proof | Generated nodes or broad coverage may exist; add CU-specific evidence. |
 | 3758 | Base Info HasContainedComponent | needs-proof | Generated nodes or broad coverage may exist; add CU-specific evidence. |
 | 3759 | Base Info HasAttachedComponent | needs-proof | Generated nodes or broad coverage may exist; add CU-specific evidence. |
-| 3802 | Time Sync - Configure Clock Skew | gap | No direct server-profile proof found; requires implementation or explicit profile exclusion. |
+| 3802 | Time Sync - Configure Clock Skew | implemented | Existing tests/docs provide direct evidence; verify CU tag coverage. |
 | 3808 | Documentation - Core Capacities | partial | Implementation or broad tests exist, but CU-specific proof is incomplete. |
 | 3911 | Base Info Server Capabilities Subscriptions | partial | Implementation or broad tests exist, but CU-specific proof is incomplete. |
 | 3912 | Base Info Server Capabilities 2 | partial | Implementation or broad tests exist, but CU-specific proof is incomplete. |
@@ -254,9 +254,9 @@ Status labels are evidence categories, not certification claims.
 | 5207 | Monitor Items 2 | implemented | Existing tests/docs provide direct evidence; verify CU tag coverage. |
 | 5208 | Monitor Value Change V2 | implemented | Existing tests/docs provide direct evidence; verify CU tag coverage. |
 | 5240 | Base Info Currency | partial | Implementation or broad tests exist, but CU-specific proof is incomplete. |
-| 5505 | Time Sync - UA based support | gap | No direct server-profile proof found; requires implementation or explicit profile exclusion. |
+| 5505 | Time Sync - UA based support | implemented | Existing tests/docs provide direct evidence; verify CU tag coverage. |
 | 5592 | Missing from normalized CU list | source-issue | Referenced by closure but absent from conformance_units. |
-| 5793 | Time Sync - Support | gap | No direct server-profile proof found; requires implementation or explicit profile exclusion. |
+| 5793 | Time Sync - Support | implemented | Existing tests/docs provide direct evidence; verify CU tag coverage. |
 | 5801 | Base Info Type Information | needs-proof | Generated nodes or broad coverage may exist; add CU-specific evidence. |
 | 5814 | Security - No Application Authentication | implemented | Existing tests/docs provide direct evidence; verify CU tag coverage. |
 | 5868 | Base Info Portable IDs | needs-proof | Generated nodes or broad coverage may exist; add CU-specific evidence. |
@@ -283,9 +283,9 @@ Status labels are evidence categories, not certification claims.
 | 2446 | Address Space AddIn Reference | needs-proof | Generated nodes or broad coverage may exist; add CU-specific evidence. |
 | 2447 | Address Space AddIn DefaultInstanceBrowsename | needs-proof | Generated nodes or broad coverage may exist; add CU-specific evidence. |
 | 2476 | Base Info LocalTime | needs-proof | Generated nodes or broad coverage may exist; add CU-specific evidence. |
-| 2478 | Time Sync - OS based support | gap | No direct server-profile proof found; requires implementation or explicit profile exclusion. |
-| 2479 | Time Sync - IEEE 1588 (PTP) | gap | No direct server-profile proof found; requires implementation or explicit profile exclusion. |
-| 2480 | Time Sync - IEEE 802.1AS | gap | No direct server-profile proof found; requires implementation or explicit profile exclusion. |
+| 2478 | Time Sync - OS based support | implemented | Existing tests/docs provide direct evidence; verify CU tag coverage. |
+| 2479 | Time Sync - IEEE 1588 (PTP) | extensible | Satisfiable via user-supplied TimeSyncSource; documented extension point, not implemented in-library. |
+| 2480 | Time Sync - IEEE 802.1AS | extensible | Satisfiable via user-supplied TimeSyncSource; documented extension point, not implemented in-library. |
 | 2481 | Base Info NormalizedString DataType | needs-proof | Generated nodes or broad coverage may exist; add CU-specific evidence. |
 | 2482 | Base Info DecimalString DataType | needs-proof | Generated nodes or broad coverage may exist; add CU-specific evidence. |
 | 2483 | Base Info Date DataTypes | needs-proof | Generated nodes or broad coverage may exist; add CU-specific evidence. |
@@ -303,7 +303,7 @@ Status labels are evidence categories, not certification claims.
 | 2536 | Base Info ContentFilter | needs-proof | Generated nodes or broad coverage may exist; add CU-specific evidence. |
 | 2600 | SecurityPolicy Support | implemented | Existing tests/docs provide direct evidence; verify CU tag coverage. |
 | 2711 | Base Info Selection List | needs-proof | Generated nodes or broad coverage may exist; add CU-specific evidence. |
-| 2786 | Time Sync - NTP | gap | No direct server-profile proof found; requires implementation or explicit profile exclusion. |
+| 2786 | Time Sync - NTP | extensible | Satisfiable via user-supplied TimeSyncSource; documented extension point, not implemented in-library. |
 | 2808 | Security Role Server Authorization | needs-proof | Generated nodes or broad coverage may exist; add CU-specific evidence. |
 | 2809 | Address Space Atomicity | needs-proof | Generated nodes or broad coverage may exist; add CU-specific evidence. |
 | 2820 | Address Space Full Array Only | partial | Implementation or broad tests exist, but CU-specific proof is incomplete. |
@@ -367,7 +367,7 @@ Status labels are evidence categories, not certification claims.
 | 3757 | Base Info HasPhysicalComponent | needs-proof | Generated nodes or broad coverage may exist; add CU-specific evidence. |
 | 3758 | Base Info HasContainedComponent | needs-proof | Generated nodes or broad coverage may exist; add CU-specific evidence. |
 | 3759 | Base Info HasAttachedComponent | needs-proof | Generated nodes or broad coverage may exist; add CU-specific evidence. |
-| 3802 | Time Sync - Configure Clock Skew | gap | No direct server-profile proof found; requires implementation or explicit profile exclusion. |
+| 3802 | Time Sync - Configure Clock Skew | implemented | Existing tests/docs provide direct evidence; verify CU tag coverage. |
 | 3808 | Documentation - Core Capacities | partial | Implementation or broad tests exist, but CU-specific proof is incomplete. |
 | 3911 | Base Info Server Capabilities Subscriptions | partial | Implementation or broad tests exist, but CU-specific proof is incomplete. |
 | 3912 | Base Info Server Capabilities 2 | partial | Implementation or broad tests exist, but CU-specific proof is incomplete. |
@@ -386,9 +386,9 @@ Status labels are evidence categories, not certification claims.
 | 5207 | Monitor Items 2 | implemented | Existing tests/docs provide direct evidence; verify CU tag coverage. |
 | 5208 | Monitor Value Change V2 | implemented | Existing tests/docs provide direct evidence; verify CU tag coverage. |
 | 5240 | Base Info Currency | partial | Implementation or broad tests exist, but CU-specific proof is incomplete. |
-| 5505 | Time Sync - UA based support | gap | No direct server-profile proof found; requires implementation or explicit profile exclusion. |
+| 5505 | Time Sync - UA based support | implemented | Existing tests/docs provide direct evidence; verify CU tag coverage. |
 | 5592 | Missing from normalized CU list | source-issue | Referenced by closure but absent from conformance_units. |
-| 5793 | Time Sync - Support | gap | No direct server-profile proof found; requires implementation or explicit profile exclusion. |
+| 5793 | Time Sync - Support | implemented | Existing tests/docs provide direct evidence; verify CU tag coverage. |
 | 5801 | Base Info Type Information | needs-proof | Generated nodes or broad coverage may exist; add CU-specific evidence. |
 | 5814 | Security - No Application Authentication | implemented | Existing tests/docs provide direct evidence; verify CU tag coverage. |
 | 5868 | Base Info Portable IDs | needs-proof | Generated nodes or broad coverage may exist; add CU-specific evidence. |

@@ -36,9 +36,9 @@ struct Relationships {
 enum EvidenceStatus {
     Implemented,
     Partial,
-    Gap,
     NeedsProof,
     SourceIssue,
+    Extensible,
 }
 
 impl EvidenceStatus {
@@ -46,9 +46,9 @@ impl EvidenceStatus {
         match self {
             Self::Implemented => "implemented",
             Self::Partial => "partial",
-            Self::Gap => "gap",
             Self::NeedsProof => "needs-proof",
             Self::SourceIssue => "source-issue",
+            Self::Extensible => "extensible",
         }
     }
 }
@@ -128,8 +128,8 @@ fn markdown_cell(value: &str) -> String {
 }
 
 fn classify_cu(cu_id: u32) -> EvidenceStatus {
-    if time_sync_gaps().contains(&cu_id) {
-        return EvidenceStatus::Gap;
+    if extensible_cus().contains(&cu_id) {
+        return EvidenceStatus::Extensible;
     }
     if implemented_cus().contains(&cu_id) {
         return EvidenceStatus::Implemented;
@@ -148,11 +148,11 @@ fn evidence_note(cu_id: u32, status: EvidenceStatus) -> &'static str {
         EvidenceStatus::Partial => {
             "Implementation or broad tests exist, but CU-specific proof is incomplete."
         }
-        EvidenceStatus::Gap => {
-            "No direct server-profile proof found; requires implementation or explicit profile exclusion."
-        }
         EvidenceStatus::NeedsProof => {
             "Generated nodes or broad coverage may exist; add CU-specific evidence."
+        }
+        EvidenceStatus::Extensible => {
+            "Satisfiable via user-supplied TimeSyncSource; documented extension point, not implemented in-library."
         }
         EvidenceStatus::SourceIssue if cu_id == 5592 => {
             "Referenced by closure but absent from conformance_units."
@@ -163,8 +163,8 @@ fn evidence_note(cu_id: u32, status: EvidenceStatus) -> &'static str {
 
 fn implemented_cus() -> BTreeSet<u32> {
     [
-        2317, 2328, 2352, 2371, 2389, 2600, 2837, 2853, 2963, 3072, 3073, 3080, 3143, 3175, 3530,
-        3721, 3727, 3913, 3923, 3985, 5207, 5208, 5814,
+        2317, 2328, 2352, 2371, 2389, 2478, 2600, 2837, 2853, 2963, 3072, 3073, 3080, 3143, 3175,
+        3530, 3721, 3727, 3802, 3913, 3923, 3985, 5207, 5208, 5505, 5793, 5814,
     ]
     .into_iter()
     .collect()
@@ -179,10 +179,12 @@ fn partial_cus() -> BTreeSet<u32> {
     .collect()
 }
 
-fn time_sync_gaps() -> BTreeSet<u32> {
-    [2478, 2479, 2480, 2786, 3802, 5505, 5793]
-        .into_iter()
-        .collect()
+/// CUs satisfiable only via a documented, user-supplied extensibility point
+/// (feature 093: `TimeSyncSource` for the PTP/gPTP/NTP wire protocols this
+/// library deliberately does not implement — see
+/// `docs/time-synchronization.md` and OPC-10000-84 §6.6.3.6).
+fn extensible_cus() -> BTreeSet<u32> {
+    [2479, 2480, 2786].into_iter().collect()
 }
 
 #[cfg(test)]
@@ -201,23 +203,27 @@ mod tests {
   },
   "conformance_units": [
     {"opc_id": 2478, "name": "Time Sync - OS based support"},
+    {"opc_id": 2479, "name": "Time Sync - IEEE 1588 (PTP)"},
     {"opc_id": 3912, "name": "Base Info Server Capabilities 2"}
   ],
   "relationships": {
     "transitive_cu_closure": {
-      "2266": [2478, 3912, 5592]
+      "2266": [2478, 2479, 3912, 5592]
     }
   }
 }
 "#;
 
     #[test]
-    fn report_classifies_cu_gaps_partials_and_source_issues() {
+    fn report_classifies_cu_implemented_extensible_partial_and_source_issues() {
         let snapshot = parse_snapshot(FIXTURE).expect("fixture parses");
         let report = generate_markdown_report(&snapshot);
 
         assert!(report.contains("Nano Embedded Device 2025 Server Profile"));
-        assert!(report.contains("| 2478 | Time Sync - OS based support | gap |"));
+        // Feature 093: OS-based time sync is claimed via the default OsClockSource.
+        assert!(report.contains("| 2478 | Time Sync - OS based support | implemented |"));
+        // Feature 093: PTP is satisfiable only via a user-supplied TimeSyncSource.
+        assert!(report.contains("| 2479 | Time Sync - IEEE 1588 (PTP) | extensible |"));
         assert!(report.contains("| 3912 | Base Info Server Capabilities 2 | partial |"));
         assert!(report.contains("| 5592 | Missing from normalized CU list | source-issue |"));
     }
@@ -231,6 +237,6 @@ mod tests {
         let snapshot = parse_snapshot(&fixture).expect("fixture parses");
         let report = generate_markdown_report(&snapshot);
 
-        assert!(report.contains("| 2478 | Time Sync - OS based support | gap |"));
+        assert!(report.contains("| 2478 | Time Sync - OS based support | implemented |"));
     }
 }

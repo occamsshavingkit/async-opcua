@@ -192,6 +192,11 @@ pub struct ServerInfo {
     pub receive_buffer_size: usize,
     /// Authenticator to use when verifying user identities, and checking for user access.
     pub authenticator: Arc<dyn AuthManager>,
+    /// Source of time-synchronization status (OPC UA Time Sync conformance
+    /// units). Defaults to [`crate::time_sync::OsClockSource`] when no
+    /// custom source is registered via
+    /// [`ServerBuilder::with_time_sync_source`](crate::ServerBuilder::with_time_sync_source).
+    pub time_sync_source: Arc<dyn crate::time_sync::TimeSyncSource>,
     /// Kerberos/GSSAPI identity validator (OPC 10000-6 §6.4).
     #[cfg(feature = "kerberos")]
     pub(crate) kerberos_validator: Option<GssapiIdentityValidator>,

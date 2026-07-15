@@ -558,6 +558,9 @@ impl Server {
             authenticator: builder
                 .authenticator
                 .unwrap_or_else(|| Arc::new(DefaultAuthenticator::new(config.user_tokens.clone()))),
+            time_sync_source: builder
+                .time_sync_source
+                .unwrap_or_else(|| Arc::new(crate::time_sync::OsClockSource)),
             #[cfg(feature = "kerberos")]
             kerberos_validator: builder.kerberos_validator,
             role_resolver: Arc::new(RwLock::new(role_resolver)),
@@ -835,6 +838,9 @@ impl Server {
         let subscription_fut = futures::future::pending();
         pin!(subscription_fut);
 
+        let time_sync_fut = self.info.time_sync_source.run();
+        pin!(time_sync_fut);
+
         let session_expiry_fut =
             Self::run_session_expiry(&self.session_manager, &self.session_notify);
         pin!(session_expiry_fut);
@@ -872,6 +878,7 @@ impl Server {
                 _ = &mut subscription_fut => {}
                 _ = &mut discovery_fut => {}
                 _ = &mut mdns_fut => {}
+                _ = &mut time_sync_fut => {}
                 _ = &mut session_expiry_fut => {}
                 rs = connection_source.next() => {
                     match rs {
@@ -1164,6 +1171,9 @@ impl Server {
         let subscription_fut = futures::future::pending::<()>();
         pin!(subscription_fut);
 
+        let time_sync_fut = self.info.time_sync_source.run();
+        pin!(time_sync_fut);
+
         let session_expiry_fut =
             Self::run_session_expiry(&self.session_manager, &self.session_notify);
         pin!(session_expiry_fut);
@@ -1173,6 +1183,7 @@ impl Server {
                 _ = &mut subscription_fut => {}
                 _ = &mut discovery_fut => {}
                 _ = &mut mdns_fut => {}
+                _ = &mut time_sync_fut => {}
                 _ = &mut session_expiry_fut => {}
                 _ = self.token.cancelled() => break,
             }

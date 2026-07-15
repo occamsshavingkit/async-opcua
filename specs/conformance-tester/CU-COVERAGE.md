@@ -63,7 +63,7 @@ independent passes over the codebase, one per subsystem cluster); see the
 | 4237 | Address Space NonVolatile and Constant | partial | NonVolatile/Constant bits defined enums.rs:15-19, generic get/set variable.rs:826-838; tests only exercise other AccessLevelEx bits |
 | 5240 | Base Info Currency | gap | Only inert CurrencyUnitType/CurrencyUnit template nodes exist (nodeset_22.rs:908-934); no builder API, usage, or test |
 | 5505 | Time Sync - UA based support | implemented | UaHeaderTimeSyncSource polls ResponseHeader.timestamp (time_sync_ua.rs:52-80), configurable builder.rs:258-262; test time_sync.rs:33 |
-| 5592 | Missing from normalized CU list | source-issue | Confirmed absent from normalized CU list per tool logic (cu-coverage-report/src/lib.rs:296,364,383); incomplete source data |
+| 5592 | Missing from normalized CU list | source-issue | Referenced by closure but absent from conformance_units. |
 | 5793 | Time Sync - Support | implemented | OsClockSource (time_sync.rs:112-124) + UA-based source satisfy facet; docs/time-synchronization.md:9-17; tests time_sync.rs:11-22 |
 | 5814 | Security - No Application Authentication | implemented | Reviewed pre-2026-07-15-audit; existing tests/docs provide direct evidence. |
 
@@ -134,7 +134,7 @@ independent passes over the codebase, one per subsystem cluster); see the
 | 5208 | Monitor Value Change V2 | partial | IndexRange applied to sample monitored_item.rs:931-940 (Variant::range_of); logic tested via read.rs:794-827, no MonitoredItem-level test |
 | 5240 | Base Info Currency | gap | Only inert CurrencyUnitType/CurrencyUnit template nodes exist (nodeset_22.rs:908-934); no builder API, usage, or test |
 | 5505 | Time Sync - UA based support | implemented | UaHeaderTimeSyncSource polls ResponseHeader.timestamp (time_sync_ua.rs:52-80), configurable builder.rs:258-262; test time_sync.rs:33 |
-| 5592 | Missing from normalized CU list | source-issue | Confirmed absent from normalized CU list per tool logic (cu-coverage-report/src/lib.rs:296,364,383); incomplete source data |
+| 5592 | Missing from normalized CU list | source-issue | Referenced by closure but absent from conformance_units. |
 | 5793 | Time Sync - Support | implemented | OsClockSource (time_sync.rs:112-124) + UA-based source satisfy facet; docs/time-synchronization.md:9-17; tests time_sync.rs:11-22 |
 | 5814 | Security - No Application Authentication | implemented | Reviewed pre-2026-07-15-audit; existing tests/docs provide direct evidence. |
 
@@ -260,7 +260,7 @@ independent passes over the codebase, one per subsystem cluster); see the
 | 5208 | Monitor Value Change V2 | partial | IndexRange applied to sample monitored_item.rs:931-940 (Variant::range_of); logic tested via read.rs:794-827, no MonitoredItem-level test |
 | 5240 | Base Info Currency | gap | Only inert CurrencyUnitType/CurrencyUnit template nodes exist (nodeset_22.rs:908-934); no builder API, usage, or test |
 | 5505 | Time Sync - UA based support | implemented | UaHeaderTimeSyncSource polls ResponseHeader.timestamp (time_sync_ua.rs:52-80), configurable builder.rs:258-262; test time_sync.rs:33 |
-| 5592 | Missing from normalized CU list | source-issue | Confirmed absent from normalized CU list per tool logic (cu-coverage-report/src/lib.rs:296,364,383); incomplete source data |
+| 5592 | Missing from normalized CU list | source-issue | Referenced by closure but absent from conformance_units. |
 | 5793 | Time Sync - Support | implemented | OsClockSource (time_sync.rs:112-124) + UA-based source satisfy facet; docs/time-synchronization.md:9-17; tests time_sync.rs:11-22 |
 | 5801 | Base Info Type Information | partial | Strong support via full 1.05 nodeset import + codegen custom-nodeset gen (samples/custom-codegen); no e2e completeness test; gaps remain. |
 | 5814 | Security - No Application Authentication | implemented | Reviewed pre-2026-07-15-audit; existing tests/docs provide direct evidence. |
@@ -392,7 +392,7 @@ independent passes over the codebase, one per subsystem cluster); see the
 | 5208 | Monitor Value Change V2 | partial | IndexRange applied to sample monitored_item.rs:931-940 (Variant::range_of); logic tested via read.rs:794-827, no MonitoredItem-level test |
 | 5240 | Base Info Currency | gap | Only inert CurrencyUnitType/CurrencyUnit template nodes exist (nodeset_22.rs:908-934); no builder API, usage, or test |
 | 5505 | Time Sync - UA based support | implemented | UaHeaderTimeSyncSource polls ResponseHeader.timestamp (time_sync_ua.rs:52-80), configurable builder.rs:258-262; test time_sync.rs:33 |
-| 5592 | Missing from normalized CU list | source-issue | Confirmed absent from normalized CU list per tool logic (cu-coverage-report/src/lib.rs:296,364,383); incomplete source data |
+| 5592 | Missing from normalized CU list | source-issue | Referenced by closure but absent from conformance_units. |
 | 5793 | Time Sync - Support | implemented | OsClockSource (time_sync.rs:112-124) + UA-based source satisfy facet; docs/time-synchronization.md:9-17; tests time_sync.rs:11-22 |
 | 5801 | Base Info Type Information | partial | Strong support via full 1.05 nodeset import + codegen custom-nodeset gen (samples/custom-codegen); no e2e completeness test; gaps remain. |
 | 5814 | Security - No Application Authentication | implemented | Reviewed pre-2026-07-15-audit; existing tests/docs provide direct evidence. |
@@ -959,7 +959,7 @@ One row per facet not already covered by the four canonical profiles above. Coun
 | 5566 | A & C Exclusive Limit High EffectiveDisplayName | gap | zero hits for "EffectiveDisplayName" on High LimitState sub-state anywhere in limit.rs |
 | 5567 | A & C Exclusive Limit HighHigh EffectiveDisplayName | gap | zero hits for "EffectiveDisplayName" on HighHigh LimitState sub-state anywhere in limit.rs |
 | 5578 | Base Info Progress Events | gap | ProgressEventType only a generated struct generated.rs:651, used only as an arbitrary test fixture subscriptions.rs:1739; never raised |
-| 5592 | Missing from normalized CU list | source-issue | Confirmed absent from normalized CU list per tool logic (cu-coverage-report/src/lib.rs:296,364,383); incomplete source data |
+| 5592 | Missing from normalized CU list | source-issue | Referenced by closure but absent from conformance_units. |
 | 5791 | Base Info TemporaryFileTransferType Base | gap | No TemporaryFileTransferType or FileTransferStateMachineType instance/implementation found outside generated NodeId enum constants. |
 | 5793 | Time Sync - Support | implemented | OsClockSource (time_sync.rs:112-124) + UA-based source satisfy facet; docs/time-synchronization.md:9-17; tests time_sync.rs:11-22 |
 | 5795 | Documentation - Durable Subscription Capacity | gap | No durable-subscription capacity doc found; feature itself absent (CU 3642); only stale CU-COVERAGE.md:962 "needs-proof" placeholder |

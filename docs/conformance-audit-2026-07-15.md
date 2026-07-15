@@ -192,6 +192,9 @@ inert generated nodeset entry.
   time; treat `gap` verdicts as strong (a targeted, documented search found
   nothing) but not infallible. Re-verify before committing to a specific
   implementation task, per this repo's usual grounding practice.
-- `partial` (45 CUs) generally means "implementation exists, test coverage or
-  full CU-described surface doesn't" — often the cheapest next win, since
-  most of the work is already done.
+- `partial` generally means "implementation exists, test coverage or full
+  CU-described surface doesn't" — often the cheapest next win, since most of
+  the work is already done. The full-ledger total is 42 CUs; the
+  per-subsystem breakdown above sums to 45 because it also counts a few
+  partials from the pre-existing 123-CU canonical-profile review that the
+  full ledger already deduplicates against (see the note under that table).

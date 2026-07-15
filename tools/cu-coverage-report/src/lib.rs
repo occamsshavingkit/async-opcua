@@ -330,10 +330,9 @@ fn evidence_note(cu_id: u32, status: EvidenceStatus) -> String {
         EvidenceStatus::Extensible => {
             "Satisfiable via user-supplied TimeSyncSource; documented extension point, not implemented in-library (feature 093).".to_string()
         }
-        EvidenceStatus::SourceIssue if cu_id == 5592 => {
+        EvidenceStatus::SourceIssue => {
             "Referenced by closure but absent from conformance_units.".to_string()
         }
-        EvidenceStatus::SourceIssue => "Referenced by closure but absent from conformance_units.".to_string(),
         EvidenceStatus::NeedsProof => {
             "Outside the 2026-07-15 audit's scope; not yet reviewed.".to_string()
         }
@@ -829,7 +828,17 @@ static AUDIT_TABLE: &[(u32, EvidenceStatus, &str)] = &[
     (5566, EvidenceStatus::Gap, "zero hits for \"EffectiveDisplayName\" on High LimitState sub-state anywhere in limit.rs"),
     (5567, EvidenceStatus::Gap, "zero hits for \"EffectiveDisplayName\" on HighHigh LimitState sub-state anywhere in limit.rs"),
     (5578, EvidenceStatus::Gap, "ProgressEventType only a generated struct generated.rs:651, used only as an arbitrary test fixture subscriptions.rs:1739; never raised"),
-    (5592, EvidenceStatus::Gap, "Confirmed absent from normalized CU list per tool logic (cu-coverage-report/src/lib.rs:296,364,383); incomplete source data"),
+    // 5592 intentionally has no entry here: it is the known "missing from the
+    // normalized CU list" data-quality issue, and its displayed status
+    // ("source-issue") always comes from write_cu_table's `None` branch, not
+    // from this table. An earlier revision carried a Gap-status row here with
+    // a self-referential line-number citation to "the tool logic confirming
+    // absence" — that citation went stale the moment this file was
+    // refactored, and worse, evidence_note() unconditionally consulted this
+    // table regardless of the already-decided SourceIssue status, so the
+    // displayed report showed status=source-issue paired with Gap-flavored
+    // evidence text. Removed rather than re-cited; the generic SourceIssue
+    // evidence text below is accurate and needs no per-CU special case.
     (5791, EvidenceStatus::Gap, "No TemporaryFileTransferType or FileTransferStateMachineType instance/implementation found outside generated NodeId enum constants."),
     (5793, EvidenceStatus::Implemented, "OsClockSource (time_sync.rs:112-124) + UA-based source satisfy facet; docs/time-synchronization.md:9-17; tests time_sync.rs:11-22"),
     (5795, EvidenceStatus::Gap, "No durable-subscription capacity doc found; feature itself absent (CU 3642); only stale CU-COVERAGE.md:962 \"needs-proof\" placeholder"),
@@ -974,5 +983,17 @@ mod tests {
         let mut sorted = ids.clone();
         sorted.sort_unstable();
         assert_eq!(ids, sorted, "AUDIT_TABLE must stay sorted by CU id");
+
+        // `binary_search_by_key` makes no guarantee about which match it
+        // returns when a key appears more than once — a duplicate CU id
+        // (e.g. two subsystem audits disagreeing and both surviving into the
+        // table by mistake) would make classify_cu/evidence_note's result
+        // for that CU unspecified rather than merely wrong.
+        let mut deduped = ids.clone();
+        deduped.dedup();
+        assert_eq!(
+            ids, deduped,
+            "AUDIT_TABLE must not contain duplicate CU ids"
+        );
     }
 }

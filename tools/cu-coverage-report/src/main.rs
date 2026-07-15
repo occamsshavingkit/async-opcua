@@ -26,7 +26,7 @@ fn run() -> Result<(), String> {
         .map_err(|error| format!("failed to read {}: {error}", args[1]))?;
     let snapshot =
         parse_snapshot(&input).map_err(|error| format!("failed to parse snapshot: {error}"))?;
-    let report = generate_markdown_report(&snapshot);
+    let report = generate_markdown_report(&snapshot)?;
 
     if let Some(output_path) = args.get(2) {
         fs::write(output_path, report)

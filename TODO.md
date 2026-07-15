@@ -4,6 +4,13 @@ Ideas that could be implemented.
 
 ## Remaining
 
+- **CU registry and evidence report**: generate an in-repo CU-indexed registry/report from the OPC UA Foundation profile snapshot, covering Nano/Micro/Embedded/Standard 2025 server profile closures with `implemented` / `partial` / `gap` / `not-applicable` statuses. See `docs/opcua-foundation-profile-roadmap.md` and `specs/conformance-tester/PLAN.md` phase 3.
+- **Time Sync profile decision**: close or explicitly exclude CUs `2478`, `2479`, `2480`, `2786`, `3802`, `5505`, and `5793`; add server-profile docs and tests for whichever time-sync mechanisms are claimed.
+- **Base Info / Address Space CU proof**: add CU-specific checks for ServerCapabilities (`3911`, `3912`, `4055`), NamespaceMetadata (`3545`), AddIn references, LocalTime, SelectionList, OptionSet, diagnostics, Locations, Currency, and standard datatype/reference nodes.
+- **Attribute Write CU proof**: add CU-named tests for StatusCode/Timestamp writes (`2936`), IndexRange writes (`3147`), and AccessLevelEx `WriteFullArrayOnly` behavior (`2820`).
+- **GDS Push Model CU proof**: verify full Part 12 Global Certificate/TrustList Management push-model semantics for CU `2231` and tie existing GDS method tests to that CU.
+- **PubSub MQTT config completion**: finish `specs/074-pubsub-gauntlet/tasks.md` T011/T012 by deriving QoS from `RequestedDeliveryGuarantee` and using configured `BrokerDataSetReaderTransportDataType.QueueName` topic filters instead of only writer/reader group IDs.
+- **Conformance known partials**: close or document the remaining JSON/XML cross-stack vector strategy, FindServersOnNetwork mDNS counterparty validation, broader Part 13 aggregate coverage, and audit-event coverage from `specs/conformance-tester/COVERAGE.md`.
 - **CTT certification run**: run the demo server against the OPC Foundation Compliance Test Tool on Windows. See `docs/ctt-conformance.md`.
 - ~~**Technical debt quick wins**: fix companion feature-name drift between `async-opcua-server/Cargo.toml` and `async-opcua-server/src/companion/mod.rs`; remove or narrow the `unexpected_cfgs` allowance; add a consistency check for declared companion features versus importer gates.~~
 - ~~**Spec Kit reconciliation**: update `specs/069-companion-specs/tasks.md` and related plan/spec artifacts so they match the current companion-spec implementation strategy, or document the intended migration path if runtime XML import is temporary.~~

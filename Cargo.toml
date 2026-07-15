@@ -8,6 +8,7 @@ members = [
   "samples/*",
   "async-opcua-*",
   "tools/certificate-creator",
+  "tools/cu-coverage-report",
   "tools/opcua-localhost-bench",
   "dotnet-tests/external-tests",
   "samples/demo-server/interop/pubsub_publisher",

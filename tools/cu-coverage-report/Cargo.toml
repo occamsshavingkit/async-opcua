@@ -1,0 +1,16 @@
+[package]
+name = "async-opcua-cu-coverage-report"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "async-opcua-cu-coverage-report"
+path = "src/main.rs"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true

@@ -4,7 +4,6 @@ Ideas that could be implemented.
 
 ## Remaining
 
-- **CU registry and evidence report**: generate an in-repo CU-indexed registry/report from the OPC UA Foundation profile snapshot, covering Nano/Micro/Embedded/Standard 2025 server profile closures with `implemented` / `partial` / `gap` / `not-applicable` statuses. See `docs/opcua-foundation-profile-roadmap.md` and `specs/conformance-tester/PLAN.md` phase 3.
 - **Time Sync profile decision**: close or explicitly exclude CUs `2478`, `2479`, `2480`, `2786`, `3802`, `5505`, and `5793`; add server-profile docs and tests for whichever time-sync mechanisms are claimed.
 - **Base Info / Address Space CU proof**: add CU-specific checks for ServerCapabilities (`3911`, `3912`, `4055`), NamespaceMetadata (`3545`), AddIn references, LocalTime, SelectionList, OptionSet, diagnostics, Locations, Currency, and standard datatype/reference nodes.
 - **Attribute Write CU proof**: add CU-named tests for StatusCode/Timestamp writes (`2936`), IndexRange writes (`3147`), and AccessLevelEx `WriteFullArrayOnly` behavior (`2820`).
@@ -24,6 +23,7 @@ Ideas that could be implemented.
 
 ## Done
 
+- ~~CU registry and evidence report~~ — `tools/cu-coverage-report` + `specs/conformance-tester/CU-COVERAGE.md`: in-repo CU-indexed registry from the OPC UA Foundation profile snapshot, covering Nano/Micro/Embedded/Standard 2025 server profile closures with `implemented`/`partial`/`needs-proof`/`gap`/`source-issue` evidence labels (PR #294).
 - ~~Shrink foundation profile footprints~~ — feature 066: nano 12M→6.8M, micro 13M→7.3M, embedded 26M→17M (43-45% reduction via opt-level=z + LTO + strip).
 - ~~Kerberos SSO: keytab path plumbing~~ — feature 065.
 - ~~Kerberos SSO: integration test & CI KDC setup~~ — feature 065.

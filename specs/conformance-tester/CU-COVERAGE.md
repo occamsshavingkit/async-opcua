@@ -48,7 +48,7 @@ independent passes over the codebase, one per subsystem cluster); see the
 | 3186 | Base Info Core Views Folder | implemented | ViewsFolder entry point address_space/mod.rs:774-779; test at same location |
 | 3192 | Base Info Diagnostics | implemented | EnabledFlag/ServerDiagnosticsSummary/SubscriptionDiagnosticsArray diagnostics/server.rs, core.rs:501-509; e2e read.rs:1604-1841 |
 | 3198 | Base Info Estimated Return Time | gap | EstimatedReturnTime has zero occurrences outside generated files; no wiring near ServerState::Running server_status.rs:198 |
-| 3201 | Base Info Custom Type System | needs-proof | Outside the 2026-07-15 audit's scope; not yet reviewed. |
+| 3201 | Base Info Custom Type System | partial | custom-codegen sample (samples/custom-codegen) demonstrates a full custom-type inheritance tree + generated Encoding Objects via async-opcua-codegen (types/encoding_ids.rs, types/gen.rs); no completeness e2e test proving all custom EventTypes are exposed alongside their encoding objects, same evidentiary gap as CU 5801 |
 | 3530 | View Basic 2 | implemented | Browse/BrowseNext w/ continuation points view.rs:213; tests browse.rs:252, :757 (Bad_ContinuationPointInvalid) |
 | 3545 | Base Info Namespace Metadata | implemented | Dynamic per-namespace NamespaceMetaData objects diagnostics/node_manager.rs:583-650; e2e test browse.rs:942-967 |
 | 3554 | Address Space Base | implemented | Core AddressSpace all NodeClasses address_space/mod.rs (1454 LOC, unit tests) + opcua-nodes crate; e2e browse.rs:144-167 |
@@ -111,7 +111,7 @@ independent passes over the codebase, one per subsystem cluster); see the
 | 3192 | Base Info Diagnostics | implemented | EnabledFlag/ServerDiagnosticsSummary/SubscriptionDiagnosticsArray diagnostics/server.rs, core.rs:501-509; e2e read.rs:1604-1841 |
 | 3196 | Base Info Fixed SamplingInterval | gap | ServerDiagnostics (diagnostics/server.rs:10-52) only summary counts; no SamplingIntervalDiagnosticsArray, no EnabledFlag gating, no test |
 | 3198 | Base Info Estimated Return Time | gap | EstimatedReturnTime has zero occurrences outside generated files; no wiring near ServerState::Running server_status.rs:198 |
-| 3201 | Base Info Custom Type System | needs-proof | Outside the 2026-07-15 audit's scope; not yet reviewed. |
+| 3201 | Base Info Custom Type System | partial | custom-codegen sample (samples/custom-codegen) demonstrates a full custom-type inheritance tree + generated Encoding Objects via async-opcua-codegen (types/encoding_ids.rs, types/gen.rs); no completeness e2e test proving all custom EventTypes are exposed alongside their encoding objects, same evidentiary gap as CU 5801 |
 | 3530 | View Basic 2 | implemented | Browse/BrowseNext w/ continuation points view.rs:213; tests browse.rs:252, :757 (Bad_ContinuationPointInvalid) |
 | 3545 | Base Info Namespace Metadata | implemented | Dynamic per-namespace NamespaceMetaData objects diagnostics/node_manager.rs:583-650; e2e test browse.rs:942-967 |
 | 3554 | Address Space Base | implemented | Core AddressSpace all NodeClasses address_space/mod.rs (1454 LOC, unit tests) + opcua-nodes crate; e2e browse.rs:144-167 |
@@ -207,7 +207,7 @@ independent passes over the codebase, one per subsystem cluster); see the
 | 3192 | Base Info Diagnostics | implemented | EnabledFlag/ServerDiagnosticsSummary/SubscriptionDiagnosticsArray diagnostics/server.rs, core.rs:501-509; e2e read.rs:1604-1841 |
 | 3196 | Base Info Fixed SamplingInterval | gap | ServerDiagnostics (diagnostics/server.rs:10-52) only summary counts; no SamplingIntervalDiagnosticsArray, no EnabledFlag gating, no test |
 | 3198 | Base Info Estimated Return Time | gap | EstimatedReturnTime has zero occurrences outside generated files; no wiring near ServerState::Running server_status.rs:198 |
-| 3201 | Base Info Custom Type System | needs-proof | Outside the 2026-07-15 audit's scope; not yet reviewed. |
+| 3201 | Base Info Custom Type System | partial | custom-codegen sample (samples/custom-codegen) demonstrates a full custom-type inheritance tree + generated Encoding Objects via async-opcua-codegen (types/encoding_ids.rs, types/gen.rs); no completeness e2e test proving all custom EventTypes are exposed alongside their encoding objects, same evidentiary gap as CU 5801 |
 | 3207 | Base Info OptionSet DataType | implemented | OptionSet DataType present in schemas/1.05/Opc.Ua.NodeSet2.xml; exposed via CoreNamespace import. |
 | 3214 | Base Info Range DataType | implemented | Range in nodeset + generated types/range.rs; used as EURange in datachange_overflow.rs, alarms.rs. |
 | 3530 | View Basic 2 | implemented | Browse/BrowseNext w/ continuation points view.rs:213; tests browse.rs:252, :757 (Bad_ContinuationPointInvalid) |
@@ -274,9 +274,9 @@ independent passes over the codebase, one per subsystem cluster); see the
 
 | CU | Name | Status | Evidence |
 |---:|---|---|---|
-| 2190 | Session Cancel | needs-proof | Outside the 2026-07-15 audit's scope; not yet reviewed. |
+| 2190 | Session Cancel | gap | Cancel service is a deliberate no-op: message_handler.rs:435-457 dispatches CancelRequest and audits it, but the comment admits "this server processes requests without a cancellable queue, so there is nothing outstanding to cancel" -- cancel_count is always 0, no in-flight request is ever actually aborted |
 | 2231 | Push Model for Global Certificate and TrustList Management | partial | Push StartSigningRequest+CreateSigningRequest impl gds/push_methods.rs:119,143 tested :435-552; missing GetTrustList/AddCert push ops |
-| 2271 | Discovery Register | needs-proof | Outside the 2026-07-15 audit's scope; not yet reviewed. |
+| 2271 | Discovery Register | implemented | Client::register_server (async-opcua-client/src/session/client.rs:818) + server-side periodic_discovery_server_registration (discovery.rs:86-117) calling it over a client-selected highest-security endpoint; test discovery.rs uses secured_endpoint() (SignAndEncrypt) throughout, e.g. discovery.rs:114 |
 | 2317 | View TranslateBrowsePath | implemented | TranslateBrowsePathsToNodeIds handler async-opcua-server/src/session/services/view.rs:388; test async-opcua/tests/integration/tier_a.rs:141 |
 | 2328 | Discovery Get Endpoints | implemented | get_endpoints_with_filters incl profile-uri filter info.rs:342-378; tests core_tests.rs:100,358,366 |
 | 2352 | Discovery Find Servers Self | implemented | FindServers handled async-opcua-server/src/session/controller.rs:716; tests async-opcua/tests/integration/discovery.rs:83,119 |
@@ -329,7 +329,7 @@ independent passes over the codebase, one per subsystem cluster); see the
 | 3143 | Subscription PublishRequest Queue Overflow | implemented | enqueue_publish_request pops oldest on overflow, returns BadTooManyPublishRequests (session_subscriptions.rs:767); test :1581. |
 | 3146 | Monitor Triggering | implemented | SetTriggering handler message_handler.rs:676, actor.rs:104/392/704; e2e tests triggering.rs:43,160 |
 | 3147 | Attribute Write Index | implemented | Variant::set_range_of variant/mod.rs:1641 via Variable::set_value_range variable.rs:746; test write.rs:688,1008 |
-| 3170 | Discovery Register2 | needs-proof | Outside the 2026-07-15 audit's scope; not yet reviewed. |
+| 3170 | Discovery Register2 | implemented | Client::register_server2 (async-opcua-client/src/session/client.rs:879) + client-callable discovery-configuration support; tests discovery.rs::register_server2_mdns_config_result_matches_feature_support and :303 over secured_endpoint() (SignAndEncrypt) |
 | 3175 | Session Base | implemented | CreateSession/ActivateSession/CloseSession session/manager.rs; SecurityMode::None optional cert/nonce manager.rs:283-300; test :47,90 |
 | 3184 | Base Info Core Structure 2 | implemented | Root/Objects/Server + ServerArray/NamespaceArray/ServiceLevel node_manager/memory/core.rs:986-1063; tests browse.rs:35, read.rs:42-43 |
 | 3185 | Base Info Core Types Folders | implemented | Types/ObjectTypes/DataTypes/VariableTypes/ReferenceTypes folders exposed via default CoreNamespace import (core.rs:147). |
@@ -339,7 +339,7 @@ independent passes over the codebase, one per subsystem cluster); see the
 | 3192 | Base Info Diagnostics | implemented | EnabledFlag/ServerDiagnosticsSummary/SubscriptionDiagnosticsArray diagnostics/server.rs, core.rs:501-509; e2e read.rs:1604-1841 |
 | 3196 | Base Info Fixed SamplingInterval | gap | ServerDiagnostics (diagnostics/server.rs:10-52) only summary counts; no SamplingIntervalDiagnosticsArray, no EnabledFlag gating, no test |
 | 3198 | Base Info Estimated Return Time | gap | EstimatedReturnTime has zero occurrences outside generated files; no wiring near ServerState::Running server_status.rs:198 |
-| 3201 | Base Info Custom Type System | needs-proof | Outside the 2026-07-15 audit's scope; not yet reviewed. |
+| 3201 | Base Info Custom Type System | partial | custom-codegen sample (samples/custom-codegen) demonstrates a full custom-type inheritance tree + generated Encoding Objects via async-opcua-codegen (types/encoding_ids.rs, types/gen.rs); no completeness e2e test proving all custom EventTypes are exposed alongside their encoding objects, same evidentiary gap as CU 5801 |
 | 3207 | Base Info OptionSet DataType | implemented | OptionSet DataType present in schemas/1.05/Opc.Ua.NodeSet2.xml; exposed via CoreNamespace import. |
 | 3214 | Base Info Range DataType | implemented | Range in nodeset + generated types/range.rs; used as EURange in datachange_overflow.rs, alarms.rs. |
 | 3530 | View Basic 2 | implemented | Browse/BrowseNext w/ continuation points view.rs:213; tests browse.rs:252, :757 (Bad_ContinuationPointInvalid) |
@@ -493,7 +493,7 @@ One row per facet not already covered by the four canonical profiles above. Coun
 | 2185 | Historical Access Structured Data Insert | gap | data_history.rs:305-308 update_structure_data rejects non-Annotation ExtensionObjects (BadTypeMismatch); same in sqlite backend.rs:1030; test history_data_inmemory.rs:421 proves only Annotation type accepted, contra CU's exclusion of annotation-only support |
 | 2188 | Aggregate - Maximum2 | implemented | engine.rs dispatch AGG_MAXIMUM2=11287 (engine.rs:1483); aggregates_tests.rs references 11287 (id present, phase_d family covers Minimum2/Maximum2 pattern) |
 | 2189 | A & C ConditionClasses | gap | AlarmEvent (opcua-core/src/events.rs:9-35) has no condition-class field; BaseEventType.condition_class_id never set by alarms code (0 hits) |
-| 2190 | Session Cancel | needs-proof | Outside the 2026-07-15 audit's scope; not yet reviewed. |
+| 2190 | Session Cancel | gap | Cancel service is a deliberate no-op: message_handler.rs:435-457 dispatches CancelRequest and audits it, but the comment admits "this server processes requests without a cancellable queue, so there is nothing outstanding to cancel" -- cancel_count is always 0, no in-flight request is ever actually aborted |
 | 2194 | Aggregate Subscription - DeltaBounds | implemented | agg_delta_bounds engine.rs:1329 (11507); test phase_c_start_end_delta_bounds aggregates_tests.rs:486-503 |
 | 2201 | Aggregate Subscription - WorstQuality | implemented | agg_worst_quality engine.rs:1247 (2364); test aggregates_tests.rs:401, worst_quality_is_value_type_independent:1141 |
 | 2202 | A & C Enable | implemented | ConditionType_Enable/Disable Methods registered (methods.rs register_condition_methods); handle_condition_enable/disable call set_enabled; test alarms.rs::enable_disable_methods_toggle_enabled_state |
@@ -513,7 +513,7 @@ One row per facet not already covered by the four canonical profiles above. Coun
 | 2263 | Aggregate - Count | implemented | engine.rs dispatch AGG_COUNT=2352 (engine.rs:1494); tests aggregates_tests.rs:1003-1059 count_* family (3 tests) |
 | 2264 | Historical Access Replace Value | implemented | data_history.rs:239-252 update_data PerformUpdateType::Replace; tests history_data_inmemory.rs:79-91 + hda.rs:353-389 e2e_replace_then_read_modified |
 | 2267 | Aggregate - StartBound | implemented | engine.rs dispatch AGG_START_BOUND=11505 (engine.rs:1510); test aggregates_tests.rs:486 part13_start_end_and_delta_bounds_use_simple_bounds |
-| 2271 | Discovery Register | needs-proof | Outside the 2026-07-15 audit's scope; not yet reviewed. |
+| 2271 | Discovery Register | implemented | Client::register_server (async-opcua-client/src/session/client.rs:818) + server-side periodic_discovery_server_registration (discovery.rs:86-117) calling it over a client-selected highest-security endpoint; test discovery.rs uses secured_endpoint() (SignAndEncrypt) throughout, e.g. discovery.rs:114 |
 | 2273 | Aggregate - TimeAverage2 | implemented | engine.rs dispatch AGG_TIME_AVERAGE2=11285 (engine.rs:1481); test aggregates_tests.rs:621 phase_d_time_average2_total2_match_stepped_area |
 | 2275 | A & C Trip | partial | discrete.rs:22,182-186 implements Trip via DiscreteAlarmKind::Trip; grep shows Trip kind never used in any test (only OffNormal is) |
 | 2276 | Historical Access Annotations | implemented | annotations.rs attach_annotations_property + data_history.rs update_structure_data/read_annotations; simple.rs:658-718 history_read_annotations; test history_data_inmemory.rs:368 round-trip insert/replace/remove/read. Uses ReadAnnotationDataDetails not ReadRawModifiedDetails, but OPC-10000-11 5.1.2 confirms both are spec-valid |
@@ -736,7 +736,7 @@ One row per facet not already covered by the four canonical profiles above. Coun
 | 3159 | Aggregate - Interpolative | implemented | engine.rs dispatch AGG_INTERPOLATIVE=2341 (engine.rs:1472); tests aggregates_tests.rs:505 phase_c_interpolative_at_interval_start, :534 phase_c_interpolative_before_data_is_bad_no_data |
 | 3162 | Aggregate - StandardDeviationPopulation | implemented | engine.rs dispatch AGG_STANDARD_DEVIATION_POPULATION=11427 (engine.rs:1516-1518); test aggregates_tests.rs:369 phase_b_variance_and_stddev |
 | 3165 | A & C Shelving | implemented | one_shot_shelve/timed_shelve/unshelve state_machine.rs:671-707 + methods registered methods.rs:674-693; tested alarms.rs:1255,1343 |
-| 3170 | Discovery Register2 | needs-proof | Outside the 2026-07-15 audit's scope; not yet reviewed. |
+| 3170 | Discovery Register2 | implemented | Client::register_server2 (async-opcua-client/src/session/client.rs:879) + client-callable discovery-configuration support; tests discovery.rs::register_server2_mdns_config_result_matches_feature_support and :303 over secured_endpoint() (SignAndEncrypt) |
 | 3171 | Discovery Server Announcement using mDNS  | implemented | mDNS responder discovery/mdns.rs:81 start_responder, wired at server.rs:516,525,827,1162; unit tests mdns.rs:521-673. |
 | 3175 | Session Base | implemented | CreateSession/ActivateSession/CloseSession session/manager.rs; SecurityMode::None optional cert/nonce manager.rs:283-300; test :47,90 |
 | 3182 | Authorization Service Configuration Server | gap | No AuthorizationServiceConfigurationType/AccessToken code found; searched "AuthorizationService","RequestAccessToken" - zero hits |
@@ -751,7 +751,7 @@ One row per facet not already covered by the four canonical profiles above. Coun
 | 3197 | Base Info Security Role Capabilities | implemented | RoleSet on ServerCapabilities (role_management.rs:479-481); test rbac.rs:287-316 verifies i=15606 + 8 role nodes. |
 | 3198 | Base Info Estimated Return Time | gap | EstimatedReturnTime has zero occurrences outside generated files; no wiring near ServerState::Running server_status.rs:198 |
 | 3199 | Base Info System Status | gap | SystemStatusChangeEventType has no server-side emission on shutdown; server_status.rs/server_handle.rs never calls notify_event/raise_event |
-| 3201 | Base Info Custom Type System | needs-proof | Outside the 2026-07-15 audit's scope; not yet reviewed. |
+| 3201 | Base Info Custom Type System | partial | custom-codegen sample (samples/custom-codegen) demonstrates a full custom-type inheritance tree + generated Encoding Objects via async-opcua-codegen (types/encoding_ids.rs, types/gen.rs); no completeness e2e test proving all custom EventTypes are exposed alongside their encoding objects, same evidentiary gap as CU 5801 |
 | 3203 | Base Info Model Change General | implemented | GeneralModelChangeEvent fired on add/delete_nodes/refs (model_change.rs, memory_mgr_impl.rs:325); e2e test node_management.rs:1437. |
 | 3206 | Base Info EventQueueOverflow EventType | implemented | monitored_item.rs:1052-1085 notify_event inserts EventQueueOverflowEventType on overflow; tested subscriptions.rs:1697-1779 |
 | 3207 | Base Info OptionSet DataType | implemented | OptionSet DataType present in schemas/1.05/Opc.Ua.NodeSet2.xml; exposed via CoreNamespace import. |

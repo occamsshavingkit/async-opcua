@@ -12,7 +12,7 @@ use opcua_core::sync::RwLock;
 use opcua_types::{ApplicationDescription, UAString};
 #[cfg(feature = "subscriptions")]
 use opcua_types::{AttributeId, DataValue, VariableId};
-use opcua_types::{LocalizedText, ServerState};
+use opcua_types::{DateTime, LocalizedText, ServerState};
 
 use crate::{reverse_connect::ReverseConnectHandle, ServerStatusWrapper};
 
@@ -179,9 +179,22 @@ impl ServerHandle {
     /// Tell the server to stop after `time` has elapsed. This will
     /// update the `SecondsTillShutdown` variable on the server as needed.
     pub fn shutdown_after(&self, time: Duration, reason: impl Into<LocalizedText>) {
+        self.shutdown_after_with_return_time(time, reason, None);
+    }
+
+    /// Like [`Self::shutdown_after`], but additionally records an estimated time at which the
+    /// server expects to be `Running` again (OPC-10000-5, `ServerType.EstimatedReturnTime`),
+    /// exposed to clients so their reconnect logic can wait accordingly rather than retrying
+    /// immediately.
+    pub fn shutdown_after_with_return_time(
+        &self,
+        time: Duration,
+        reason: impl Into<LocalizedText>,
+        estimated_return_time: Option<DateTime>,
+    ) {
         let deadline = Instant::now() + time;
         self.status
-            .schedule_shutdown(reason.into(), Instant::now() + time);
+            .schedule_shutdown(reason.into(), deadline, estimated_return_time);
         let token = self.token.clone();
         info!("Shutting down server in {time:?}");
         tokio::task::spawn(async move {

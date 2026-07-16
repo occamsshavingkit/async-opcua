@@ -1,6 +1,7 @@
 mod address_space_oracle;
 mod adversarial;
 mod alarms;
+mod base_info;
 mod browse;
 mod conformance;
 mod core_tests;

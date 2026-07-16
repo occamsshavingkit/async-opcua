@@ -29,7 +29,7 @@ independent passes over the codebase, one per subsystem cluster); see the
 | 2479 | Time Sync - IEEE 1588 (PTP) | extensible | Satisfiable via user-supplied TimeSyncSource; documented extension point, not implemented in-library (feature 093). |
 | 2480 | Time Sync - IEEE 802.1AS | extensible | Satisfiable via user-supplied TimeSyncSource; documented extension point, not implemented in-library (feature 093). |
 | 2600 | SecurityPolicy Support | implemented | 10+ SecurityPolicy variants incl None async-opcua-crypto/src/security_policy.rs:125-150; extensively tested + CI conformance matrix |
-| 2711 | Base Info Selection List | gap | Only generated node IDs (SelectionListType_RestrictToList/Selections node_ids.rs:13907,15279); zero application code/tests |
+| 2711 | Base Info Selection List | implemented | base_info::create_selection_list_variable instantiates SelectionListType with Selections/SelectionDescriptions/RestrictToList; test base_info.rs::selection_list_exposes_selections_descriptions_and_restrict_flag |
 | 2786 | Time Sync - NTP | extensible | Satisfiable via user-supplied TimeSyncSource; documented extension point, not implemented in-library (feature 093). |
 | 2808 | Security Role Server Authorization | implemented | Opt-in RBAC enforcement async-opcua-server/src/rbac/decision.rs:46-81; dedicated suite async-opcua/tests/integration/rbac.rs |
 | 2809 | Address Space Atomicity | implemented | AccessLevelExType NonatomicRead/Write async-opcua-nodes/src/variable.rs:62,827-837; unit test variable.rs:990-997 |
@@ -37,22 +37,22 @@ independent passes over the codebase, one per subsystem cluster); see the
 | 2837 | UA Binary Encoding | implemented | BinaryEncodable/BinaryDecodable traits async-opcua-types/src/encoding.rs:445-482, pervasive derive use; tests encoding.rs:919 |
 | 2853 | UA Secure Conversation | implemented | SecureChannel/OpenSecureChannel comms/secure_channel.rs:657; tests secure_channel.rs:136-663, integration secure_channel.rs:15 |
 | 2936 | Attribute Write StatusCode & Timestamp | partial | Write stores client status/source_timestamp async-opcua-nodes/src/variable.rs:737-739; no test reads value back post-Write |
-| 2969 | Base Info ValueAsText | gap | ValueAsText only a static generated nodeset property (nodeset_20.rs:3350); no server code computes/updates it from enum values |
+| 2969 | Base Info ValueAsText | implemented | base_info::create_enum_variable_with_value_as_text/update_enum_value attach a ValueAsText property kept in sync with an enumerated Variable's Value; test base_info.rs::value_as_text_tracks_enumerated_value_changes |
 | 3072 | Attribute Read | implemented | Read applies IndexRange via NumericRange::range_of node_manager/memory/core.rs:1079-1080; tests read.rs:1425,794 |
 | 3073 | View RegisterNodes | implemented | RegisterNodes/UnregisterNodes handler session/services/view.rs:540, memory_mgr_impl.rs:1608; e2e test browse.rs:675 |
 | 3080 | Security Default ApplicationInstance Certificate | implemented | CertificateStore::create_and_store_application_instance_cert certificate_store.rs:265, default builder.rs:119; test crypto.rs:46 |
-| 3127 | Base Info OptionSet | partial | Only generated core-nodeset OptionSetType node (nodeset_51.rs id 11487); no server code instantiates/handles it, no test |
+| 3127 | Base Info OptionSet | implemented | base_info::create_option_set_variable instantiates OptionSetType with OptionSetValues/BitMask; test base_info.rs::option_set_exposes_per_bit_values_and_bitmask |
 | 3147 | Attribute Write Index | implemented | Variant::set_range_of variant/mod.rs:1641 via Variable::set_value_range variable.rs:746; test write.rs:688,1008 |
 | 3175 | Session Base | implemented | CreateSession/ActivateSession/CloseSession session/manager.rs; SecurityMode::None optional cert/nonce manager.rs:283-300; test :47,90 |
 | 3184 | Base Info Core Structure 2 | implemented | Root/Objects/Server + ServerArray/NamespaceArray/ServiceLevel node_manager/memory/core.rs:986-1063; tests browse.rs:35, read.rs:42-43 |
 | 3186 | Base Info Core Views Folder | implemented | ViewsFolder entry point address_space/mod.rs:774-779; test at same location |
 | 3192 | Base Info Diagnostics | implemented | EnabledFlag/ServerDiagnosticsSummary/SubscriptionDiagnosticsArray diagnostics/server.rs, core.rs:501-509; e2e read.rs:1604-1841 |
-| 3198 | Base Info Estimated Return Time | gap | EstimatedReturnTime has zero occurrences outside generated files; no wiring near ServerState::Running server_status.rs:198 |
+| 3198 | Base Info Estimated Return Time | implemented | ServerStatusWrapper::schedule_shutdown/estimated_return_time (server_status.rs) + ServerHandle::shutdown_after_with_return_time (server_handle.rs) extend the existing shutdown mechanism; wired core.rs get_attribute; test base_info.rs::estimated_return_time_reflects_scheduled_shutdown_and_is_null_otherwise |
 | 3201 | Base Info Custom Type System | partial | custom-codegen sample (samples/custom-codegen) demonstrates a full custom-type inheritance tree + generated Encoding Objects via async-opcua-codegen (types/encoding_ids.rs, types/gen.rs); no completeness e2e test proving all custom EventTypes are exposed alongside their encoding objects, same evidentiary gap as CU 5801 |
 | 3530 | View Basic 2 | implemented | Browse/BrowseNext w/ continuation points view.rs:213; tests browse.rs:252, :757 (Bad_ContinuationPointInvalid) |
 | 3545 | Base Info Namespace Metadata | implemented | Dynamic per-namespace NamespaceMetaData objects diagnostics/node_manager.rs:583-650; e2e test browse.rs:942-967 |
 | 3554 | Address Space Base | implemented | Core AddressSpace all NodeClasses address_space/mod.rs (1454 LOC, unit tests) + opcua-nodes crate; e2e browse.rs:144-167 |
-| 3560 | Address Space Interfaces | gap | Searched 'HasInterface'/'BaseInterfaceType' usage - only nodeset type nodes; no server code creates HasInterface refs. |
+| 3560 | Address Space Interfaces | implemented | base_info::add_ordered_object attaches HasInterface from each OrderedListType child to IOrderedObjectType (a byproduct of closing CU 2512); test base_info.rs::ordered_list_children_are_ordered_and_interface_conformant |
 | 3721 | Security ECC Policy | implemented | Reviewed pre-2026-07-15-audit; existing tests/docs provide direct evidence. |
 | 3802 | Time Sync - Configure Clock Skew | implemented | ServerConfig::max_acceptable_clock_skew_ns config/server.rs:669,998-1002; tests config/server.rs:375-432 |
 | 3808 | Documentation - Core Capacities | implemented | docs/server-capacity-limits.md enumerates every Limits/SubscriptionLimits/OperationalLimits field with its default and configuration method, cross-checked against config/limits.rs's Default impls and the server_conf_limits_match_struct_field_names test |
@@ -61,7 +61,7 @@ independent passes over the codebase, one per subsystem cluster); see the
 | 3985 | Session General Service Behaviour | implemented | controller.rs:396 auth-token check, response.rs:207 requestHandle echo, deadline_queue:971-1016 BadTimeout; e2e read.rs:1400-1408 |
 | 4053 | Base Info Locations Object | implemented | Locations object (i=31915, nodeset_16.rs:918-943) confirmed reachable via Browse from ObjectsFolder; test browse.rs::locations_object_is_reachable_from_objects_folder |
 | 4237 | Address Space NonVolatile and Constant | partial | NonVolatile/Constant bits defined enums.rs:15-19, generic get/set variable.rs:826-838; tests only exercise other AccessLevelEx bits |
-| 5240 | Base Info Currency | gap | Only inert CurrencyUnitType/CurrencyUnit template nodes exist (nodeset_22.rs:908-934); no builder API, usage, or test |
+| 5240 | Base Info Currency | implemented | base_info::create_currency_variable attaches a CurrencyUnit property (CurrencyUnitType) to a monetary DataVariable; test base_info.rs::currency_unit_property_reports_iso4217_fields |
 | 5505 | Time Sync - UA based support | implemented | UaHeaderTimeSyncSource polls ResponseHeader.timestamp (time_sync_ua.rs:52-80), configurable builder.rs:258-262; test time_sync.rs:33 |
 | 5592 | Missing from normalized CU list | source-issue | Referenced by closure but absent from conformance_units. |
 | 5793 | Time Sync - Support | implemented | OsClockSource (time_sync.rs:112-124) + UA-based source satisfy facet; docs/time-synchronization.md:9-17; tests time_sync.rs:11-22 |
@@ -89,7 +89,7 @@ independent passes over the codebase, one per subsystem cluster); see the
 | 2479 | Time Sync - IEEE 1588 (PTP) | extensible | Satisfiable via user-supplied TimeSyncSource; documented extension point, not implemented in-library (feature 093). |
 | 2480 | Time Sync - IEEE 802.1AS | extensible | Satisfiable via user-supplied TimeSyncSource; documented extension point, not implemented in-library (feature 093). |
 | 2600 | SecurityPolicy Support | implemented | 10+ SecurityPolicy variants incl None async-opcua-crypto/src/security_policy.rs:125-150; extensively tested + CI conformance matrix |
-| 2711 | Base Info Selection List | gap | Only generated node IDs (SelectionListType_RestrictToList/Selections node_ids.rs:13907,15279); zero application code/tests |
+| 2711 | Base Info Selection List | implemented | base_info::create_selection_list_variable instantiates SelectionListType with Selections/SelectionDescriptions/RestrictToList; test base_info.rs::selection_list_exposes_selections_descriptions_and_restrict_flag |
 | 2786 | Time Sync - NTP | extensible | Satisfiable via user-supplied TimeSyncSource; documented extension point, not implemented in-library (feature 093). |
 | 2808 | Security Role Server Authorization | implemented | Opt-in RBAC enforcement async-opcua-server/src/rbac/decision.rs:46-81; dedicated suite async-opcua/tests/integration/rbac.rs |
 | 2809 | Address Space Atomicity | implemented | AccessLevelExType NonatomicRead/Write async-opcua-nodes/src/variable.rs:62,827-837; unit test variable.rs:990-997 |
@@ -98,11 +98,11 @@ independent passes over the codebase, one per subsystem cluster); see the
 | 2853 | UA Secure Conversation | implemented | SecureChannel/OpenSecureChannel comms/secure_channel.rs:657; tests secure_channel.rs:136-663, integration secure_channel.rs:15 |
 | 2936 | Attribute Write StatusCode & Timestamp | partial | Write stores client status/source_timestamp async-opcua-nodes/src/variable.rs:737-739; no test reads value back post-Write |
 | 2963 | Monitor Basic | implemented | create/modify/delete_monitored_items + set_monitoring_mode (session/services/monitored_items.rs:170-573); tested subscriptions.rs. |
-| 2969 | Base Info ValueAsText | gap | ValueAsText only a static generated nodeset property (nodeset_20.rs:3350); no server code computes/updates it from enum values |
+| 2969 | Base Info ValueAsText | implemented | base_info::create_enum_variable_with_value_as_text/update_enum_value attach a ValueAsText property kept in sync with an enumerated Variable's Value; test base_info.rs::value_as_text_tracks_enumerated_value_changes |
 | 3072 | Attribute Read | implemented | Read applies IndexRange via NumericRange::range_of node_manager/memory/core.rs:1079-1080; tests read.rs:1425,794 |
 | 3073 | View RegisterNodes | implemented | RegisterNodes/UnregisterNodes handler session/services/view.rs:540, memory_mgr_impl.rs:1608; e2e test browse.rs:675 |
 | 3080 | Security Default ApplicationInstance Certificate | implemented | CertificateStore::create_and_store_application_instance_cert certificate_store.rs:265, default builder.rs:119; test crypto.rs:46 |
-| 3127 | Base Info OptionSet | partial | Only generated core-nodeset OptionSetType node (nodeset_51.rs id 11487); no server code instantiates/handles it, no test |
+| 3127 | Base Info OptionSet | implemented | base_info::create_option_set_variable instantiates OptionSetType with OptionSetValues/BitMask; test base_info.rs::option_set_exposes_per_bit_values_and_bitmask |
 | 3143 | Subscription PublishRequest Queue Overflow | implemented | enqueue_publish_request pops oldest on overflow, returns BadTooManyPublishRequests (session_subscriptions.rs:767); test :1581. |
 | 3147 | Attribute Write Index | implemented | Variant::set_range_of variant/mod.rs:1641 via Variable::set_value_range variable.rs:746; test write.rs:688,1008 |
 | 3175 | Session Base | implemented | CreateSession/ActivateSession/CloseSession session/manager.rs; SecurityMode::None optional cert/nonce manager.rs:283-300; test :47,90 |
@@ -110,12 +110,12 @@ independent passes over the codebase, one per subsystem cluster); see the
 | 3186 | Base Info Core Views Folder | implemented | ViewsFolder entry point address_space/mod.rs:774-779; test at same location |
 | 3192 | Base Info Diagnostics | implemented | EnabledFlag/ServerDiagnosticsSummary/SubscriptionDiagnosticsArray diagnostics/server.rs, core.rs:501-509; e2e read.rs:1604-1841 |
 | 3196 | Base Info Fixed SamplingInterval | implemented | CU is conditional on the Server using a fixed set of sampling intervals (OPC-10000-5 SS7.9/SS12.8); this server negotiates a continuously-variable client-requested interval per monitored item (sanitize_sampling_interval, subscriptions/monitored_item.rs:299-311), so the precondition never holds and non-exposure of SamplingIntervalDiagnosticsArray is spec-conformant, not a gap -- documented in docs/server-capacity-limits.md |
-| 3198 | Base Info Estimated Return Time | gap | EstimatedReturnTime has zero occurrences outside generated files; no wiring near ServerState::Running server_status.rs:198 |
+| 3198 | Base Info Estimated Return Time | implemented | ServerStatusWrapper::schedule_shutdown/estimated_return_time (server_status.rs) + ServerHandle::shutdown_after_with_return_time (server_handle.rs) extend the existing shutdown mechanism; wired core.rs get_attribute; test base_info.rs::estimated_return_time_reflects_scheduled_shutdown_and_is_null_otherwise |
 | 3201 | Base Info Custom Type System | partial | custom-codegen sample (samples/custom-codegen) demonstrates a full custom-type inheritance tree + generated Encoding Objects via async-opcua-codegen (types/encoding_ids.rs, types/gen.rs); no completeness e2e test proving all custom EventTypes are exposed alongside their encoding objects, same evidentiary gap as CU 5801 |
 | 3530 | View Basic 2 | implemented | Browse/BrowseNext w/ continuation points view.rs:213; tests browse.rs:252, :757 (Bad_ContinuationPointInvalid) |
 | 3545 | Base Info Namespace Metadata | implemented | Dynamic per-namespace NamespaceMetaData objects diagnostics/node_manager.rs:583-650; e2e test browse.rs:942-967 |
 | 3554 | Address Space Base | implemented | Core AddressSpace all NodeClasses address_space/mod.rs (1454 LOC, unit tests) + opcua-nodes crate; e2e browse.rs:144-167 |
-| 3560 | Address Space Interfaces | gap | Searched 'HasInterface'/'BaseInterfaceType' usage - only nodeset type nodes; no server code creates HasInterface refs. |
+| 3560 | Address Space Interfaces | implemented | base_info::add_ordered_object attaches HasInterface from each OrderedListType child to IOrderedObjectType (a byproduct of closing CU 2512); test base_info.rs::ordered_list_children_are_ordered_and_interface_conformant |
 | 3721 | Security ECC Policy | implemented | Reviewed pre-2026-07-15-audit; existing tests/docs provide direct evidence. |
 | 3727 | Subscription Basic | implemented | CreateSubscription/Publish/Republish/SetPublishingMode etc implemented (subscriptions/session_subscriptions.rs); tested subscriptions.rs. |
 | 3802 | Time Sync - Configure Clock Skew | implemented | ServerConfig::max_acceptable_clock_skew_ns config/server.rs:669,998-1002; tests config/server.rs:375-432 |
@@ -132,7 +132,7 @@ independent passes over the codebase, one per subsystem cluster); see the
 | 4237 | Address Space NonVolatile and Constant | partial | NonVolatile/Constant bits defined enums.rs:15-19, generic get/set variable.rs:826-838; tests only exercise other AccessLevelEx bits |
 | 5207 | Monitor Items 2 | implemented | No per-subscription item cap below 2 found (server/src/config/limits.rs); 2+ Double items trivially exercised in subscriptions.rs. |
 | 5208 | Monitor Value Change V2 | partial | IndexRange applied to sample monitored_item.rs:931-940 (Variant::range_of); logic tested via read.rs:794-827, no MonitoredItem-level test |
-| 5240 | Base Info Currency | gap | Only inert CurrencyUnitType/CurrencyUnit template nodes exist (nodeset_22.rs:908-934); no builder API, usage, or test |
+| 5240 | Base Info Currency | implemented | base_info::create_currency_variable attaches a CurrencyUnit property (CurrencyUnitType) to a monetary DataVariable; test base_info.rs::currency_unit_property_reports_iso4217_fields |
 | 5505 | Time Sync - UA based support | implemented | UaHeaderTimeSyncSource polls ResponseHeader.timestamp (time_sync_ua.rs:52-80), configurable builder.rs:258-262; test time_sync.rs:33 |
 | 5592 | Missing from normalized CU list | source-issue | Referenced by closure but absent from conformance_units. |
 | 5793 | Time Sync - Support | implemented | OsClockSource (time_sync.rs:112-124) + UA-based source satisfy facet; docs/time-synchronization.md:9-17; tests time_sync.rs:11-22 |
@@ -169,7 +169,7 @@ independent passes over the codebase, one per subsystem cluster); see the
 | 2490 | Base Info Subvariables of Structures | implemented | HasStructuredComponent present in schemas/1.05/Opc.Ua.NodeSet2.xml; exposed via CoreNamespace import. |
 | 2491 | Base Info AssociatedWith | implemented | AssociatedWith present in schemas/1.05/Opc.Ua.NodeSet2.xml; exposed via CoreNamespace import. |
 | 2500 | Base Info EUInformation | implemented | EUInformation used/tested: tests/integration/custom_types.rs, async-opcua-types/src/tests/json.rs:344. |
-| 2512 | Base Info OrderedList | gap | Searched 'OrderedListType'/'IOrderedObjectType' - zero instance usage anywhere. |
+| 2512 | Base Info OrderedList | implemented | base_info::create_ordered_list_in_address_space/add_ordered_object instantiate OrderedListType with HasOrderedComponent children implementing IOrderedObjectType via HasInterface (NumberInList is the authoritative order signal, not Browse response order, per OPC-10000-5 SS6.11's own rationale); test base_info.rs::ordered_list_children_are_ordered_and_interface_conformant |
 | 2513 | Base Info Audio Type | implemented | AudioVariableType/AudioDataType present schemas/1.05/Opc.Ua.NodeSet2.xml; type-level exposure via CoreNamespace import. |
 | 2514 | Base Info Spatial Data | implemented | VectorType/CartesianCoordinatesType/OrientationType/FrameType present in schemas/1.05; exposed via CoreNamespace import. |
 | 2516 | Base Info HasOrderedComponent | implemented | HasOrderedComponent present in schemas/1.05/Opc.Ua.NodeSet2.xml; exposed via CoreNamespace import. |
@@ -177,7 +177,7 @@ independent passes over the codebase, one per subsystem cluster); see the
 | 2518 | Base Info Image DataTypes | implemented | ImageBMP/GIF/JPG/PNG present in schemas/1.05/Opc.Ua.NodeSet2.xml; exposed via CoreNamespace import. |
 | 2536 | Base Info ContentFilter | implemented | ContentFilter/Element DataTypes+encodings (node_ids.rs:168,7132); real WhereClause use+tests in where_clause.rs:13-56, select.rs:14-79. |
 | 2600 | SecurityPolicy Support | implemented | 10+ SecurityPolicy variants incl None async-opcua-crypto/src/security_policy.rs:125-150; extensively tested + CI conformance matrix |
-| 2711 | Base Info Selection List | gap | Only generated node IDs (SelectionListType_RestrictToList/Selections node_ids.rs:13907,15279); zero application code/tests |
+| 2711 | Base Info Selection List | implemented | base_info::create_selection_list_variable instantiates SelectionListType with Selections/SelectionDescriptions/RestrictToList; test base_info.rs::selection_list_exposes_selections_descriptions_and_restrict_flag |
 | 2786 | Time Sync - NTP | extensible | Satisfiable via user-supplied TimeSyncSource; documented extension point, not implemented in-library (feature 093). |
 | 2808 | Security Role Server Authorization | implemented | Opt-in RBAC enforcement async-opcua-server/src/rbac/decision.rs:46-81; dedicated suite async-opcua/tests/integration/rbac.rs |
 | 2809 | Address Space Atomicity | implemented | AccessLevelExType NonatomicRead/Write async-opcua-nodes/src/variable.rs:62,827-837; unit test variable.rs:990-997 |
@@ -190,11 +190,11 @@ independent passes over the codebase, one per subsystem cluster); see the
 | 2936 | Attribute Write StatusCode & Timestamp | partial | Write stores client status/source_timestamp async-opcua-nodes/src/variable.rs:737-739; no test reads value back post-Write |
 | 2940 | Base Info GetMonitoredItems Method | implemented | GetMonitoredItems method node_manager/memory/core.rs:1195-1207; test methods.rs:291-332 call_get_monitored_items |
 | 2963 | Monitor Basic | implemented | create/modify/delete_monitored_items + set_monitoring_mode (session/services/monitored_items.rs:170-573); tested subscriptions.rs. |
-| 2969 | Base Info ValueAsText | gap | ValueAsText only a static generated nodeset property (nodeset_20.rs:3350); no server code computes/updates it from enum values |
+| 2969 | Base Info ValueAsText | implemented | base_info::create_enum_variable_with_value_as_text/update_enum_value attach a ValueAsText property kept in sync with an enumerated Variable's Value; test base_info.rs::value_as_text_tracks_enumerated_value_changes |
 | 3072 | Attribute Read | implemented | Read applies IndexRange via NumericRange::range_of node_manager/memory/core.rs:1079-1080; tests read.rs:1425,794 |
 | 3073 | View RegisterNodes | implemented | RegisterNodes/UnregisterNodes handler session/services/view.rs:540, memory_mgr_impl.rs:1608; e2e test browse.rs:675 |
 | 3080 | Security Default ApplicationInstance Certificate | implemented | CertificateStore::create_and_store_application_instance_cert certificate_store.rs:265, default builder.rs:119; test crypto.rs:46 |
-| 3127 | Base Info OptionSet | partial | Only generated core-nodeset OptionSetType node (nodeset_51.rs id 11487); no server code instantiates/handles it, no test |
+| 3127 | Base Info OptionSet | implemented | base_info::create_option_set_variable instantiates OptionSetType with OptionSetValues/BitMask; test base_info.rs::option_set_exposes_per_bit_values_and_bitmask |
 | 3143 | Subscription PublishRequest Queue Overflow | implemented | enqueue_publish_request pops oldest on overflow, returns BadTooManyPublishRequests (session_subscriptions.rs:767); test :1581. |
 | 3146 | Monitor Triggering | implemented | SetTriggering handler message_handler.rs:676, actor.rs:104/392/704; e2e tests triggering.rs:43,160 |
 | 3147 | Attribute Write Index | implemented | Variant::set_range_of variant/mod.rs:1641 via Variable::set_value_range variable.rs:746; test write.rs:688,1008 |
@@ -206,7 +206,7 @@ independent passes over the codebase, one per subsystem cluster); see the
 | 3189 | Base Info ServerType | implemented | ServerType is the root of the default AddressSpace; exercised across suite e.g. tests/integration/browse.rs. |
 | 3192 | Base Info Diagnostics | implemented | EnabledFlag/ServerDiagnosticsSummary/SubscriptionDiagnosticsArray diagnostics/server.rs, core.rs:501-509; e2e read.rs:1604-1841 |
 | 3196 | Base Info Fixed SamplingInterval | implemented | CU is conditional on the Server using a fixed set of sampling intervals (OPC-10000-5 SS7.9/SS12.8); this server negotiates a continuously-variable client-requested interval per monitored item (sanitize_sampling_interval, subscriptions/monitored_item.rs:299-311), so the precondition never holds and non-exposure of SamplingIntervalDiagnosticsArray is spec-conformant, not a gap -- documented in docs/server-capacity-limits.md |
-| 3198 | Base Info Estimated Return Time | gap | EstimatedReturnTime has zero occurrences outside generated files; no wiring near ServerState::Running server_status.rs:198 |
+| 3198 | Base Info Estimated Return Time | implemented | ServerStatusWrapper::schedule_shutdown/estimated_return_time (server_status.rs) + ServerHandle::shutdown_after_with_return_time (server_handle.rs) extend the existing shutdown mechanism; wired core.rs get_attribute; test base_info.rs::estimated_return_time_reflects_scheduled_shutdown_and_is_null_otherwise |
 | 3201 | Base Info Custom Type System | partial | custom-codegen sample (samples/custom-codegen) demonstrates a full custom-type inheritance tree + generated Encoding Objects via async-opcua-codegen (types/encoding_ids.rs, types/gen.rs); no completeness e2e test proving all custom EventTypes are exposed alongside their encoding objects, same evidentiary gap as CU 5801 |
 | 3207 | Base Info OptionSet DataType | implemented | OptionSet DataType present in schemas/1.05/Opc.Ua.NodeSet2.xml; exposed via CoreNamespace import. |
 | 3214 | Base Info Range DataType | implemented | Range in nodeset + generated types/range.rs; used as EURange in datachange_overflow.rs, alarms.rs. |
@@ -221,7 +221,7 @@ independent passes over the codebase, one per subsystem cluster); see the
 | 3550 | Base Info StatusResult DataType | implemented | StatusResult in nodeset + generated types/status_result.rs; exposed via CoreNamespace import. |
 | 3551 | Base Info UriString | implemented | UriString present in schemas/1.05/Opc.Ua.NodeSet2.xml; exposed via CoreNamespace import. |
 | 3554 | Address Space Base | implemented | Core AddressSpace all NodeClasses address_space/mod.rs (1454 LOC, unit tests) + opcua-nodes crate; e2e browse.rs:144-167 |
-| 3560 | Address Space Interfaces | gap | Searched 'HasInterface'/'BaseInterfaceType' usage - only nodeset type nodes; no server code creates HasInterface refs. |
+| 3560 | Address Space Interfaces | implemented | base_info::add_ordered_object attaches HasInterface from each OrderedListType child to IOrderedObjectType (a byproduct of closing CU 2512); test base_info.rs::ordered_list_children_are_ordered_and_interface_conformant |
 | 3641 | Base Info Method Argument DataType | implemented | DataTypeId::Argument used building Method args async-opcua-nodes/src/method.rs:92; asserted in address_space/mod.rs:1320. |
 | 3644 | Base Info SemanticVersionString | implemented | SemanticVersionString present in schemas/1.05/Opc.Ua.NodeSet2.xml; exposed via CoreNamespace import. |
 | 3645 | Security User Token Unencrypted | implemented | SecurityPolicy::None UserTokenPolicy supported (authenticator.rs:397,415); tested authenticator.rs:492-518. |
@@ -249,7 +249,7 @@ independent passes over the codebase, one per subsystem cluster); see the
 | 3923 | Session Multiple | implemented | Reviewed pre-2026-07-15-audit; existing tests/docs provide direct evidence. |
 | 3983 | Base Services Diagnostics | implemented | result.rs:17-58 filter_diagnostic_info masks diag bits; wired attribute.rs/node_management.rs; test per_op_diagnostics.rs |
 | 3985 | Session General Service Behaviour | implemented | controller.rs:396 auth-token check, response.rs:207 requestHandle echo, deadline_queue:971-1016 BadTimeout; e2e read.rs:1400-1408 |
-| 3996 | Base Info ReferenceDescription | gap | Searched 'ReferenceDescriptionVariableType'/'HasReferenceDescription' - only nodeset nodes; unused by server code. |
+| 3996 | Base Info ReferenceDescription | implemented | base_info::attach_reference_description instantiates ReferenceDescriptionVariableType via HasReferenceDescription, documenting a real Reference's SourceNode/ReferenceType/IsForward/TargetNode (OPC-10000-23 SS5, not Part 3/5); test base_info.rs::reference_description_documents_a_real_reference |
 | 4052 | Base Info TrimmedString | implemented | TrimmedString present in schemas/1.05/Opc.Ua.NodeSet2.xml; exposed via CoreNamespace import. |
 | 4053 | Base Info Locations Object | implemented | Locations object (i=31915, nodeset_16.rs:918-943) confirmed reachable via Browse from ObjectsFolder; test browse.rs::locations_object_is_reachable_from_objects_folder |
 | 4054 | Base Info Handle DataType | implemented | Handle DataType present in schemas/1.05/Opc.Ua.NodeSet2.xml; exposed via CoreNamespace import. |
@@ -258,7 +258,7 @@ independent passes over the codebase, one per subsystem cluster); see the
 | 4426 | Base Info Decimal DataType | implemented | Decimal in nodeset + generated types/decimal_data_type.rs; encoded generically as a Structure DataType. |
 | 5207 | Monitor Items 2 | implemented | No per-subscription item cap below 2 found (server/src/config/limits.rs); 2+ Double items trivially exercised in subscriptions.rs. |
 | 5208 | Monitor Value Change V2 | partial | IndexRange applied to sample monitored_item.rs:931-940 (Variant::range_of); logic tested via read.rs:794-827, no MonitoredItem-level test |
-| 5240 | Base Info Currency | gap | Only inert CurrencyUnitType/CurrencyUnit template nodes exist (nodeset_22.rs:908-934); no builder API, usage, or test |
+| 5240 | Base Info Currency | implemented | base_info::create_currency_variable attaches a CurrencyUnit property (CurrencyUnitType) to a monetary DataVariable; test base_info.rs::currency_unit_property_reports_iso4217_fields |
 | 5505 | Time Sync - UA based support | implemented | UaHeaderTimeSyncSource polls ResponseHeader.timestamp (time_sync_ua.rs:52-80), configurable builder.rs:258-262; test time_sync.rs:33 |
 | 5592 | Missing from normalized CU list | source-issue | Referenced by closure but absent from conformance_units. |
 | 5793 | Time Sync - Support | implemented | OsClockSource (time_sync.rs:112-124) + UA-based source satisfy facet; docs/time-synchronization.md:9-17; tests time_sync.rs:11-22 |
@@ -299,7 +299,7 @@ independent passes over the codebase, one per subsystem cluster); see the
 | 2490 | Base Info Subvariables of Structures | implemented | HasStructuredComponent present in schemas/1.05/Opc.Ua.NodeSet2.xml; exposed via CoreNamespace import. |
 | 2491 | Base Info AssociatedWith | implemented | AssociatedWith present in schemas/1.05/Opc.Ua.NodeSet2.xml; exposed via CoreNamespace import. |
 | 2500 | Base Info EUInformation | implemented | EUInformation used/tested: tests/integration/custom_types.rs, async-opcua-types/src/tests/json.rs:344. |
-| 2512 | Base Info OrderedList | gap | Searched 'OrderedListType'/'IOrderedObjectType' - zero instance usage anywhere. |
+| 2512 | Base Info OrderedList | implemented | base_info::create_ordered_list_in_address_space/add_ordered_object instantiate OrderedListType with HasOrderedComponent children implementing IOrderedObjectType via HasInterface (NumberInList is the authoritative order signal, not Browse response order, per OPC-10000-5 SS6.11's own rationale); test base_info.rs::ordered_list_children_are_ordered_and_interface_conformant |
 | 2513 | Base Info Audio Type | implemented | AudioVariableType/AudioDataType present schemas/1.05/Opc.Ua.NodeSet2.xml; type-level exposure via CoreNamespace import. |
 | 2514 | Base Info Spatial Data | implemented | VectorType/CartesianCoordinatesType/OrientationType/FrameType present in schemas/1.05; exposed via CoreNamespace import. |
 | 2516 | Base Info HasOrderedComponent | implemented | HasOrderedComponent present in schemas/1.05/Opc.Ua.NodeSet2.xml; exposed via CoreNamespace import. |
@@ -307,7 +307,7 @@ independent passes over the codebase, one per subsystem cluster); see the
 | 2518 | Base Info Image DataTypes | implemented | ImageBMP/GIF/JPG/PNG present in schemas/1.05/Opc.Ua.NodeSet2.xml; exposed via CoreNamespace import. |
 | 2536 | Base Info ContentFilter | implemented | ContentFilter/Element DataTypes+encodings (node_ids.rs:168,7132); real WhereClause use+tests in where_clause.rs:13-56, select.rs:14-79. |
 | 2600 | SecurityPolicy Support | implemented | 10+ SecurityPolicy variants incl None async-opcua-crypto/src/security_policy.rs:125-150; extensively tested + CI conformance matrix |
-| 2711 | Base Info Selection List | gap | Only generated node IDs (SelectionListType_RestrictToList/Selections node_ids.rs:13907,15279); zero application code/tests |
+| 2711 | Base Info Selection List | implemented | base_info::create_selection_list_variable instantiates SelectionListType with Selections/SelectionDescriptions/RestrictToList; test base_info.rs::selection_list_exposes_selections_descriptions_and_restrict_flag |
 | 2786 | Time Sync - NTP | extensible | Satisfiable via user-supplied TimeSyncSource; documented extension point, not implemented in-library (feature 093). |
 | 2808 | Security Role Server Authorization | implemented | Opt-in RBAC enforcement async-opcua-server/src/rbac/decision.rs:46-81; dedicated suite async-opcua/tests/integration/rbac.rs |
 | 2809 | Address Space Atomicity | implemented | AccessLevelExType NonatomicRead/Write async-opcua-nodes/src/variable.rs:62,827-837; unit test variable.rs:990-997 |
@@ -320,12 +320,12 @@ independent passes over the codebase, one per subsystem cluster); see the
 | 2936 | Attribute Write StatusCode & Timestamp | partial | Write stores client status/source_timestamp async-opcua-nodes/src/variable.rs:737-739; no test reads value back post-Write |
 | 2940 | Base Info GetMonitoredItems Method | implemented | GetMonitoredItems method node_manager/memory/core.rs:1195-1207; test methods.rs:291-332 call_get_monitored_items |
 | 2963 | Monitor Basic | implemented | create/modify/delete_monitored_items + set_monitoring_mode (session/services/monitored_items.rs:170-573); tested subscriptions.rs. |
-| 2969 | Base Info ValueAsText | gap | ValueAsText only a static generated nodeset property (nodeset_20.rs:3350); no server code computes/updates it from enum values |
+| 2969 | Base Info ValueAsText | implemented | base_info::create_enum_variable_with_value_as_text/update_enum_value attach a ValueAsText property kept in sync with an enumerated Variable's Value; test base_info.rs::value_as_text_tracks_enumerated_value_changes |
 | 3072 | Attribute Read | implemented | Read applies IndexRange via NumericRange::range_of node_manager/memory/core.rs:1079-1080; tests read.rs:1425,794 |
 | 3073 | View RegisterNodes | implemented | RegisterNodes/UnregisterNodes handler session/services/view.rs:540, memory_mgr_impl.rs:1608; e2e test browse.rs:675 |
 | 3080 | Security Default ApplicationInstance Certificate | implemented | CertificateStore::create_and_store_application_instance_cert certificate_store.rs:265, default builder.rs:119; test crypto.rs:46 |
 | 3125 | Security User X509 | implemented | X509 user cert validated incl. POP sig (info.rs:1291-1332); tests security_tests.rs:1565-1863 (untrusted/expired/revoked). |
-| 3127 | Base Info OptionSet | partial | Only generated core-nodeset OptionSetType node (nodeset_51.rs id 11487); no server code instantiates/handles it, no test |
+| 3127 | Base Info OptionSet | implemented | base_info::create_option_set_variable instantiates OptionSetType with OptionSetValues/BitMask; test base_info.rs::option_set_exposes_per_bit_values_and_bitmask |
 | 3143 | Subscription PublishRequest Queue Overflow | implemented | enqueue_publish_request pops oldest on overflow, returns BadTooManyPublishRequests (session_subscriptions.rs:767); test :1581. |
 | 3146 | Monitor Triggering | implemented | SetTriggering handler message_handler.rs:676, actor.rs:104/392/704; e2e tests triggering.rs:43,160 |
 | 3147 | Attribute Write Index | implemented | Variant::set_range_of variant/mod.rs:1641 via Variable::set_value_range variable.rs:746; test write.rs:688,1008 |
@@ -338,7 +338,7 @@ independent passes over the codebase, one per subsystem cluster); see the
 | 3189 | Base Info ServerType | implemented | ServerType is the root of the default AddressSpace; exercised across suite e.g. tests/integration/browse.rs. |
 | 3192 | Base Info Diagnostics | implemented | EnabledFlag/ServerDiagnosticsSummary/SubscriptionDiagnosticsArray diagnostics/server.rs, core.rs:501-509; e2e read.rs:1604-1841 |
 | 3196 | Base Info Fixed SamplingInterval | implemented | CU is conditional on the Server using a fixed set of sampling intervals (OPC-10000-5 SS7.9/SS12.8); this server negotiates a continuously-variable client-requested interval per monitored item (sanitize_sampling_interval, subscriptions/monitored_item.rs:299-311), so the precondition never holds and non-exposure of SamplingIntervalDiagnosticsArray is spec-conformant, not a gap -- documented in docs/server-capacity-limits.md |
-| 3198 | Base Info Estimated Return Time | gap | EstimatedReturnTime has zero occurrences outside generated files; no wiring near ServerState::Running server_status.rs:198 |
+| 3198 | Base Info Estimated Return Time | implemented | ServerStatusWrapper::schedule_shutdown/estimated_return_time (server_status.rs) + ServerHandle::shutdown_after_with_return_time (server_handle.rs) extend the existing shutdown mechanism; wired core.rs get_attribute; test base_info.rs::estimated_return_time_reflects_scheduled_shutdown_and_is_null_otherwise |
 | 3201 | Base Info Custom Type System | partial | custom-codegen sample (samples/custom-codegen) demonstrates a full custom-type inheritance tree + generated Encoding Objects via async-opcua-codegen (types/encoding_ids.rs, types/gen.rs); no completeness e2e test proving all custom EventTypes are exposed alongside their encoding objects, same evidentiary gap as CU 5801 |
 | 3207 | Base Info OptionSet DataType | implemented | OptionSet DataType present in schemas/1.05/Opc.Ua.NodeSet2.xml; exposed via CoreNamespace import. |
 | 3214 | Base Info Range DataType | implemented | Range in nodeset + generated types/range.rs; used as EURange in datachange_overflow.rs, alarms.rs. |
@@ -353,7 +353,7 @@ independent passes over the codebase, one per subsystem cluster); see the
 | 3550 | Base Info StatusResult DataType | implemented | StatusResult in nodeset + generated types/status_result.rs; exposed via CoreNamespace import. |
 | 3551 | Base Info UriString | implemented | UriString present in schemas/1.05/Opc.Ua.NodeSet2.xml; exposed via CoreNamespace import. |
 | 3554 | Address Space Base | implemented | Core AddressSpace all NodeClasses address_space/mod.rs (1454 LOC, unit tests) + opcua-nodes crate; e2e browse.rs:144-167 |
-| 3560 | Address Space Interfaces | gap | Searched 'HasInterface'/'BaseInterfaceType' usage - only nodeset type nodes; no server code creates HasInterface refs. |
+| 3560 | Address Space Interfaces | implemented | base_info::add_ordered_object attaches HasInterface from each OrderedListType child to IOrderedObjectType (a byproduct of closing CU 2512); test base_info.rs::ordered_list_children_are_ordered_and_interface_conformant |
 | 3641 | Base Info Method Argument DataType | implemented | DataTypeId::Argument used building Method args async-opcua-nodes/src/method.rs:92; asserted in address_space/mod.rs:1320. |
 | 3644 | Base Info SemanticVersionString | implemented | SemanticVersionString present in schemas/1.05/Opc.Ua.NodeSet2.xml; exposed via CoreNamespace import. |
 | 3645 | Security User Token Unencrypted | implemented | SecurityPolicy::None UserTokenPolicy supported (authenticator.rs:397,415); tested authenticator.rs:492-518. |
@@ -381,7 +381,7 @@ independent passes over the codebase, one per subsystem cluster); see the
 | 3923 | Session Multiple | implemented | Reviewed pre-2026-07-15-audit; existing tests/docs provide direct evidence. |
 | 3983 | Base Services Diagnostics | implemented | result.rs:17-58 filter_diagnostic_info masks diag bits; wired attribute.rs/node_management.rs; test per_op_diagnostics.rs |
 | 3985 | Session General Service Behaviour | implemented | controller.rs:396 auth-token check, response.rs:207 requestHandle echo, deadline_queue:971-1016 BadTimeout; e2e read.rs:1400-1408 |
-| 3996 | Base Info ReferenceDescription | gap | Searched 'ReferenceDescriptionVariableType'/'HasReferenceDescription' - only nodeset nodes; unused by server code. |
+| 3996 | Base Info ReferenceDescription | implemented | base_info::attach_reference_description instantiates ReferenceDescriptionVariableType via HasReferenceDescription, documenting a real Reference's SourceNode/ReferenceType/IsForward/TargetNode (OPC-10000-23 SS5, not Part 3/5); test base_info.rs::reference_description_documents_a_real_reference |
 | 4052 | Base Info TrimmedString | implemented | TrimmedString present in schemas/1.05/Opc.Ua.NodeSet2.xml; exposed via CoreNamespace import. |
 | 4053 | Base Info Locations Object | implemented | Locations object (i=31915, nodeset_16.rs:918-943) confirmed reachable via Browse from ObjectsFolder; test browse.rs::locations_object_is_reachable_from_objects_folder |
 | 4054 | Base Info Handle DataType | implemented | Handle DataType present in schemas/1.05/Opc.Ua.NodeSet2.xml; exposed via CoreNamespace import. |
@@ -390,7 +390,7 @@ independent passes over the codebase, one per subsystem cluster); see the
 | 4426 | Base Info Decimal DataType | implemented | Decimal in nodeset + generated types/decimal_data_type.rs; encoded generically as a Structure DataType. |
 | 5207 | Monitor Items 2 | implemented | No per-subscription item cap below 2 found (server/src/config/limits.rs); 2+ Double items trivially exercised in subscriptions.rs. |
 | 5208 | Monitor Value Change V2 | partial | IndexRange applied to sample monitored_item.rs:931-940 (Variant::range_of); logic tested via read.rs:794-827, no MonitoredItem-level test |
-| 5240 | Base Info Currency | gap | Only inert CurrencyUnitType/CurrencyUnit template nodes exist (nodeset_22.rs:908-934); no builder API, usage, or test |
+| 5240 | Base Info Currency | implemented | base_info::create_currency_variable attaches a CurrencyUnit property (CurrencyUnitType) to a monetary DataVariable; test base_info.rs::currency_unit_property_reports_iso4217_fields |
 | 5505 | Time Sync - UA based support | implemented | UaHeaderTimeSyncSource polls ResponseHeader.timestamp (time_sync_ua.rs:52-80), configurable builder.rs:258-262; test time_sync.rs:33 |
 | 5592 | Missing from normalized CU list | source-issue | Referenced by closure but absent from conformance_units. |
 | 5793 | Time Sync - Support | implemented | OsClockSource (time_sync.rs:112-124) + UA-based source satisfy facet; docs/time-synchronization.md:9-17; tests time_sync.rs:11-22 |
@@ -433,11 +433,11 @@ One row per facet not already covered by the four canonical profiles above. Coun
 | Documentation Server Facet | 768 | 6 | 4 | 0 | 2 | 0 | 0 | 0 |
 | Durable Subscription 2022 Server Facet | 2098 | 3 | 1 | 0 | 2 | 0 | 0 | 0 |
 | Embedded DataChange Subscription 2022 Server Facet | 2250 | 10 | 9 | 1 | 0 | 0 | 0 | 0 |
-| Exposes Type System Server Facet | 1219 | 46 | 42 | 1 | 3 | 0 | 0 | 0 |
+| Exposes Type System Server Facet | 1219 | 46 | 45 | 1 | 0 | 0 | 0 | 0 |
 | File Access Server Facet | 1348 | 3 | 0 | 2 | 1 | 0 | 0 | 0 |
 | Global Certificate Management Server Facet | 1631 | 1 | 0 | 1 | 0 | 0 | 0 | 0 |
-| Global Discovery Server 2022 Profile | 1343 | 69 | 50 | 7 | 8 | 0 | 3 | 1 |
-| Global Discovery and Certificate Mgmt 2022 Server | 1344 | 94 | 58 | 16 | 16 | 0 | 3 | 1 |
+| Global Discovery Server 2022 Profile | 1343 | 69 | 56 | 6 | 3 | 0 | 3 | 1 |
+| Global Discovery and Certificate Mgmt 2022 Server | 1344 | 94 | 64 | 15 | 11 | 0 | 3 | 1 |
 | Global Service Authorization Request Server Facet | 1026 | 1 | 0 | 0 | 1 | 0 | 0 | 0 |
 | Global Service KeyCredential Pull Facet | 1027 | 1 | 0 | 0 | 1 | 0 | 0 | 0 |
 | Historical Access Modified Data 2022 Server Facet | 1709 | 4 | 4 | 0 | 0 | 0 | 0 | 0 |
@@ -457,7 +457,7 @@ One row per facet not already covered by the four canonical profiles above. Coun
 | KeyCredential Service Server Facet | 2113 | 5 | 0 | 0 | 5 | 0 | 0 | 0 |
 | Method 2022 Server Facet | 1639 | 6 | 3 | 2 | 1 | 0 | 0 | 0 |
 | Model Change Event Server Facet | 1733 | 3 | 1 | 0 | 2 | 0 | 0 | 0 |
-| Node Management 2022 Server Facet | 1329 | 54 | 48 | 1 | 5 | 0 | 0 | 0 |
+| Node Management 2022 Server Facet | 1329 | 54 | 51 | 1 | 2 | 0 | 0 | 0 |
 | Redundancy Transparent Server Facet | 2249 | 1 | 0 | 0 | 1 | 0 | 0 | 0 |
 | Redundancy Visible Server Facet | 2252 | 1 | 0 | 0 | 1 | 0 | 0 | 0 |
 | Request State Change Server Facet | 1633 | 1 | 0 | 0 | 1 | 0 | 0 | 0 |
@@ -588,7 +588,7 @@ One row per facet not already covered by the four canonical profiles above. Coun
 | 2490 | Base Info Subvariables of Structures | implemented | HasStructuredComponent present in schemas/1.05/Opc.Ua.NodeSet2.xml; exposed via CoreNamespace import. |
 | 2491 | Base Info AssociatedWith | implemented | AssociatedWith present in schemas/1.05/Opc.Ua.NodeSet2.xml; exposed via CoreNamespace import. |
 | 2500 | Base Info EUInformation | implemented | EUInformation used/tested: tests/integration/custom_types.rs, async-opcua-types/src/tests/json.rs:344. |
-| 2512 | Base Info OrderedList | gap | Searched 'OrderedListType'/'IOrderedObjectType' - zero instance usage anywhere. |
+| 2512 | Base Info OrderedList | implemented | base_info::create_ordered_list_in_address_space/add_ordered_object instantiate OrderedListType with HasOrderedComponent children implementing IOrderedObjectType via HasInterface (NumberInList is the authoritative order signal, not Browse response order, per OPC-10000-5 SS6.11's own rationale); test base_info.rs::ordered_list_children_are_ordered_and_interface_conformant |
 | 2513 | Base Info Audio Type | implemented | AudioVariableType/AudioDataType present schemas/1.05/Opc.Ua.NodeSet2.xml; type-level exposure via CoreNamespace import. |
 | 2514 | Base Info Spatial Data | implemented | VectorType/CartesianCoordinatesType/OrientationType/FrameType present in schemas/1.05; exposed via CoreNamespace import. |
 | 2515 | Address Space Events 2 | implemented | Server EventNotifier=1 (nodeset_16.rs:989); BaseEventType/GeneratesEvent/EventTypes in nodeset; used in subscriptions.rs tests |
@@ -604,7 +604,7 @@ One row per facet not already covered by the four canonical profiles above. Coun
 | 2664 | Historical Access Structured Data Read Modified | gap | no "modified" tracking exists for the annotation_values store (data_history.rs record_modified is only invoked from update_data, never update_structure_data at lines 290-355); ReadModified=true has no structured-data source |
 | 2705 | Azure Identity Provider Authority Profile | gap | No "Azure" match in src; no authorityProfileURI concept exists anywhere (grep -r confirmed). |
 | 2709 | OPC UA Authority Profile | gap | No Part-12 GetAccessToken Methods/AuthorizationServices instantiated; only unused generated defs (nodeset_18.rs, node_ids.rs). |
-| 2711 | Base Info Selection List | gap | Only generated node IDs (SelectionListType_RestrictToList/Selections node_ids.rs:13907,15279); zero application code/tests |
+| 2711 | Base Info Selection List | implemented | base_info::create_selection_list_variable instantiates SelectionListType with Selections/SelectionDescriptions/RestrictToList; test base_info.rs::selection_list_exposes_selections_descriptions_and_restrict_flag |
 | 2726 | A & C First in Group Alarm | gap | FirstInGroup only in generated nodeset (node_ids.rs, nodeset_23/8.rs); zero server code in async-opcua-server/src |
 | 2730 | Aggregate - Range2 | implemented | engine.rs dispatch AGG_RANGE2=11288 (engine.rs:1484); aggregates_tests.rs references 11288 (phase_d family) |
 | 2740 | Historical Access Structured Data Delete | gap | delete_raw_modified/delete_at_time (data_history.rs:357-466) only operate on raw_values/modified_values, never annotation_values; structured-data removal is only reachable via UpdateStructureDataDetails(Remove), itself restricted to Annotation-typed values (line 305), so still fails the generic-structured-data bar |
@@ -672,7 +672,7 @@ One row per facet not already covered by the four canonical profiles above. Coun
 | 2962 | Aggregate - Maximum | implemented | engine.rs dispatch AGG_MAXIMUM=2347 (engine.rs:1477); test aggregates_tests.rs:228 test_calculate_aggregate_min_max |
 | 2963 | Monitor Basic | implemented | create/modify/delete_monitored_items + set_monitoring_mode (session/services/monitored_items.rs:170-573); tested subscriptions.rs. |
 | 2965 | A & C Basic | implemented | ConditionStateMachine base creates EnabledState/Retain/etc for every condition (state_machine.rs:126-256); foundational to all A&C tests |
-| 2969 | Base Info ValueAsText | gap | ValueAsText only a static generated nodeset property (nodeset_20.rs:3350); no server code computes/updates it from enum values |
+| 2969 | Base Info ValueAsText | implemented | base_info::create_enum_variable_with_value_as_text/update_enum_value attach a ValueAsText property kept in sync with an enumerated Variable's Value; test base_info.rs::value_as_text_tracks_enumerated_value_changes |
 | 2974 | Aggregate Subscription - MinimumActualTime | implemented | agg_minimum_actual_time engine.rs:826 (2348); test phase_b_actual_time_returns_value_timestamp aggregates_tests.rs:345 |
 | 2975 | Aggregate - PercentBad | implemented | engine.rs dispatch AGG_PERCENT_BAD=2363 (engine.rs:1502); test aggregates_tests.rs:694 phase_e_duration_and_percent_good_bad |
 | 2978 | Base Info SemanticChange | gap | SemanticChangeEventType only a generated type (events/generated.rs:699); never raised; no semantic-changed StatusCode bit usage |
@@ -723,7 +723,7 @@ One row per facet not already covered by the four canonical profiles above. Coun
 | 3121 | Monitor Aggregate Filter | implemented | monitored_item.rs ParsedAggregateFilter:101,139; e2e test aggregate_filter_average subscriptions.rs:2276,2384 |
 | 3125 | Security User X509 | implemented | X509 user cert validated incl. POP sig (info.rs:1291-1332); tests security_tests.rs:1565-1863 (untrusted/expired/revoked). |
 | 3126 | Aggregate Subscription - TimeAverage2 | implemented | agg_time_average2 engine.rs:714 (11285); test phase_d_time_average2_total2 aggregates_tests.rs:621 |
-| 3127 | Base Info OptionSet | partial | Only generated core-nodeset OptionSetType node (nodeset_51.rs id 11487); no server code instantiates/handles it, no test |
+| 3127 | Base Info OptionSet | implemented | base_info::create_option_set_variable instantiates OptionSetType with OptionSetValues/BitMask; test base_info.rs::option_set_exposes_per_bit_values_and_bitmask |
 | 3130 | Aggregate Subscription - MaximumActualTime | implemented | agg_maximum_actual_time engine.rs:922 (2349); test phase_b_actual_time_returns_value_timestamp aggregates_tests.rs:345 |
 | 3137 | Aggregate Subscription - Custom | gap | No custom aggregate extensibility; dispatch_aggregate engine.rs:1466 is a fixed closed match, unknown ids -> BadAggregateNotSupported |
 | 3142 | Monitor Alternate Encoding | partial | sample() passes data_encoding through same pipeline as Read (subscriptions/mod.rs:1230), no monitored-item XML/JSON test found. |
@@ -749,7 +749,7 @@ One row per facet not already covered by the four canonical profiles above. Coun
 | 3194 | Base Info Events Capabilities | partial | MaxSelectClauseParameters/MaxWhereClauseParameters nodes exist (nodeset_28.rs:4158) but Value is DataValue::null(), not live-wired. |
 | 3196 | Base Info Fixed SamplingInterval | implemented | CU is conditional on the Server using a fixed set of sampling intervals (OPC-10000-5 SS7.9/SS12.8); this server negotiates a continuously-variable client-requested interval per monitored item (sanitize_sampling_interval, subscriptions/monitored_item.rs:299-311), so the precondition never holds and non-exposure of SamplingIntervalDiagnosticsArray is spec-conformant, not a gap -- documented in docs/server-capacity-limits.md |
 | 3197 | Base Info Security Role Capabilities | implemented | RoleSet on ServerCapabilities (role_management.rs:479-481); test rbac.rs:287-316 verifies i=15606 + 8 role nodes. |
-| 3198 | Base Info Estimated Return Time | gap | EstimatedReturnTime has zero occurrences outside generated files; no wiring near ServerState::Running server_status.rs:198 |
+| 3198 | Base Info Estimated Return Time | implemented | ServerStatusWrapper::schedule_shutdown/estimated_return_time (server_status.rs) + ServerHandle::shutdown_after_with_return_time (server_handle.rs) extend the existing shutdown mechanism; wired core.rs get_attribute; test base_info.rs::estimated_return_time_reflects_scheduled_shutdown_and_is_null_otherwise |
 | 3199 | Base Info System Status | gap | SystemStatusChangeEventType has no server-side emission on shutdown; server_status.rs/server_handle.rs never calls notify_event/raise_event |
 | 3201 | Base Info Custom Type System | partial | custom-codegen sample (samples/custom-codegen) demonstrates a full custom-type inheritance tree + generated Encoding Objects via async-opcua-codegen (types/encoding_ids.rs, types/gen.rs); no completeness e2e test proving all custom EventTypes are exposed alongside their encoding objects, same evidentiary gap as CU 5801 |
 | 3203 | Base Info Model Change General | implemented | GeneralModelChangeEvent fired on add/delete_nodes/refs (model_change.rs, memory_mgr_impl.rs:325); e2e test node_management.rs:1437. |
@@ -789,7 +789,7 @@ One row per facet not already covered by the four canonical profiles above. Coun
 | 3550 | Base Info StatusResult DataType | implemented | StatusResult in nodeset + generated types/status_result.rs; exposed via CoreNamespace import. |
 | 3551 | Base Info UriString | implemented | UriString present in schemas/1.05/Opc.Ua.NodeSet2.xml; exposed via CoreNamespace import. |
 | 3554 | Address Space Base | implemented | Core AddressSpace all NodeClasses address_space/mod.rs (1454 LOC, unit tests) + opcua-nodes crate; e2e browse.rs:144-167 |
-| 3560 | Address Space Interfaces | gap | Searched 'HasInterface'/'BaseInterfaceType' usage - only nodeset type nodes; no server code creates HasInterface refs. |
+| 3560 | Address Space Interfaces | implemented | base_info::add_ordered_object attaches HasInterface from each OrderedListType child to IOrderedObjectType (a byproduct of closing CU 2512); test base_info.rs::ordered_list_children_are_ordered_and_interface_conformant |
 | 3562 | Address Space Method Meta Data | gap | Searched 'HasArgumentDescription' usage - only nodeset ref-type node; MethodBuilder args lack description metadata. |
 | 3565 | Data Access DataItems | implemented | Satisfied via subtype: AnalogItemType (subtype of DataItemType) tested datachange_overflow.rs:173; BadOutOfRange in write_validation.rs:280 |
 | 3566 | Data Access BaseAnalogType | implemented | Satisfied via subtype: AnalogItemType instances w/ EURange tested (datachange_overflow.rs:173, alarms.rs:1494). |
@@ -865,7 +865,7 @@ One row per facet not already covered by the four canonical profiles above. Coun
 | 3983 | Base Services Diagnostics | implemented | result.rs:17-58 filter_diagnostic_info masks diag bits; wired attribute.rs/node_management.rs; test per_op_diagnostics.rs |
 | 3985 | Session General Service Behaviour | implemented | controller.rs:396 auth-token check, response.rs:207 requestHandle echo, deadline_queue:971-1016 BadTimeout; e2e read.rs:1400-1408 |
 | 3994 | Session Sessionless Invocation | gap | SessionlessInvokeRequestType/ResponseType exist only as generated types (unused); rbac/decision.rs:147 TODO admits "sessionless: enforce SessionRequired... not done"; no dispatch path. |
-| 3996 | Base Info ReferenceDescription | gap | Searched 'ReferenceDescriptionVariableType'/'HasReferenceDescription' - only nodeset nodes; unused by server code. |
+| 3996 | Base Info ReferenceDescription | implemented | base_info::attach_reference_description instantiates ReferenceDescriptionVariableType via HasReferenceDescription, documenting a real Reference's SourceNode/ReferenceType/IsForward/TargetNode (OPC-10000-23 SS5, not Part 3/5); test base_info.rs::reference_description_documents_a_real_reference |
 | 4030 | Monitor Complex Event Filter | implemented | OfType evaluated incl. supertypes (evaluate.rs:211-216, fn of_type:358); arity check validation.rs:345; unit test evaluate.rs:1030-1064. |
 | 4052 | Base Info TrimmedString | implemented | TrimmedString present in schemas/1.05/Opc.Ua.NodeSet2.xml; exposed via CoreNamespace import. |
 | 4053 | Base Info Locations Object | implemented | Locations object (i=31915, nodeset_16.rs:918-943) confirmed reachable via Browse from ObjectsFolder; test browse.rs::locations_object_is_reachable_from_objects_folder |
@@ -889,7 +889,7 @@ One row per facet not already covered by the four canonical profiles above. Coun
 | 5207 | Monitor Items 2 | implemented | No per-subscription item cap below 2 found (server/src/config/limits.rs); 2+ Double items trivially exercised in subscriptions.rs. |
 | 5208 | Monitor Value Change V2 | partial | IndexRange applied to sample monitored_item.rs:931-940 (Variant::range_of); logic tested via read.rs:794-827, no MonitoredItem-level test |
 | 5213 | Auditing Connections | implemented | audit.rs:736 AuditOpenSecureChannelEventType, :763 AuditChannelEventType, :928/:442 Create/ActivateSession; test session_audit.rs:18 |
-| 5240 | Base Info Currency | gap | Only inert CurrencyUnitType/CurrencyUnit template nodes exist (nodeset_22.rs:908-934); no builder API, usage, or test |
+| 5240 | Base Info Currency | implemented | base_info::create_currency_variable attaches a CurrencyUnit property (CurrencyUnitType) to a monetary DataVariable; test base_info.rs::currency_unit_property_reports_iso4217_fields |
 | 5274 | Security Role Server IdentityManagement | implemented | AddIdentity/RemoveIdentity (role_management.rs:330-373), wired for 7 well-known roles; unit tests :682,721,913. |
 | 5275 | Security Role Server EndpointManagement | implemented | AddEndpoint/RemoveEndpoint role_management.rs:282-328; unit tests role_management.rs:743,895 (filter add/remove + gating). |
 | 5276 | Security Role Server ApplicationManagement | implemented | AddApplication/RemoveApplication role_management.rs:234-280; unit tests role_management.rs:743,810. |

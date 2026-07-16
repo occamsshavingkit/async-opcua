@@ -21,6 +21,10 @@ pub enum DiscreteAlarmKind {
     OffNormal,
     /// TripAlarmType, an OffNormalAlarmType subtype with the same active-state mechanics.
     Trip,
+    /// SystemOffNormalAlarmType, an OffNormalAlarmType subtype indicating an underlying system
+    /// (rather than process) is off-normal; identical active-state mechanics (OPC-10000-9
+    /// §5.8.24.3).
+    SystemOffNormal,
 }
 
 /// Address-space nodes and runtime state for an off-normal discrete alarm.
@@ -173,6 +177,7 @@ impl DiscreteAlarmKind {
         match self {
             Self::OffNormal => NodeId::from(ObjectTypeId::OffNormalAlarmType),
             Self::Trip => NodeId::from(ObjectTypeId::TripAlarmType),
+            Self::SystemOffNormal => NodeId::from(ObjectTypeId::SystemOffNormalAlarmType),
         }
     }
 }

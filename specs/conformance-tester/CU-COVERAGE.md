@@ -406,15 +406,15 @@ One row per facet not already covered by the four canonical profiles above. Coun
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
 | A & C Acknowledgeable Alarm 2022 Server Facet | 1565 | 34 | 18 | 5 | 11 | 0 | 0 | 0 |
 | A & C Address Space Instance 2022 Server Facet | 1562 | 1 | 1 | 0 | 0 | 0 | 0 | 0 |
-| A & C Alarm 2022 Server Facet | 1502 | 84 | 36 | 6 | 42 | 0 | 0 | 0 |
+| A & C Alarm 2022 Server Facet | 1502 | 84 | 41 | 6 | 37 | 0 | 0 | 0 |
 | A & C Alarm Auditing Server Facet | 1503 | 8 | 3 | 0 | 5 | 0 | 0 | 0 |
 | A & C AlarmMetrics Server Facet | 887 | 1 | 0 | 0 | 1 | 0 | 0 | 0 |
 | A & C Base Condition 2022 Server Facet | 1551 | 26 | 14 | 5 | 7 | 0 | 0 | 0 |
-| A & C CertificateExpiration 2022 Server Facet | 1566 | 32 | 19 | 5 | 8 | 0 | 0 | 0 |
+| A & C CertificateExpiration 2022 Server Facet | 1566 | 32 | 20 | 5 | 7 | 0 | 0 | 0 |
 | A & C Dialog 2022 Server Facet | 1504 | 32 | 15 | 6 | 11 | 0 | 0 | 0 |
 | A & C Enable 2022 Server Facet | 1563 | 31 | 17 | 5 | 9 | 0 | 0 | 0 |
-| A & C Exclusive Alarming 2022 Server Facet | 1500 | 100 | 42 | 6 | 52 | 0 | 0 | 0 |
-| A & C Non-Exclusive Alarming 2022 Server Facet | 1501 | 103 | 45 | 6 | 52 | 0 | 0 | 0 |
+| A & C Exclusive Alarming 2022 Server Facet | 1500 | 100 | 49 | 6 | 45 | 0 | 0 | 0 |
+| A & C Non-Exclusive Alarming 2022 Server Facet | 1501 | 103 | 52 | 6 | 45 | 0 | 0 | 0 |
 | A & C Previous Instances 2022 Server Facet | 1564 | 27 | 15 | 5 | 7 | 0 | 0 | 0 |
 | A & C Refresh2 2022 Server Facet | 1568 | 27 | 15 | 5 | 7 | 0 | 0 | 0 |
 | A & E Wrapper 2022 Facet | 1346 | 18 | 13 | 2 | 3 | 0 | 0 | 0 |
@@ -506,8 +506,8 @@ One row per facet not already covered by the four canonical profiles above. Coun
 | 2231 | Push Model for Global Certificate and TrustList Management | partial | Push StartSigningRequest+CreateSigningRequest impl gds/push_methods.rs:119,143 tested :435-552; missing GetTrustList/AddCert push ops |
 | 2232 | GDS Application Directory | gap | Directory RegisterApplication/QueryServers unimplemented: method.rs:98-104,131-135 maps to BadServiceUnsupported; no callbacks registered |
 | 2233 | GDS LDS-ME Connectivity | gap | Searched "LDS-ME","LdsMe","lds_me" - only unrelated mdns.rs hits; no GDS-to-LDS-ME semi-automatic registration config found |
-| 2236 | A & C CertificateExpiration | gap | CertificateExpirationAlarmType only structural (node_ids.rs:10623); no instantiation in async-opcua-server/src/alarms |
-| 2239 | A & C SystemOffNormal | gap | SystemOffNormalAlarmType only structural (node_ids.rs:10610); no instantiation in async-opcua-server/src/alarms |
+| 2236 | A & C CertificateExpiration | implemented | CertificateExpirationAlarm (alarms/certificate_expiration.rs) evaluates ExpirationDate/ExpirationLimit, register_certificate_expiration_alarm; test alarms.rs::certificate_expiration_alarm_activates_within_expiration_limit_and_clears_on_renewal |
+| 2239 | A & C SystemOffNormal | implemented | DiscreteAlarmKind::SystemOffNormal (discrete.rs) parameterizes DiscreteAlarm to report SystemOffNormalAlarmType, same OffNormalAlarmType evaluation; test alarms.rs::system_off_normal_alarm_reports_type_definition_and_activates |
 | 2256 | Aggregate Subscription - Delta | implemented | agg_delta engine.rs:776 (2359); test phase_b_count_average_range_delta aggregates_tests.rs:320-339 |
 | 2258 | Redundancy Server | gap | Searched "redundancy"/"RedundancySupport"/"redundant_server" — only generated DataType stub (redundant_server_data_type.rs); no failover/clustering logic anywhere. |
 | 2263 | Aggregate - Count | implemented | engine.rs dispatch AGG_COUNT=2352 (engine.rs:1494); tests aggregates_tests.rs:1003-1059 count_* family (3 tests) |
@@ -530,7 +530,7 @@ One row per facet not already covered by the four canonical profiles above. Coun
 | 2317 | View TranslateBrowsePath | implemented | TranslateBrowsePathsToNodeIds handler async-opcua-server/src/session/services/view.rs:388; test async-opcua/tests/integration/tier_a.rs:141 |
 | 2318 | Monitor QueueSize_ServerMax | partial | Clamp (monitored_item.rs:314-336 sanitize_queue_size) caps queuesize to max but 0 dedicated test; comment admits event handling is "Future" |
 | 2319 | Security Certificate Administration | implemented | ServerBuilder certificate_path/private_key_path (builder.rs:359-366), pki_dir (builder.rs:494-495); tested security_tests.rs:421-568. |
-| 2323 | A & C Exclusive RateOfChange | gap | ExclusiveRateOfChangeAlarmType only structural (node_ids.rs:10588); no server instantiation |
+| 2323 | A & C Exclusive RateOfChange | implemented | RateOfChangeAlarm (alarms/rate_of_change.rs) reuses LimitAlarm evaluator against a computed per-second rate, register_rate_of_change_alarm; test alarms.rs::rate_of_change_alarm_reports_type_definition_and_activates_on_fast_change |
 | 2328 | Discovery Get Endpoints | implemented | get_endpoints_with_filters incl profile-uri filter info.rs:342-378; tests core_tests.rs:100,358,366 |
 | 2330 | Aggregate Subscription - StartBound | implemented | agg_start_bound engine.rs:1289 (11505); test aggregates_tests.rs:486, part13_start_end_and_delta_bounds:1342 |
 | 2332 | Historical Access Structured Data Read Raw | gap | data_history.rs read_raw_modified (lines 131-180) reads only the raw_values map; annotation_values (structured data) is a separate store never reachable via ReadRawModifiedDetails for any NodeId |
@@ -558,7 +558,7 @@ One row per facet not already covered by the four canonical profiles above. Coun
 | 2383 | Historical Access Insert Value | implemented | data_history.rs:228-238 update_data PerformUpdateType::Insert; test hda.rs:320-351 e2e_inmemory_update_then_read_roundtrip |
 | 2384 | Aggregate - WorstQuality2 | implemented | engine.rs dispatch AGG_WORST_QUALITY2=11292 (engine.rs:1485); test aggregates_tests.rs:1141 worst_quality_is_value_type_independent |
 | 2389 | Attribute Write Values | implemented | Write handler async-opcua-server/src/session/message_handler.rs:820-852; tests async-opcua/tests/integration/write.rs |
-| 2390 | A & C Non-Exclusive Deviation | gap | NonExclusiveDeviationAlarmType only structural (node_ids.rs:10593); no server instantiation |
+| 2390 | A & C Non-Exclusive Deviation | implemented | DeviationAlarm (alarms/deviation.rs) reuses LimitAlarm evaluator against processValue-setpointValue for the non-exclusive path, register_deviation_alarm; test alarms.rs::deviation_alarm_reports_deviation_type_definition_and_activates_on_setpoint_deviation |
 | 2391 | Method Call | implemented | Call service handled in session/message_handler.rs:411; tested call_trivial/call_args in async-opcua/tests/integration/methods.rs:26,61. |
 | 2394 | Node Management Delete Node | implemented | delete_nodes_impl (memory_mgr_impl.rs:329); tested tests/integration/node_management.rs. |
 | 2399 | Data Access Complex Number | gap | Searched 'ComplexNumberType' - zero hits outside generated nodeset. |
@@ -635,14 +635,14 @@ One row per facet not already covered by the four canonical profiles above. Coun
 | 2845 | Base Info RequestServerStateChange Method | gap | Only generated NodeId constants (ServerType_RequestServerStateChange, node_ids.rs:1103-1105); no add_method_cb handler found anywhere. |
 | 2852 | A & C Condition Sub-Classes | gap | condition_sub_class_id field exists on BaseEventType only (events/event.rs:70-73); never set anywhere in async-opcua-server/src |
 | 2853 | UA Secure Conversation | implemented | SecureChannel/OpenSecureChannel comms/secure_channel.rs:657; tests secure_channel.rs:136-663, integration secure_channel.rs:15 |
-| 2861 | A & C Discrepancy | gap | DiscrepancyAlarmType only structural (node_ids.rs:10659, generated/events.rs:479); no server instantiation |
+| 2861 | A & C Discrepancy | implemented | DiscrepancyAlarm (alarms/discrepancy.rs) tracks process-vs-TargetValueNode discrepancy beyond Tolerance persisting past ExpectedTime, register_discrepancy_alarm; test alarms.rs::discrepancy_alarm_activates_after_expected_time_and_clears_at_target |
 | 2863 | Security Policy Required | implemented | Modern policies default-on, legacy Basic128Rsa15/Basic256 opt-in behind legacy-crypto feature builder.rs:142-166; matrix test |
 | 2867 | Protocol Reverse Connect Server | implemented | async-opcua-server/src/reverse_connect.rs (ReverseConnectionManager etc.); e2e async-opcua/tests/integration/reverse_connect.rs:16-17 test_reverse_connect. |
 | 2871 | Discovery Get Endpoints SessionLess | gap | GetEndpoints handler (session/controller.rs:697-707) has no Transport-URI "SL" query-string filter/sessionless-endpoint logic. |
 | 2873 | Security Role Server DefaultRolePermissions | gap | DefaultRolePermissions only settable via ServerBuilder config pre-startup (builder.rs:439); no live Write path (core.rs:1104). |
-| 2877 | A & C On-Off Delay | gap | OnDelay/OffDelay only in generated nodeset; zero hits in async-opcua-server/src or async-opcua-client/src |
-| 2879 | A & C Re-Alarming | gap | ReAlarmTime/ReAlarmRepeatCount only in generated nodeset; zero server implementation |
-| 2881 | A & C Audible Sound | gap | AudibleSound only in generated nodeset; zero server implementation |
+| 2877 | A & C On-Off Delay | implemented | ConditionStateMachine::gate_active + LimitAlarm.{on,off}_delay_ms (state_machine.rs, limit.rs::with_delays) defer ActiveState commit until the delay elapses; test alarms.rs::on_delay_and_off_delay_defer_activation_and_deactivation |
+| 2879 | A & C Re-Alarming | implemented | ConditionStateMachine::maybe_re_alarm/reset_re_alarm + LimitAlarm::with_re_alarm (state_machine.rs, limit.rs); ReAlarmRepeatCount server-maintained, resets on return to normal per spec text (corrected from task's initial ack-reset assumption); test alarms.rs::re_alarm_time_renotifies_while_active_and_resets_on_return_to_normal |
+| 2881 | A & C Audible Sound | implemented | ConditionStateMachine::recompute_audible_enabled (state_machine.rs) computes AudibleEnabled from active/acked/silenced; AudibleSound modeled as a plain property (AudioDataType has no generated Rust type); Acknowledge now also auto-silences (transitions.rs) per spec; test alarms.rs::audible_enabled_tracks_active_unacked_unsilenced_and_acknowledge_auto_silences |
 | 2893 | A & C Suppression by Operator | implemented | AlarmConditionType_Suppress/Unsuppress Methods registered (methods.rs); handle_condition_suppress/unsuppress call set_suppressed; test alarms.rs::suppress_unsuppress_methods_toggle_suppressed_state |
 | 2896 | A & C Silencing | implemented | SilenceState variable added (state_machine.rs) + AlarmConditionType_Silence Method registered; handle_condition_silence calls set_silenced; test alarms.rs::silence_method_toggles_silence_state_and_is_idempotent |
 | 2897 | A & C Suppression | implemented | SuppressedState var+get/set_suppressed wired to SuppressedOrShelved (state_machine.rs), now tested via alarms.rs::suppress_unsuppress_methods_toggle_suppressed_state |
@@ -658,11 +658,11 @@ One row per facet not already covered by the four canonical profiles above. Coun
 | 2940 | Base Info GetMonitoredItems Method | implemented | GetMonitoredItems method node_manager/memory/core.rs:1195-1207; test methods.rs:291-332 call_get_monitored_items |
 | 2941 | Aggregate Subscription - MaximumActualTime2 | implemented | agg_maximum_actual_time2 engine.rs:950 (11306); test aggregates_tests.rs:952 (duplicate-extrema) |
 | 2943 | Historical Access Delete Event | implemented | event_history.rs:226-250 delete_event; tests history_events_inmemory.rs:128 delete_event_by_id + sqlite history_events.rs:117 |
-| 2946 | A & C Non-Exclusive RateOfChange | gap | NonExclusiveRateOfChangeAlarmType only structural (node_ids.rs:10592); no server instantiation |
+| 2946 | A & C Non-Exclusive RateOfChange | implemented | RateOfChangeAlarm (alarms/rate_of_change.rs) non-exclusive path via create_non_exclusive_in_address_space + LimitAlarmKind::RateOfChange; test alarms.rs::rate_of_change_alarm_reports_type_definition_and_activates_on_fast_change |
 | 2947 | Historical Access Events | implemented | event_history.rs:68-138 read_events using ParsedEventFilter; test history_tests.rs:407 test_history_read_events_empty_result |
 | 2948 | Aggregate - VariancePopulation | implemented | engine.rs dispatch AGG_VARIANCE_POPULATION=11429 (engine.rs:1520); test aggregates_tests.rs:369 phase_b_variance_and_stddev |
 | 2950 | Historical Access ServerTimestamp | partial | both backends persist a distinct server_timestamp (sqlite backend.rs:105/417/854 dedicated column, query.rs:93 populates on read; in-memory stores full DataValue); config flag capabilities.rs:34 defaults false; no test asserts server_timestamp survives distinct from source_timestamp on read, and simple.rs history_read_raw_modified ignores timestamps_to_return (unused param) |
-| 2951 | A & C Exclusive Deviation | gap | ExclusiveDeviationAlarmType only structural (node_ids.rs:10589); no server instantiation |
+| 2951 | A & C Exclusive Deviation | implemented | DeviationAlarm (alarms/deviation.rs) exclusive path via create_exclusive_in_address_space + LimitAlarmKind::Deviation; test alarms.rs::deviation_alarm_reports_deviation_type_definition_and_activates_on_setpoint_deviation |
 | 2952 | Aggregate Subscription - MinimumActualTime2 | implemented | agg_minimum_actual_time2 engine.rs:863 (11305); test phase_d_min_actual_time2_uses_bound_timestamp aggregates_tests.rs:603 |
 | 2954 | Aggregate Subscription - DurationBad | implemented | agg_duration_bad engine.rs:1162 (2361); test phase_e_duration_and_percent_good_bad aggregates_tests.rs:694 |
 | 2955 | Aggregate Subscription - StandardDeviationPopulation | implemented | agg_std_dev_population engine.rs:1033 (11427); test phase_b_variance_and_stddev aggregates_tests.rs:369-393 |

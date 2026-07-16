@@ -109,11 +109,46 @@ pub struct ConditionStateMachine {
     pub shelving_current_state_transition_time_id: NodeId,
     /// NodeId of the ShelvingState.UnshelveTime property.
     pub unshelve_time_id: NodeId,
+    /// NodeId of the AlarmConditionType OnDelay property (OPC-10000-9 §5.8.2, optional).
+    pub on_delay_id: NodeId,
+    /// NodeId of the AlarmConditionType OffDelay property (OPC-10000-9 §5.8.2, optional).
+    pub off_delay_id: NodeId,
+    /// NodeId of the AlarmConditionType ReAlarmTime property (OPC-10000-9 §5.8.2, optional).
+    pub re_alarm_time_id: NodeId,
+    /// NodeId of the AlarmConditionType ReAlarmRepeatCount variable (OPC-10000-9 §5.8.2,
+    /// optional; server-maintained, not client-configured).
+    pub re_alarm_repeat_count_id: NodeId,
+    /// NodeId of the AlarmConditionType AudibleEnabled property (OPC-10000-9 §5.8.2, optional;
+    /// server-computed from active/acked/silenced state, not client-configured).
+    pub audible_enabled_id: NodeId,
+    /// NodeId of the AlarmConditionType AudibleSound variable (OPC-10000-9 §5.8.2, optional).
+    /// Modeled as a plain writable property here rather than the full `AudioVariableType`
+    /// structure (`AudioDataType` has no generated Rust type in this codebase and its content is
+    /// a client-side playback concern, not server-evaluated).
+    pub audible_sound_id: NodeId,
     /// EventId of the condition's current (most recent) reportable state, shared across clones.
     /// Acknowledge/Confirm validate the client-supplied EventId against this (Part 9 §5.5.2).
     current_event_id: Arc<Mutex<Vec<u8>>>,
     /// Active condition branches, shared across clones.
     branches: Arc<opcua_core::sync::RwLock<Vec<Branch>>>,
+    /// OnDelay/OffDelay hysteresis bookkeeping for `gate_active`, shared across clones.
+    delay_gate: Arc<Mutex<DelayGateState>>,
+    /// ReAlarmTime bookkeeping for `maybe_re_alarm`/`reset_re_alarm`, shared across clones.
+    re_alarm: Arc<Mutex<ReAlarmState>>,
+}
+
+/// Bookkeeping for `ConditionStateMachine::gate_active`'s OnDelay/OffDelay hysteresis.
+#[derive(Debug, Default)]
+struct DelayGateState {
+    committed: bool,
+    pending: Option<(bool, DateTime)>,
+}
+
+/// Bookkeeping for `ConditionStateMachine::maybe_re_alarm`'s ReAlarmTime tracking (OPC-10000-9
+/// §5.8.2): `None` while the alarm is not active; `Some(t)` records when it was last (re-)alarmed.
+#[derive(Debug, Default)]
+struct ReAlarmState {
+    last_alarm_time: Option<DateTime>,
 }
 
 /// Creates a `PropertyType` child Variable (e.g. `TransitionTime`, `EffectiveTransitionTime`,
@@ -202,6 +237,13 @@ impl ConditionStateMachine {
         );
         let unshelve_time_id =
             NodeId::new(ns_idx, format!("{}_ShelvingState_UnshelveTime", base_s));
+        let on_delay_id = NodeId::new(ns_idx, format!("{}_OnDelay", base_s));
+        let off_delay_id = NodeId::new(ns_idx, format!("{}_OffDelay", base_s));
+        let re_alarm_time_id = NodeId::new(ns_idx, format!("{}_ReAlarmTime", base_s));
+        let re_alarm_repeat_count_id =
+            NodeId::new(ns_idx, format!("{}_ReAlarmRepeatCount", base_s));
+        let audible_enabled_id = NodeId::new(ns_idx, format!("{}_AudibleEnabled", base_s));
+        let audible_sound_id = NodeId::new(ns_idx, format!("{}_AudibleSound", base_s));
 
         // 1. Create Condition Object (AlarmConditionType i=2915)
         let alarm_obj = ObjectBuilder::new(
@@ -531,6 +573,111 @@ impl ConditionStateMachine {
             )]),
         );
 
+        // OnDelay/OffDelay (OPC-10000-9 §5.8.2, optional) -- created unconditionally for every
+        // condition, matching this module's existing treatment of SuppressedState/SilenceState.
+        // Their live values are read by `gate_active`'s callers, not re-read from these address
+        // space nodes; the nodes exist for browsability/structural conformance.
+        let on_delay_var = VariableBuilder::new(&on_delay_id, "OnDelay", "OnDelay")
+            .data_type(DataTypeId::Duration)
+            .has_type_definition(VariableTypeId::PropertyType)
+            .value(0.0f64)
+            .writable()
+            .build();
+        address_space.insert(
+            on_delay_var,
+            Some(&[(
+                &condition_id,
+                &NodeId::new(0, 46),
+                opcua_nodes::ReferenceDirection::Inverse,
+            )]),
+        );
+
+        let off_delay_var = VariableBuilder::new(&off_delay_id, "OffDelay", "OffDelay")
+            .data_type(DataTypeId::Duration)
+            .has_type_definition(VariableTypeId::PropertyType)
+            .value(0.0f64)
+            .writable()
+            .build();
+        address_space.insert(
+            off_delay_var,
+            Some(&[(
+                &condition_id,
+                &NodeId::new(0, 46),
+                opcua_nodes::ReferenceDirection::Inverse,
+            )]),
+        );
+
+        // ReAlarmTime/ReAlarmRepeatCount (OPC-10000-9 §5.8.2, optional) -- created
+        // unconditionally, same rationale as OnDelay/OffDelay above. ReAlarmRepeatCount is
+        // server-maintained (Int16, BaseDataVariableType), not client-configured.
+        let re_alarm_time_var =
+            VariableBuilder::new(&re_alarm_time_id, "ReAlarmTime", "ReAlarmTime")
+                .data_type(DataTypeId::Duration)
+                .has_type_definition(VariableTypeId::PropertyType)
+                .value(0.0f64)
+                .writable()
+                .build();
+        address_space.insert(
+            re_alarm_time_var,
+            Some(&[(
+                &condition_id,
+                &NodeId::new(0, 46),
+                opcua_nodes::ReferenceDirection::Inverse,
+            )]),
+        );
+
+        let re_alarm_repeat_count_var = VariableBuilder::new(
+            &re_alarm_repeat_count_id,
+            "ReAlarmRepeatCount",
+            "ReAlarmRepeatCount",
+        )
+        .data_type(DataTypeId::Int16)
+        .value(0i16)
+        .writable()
+        .build();
+        address_space.insert(
+            re_alarm_repeat_count_var,
+            Some(&[(
+                &condition_id,
+                &NodeId::new(0, 47),
+                opcua_nodes::ReferenceDirection::Inverse,
+            )]),
+        );
+
+        // AudibleEnabled/AudibleSound (OPC-10000-9 §5.8.2, optional) -- created unconditionally,
+        // same rationale as OnDelay/OffDelay above. AudibleEnabled is server-computed (see
+        // `recompute_audible_enabled`), not client-configured.
+        let audible_enabled_var =
+            VariableBuilder::new(&audible_enabled_id, "AudibleEnabled", "AudibleEnabled")
+                .data_type(DataTypeId::Boolean)
+                .has_type_definition(VariableTypeId::PropertyType)
+                .value(false)
+                .writable()
+                .build();
+        address_space.insert(
+            audible_enabled_var,
+            Some(&[(
+                &condition_id,
+                &NodeId::new(0, 46),
+                opcua_nodes::ReferenceDirection::Inverse,
+            )]),
+        );
+
+        let audible_sound_var =
+            VariableBuilder::new(&audible_sound_id, "AudibleSound", "AudibleSound")
+                .data_type(DataTypeId::LocalizedText)
+                .value(LocalizedText::null())
+                .writable()
+                .build();
+        address_space.insert(
+            audible_sound_var,
+            Some(&[(
+                &condition_id,
+                &NodeId::new(0, 47),
+                opcua_nodes::ReferenceDirection::Inverse,
+            )]),
+        );
+
         Self {
             condition_id,
             source_node_id,
@@ -560,8 +707,16 @@ impl ConditionStateMachine {
             shelving_current_state_id,
             shelving_current_state_transition_time_id,
             unshelve_time_id,
+            on_delay_id,
+            off_delay_id,
+            re_alarm_time_id,
+            re_alarm_repeat_count_id,
+            audible_enabled_id,
+            audible_sound_id,
             current_event_id: Arc::new(Mutex::new(Vec::new())),
             branches: Arc::new(opcua_core::sync::RwLock::new(Vec::new())),
+            delay_gate: Arc::new(Mutex::new(DelayGateState::default())),
+            re_alarm: Arc::new(Mutex::new(ReAlarmState::default())),
         }
     }
 
@@ -661,6 +816,106 @@ impl ConditionStateMachine {
         self.set_bool_value(address_space, &self.active_state_id, active);
         self.write_transition_time(address_space, &self.active_state_transition_time_id);
         self.recompute_effective_state(address_space);
+        self.recompute_audible_enabled(address_space);
+    }
+
+    /// Applies OnDelay/OffDelay hysteresis (OPC-10000-9 §5.8.2) to a desired ActiveState
+    /// transition evaluated at `now`, committing (writing) `ActiveState` via `set_active` only
+    /// once the configured delay has elapsed since `desired` was first observed at a differing
+    /// value from what's committed. Returns `Some(active)` when a transition is committed this
+    /// call, `None` when `desired` already matches the committed state or the delay has not yet
+    /// elapsed. Zero delays commit immediately, matching plain `set_active`.
+    pub fn gate_active(
+        &self,
+        address_space: &AddressSpace,
+        desired: bool,
+        now: DateTime,
+        on_delay_ms: f64,
+        off_delay_ms: f64,
+    ) -> Option<bool> {
+        let commit = {
+            let mut state = self.delay_gate.lock().unwrap();
+            if desired == state.committed {
+                state.pending = None;
+                return None;
+            }
+
+            let started = match state.pending {
+                Some((pending_desired, started)) if pending_desired == desired => started,
+                _ => {
+                    state.pending = Some((desired, now));
+                    now
+                }
+            };
+
+            let delay_ms = if desired { on_delay_ms } else { off_delay_ms };
+            let elapsed_ms = (now.checked_ticks() - started.checked_ticks()) as f64 / 10_000.0;
+            if elapsed_ms < delay_ms {
+                return None;
+            }
+
+            state.committed = desired;
+            state.pending = None;
+            desired
+        };
+
+        self.set_active(address_space, commit);
+        Some(commit)
+    }
+
+    /// (Re)initializes ReAlarmTime bookkeeping (OPC-10000-9 §5.8.2) after an ActiveState
+    /// transition commits: a fresh activation starts the ReAlarm timer at `now` and resets
+    /// `ReAlarmRepeatCount` to 0; a deactivation (return to normal) stops the timer and resets
+    /// `ReAlarmRepeatCount` to 0 ("the count is reset when an Alarm returns to normal").
+    pub fn reset_re_alarm(&self, address_space: &AddressSpace, active: bool, now: DateTime) {
+        {
+            let mut state = self.re_alarm.lock().unwrap();
+            state.last_alarm_time = if active { Some(now) } else { None };
+        }
+        self.set_i16_value(address_space, &self.re_alarm_repeat_count_id, 0);
+    }
+
+    /// Checks whether `re_alarm_ms` has elapsed since this (still active, unacknowledged) alarm
+    /// was last (re-)alarmed at `now`; if so, re-alarms it per OPC-10000-9 §5.8.2/Annex B.1.5:
+    /// increments `ReAlarmRepeatCount`, returns `AckedState`/`SilenceState` to unacknowledged/
+    /// un-silenced, stamps `ActiveState.TransitionTime` ("the Alarm active time is set to the
+    /// time of the re-alarm"), and resets the timer to `now`. Returns whether a re-alarm
+    /// occurred this call; a disabled timer (`re_alarm_ms <= 0.0`) or one not currently tracked
+    /// as active never re-alarms.
+    pub fn maybe_re_alarm(
+        &self,
+        address_space: &AddressSpace,
+        now: DateTime,
+        re_alarm_ms: f64,
+    ) -> bool {
+        if re_alarm_ms <= 0.0 {
+            return false;
+        }
+
+        let started = match self.re_alarm.lock().unwrap().last_alarm_time {
+            Some(t) => t,
+            None => return false,
+        };
+
+        let elapsed_ms = (now.checked_ticks() - started.checked_ticks()) as f64 / 10_000.0;
+        if elapsed_ms < re_alarm_ms {
+            return false;
+        }
+
+        self.re_alarm.lock().unwrap().last_alarm_time = Some(now);
+        let count = self.get_i16_value(address_space, &self.re_alarm_repeat_count_id);
+        self.set_i16_value(
+            address_space,
+            &self.re_alarm_repeat_count_id,
+            count.saturating_add(1),
+        );
+        // "The Server will generate a new Alarm for it (as if it just went into alarm)":
+        // Acked/Confirmed both return to fresh-alarm (false), matching an initial activation.
+        self.set_acked(address_space, false);
+        self.set_confirmed(address_space, false);
+        self.set_silenced(address_space, false);
+        self.write_transition_time(address_space, &self.active_state_transition_time_id);
+        true
     }
 
     /// Gets whether the condition is acknowledged.
@@ -673,6 +928,7 @@ impl ConditionStateMachine {
         self.set_bool_value(address_space, &self.acked_state_id, acked);
         self.write_transition_time(address_space, &self.acked_state_transition_time_id);
         self.recompute_effective_state(address_space);
+        self.recompute_audible_enabled(address_space);
     }
 
     /// Gets whether the condition is confirmed.
@@ -787,6 +1043,17 @@ impl ConditionStateMachine {
     pub fn set_silenced(&self, address_space: &AddressSpace, silenced: bool) {
         self.set_bool_value(address_space, &self.silence_state_id, silenced);
         self.write_transition_time(address_space, &self.silence_state_transition_time_id);
+        self.recompute_audible_enabled(address_space);
+    }
+
+    /// Recomputes `AudibleEnabled` (OPC-10000-9 §5.8.2): true only while the alarm is active,
+    /// unacknowledged, and not silenced ("this file would be play/generated as long as the Alarm
+    /// is active and unacknowledged, unless the silence StateMachine ... silences it").
+    fn recompute_audible_enabled(&self, address_space: &AddressSpace) {
+        let audible = self.get_active(address_space)
+            && !self.get_acked(address_space)
+            && !self.get_silenced(address_space);
+        self.set_bool_value(address_space, &self.audible_enabled_id, audible);
     }
 
     /// Gets whether the condition is suppressed or shelved.
@@ -993,6 +1260,33 @@ impl ConditionStateMachine {
     }
 
     fn set_bool_value(&self, address_space: &AddressSpace, id: &NodeId, value: bool) {
+        if let Some(mut node) = address_space.find_mut(id) {
+            if let NodeType::Variable(ref mut var) = &mut *node {
+                let _ = var.set_value(&opcua_types::NumericRange::None, Variant::from(value));
+            }
+        };
+    }
+
+    fn get_i16_value(&self, address_space: &AddressSpace, id: &NodeId) -> i16 {
+        if let Some(node) = address_space.find(id) {
+            if let NodeType::Variable(ref var) = *node {
+                if let Some(Variant::Int16(v)) = var
+                    .value(
+                        opcua_types::TimestampsToReturn::Neither,
+                        &opcua_types::NumericRange::None,
+                        &opcua_types::DataEncoding::Binary,
+                        0.0,
+                    )
+                    .value
+                {
+                    return v;
+                }
+            }
+        };
+        0
+    }
+
+    fn set_i16_value(&self, address_space: &AddressSpace, id: &NodeId, value: i16) {
         if let Some(mut node) = address_space.find_mut(id) {
             if let NodeType::Variable(ref mut var) = &mut *node {
                 let _ = var.set_value(&opcua_types::NumericRange::None, Variant::from(value));

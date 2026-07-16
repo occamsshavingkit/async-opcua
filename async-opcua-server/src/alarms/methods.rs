@@ -12,12 +12,12 @@ use crate::node_manager::RequestContext;
 use crate::MonitoredItemHandle;
 use opcua_core::events::AlarmEvent;
 use opcua_core::traits::ConditionMethodHandler;
-use opcua_nodes::{Event, EventField};
+use opcua_nodes::{BaseEventType, Event, EventField};
 #[cfg(all(feature = "generated-address-space", feature = "method-call"))]
 use opcua_types::MethodId;
 use opcua_types::{
-    AttributeId, ByteString, DateTime, LocalizedText, NodeId, NumericRange, QualifiedName,
-    StatusCode, TryFromVariant, UAString, Variant,
+    AttributeId, ByteString, DateTime, LocalizedText, NodeId, NumericRange, ObjectId, ObjectTypeId,
+    QualifiedName, StatusCode, TryFromVariant, UAString, Variant,
 };
 use std::sync::Arc;
 
@@ -198,14 +198,13 @@ impl AlarmMethodHandler {
         let severity = self.state_machine.get_severity(&address_space);
         let retain = active || !confirmed;
 
-        // ponytail: Emit AuditConditionCommentEventType when audit event support is added.
         let event = opcua_core::events::AlarmEvent {
             event_id: event_id.to_vec(),
             event_type: NodeId::new(0, 2915),
             source_node: self.state_machine.source_node_id.clone(),
             source_name: self.state_machine.condition_name.clone(),
             time: DateTime::now(),
-            message: comment,
+            message: comment.clone(),
             severity,
             condition_id: self.state_machine.condition_id.clone(),
             branch_id: NodeId::null(),
@@ -216,6 +215,14 @@ impl AlarmMethodHandler {
             retain,
         };
 
+        let audit_event = ConditionAuditEvent::new(
+            ObjectTypeId::AuditConditionCommentEventType,
+            "AddComment",
+            &self.state_machine,
+            StatusCode::Good,
+            Some(comment),
+        );
+        notify_condition_audit_event(context, &audit_event);
         notify_alarm_event(context, &event);
 
         Ok(vec![])
@@ -429,7 +436,7 @@ impl ConditionRefreshHandler {
     /// Callback executed when the standard Enable method (OPC-10000-9 §5.5.5) is called by a client.
     pub fn handle_condition_enable(
         &self,
-        _context: &RequestContext,
+        context: &RequestContext,
         object_id: &NodeId,
         _args: &[Variant],
     ) -> Result<Vec<Variant>, StatusCode> {
@@ -437,15 +444,18 @@ impl ConditionRefreshHandler {
             .registry
             .get(object_id)
             .ok_or(StatusCode::BadNodeIdUnknown)?;
-        let address_space = opcua_core::trace_write_lock!(self.address_space);
-        condition.set_enabled(&address_space, true);
+        {
+            let address_space = opcua_core::trace_write_lock!(self.address_space);
+            condition.set_enabled(&address_space, true);
+        }
+        notify_enable_audit_event(context, &condition, "Enable", StatusCode::Good);
         Ok(vec![])
     }
 
     /// Callback executed when the standard Disable method (OPC-10000-9 §5.5.4) is called by a client.
     pub fn handle_condition_disable(
         &self,
-        _context: &RequestContext,
+        context: &RequestContext,
         object_id: &NodeId,
         _args: &[Variant],
     ) -> Result<Vec<Variant>, StatusCode> {
@@ -453,8 +463,11 @@ impl ConditionRefreshHandler {
             .registry
             .get(object_id)
             .ok_or(StatusCode::BadNodeIdUnknown)?;
-        let address_space = opcua_core::trace_write_lock!(self.address_space);
-        condition.set_enabled(&address_space, false);
+        {
+            let address_space = opcua_core::trace_write_lock!(self.address_space);
+            condition.set_enabled(&address_space, false);
+        }
+        notify_enable_audit_event(context, &condition, "Disable", StatusCode::Good);
         Ok(vec![])
     }
 
@@ -499,7 +512,7 @@ impl ConditionRefreshHandler {
     /// is an optional Comment.
     pub fn handle_condition_remove_from_service(
         &self,
-        _context: &RequestContext,
+        context: &RequestContext,
         object_id: &NodeId,
         args: &[Variant],
     ) -> Result<Vec<Variant>, StatusCode> {
@@ -507,9 +520,12 @@ impl ConditionRefreshHandler {
             .registry
             .get(object_id)
             .ok_or(StatusCode::BadNodeIdUnknown)?;
-        let address_space = opcua_core::trace_write_lock!(self.address_space);
-        apply_optional_comment(&condition, args, &address_space)?;
-        condition.set_out_of_service(&address_space, true);
+        {
+            let address_space = opcua_core::trace_write_lock!(self.address_space);
+            apply_optional_comment(&condition, args, &address_space)?;
+            condition.set_out_of_service(&address_space, true);
+        }
+        notify_out_of_service_audit_event(context, &condition, "RemoveFromService", StatusCode::Good);
         Ok(vec![])
     }
 
@@ -518,7 +534,7 @@ impl ConditionRefreshHandler {
     /// Comment.
     pub fn handle_condition_place_in_service(
         &self,
-        _context: &RequestContext,
+        context: &RequestContext,
         object_id: &NodeId,
         args: &[Variant],
     ) -> Result<Vec<Variant>, StatusCode> {
@@ -526,9 +542,12 @@ impl ConditionRefreshHandler {
             .registry
             .get(object_id)
             .ok_or(StatusCode::BadNodeIdUnknown)?;
-        let address_space = opcua_core::trace_write_lock!(self.address_space);
-        apply_optional_comment(&condition, args, &address_space)?;
-        condition.set_out_of_service(&address_space, false);
+        {
+            let address_space = opcua_core::trace_write_lock!(self.address_space);
+            apply_optional_comment(&condition, args, &address_space)?;
+            condition.set_out_of_service(&address_space, false);
+        }
+        notify_out_of_service_audit_event(context, &condition, "PlaceInService", StatusCode::Good);
         Ok(vec![])
     }
 
@@ -536,7 +555,7 @@ impl ConditionRefreshHandler {
     /// client. Idempotent: silencing an already-silenced alarm succeeds without error.
     pub fn handle_condition_silence(
         &self,
-        _context: &RequestContext,
+        context: &RequestContext,
         object_id: &NodeId,
         _args: &[Variant],
     ) -> Result<Vec<Variant>, StatusCode> {
@@ -544,8 +563,18 @@ impl ConditionRefreshHandler {
             .registry
             .get(object_id)
             .ok_or(StatusCode::BadNodeIdUnknown)?;
-        let address_space = opcua_core::trace_write_lock!(self.address_space);
-        condition.set_silenced(&address_space, true);
+        {
+            let address_space = opcua_core::trace_write_lock!(self.address_space);
+            condition.set_silenced(&address_space, true);
+        }
+        let audit_event = ConditionAuditEvent::new(
+            ObjectTypeId::AuditConditionSilenceEventType,
+            "Silence",
+            &condition,
+            StatusCode::Good,
+            None,
+        );
+        notify_condition_audit_event(context, &audit_event);
         Ok(vec![])
     }
 
@@ -749,6 +778,159 @@ impl EventField for OwnedAlarmEvent {
 
         Variant::Empty
     }
+}
+
+/// A&C audit event (OPC-10000-9 §5.10.2 `AuditConditionEventType` family): Enable/Disable,
+/// Silence, RemoveFromService/PlaceInService, and AddComment actions.
+///
+/// Deliberately lighter-weight than `session/audit.rs`'s `ServerAuditEvent`: this call path
+/// (a Method callback registered via `add_method_callback_with_context`, invoked from the
+/// generic Call service dispatch) has a `RequestContext`, not the `RequestHeader`-derived
+/// `AuditEventContext` (client audit entry id, secure channel id, ...) that session-service-layer
+/// audit events use — building one here would require threading request-header state through a
+/// call path that doesn't carry it today. This event still carries what OPC-10000-9 §5.10.2-5.10.4
+/// actually require: `ConditionId`, `ConditionEventId`, and (for AddComment) `Comment`, plus the
+/// generic `BaseEventType` fields (`Time`/`Message`/`Severity`/`SourceNode`).
+#[derive(Clone)]
+struct ConditionAuditEvent {
+    base: BaseEventType,
+    status: bool,
+    /// The Node that should receive this notification. Audit events are raised with
+    /// `SourceNode = Server` (matching every other audit event in this codebase,
+    /// `session/audit.rs`'s `ServerAuditEvent`), not the alarm's own source device — using the
+    /// alarm's source would deliver audit notifications to every plain alarm-event subscription
+    /// on that device too, corrupting the existing `AlarmEvent` notification stream those
+    /// subscriptions expect.
+    notify_target: NodeId,
+    condition_event_id: ByteString,
+    comment: Option<LocalizedText>,
+}
+
+impl ConditionAuditEvent {
+    fn new(
+        event_type: ObjectTypeId,
+        action: &str,
+        condition: &ConditionStateMachine,
+        status_code: StatusCode,
+        comment: Option<LocalizedText>,
+    ) -> Self {
+        let now = DateTime::now();
+        let status = status_code.is_good();
+        let severity = if status { 100 } else { 900 };
+        let message = if status {
+            format!("{action} succeeded")
+        } else {
+            format!("{action} failed: {status_code}")
+        };
+        let server_node: NodeId = ObjectId::Server.into();
+        let base = BaseEventType::new(
+            event_type,
+            ByteString::from(uuid::Uuid::new_v4().as_bytes().as_slice()),
+            message,
+            now,
+        )
+        .set_source_node(server_node.clone())
+        .set_source_name(UAString::from("Server"))
+        .set_severity(severity);
+
+        Self {
+            base,
+            status,
+            notify_target: server_node,
+            condition_event_id: ByteString::from(condition.current_event_id()),
+            comment,
+        }
+    }
+}
+
+impl Event for ConditionAuditEvent {
+    fn clone_box(&self) -> Box<dyn Event + Send> {
+        Box::new(self.clone())
+    }
+
+    fn get_field(
+        &self,
+        _type_definition_id: &NodeId,
+        attribute_id: AttributeId,
+        index_range: &NumericRange,
+        browse_path: &[QualifiedName],
+    ) -> Variant {
+        self.get_value(attribute_id, index_range, browse_path)
+    }
+
+    fn time(&self) -> &DateTime {
+        &self.base.time
+    }
+
+    fn event_type_id(&self) -> &NodeId {
+        &self.base.event_type
+    }
+}
+
+impl EventField for ConditionAuditEvent {
+    fn get_value(
+        &self,
+        attribute_id: AttributeId,
+        index_range: &NumericRange,
+        remaining_path: &[QualifiedName],
+    ) -> Variant {
+        if attribute_id != AttributeId::Value || remaining_path.len() != 1 {
+            return self.base.get_value(attribute_id, index_range, remaining_path);
+        }
+
+        match remaining_path[0].name.as_ref() {
+            "Status" => Variant::from(self.status),
+            // Not "ConditionId": OPC-10000-9 §5.10.2 declares `ConditionEventId` on
+            // AuditConditionEventType, inherited by every subtype — `ConditionId` is an
+            // `AlarmEvent`-only field from a different type hierarchy (ConditionType).
+            "ConditionEventId" => Variant::from(self.condition_event_id.clone()),
+            "Comment" => match &self.comment {
+                Some(text) => Variant::from(text.clone()),
+                None => Variant::from(LocalizedText::null()),
+            },
+            _ => self.base.get_value(attribute_id, index_range, remaining_path),
+        }
+    }
+}
+
+fn notify_condition_audit_event(context: &RequestContext, event: &ConditionAuditEvent) {
+    let items = std::iter::once((event as &dyn Event, &event.notify_target));
+    context.subscriptions.notify_events(items);
+}
+
+/// Emits `AuditConditionEnableEventType` (OPC-10000-9 §5.10.2/§5.10.3) for Enable/Disable.
+fn notify_enable_audit_event(
+    context: &RequestContext,
+    condition: &ConditionStateMachine,
+    action: &str,
+    status_code: StatusCode,
+) {
+    let event = ConditionAuditEvent::new(
+        ObjectTypeId::AuditConditionEnableEventType,
+        action,
+        condition,
+        status_code,
+        None,
+    );
+    notify_condition_audit_event(context, &event);
+}
+
+/// Emits `AuditConditionOutOfServiceEventType` (OPC-10000-9 §5.10.12) for RemoveFromService/
+/// PlaceInService.
+fn notify_out_of_service_audit_event(
+    context: &RequestContext,
+    condition: &ConditionStateMachine,
+    action: &str,
+    status_code: StatusCode,
+) {
+    let event = ConditionAuditEvent::new(
+        ObjectTypeId::AuditConditionOutOfServiceEventType,
+        action,
+        condition,
+        status_code,
+        None,
+    );
+    notify_condition_audit_event(context, &event);
 }
 
 /// Registers standard ConditionRefresh, ConditionRefresh2, AddComment, Acknowledge, and Confirm method callbacks.

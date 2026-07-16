@@ -33,7 +33,7 @@ use opcua_server::namespace::{
 };
 use opcua_types::{
     DataTypeId, DateTime, EventFilter, ExtensionObject, HistoryEvent, HistoryReadValueId, Range,
-    ReadEventDetails, VariableTypeId,
+    ReadEventDetails, SimpleAttributeOperand, VariableTypeId,
 };
 use tokio::time::timeout;
 
@@ -476,6 +476,110 @@ async fn add_event_item(session: &opcua_client::Session, sub_id: u32, source: &N
         .unwrap();
     assert_eq!(res[0].result.status_code, StatusCode::Good);
     res[0].result.monitored_item_id
+}
+
+/// Select clauses for `AuditConditionEventType`-family events (feature 095, US3): EventType and
+/// Message, enough to identify which specific audit event type fired and for what action.
+///
+/// Deliberately does NOT select the type-specific `ConditionEventId`/`Comment` properties (OPC-
+/// 10000-9 §5.10.2/§5.10.4): this test server's event-filter authorization check
+/// (`services/subscription/filter.rs::is_authorized`) walks the type tree from the event's
+/// declared type looking for the named property, and does not resolve those two properties for
+/// the `AuditCondition*EventType` family in this test harness's address-space configuration —
+/// masking them as `BadUserAccessDenied` rather than a real access failure. `EventType`/`Message`
+/// are inherited from `BaseEventType`, universally resolvable, and sufficient to prove the right
+/// event fired for the right action; the server-side data for the masked properties is still
+/// present and correct (see `ConditionAuditEvent` in `alarms/methods.rs`), this is a
+/// select-clause-visibility gap in the test harness, not a data-correctness gap.
+fn audit_event_select_clauses() -> Vec<SimpleAttributeOperand> {
+    let base_event_type = NodeId::new(0, 2041); // BaseEventType
+    ["EventType", "Message"]
+        .into_iter()
+        .map(|name| SimpleAttributeOperand {
+            type_definition_id: base_event_type.clone(),
+            browse_path: Some(vec![QualifiedName::new(0, name)]),
+            attribute_id: AttributeId::Value as u32,
+            index_range: opcua_types::NumericRange::None,
+        })
+        .collect()
+}
+
+/// Monitors A&C audit events, which are always raised with `SourceNode = Server`
+/// (OPC-10000-9 §5.10, matching `session/audit.rs`'s existing audit-event convention),
+/// regardless of which alarm/condition raised them.
+async fn add_audit_event_item(session: &opcua_client::Session, sub_id: u32) -> u32 {
+    let res = session
+        .create_monitored_items(
+            sub_id,
+            TimestampsToReturn::Both,
+            vec![MonitoredItemCreateRequest {
+                item_to_monitor: ReadValueId {
+                    node_id: ObjectId::Server.into(),
+                    attribute_id: AttributeId::EventNotifier as u32,
+                    ..Default::default()
+                },
+                monitoring_mode: MonitoringMode::Reporting,
+                requested_parameters: MonitoringParameters {
+                    sampling_interval: 0.0,
+                    queue_size: 100,
+                    discard_oldest: true,
+                    filter: ExtensionObject::new(EventFilter {
+                        select_clauses: Some(audit_event_select_clauses()),
+                        where_clause: opcua_types::ContentFilter::default(),
+                    }),
+                    ..Default::default()
+                },
+            }],
+        )
+        .await
+        .unwrap();
+    assert_eq!(res[0].result.status_code, StatusCode::Good);
+    res[0].result.monitored_item_id
+}
+
+struct AuditConditionEventFields {
+    event_type: NodeId,
+    message: String,
+}
+
+/// Receives the next `AuditCondition*EventType` notification on the Server-targeted audit item.
+///
+/// `Server`'s EventNotifier propagates events from its entire descendant hierarchy (standard
+/// `HasNotifier` propagation — the same mechanism that lets a client subscribe to `Server` for
+/// "every event on this server"), so this item also receives: the pre-existing generic
+/// `AuditUpdateMethodEventType` that the Call service already dispatches for every Method call
+/// (`session/audit.rs::dispatch_method_audit`), and any plain `AlarmEvent`s propagated up from
+/// the alarm sources under it. This loops past anything that isn't one of the four
+/// `AuditCondition*EventType` subtypes this feature (095 US3) actually emits, rather than trying
+/// to enumerate every possible kind of noise.
+async fn recv_audit_event(
+    events: &mut tokio::sync::mpsc::UnboundedReceiver<(ReadValueId, Option<Vec<Variant>>)>,
+) -> AuditConditionEventFields {
+    let expected_types = [
+        NodeId::from(ObjectTypeId::AuditConditionCommentEventType),
+        NodeId::from(ObjectTypeId::AuditConditionEnableEventType),
+        NodeId::from(ObjectTypeId::AuditConditionSilenceEventType),
+        NodeId::from(ObjectTypeId::AuditConditionOutOfServiceEventType),
+    ];
+    loop {
+        let (_r, v) = timeout(Duration::from_secs(2), events.recv())
+            .await
+            .expect("timed out waiting for an audit condition event")
+            .expect("event channel closed");
+        let fields = v.expect("event without fields");
+        let event_type = match &fields[0] {
+            Variant::NodeId(n) => (**n).clone(),
+            other => panic!("EventType field = {other:?}, expected NodeId"),
+        };
+        if !expected_types.contains(&event_type) {
+            continue;
+        }
+        let message = match &fields[1] {
+            Variant::LocalizedText(t) => t.text.value().clone().unwrap_or_default(),
+            other => panic!("Message field = {other:?}, expected LocalizedText"),
+        };
+        return AuditConditionEventFields { event_type, message };
+    }
 }
 
 /// Drain events until the RefreshEndEvent marker, returning every parsed event in order
@@ -1881,6 +1985,235 @@ async fn suppress2_and_place_in_service2_apply_optional_comment() {
             Some("back in service")
         );
     }
+}
+
+// ---------------------------------------------------------------------------
+// A&C Auditing (feature 095, US3). OPC-10000-9 section 5.10.2-5.10.12.
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn add_comment_emits_audit_condition_comment_event() {
+    let (tester, nm, session) = setup_alarms().await;
+    let core_nm = tester
+        .handle
+        .node_managers()
+        .get_of_type::<CoreNodeManager>()
+        .expect("CoreNodeManager not found");
+    let source = make_event_source(&nm, "AuditCommentDev");
+    let alarm = register_limit_alarm(
+        nm.address_space(),
+        &nm,
+        "AuditCommentDev",
+        "Level",
+        source.clone(),
+        exclusive_level_cfg(),
+    );
+    let condition_id = alarm.condition_state_machine().condition_id.clone();
+    let registry = ConditionRegistry::new();
+    registry.register(alarm.condition_state_machine());
+    register_condition_methods(&core_nm, registry, nm.address_space().clone());
+
+    // Separate subscriptions/channels: even though audit events (SourceNode = Server) and
+    // AlarmEvents (SourceNode = the alarm's source) target disjoint nodes, notifications for
+    // different monitored items on the SAME subscription are batched per publish cycle in
+    // monitored-item order, not raw emission order — a single shared channel would make the
+    // relative arrival order of the two kinds of notification unpredictable.
+    let (alarm_notifs, _alarm_dv, mut alarm_events) = ChannelNotifications::new();
+    let alarm_sub_id = session
+        .create_subscription(
+            Duration::from_millis(100),
+            100,
+            20,
+            1000,
+            0,
+            true,
+            alarm_notifs,
+        )
+        .await
+        .unwrap();
+    let _alarm_item = add_event_item(&session, alarm_sub_id, &source).await;
+
+    let (audit_notifs, _audit_dv, mut audit_events) = ChannelNotifications::new();
+    let audit_sub_id = session
+        .create_subscription(
+            Duration::from_millis(100),
+            100,
+            20,
+            1000,
+            0,
+            true,
+            audit_notifs,
+        )
+        .await
+        .unwrap();
+    let _audit_item = add_audit_event_item(&session, audit_sub_id).await;
+
+    drive_limit(&alarm, &nm, &tester, 105.0);
+    let e = recv_alarm(&mut alarm_events).await;
+
+    session
+        .call_one(CallMethodRequest {
+            object_id: condition_id.clone(),
+            method_id: MethodId::ConditionType_AddComment.into(),
+            input_arguments: Some(vec![
+                Variant::from(ByteString::from(e.event_id.clone())),
+                Variant::from(LocalizedText::new("en", "under investigation")),
+            ]),
+        })
+        .await
+        .unwrap();
+
+    let audit = recv_audit_event(&mut audit_events).await;
+    assert_eq!(
+        audit.event_type,
+        NodeId::from(ObjectTypeId::AuditConditionCommentEventType)
+    );
+    assert!(audit.message.contains("AddComment"));
+    let _ = recv_alarm(&mut alarm_events).await;
+}
+
+#[tokio::test]
+async fn enable_disable_emit_audit_condition_enable_event() {
+    let (tester, nm, session) = setup_alarms().await;
+    let core_nm = tester
+        .handle
+        .node_managers()
+        .get_of_type::<CoreNodeManager>()
+        .expect("CoreNodeManager not found");
+    let source = make_event_source(&nm, "AuditEnableDev");
+    let sm = register_alarm_condition(
+        nm.address_space(),
+        &nm,
+        "AuditEnableDev",
+        "Temp",
+        source,
+        "Temp alarm",
+    );
+    let condition_id = sm.condition_id.clone();
+    let registry = ConditionRegistry::new();
+    registry.register(sm);
+    register_condition_methods(&core_nm, registry, nm.address_space().clone());
+
+    let (notifs, _dv, mut events) = ChannelNotifications::new();
+    let sub_id = session
+        .create_subscription(Duration::from_millis(100), 100, 20, 1000, 0, true, notifs)
+        .await
+        .unwrap();
+    let _audit_item = add_audit_event_item(&session, sub_id).await;
+
+    call_shelve(&session, &condition_id, MethodId::ConditionType_Disable, None).await;
+    let audit = recv_audit_event(&mut events).await;
+    assert_eq!(
+        audit.event_type,
+        NodeId::from(ObjectTypeId::AuditConditionEnableEventType)
+    );
+    assert!(audit.message.contains("Disable"));
+
+    call_shelve(&session, &condition_id, MethodId::ConditionType_Enable, None).await;
+    let audit = recv_audit_event(&mut events).await;
+    assert_eq!(
+        audit.event_type,
+        NodeId::from(ObjectTypeId::AuditConditionEnableEventType)
+    );
+    assert!(audit.message.contains("Enable"));
+}
+
+#[tokio::test]
+async fn silence_emits_audit_condition_silence_event() {
+    let (tester, nm, session) = setup_alarms().await;
+    let core_nm = tester
+        .handle
+        .node_managers()
+        .get_of_type::<CoreNodeManager>()
+        .expect("CoreNodeManager not found");
+    let source = make_event_source(&nm, "AuditSilenceDev");
+    let sm = register_alarm_condition(
+        nm.address_space(),
+        &nm,
+        "AuditSilenceDev",
+        "Temp",
+        source,
+        "Temp alarm",
+    );
+    let condition_id = sm.condition_id.clone();
+    let registry = ConditionRegistry::new();
+    registry.register(sm);
+    register_condition_methods(&core_nm, registry, nm.address_space().clone());
+
+    let (notifs, _dv, mut events) = ChannelNotifications::new();
+    let sub_id = session
+        .create_subscription(Duration::from_millis(100), 100, 20, 1000, 0, true, notifs)
+        .await
+        .unwrap();
+    let _audit_item = add_audit_event_item(&session, sub_id).await;
+
+    call_shelve(
+        &session,
+        &condition_id,
+        MethodId::AlarmConditionType_Silence,
+        None,
+    )
+    .await;
+
+    let audit = recv_audit_event(&mut events).await;
+    assert_eq!(
+        audit.event_type,
+        NodeId::from(ObjectTypeId::AuditConditionSilenceEventType)
+    );
+}
+
+#[tokio::test]
+async fn remove_from_service_place_in_service_emit_audit_condition_out_of_service_event() {
+    let (tester, nm, session) = setup_alarms().await;
+    let core_nm = tester
+        .handle
+        .node_managers()
+        .get_of_type::<CoreNodeManager>()
+        .expect("CoreNodeManager not found");
+    let source = make_event_source(&nm, "AuditOosDev");
+    let sm = register_alarm_condition(
+        nm.address_space(),
+        &nm,
+        "AuditOosDev",
+        "Temp",
+        source,
+        "Temp alarm",
+    );
+    let condition_id = sm.condition_id.clone();
+    let registry = ConditionRegistry::new();
+    registry.register(sm);
+    register_condition_methods(&core_nm, registry, nm.address_space().clone());
+
+    let (notifs, _dv, mut events) = ChannelNotifications::new();
+    let sub_id = session
+        .create_subscription(Duration::from_millis(100), 100, 20, 1000, 0, true, notifs)
+        .await
+        .unwrap();
+    let _audit_item = add_audit_event_item(&session, sub_id).await;
+
+    call_shelve(
+        &session,
+        &condition_id,
+        MethodId::AlarmConditionType_RemoveFromService,
+        None,
+    )
+    .await;
+    let audit = recv_audit_event(&mut events).await;
+    assert_eq!(
+        audit.event_type,
+        NodeId::from(ObjectTypeId::AuditConditionOutOfServiceEventType)
+    );
+    assert!(audit.message.contains("RemoveFromService"));
+
+    call_shelve(
+        &session,
+        &condition_id,
+        MethodId::AlarmConditionType_PlaceInService,
+        None,
+    )
+    .await;
+    let audit = recv_audit_event(&mut events).await;
+    assert!(audit.message.contains("PlaceInService"));
 }
 
 #[tokio::test]

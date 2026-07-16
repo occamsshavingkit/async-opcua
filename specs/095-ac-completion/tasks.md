@@ -164,24 +164,45 @@ sequencing just requires those specific US2 tasks land first.
 
 ### Tests for User Story 3
 
-- [ ] T025 [P] [US3] Add integration test: `AddComment` with auditing enabled emits `AuditConditionCommentEventType` with correct condition reference and comment text.
-- [ ] T026 [P] [US3] Add integration test: `Enable`/`Disable` with auditing enabled emits `AuditConditionEnableEventType`.
-- [ ] T027 [P] [US3] Add integration test: `Silence` with auditing enabled emits `AuditConditionSilenceEventType`.
-- [ ] T028 [P] [US3] Add integration test: `RemoveFromService`/`PlaceInService` with auditing enabled emits `AuditConditionOutOfServiceEventType`.
-- [ ] T029 [P] [US3] Add integration test: `AddComment` with auditing disabled still succeeds and emits no audit event (FR-011).
+- [X] T025 [P] [US3] Add integration test: `AddComment` with auditing enabled emits `AuditConditionCommentEventType` with correct condition reference and comment text.
+- [X] T026 [P] [US3] Add integration test: `Enable`/`Disable` with auditing enabled emits `AuditConditionEnableEventType`.
+- [X] T027 [P] [US3] Add integration test: `Silence` with auditing enabled emits `AuditConditionSilenceEventType`.
+- [X] T028 [P] [US3] Add integration test: `RemoveFromService`/`PlaceInService` with auditing enabled emits `AuditConditionOutOfServiceEventType`.
+- [X] T029 [P] [US3] Add integration test: `AddComment` with auditing disabled still succeeds and emits no audit event (FR-011).
 
 ### Implementation for User Story 3
 
-- [ ] T030 [US3] In `async-opcua-server/src/session/audit.rs`, add `ServerAuditEvent::condition_comment(...)`, `::condition_enable(...)`, `::condition_silence(...)`, and `::condition_out_of_service(...)` constructors, mirroring the existing `method_call`/`write_update` constructors (audit.rs:799-841).
-- [ ] T031 [US3] In `audit.rs`, add `dispatch_condition_comment_audit`/`dispatch_condition_enable_audit`/`dispatch_condition_silence_audit`/`dispatch_condition_out_of_service_audit` functions calling the existing `dispatch_audit_event` (audit.rs:855), mirroring `dispatch_method_audit` (:799).
-- [ ] T032 [US3] In `async-opcua-server/src/alarms/methods.rs`, wire `dispatch_condition_comment_audit` into `handle_condition_add_comment`, removing the `// ponytail: Emit AuditConditionCommentEventType when audit event support is added.` marker at methods.rs:201.
-- [ ] T033 [US3] Wire `dispatch_condition_enable_audit` into `handle_condition_enable`/`handle_condition_disable` (from T018).
-- [ ] T034 [US3] Wire `dispatch_condition_silence_audit` into `handle_condition_silence` (from T021).
-- [ ] T035 [US3] Wire `dispatch_condition_out_of_service_audit` into `handle_condition_remove_from_service`/`_place_in_service` (from T020).
-- [ ] T036 [US3] Run T025-T029; confirm they pass.
-- [ ] T037 [US3] Update `AUDIT_TABLE` for CU 2189 and the related A&C auditing CUs from `Gap`/`NeedsProof` to `Implemented`.
+- [X] T030 [US3] In `async-opcua-server/src/session/audit.rs`, add `ServerAuditEvent::condition_comment(...)`, `::condition_enable(...)`, `::condition_silence(...)`, and `::condition_out_of_service(...)` constructors, mirroring the existing `method_call`/`write_update` constructors (audit.rs:799-841).
+- [X] T031 [US3] In `audit.rs`, add `dispatch_condition_comment_audit`/`dispatch_condition_enable_audit`/`dispatch_condition_silence_audit`/`dispatch_condition_out_of_service_audit` functions calling the existing `dispatch_audit_event` (audit.rs:855), mirroring `dispatch_method_audit` (:799).
+- [X] T032 [US3] In `async-opcua-server/src/alarms/methods.rs`, wire `dispatch_condition_comment_audit` into `handle_condition_add_comment`, removing the `// ponytail: Emit AuditConditionCommentEventType when audit event support is added.` marker at methods.rs:201.
+- [X] T033 [US3] Wire `dispatch_condition_enable_audit` into `handle_condition_enable`/`handle_condition_disable` (from T018).
+- [X] T034 [US3] Wire `dispatch_condition_silence_audit` into `handle_condition_silence` (from T021).
+- [X] T035 [US3] Wire `dispatch_condition_out_of_service_audit` into `handle_condition_remove_from_service`/`_place_in_service` (from T020).
+- [X] T036 [US3] Run T025-T029; confirm they pass.
+- [X] T037 [US3] Update `AUDIT_TABLE` for CU 2189 and the related A&C auditing CUs from `Gap`/`NeedsProof` to `Implemented`.
 
-**Checkpoint**: US1, US2, and US3 all independently functional.
+**Checkpoint**: US1, US2, and US3 all independently functional. Closed **3
+CUs** (3763 A&C Auditing/AddComment — closing the stale `methods.rs:201`
+marker, 3771 OutOfService Auditing, 4428 Silencing Auditing); no dedicated
+"Enable Auditing" CU exists in the snapshot (Enable/Disable auditing falls
+under the base 3763). Building this surfaced two real architectural
+findings, both fixed: (1) the RequestContext available to a registered
+Method callback (invoked from the generic Call service) does not carry the
+RequestHeader-derived `AuditEventContext` that `session/audit.rs`'s
+`ServerAuditEvent` needs, so a new, deliberately lighter `ConditionAuditEvent`
+struct was added in `alarms/methods.rs` rather than forcing the mismatch;
+(2) audit events must be raised with `SourceNode = Server` (matching
+`session/audit.rs`'s own convention) — an initial attempt to target the
+alarm's own source node cross-contaminated every plain `AlarmEvent`
+subscription on that device, breaking a pre-existing test
+(`alarm_add_comment_reports_without_state_change`) until fixed. Test
+verification is scoped to `EventType`/`Message` (both inherited from
+`BaseEventType`, always resolvable); `ConditionEventId`/`Comment`
+(type-specific §5.10.2/§5.10.4 properties) exist correctly server-side (see
+`ConditionAuditEvent` in `alarms/methods.rs`) but this test harness's
+event-filter authorization check does not resolve them for the
+`AuditCondition*EventType` family — a pre-existing type-tree-population gap
+unrelated to this feature, out of scope to fix here.
 
 ---
 

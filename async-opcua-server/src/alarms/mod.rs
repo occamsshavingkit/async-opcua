@@ -3,11 +3,15 @@
 use crate::address_space::AddressSpace;
 use opcua_types::{NodeId, ReferenceTypeId};
 
+pub mod certificate_expiration;
+pub mod deviation;
 pub mod dialog;
+pub mod discrepancy;
 pub mod discrete;
 pub mod dispatch;
 pub mod limit;
 pub mod methods;
+pub mod rate_of_change;
 pub mod refresh_events;
 pub mod registry;
 pub mod source_monitor;
@@ -28,7 +32,10 @@ pub(crate) fn replace_condition_type_definition(
     address_space.insert_reference(condition_id, &new_type, ReferenceTypeId::HasTypeDefinition);
 }
 
+pub use certificate_expiration::CertificateExpirationAlarm;
+pub use deviation::DeviationAlarm;
 pub use dialog::{DialogCondition, DialogRegistry};
+pub use discrepancy::DiscrepancyAlarm;
 pub use discrete::{DiscreteAlarm, DiscreteAlarmKind};
 pub use dispatch::{dispatch_alarm_event, ServerAlarmEvent};
 pub use limit::{
@@ -38,6 +45,7 @@ pub use limit::{
 #[cfg(all(feature = "generated-address-space", feature = "method-call"))]
 pub use methods::{register_condition_methods, register_dialog_condition_methods};
 pub use methods::{AlarmMethodHandler, ConditionRefreshHandler};
+pub use rate_of_change::RateOfChangeAlarm;
 pub use refresh_events::{RefreshEndEvent, RefreshStartEvent};
 pub use registry::ConditionRegistry;
 pub use source_monitor::{AlarmSourceRegistry, SourceMonitoredAlarm};

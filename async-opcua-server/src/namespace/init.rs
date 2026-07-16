@@ -5,9 +5,12 @@
 use crate::address_space::AddressSpace;
 #[cfg(feature = "alarms")]
 use crate::alarms::{
-    read_eurange, ConditionStateMachine, DiscreteAlarm, DiscreteAlarmKind, LimitAlarm,
-    LimitAlarmKind, LimitConfig, LimitMode,
+    read_eurange, CertificateExpirationAlarm, ConditionStateMachine, DeviationAlarm,
+    DiscrepancyAlarm, DiscreteAlarm, DiscreteAlarmKind, LimitAlarm, LimitAlarmKind, LimitConfig,
+    LimitMode, RateOfChangeAlarm,
 };
+#[cfg(feature = "alarms")]
+use opcua_types::DateTime;
 #[cfg(feature = "alarms")]
 use opcua_types::{MethodId, NodeId, ReferenceTypeId, StatusCode, Variant};
 #[cfg(feature = "alarms")]
@@ -180,6 +183,196 @@ pub fn register_limit_alarm_checked(
         source_node_id,
         cfg,
     ))
+}
+
+/// Registers a new DeviationAlarm condition and exposes the standard Acknowledge/Confirm methods
+/// (`ExclusiveDeviationAlarmType`/`NonExclusiveDeviationAlarmType`, OPC-10000-9 §5.8.22).
+#[cfg(feature = "alarms")]
+pub fn register_deviation_alarm(
+    address_space: &Arc<opcua_core::sync::RwLock<AddressSpace>>,
+    _node_manager: &crate::node_manager::memory::SimpleNodeManager,
+    device: &str,
+    alarm_name: &str,
+    source_node_id: NodeId,
+    cfg: LimitConfig,
+) -> DeviationAlarm {
+    let alarm = {
+        let space = opcua_core::trace_write_lock!(address_space);
+        let ns = 2;
+
+        match cfg.mode {
+            LimitMode::Exclusive => DeviationAlarm::create_exclusive_in_address_space(
+                &space,
+                ns,
+                device,
+                alarm_name,
+                source_node_id,
+                cfg,
+            ),
+            LimitMode::NonExclusive => DeviationAlarm::create_non_exclusive_in_address_space(
+                &space,
+                ns,
+                device,
+                alarm_name,
+                source_node_id,
+                cfg,
+            ),
+        }
+    };
+
+    {
+        let space = opcua_core::trace_write_lock!(address_space);
+        space.insert_reference(
+            &alarm.condition_state_machine().condition_id,
+            &MethodId::AcknowledgeableConditionType_Acknowledge.into(),
+            ReferenceTypeId::HasComponent,
+        );
+        space.insert_reference(
+            &alarm.condition_state_machine().condition_id,
+            &MethodId::AcknowledgeableConditionType_Confirm.into(),
+            ReferenceTypeId::HasComponent,
+        );
+    }
+
+    alarm
+}
+
+/// Registers a new RateOfChangeAlarm condition and exposes the standard Acknowledge/Confirm
+/// methods (`ExclusiveRateOfChangeAlarmType`/`NonExclusiveRateOfChangeAlarmType`, OPC-10000-9
+/// §5.8.23).
+#[cfg(feature = "alarms")]
+pub fn register_rate_of_change_alarm(
+    address_space: &Arc<opcua_core::sync::RwLock<AddressSpace>>,
+    _node_manager: &crate::node_manager::memory::SimpleNodeManager,
+    device: &str,
+    alarm_name: &str,
+    source_node_id: NodeId,
+    cfg: LimitConfig,
+) -> RateOfChangeAlarm {
+    let alarm = {
+        let space = opcua_core::trace_write_lock!(address_space);
+        let ns = 2;
+
+        match cfg.mode {
+            LimitMode::Exclusive => RateOfChangeAlarm::create_exclusive_in_address_space(
+                &space,
+                ns,
+                device,
+                alarm_name,
+                source_node_id,
+                cfg,
+            ),
+            LimitMode::NonExclusive => RateOfChangeAlarm::create_non_exclusive_in_address_space(
+                &space,
+                ns,
+                device,
+                alarm_name,
+                source_node_id,
+                cfg,
+            ),
+        }
+    };
+
+    {
+        let space = opcua_core::trace_write_lock!(address_space);
+        space.insert_reference(
+            &alarm.condition_state_machine().condition_id,
+            &MethodId::AcknowledgeableConditionType_Acknowledge.into(),
+            ReferenceTypeId::HasComponent,
+        );
+        space.insert_reference(
+            &alarm.condition_state_machine().condition_id,
+            &MethodId::AcknowledgeableConditionType_Confirm.into(),
+            ReferenceTypeId::HasComponent,
+        );
+    }
+
+    alarm
+}
+
+/// Registers a new CertificateExpirationAlarm condition and exposes the standard
+/// Acknowledge/Confirm methods (`CertificateExpirationAlarmType`, OPC-10000-9 §5.8.24.7).
+#[cfg(feature = "alarms")]
+#[allow(clippy::too_many_arguments)]
+pub fn register_certificate_expiration_alarm(
+    address_space: &Arc<opcua_core::sync::RwLock<AddressSpace>>,
+    _node_manager: &crate::node_manager::memory::SimpleNodeManager,
+    device: &str,
+    alarm_name: &str,
+    source_node_id: NodeId,
+    expiration_date: DateTime,
+    expiration_limit_ms: f64,
+) -> CertificateExpirationAlarm {
+    let alarm = {
+        let space = opcua_core::trace_write_lock!(address_space);
+        CertificateExpirationAlarm::create_in_address_space(
+            &space,
+            2,
+            device,
+            alarm_name,
+            source_node_id,
+            expiration_date,
+            expiration_limit_ms,
+        )
+    };
+
+    {
+        let space = opcua_core::trace_write_lock!(address_space);
+        space.insert_reference(
+            &alarm.condition_state_machine().condition_id,
+            &MethodId::AcknowledgeableConditionType_Acknowledge.into(),
+            ReferenceTypeId::HasComponent,
+        );
+        space.insert_reference(
+            &alarm.condition_state_machine().condition_id,
+            &MethodId::AcknowledgeableConditionType_Confirm.into(),
+            ReferenceTypeId::HasComponent,
+        );
+    }
+
+    alarm
+}
+
+/// Registers a new DiscrepancyAlarm condition and exposes the standard Acknowledge/Confirm
+/// methods (`DiscrepancyAlarmType`, OPC-10000-9 §5.8.25).
+#[cfg(feature = "alarms")]
+pub fn register_discrepancy_alarm(
+    address_space: &Arc<opcua_core::sync::RwLock<AddressSpace>>,
+    _node_manager: &crate::node_manager::memory::SimpleNodeManager,
+    device: &str,
+    alarm_name: &str,
+    source_node_id: NodeId,
+    expected_time_ms: f64,
+    tolerance: f64,
+) -> DiscrepancyAlarm {
+    let alarm = {
+        let space = opcua_core::trace_write_lock!(address_space);
+        DiscrepancyAlarm::create_in_address_space(
+            &space,
+            2,
+            device,
+            alarm_name,
+            source_node_id,
+            expected_time_ms,
+            tolerance,
+        )
+    };
+
+    {
+        let space = opcua_core::trace_write_lock!(address_space);
+        space.insert_reference(
+            &alarm.condition_state_machine().condition_id,
+            &MethodId::AcknowledgeableConditionType_Acknowledge.into(),
+            ReferenceTypeId::HasComponent,
+        );
+        space.insert_reference(
+            &alarm.condition_state_machine().condition_id,
+            &MethodId::AcknowledgeableConditionType_Confirm.into(),
+            ReferenceTypeId::HasComponent,
+        );
+    }
+
+    alarm
 }
 
 /// Registers a new DiscreteAlarm condition and exposes the standard Acknowledge/Confirm methods.

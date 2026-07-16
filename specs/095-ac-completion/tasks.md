@@ -220,39 +220,36 @@ and re-alarm timing separately.
 ### Tests for User Story 4
 
 - [X] T038 [P] [US4] Add integration test: `ExclusiveLevelAlarmType`/`NonExclusiveLevelAlarmType` instance reports the correct `TypeDefinition` (not `ExclusiveLimitAlarmType`/`NonExclusiveLimitAlarmType`) and activates on threshold crossing (§5.8.21).
-- [ ] T039 [P] [US4] Add integration test: `ExclusiveDeviationAlarmType`/`NonExclusiveDeviationAlarmType` activates when the monitored value deviates from its configured `SetpointNode` beyond threshold (§5.8.22).
-- [ ] T040 [P] [US4] Add integration test: `ExclusiveRateOfChangeAlarmType`/`NonExclusiveRateOfChangeAlarmType` activates when the monitored value's rate of change exceeds a configured threshold (§5.8.23).
-- [ ] T041 [P] [US4] Add integration tests: `SystemOffNormalAlarmType` (§5.8.24.3), `CertificateExpirationAlarmType` using `ExpirationDate`/`ExpirationLimit` (§5.8.24.7), and `DiscrepancyAlarmType` using `TargetValueNode` (§5.8.25) each activate on their respective trigger.
-- [ ] T042 [P] [US4] Add integration test: an alarm configured with non-zero `OnDelay` does not activate until the delay elapses; `OffDelay` analogously for deactivation.
-- [ ] T043 [P] [US4] Add integration test: an alarm with `ReAlarmTime` configured re-notifies while active+unacknowledged, incrementing `ReAlarmRepeatCount` on each re-notification; confirm `ReAlarmRepeatCount` resets to 0 on acknowledge.
+- [X] T039 [P] [US4] Add integration test: `ExclusiveDeviationAlarmType`/`NonExclusiveDeviationAlarmType` activates when the monitored value deviates from its configured `SetpointNode` beyond threshold (§5.8.22).
+- [X] T040 [P] [US4] Add integration test: `ExclusiveRateOfChangeAlarmType`/`NonExclusiveRateOfChangeAlarmType` activates when the monitored value's rate of change exceeds a configured threshold (§5.8.23).
+- [X] T041 [P] [US4] Add integration tests: `SystemOffNormalAlarmType` (§5.8.24.3), `CertificateExpirationAlarmType` using `ExpirationDate`/`ExpirationLimit` (§5.8.24.7), and `DiscrepancyAlarmType` using `TargetValueNode` (§5.8.25) each activate on their respective trigger.
+- [X] T042 [P] [US4] Add integration test: an alarm configured with non-zero `OnDelay` does not activate until the delay elapses; `OffDelay` analogously for deactivation.
+- [X] T043 [P] [US4] Add integration test: an alarm with `ReAlarmTime` configured re-notifies while active+unacknowledged, incrementing `ReAlarmRepeatCount` on each re-notification; confirm `ReAlarmRepeatCount` resets to 0 on return to normal (grounding correction — Part 9 text resets the count on return-to-normal, not on acknowledge as originally assumed here).
 
 ### Implementation for User Story 4
 
 - [X] T044 [US4] In `async-opcua-server/src/alarms/limit.rs`, add a `LimitAlarmKind { Limit, Level }` enum with a `type_id()` method (mirroring `discrete.rs::DiscreteAlarmKind`, discrete.rs:19-23,172-176) returning `ObjectTypeId::ExclusiveLimitAlarmType`/`ExclusiveLevelAlarmType` (and non-exclusive counterparts); parameterize `create_exclusive_in_address_space` (limit.rs:357) and `create_non_exclusive_in_address_space` (:439) by this kind, replacing the hardcoded `ObjectTypeId::ExclusiveLimitAlarmType`/`NonExclusiveLimitAlarmType` at limit.rs:376/458.
-- [ ] T045 [US4] Add a `DeviationAlarm` evaluator + address-space wiring in `limit.rs` (or a new sibling module if it doesn't fit cleanly), using `ExclusiveDeviationAlarmType_SetpointNode`/`NonExclusiveDeviationAlarmType_SetpointNode` (generated NodeIds confirmed present) to reference the setpoint.
-- [ ] T046 [US4] Add a `RateOfChangeAlarm` evaluator + address-space wiring in `limit.rs` (or sibling module), tracking a configured rate window against successive monitored values.
-- [ ] T047 [US4] Add `SystemOffNormalAlarmType`/`CertificateExpirationAlarmType`/`DiscrepancyAlarmType` instantiation, following the `discrete.rs::DiscreteAlarmKind` pattern (either as new variants or a sibling kind enum); wire `CertificateExpirationAlarmType_ExpirationDate`/`_ExpirationLimit` and `DiscrepancyAlarmType_TargetValueNode` (generated NodeIds confirmed present).
-- [ ] T048 [US4] Add `OnDelay`/`OffDelay` timing state to the per-instance alarm evaluation path (`async-opcua-server/src/alarms/source_monitor.rs`), reading `AlarmConditionType_OnDelay`/`_OffDelay` and delaying activation/deactivation notification accordingly.
-- [ ] T049 [US4] Add `ReAlarmTime` re-notification logic to the same evaluation path, reading `AlarmConditionType_ReAlarmTime`; on each re-notification, increment and write `AlarmConditionType_ReAlarmRepeatCount` (server-maintained output counter, not client-configured — OPC-10000-9 §5.8.2), resetting it to 0 on acknowledge or deactivation.
-- [ ] T050 [US4] Add `AudibleSound`/`AudibleEnabled` property wiring (`AlarmConditionType_AudibleSound`/`_AudibleEnabled`), interacting with the US2 `Silence`/`SilenceState` mechanism (T017/T021).
-- [ ] T051 [US4] Run T038-T043; confirm they pass. Fix any evaluator/wiring mismatches found.
-- [ ] T052 [US4] Update `AUDIT_TABLE` for CUs 2236, 2239, 2323, 2390, 2746, 2861, 2877, 2879, 2881, 2946, 2951, 3001, and adjacent CUs from `Gap` to `Implemented`.
+- [X] T045 [US4] Add a `DeviationAlarm` evaluator + address-space wiring in `alarms/deviation.rs`, wrapping `LimitAlarm` (new `LimitAlarmKind::Deviation` variant) and evaluating `processValue - setpointValue`; `SetpointNode` property via a generalized `ensure_node_ref_property` helper shared with `InputNode`.
+- [X] T046 [US4] Add a `RateOfChangeAlarm` evaluator + address-space wiring in `alarms/rate_of_change.rs`, wrapping `LimitAlarm` (new `LimitAlarmKind::RateOfChange` variant) and evaluating a per-second rate between successive timestamped samples.
+- [X] T047 [US4] Add `SystemOffNormalAlarmType` (new `DiscreteAlarmKind::SystemOffNormal` variant, identical `OffNormalAlarmType` evaluation), `CertificateExpirationAlarmType` (`alarms/certificate_expiration.rs`, evaluates `ExpirationDate`/`ExpirationLimit` directly — a `SystemOffNormalAlarmType` subtype per grounding, not the `LimitAlarmType` family originally assumed), and `DiscrepancyAlarmType` (`alarms/discrepancy.rs`, `TargetValueNode`/`ExpectedTime`/`Tolerance` — based directly on `AlarmConditionType` per grounding, not `LimitAlarmType`).
+- [X] T048 [US4] Add `OnDelay`/`OffDelay` timing via `ConditionStateMachine::gate_active` (state_machine.rs) — the shared per-condition chokepoint every alarm kind's `set_active` call already funnels through — rather than `source_monitor.rs` (that module is a registry/trait, not an evaluation path); wired into `LimitAlarm::update_value_at`, covering Limit/Level/Deviation/RateOfChange. Only gates the false↔true transition itself; a same-state severity escalation (e.g. High→HighHigh) still reports immediately (regression caught and fixed via full-suite re-run).
+- [X] T049 [US4] Add `ReAlarmTime` re-notification via `ConditionStateMachine::maybe_re_alarm`/`reset_re_alarm`, wired into `LimitAlarm::update_value_at` alongside T048's gate; `ReAlarmRepeatCount` resets on return-to-normal (not acknowledge — corrected via OPC UA Part 9 grounding, matching Annex B.1.5's example of re-alarming an already-Acknowledged alarm).
+- [X] T050 [US4] Add `AudibleEnabled` (server-computed from active/acked/silenced, `ConditionStateMachine::recompute_audible_enabled`) and `AudibleSound` (modeled as a plain property — `AudioDataType` has no generated Rust type in this codebase); found and fixed a real spec-conformance gap in the process: `Acknowledge` did not auto-silence the alarm as OPC-10000-9 §5.8.2 requires ("Acknowledging an Alarm shall automatically silence an Alarm") — added to `transitions.rs::acknowledge_alarm`.
+- [X] T051 [US4] Run T038-T043; confirm they pass. Full `async-opcua-server` lib suite (333 tests) + full `async-opcua` integration suite (352 tests) both green; one real regression (severity escalation losing its event under the new delay gate) found and fixed via the full-suite re-run, not the targeted tests alone.
+- [X] T052 [US4] Updated `AUDIT_TABLE` for CUs 2236, 2239, 2323, 2390, 2746, 2861, 2877, 2879, 2881, 2946, 2951, 3001 from `Gap` to `Implemented`; regenerated `specs/conformance-tester/CU-COVERAGE.md`.
 
-**Checkpoint (partial)**: Only T038/T044 (the Level-alarm `TypeDefinition`
-fix) landed in this pass — the cheapest slice, a pure parameterization of
-already-correct evaluation logic. T045-T050 (Deviation, RateOfChange,
-SystemOffNormal, CertificateExpiration, Discrepancy, OnDelay/OffDelay,
-ReAlarm, AudibleSound) are genuinely new evaluator/timing logic, not
-parameterizations of existing code, and were deliberately deferred rather
-than implemented under time pressure without the same grounding/test/
-clippy rigor applied to US1-US3 — US3 alone surfaced multiple real,
-non-obvious architectural bugs (notification-routing target, event-filter
-authorization scoping) that only surfaced through actual test runs, and
-the remaining US4 items carry similar unknown-unknown risk. **Not** closed
-in this feature: CUs 2236 (CertificateExpiration), 2239 (SystemOffNormal),
-2323/2946 (RateOfChange), 2390/2951 (Deviation), 2861 (Discrepancy),
-2877 (OnDelay/OffDelay), 2879 (ReAlarm), 2881 (AudibleSound) — see TODO.md
-for the itemized follow-up.
+**Checkpoint**: US4 fully closed. All six missing alarm subtypes
+(Level/Deviation/RateOfChange/SystemOffNormal/CertificateExpiration/
+Discrepancy) instantiate with correct `TypeDefinition`s, and all five
+`AlarmConditionType` timing/audible properties (OnDelay/OffDelay/
+ReAlarmTime/ReAlarmRepeatCount/AudibleSound/AudibleEnabled) are wired and
+tested. Grounding against the local OPC-10000-9 PDF corrected three
+assumptions baked into this task list: (1) `CertificateExpirationAlarmType`
+subtypes `SystemOffNormalAlarmType`, not `LimitAlarmType`; (2)
+`DiscrepancyAlarmType` is based directly on `AlarmConditionType`, not
+`LimitAlarmType`; (3) `ReAlarmRepeatCount` resets on return-to-normal, not
+on acknowledge. All 12 target CUs closed Gap → Implemented; see TODO.md
+for the (unrelated) wider conformance backlog.
 
 ---
 

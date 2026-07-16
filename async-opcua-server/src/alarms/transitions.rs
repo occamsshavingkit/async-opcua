@@ -79,6 +79,8 @@ pub fn acknowledge_alarm(
     }
 
     state_machine.set_acked(address_space, true);
+    // OPC-10000-9 §5.8.2: "Acknowledging an Alarm shall automatically silence an Alarm."
+    state_machine.set_silenced(address_space, true);
 
     let active = state_machine.get_active(address_space);
     let confirmed = state_machine.get_confirmed(address_space);

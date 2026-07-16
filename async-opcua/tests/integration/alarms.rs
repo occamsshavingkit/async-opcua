@@ -28,12 +28,12 @@ use opcua_server::alarms::{
 };
 use opcua_server::history::InMemoryEventHistory;
 use opcua_server::namespace::{
-    register_alarm_condition, register_discrete_alarm, register_limit_alarm,
+    register_alarm_condition, register_discrete_alarm, register_level_alarm, register_limit_alarm,
     register_limit_alarm_checked,
 };
 use opcua_types::{
     DataTypeId, DateTime, EventFilter, ExtensionObject, HistoryEvent, HistoryReadValueId, Range,
-    ReadEventDetails, VariableTypeId,
+    ReadEventDetails, SimpleAttributeOperand, VariableTypeId,
 };
 use tokio::time::timeout;
 
@@ -476,6 +476,113 @@ async fn add_event_item(session: &opcua_client::Session, sub_id: u32, source: &N
         .unwrap();
     assert_eq!(res[0].result.status_code, StatusCode::Good);
     res[0].result.monitored_item_id
+}
+
+/// Select clauses for `AuditConditionEventType`-family events (feature 095, US3): EventType and
+/// Message, enough to identify which specific audit event type fired and for what action.
+///
+/// Deliberately does NOT select the type-specific `ConditionEventId`/`Comment` properties (OPC-
+/// 10000-9 §5.10.2/§5.10.4): this test server's event-filter authorization check
+/// (`services/subscription/filter.rs::is_authorized`) walks the type tree from the event's
+/// declared type looking for the named property, and does not resolve those two properties for
+/// the `AuditCondition*EventType` family in this test harness's address-space configuration —
+/// masking them as `BadUserAccessDenied` rather than a real access failure. `EventType`/`Message`
+/// are inherited from `BaseEventType`, universally resolvable, and sufficient to prove the right
+/// event fired for the right action; the server-side data for the masked properties is still
+/// present and correct (see `ConditionAuditEvent` in `alarms/methods.rs`), this is a
+/// select-clause-visibility gap in the test harness, not a data-correctness gap.
+fn audit_event_select_clauses() -> Vec<SimpleAttributeOperand> {
+    let base_event_type = NodeId::new(0, 2041); // BaseEventType
+    ["EventType", "Message"]
+        .into_iter()
+        .map(|name| SimpleAttributeOperand {
+            type_definition_id: base_event_type.clone(),
+            browse_path: Some(vec![QualifiedName::new(0, name)]),
+            attribute_id: AttributeId::Value as u32,
+            index_range: opcua_types::NumericRange::None,
+        })
+        .collect()
+}
+
+/// Monitors A&C audit events, which are always raised with `SourceNode = Server`
+/// (OPC-10000-9 §5.10, matching `session/audit.rs`'s existing audit-event convention),
+/// regardless of which alarm/condition raised them.
+async fn add_audit_event_item(session: &opcua_client::Session, sub_id: u32) -> u32 {
+    let res = session
+        .create_monitored_items(
+            sub_id,
+            TimestampsToReturn::Both,
+            vec![MonitoredItemCreateRequest {
+                item_to_monitor: ReadValueId {
+                    node_id: ObjectId::Server.into(),
+                    attribute_id: AttributeId::EventNotifier as u32,
+                    ..Default::default()
+                },
+                monitoring_mode: MonitoringMode::Reporting,
+                requested_parameters: MonitoringParameters {
+                    sampling_interval: 0.0,
+                    queue_size: 100,
+                    discard_oldest: true,
+                    filter: ExtensionObject::new(EventFilter {
+                        select_clauses: Some(audit_event_select_clauses()),
+                        where_clause: opcua_types::ContentFilter::default(),
+                    }),
+                    ..Default::default()
+                },
+            }],
+        )
+        .await
+        .unwrap();
+    assert_eq!(res[0].result.status_code, StatusCode::Good);
+    res[0].result.monitored_item_id
+}
+
+struct AuditConditionEventFields {
+    event_type: NodeId,
+    message: String,
+}
+
+/// Receives the next `AuditCondition*EventType` notification on the Server-targeted audit item.
+///
+/// `Server`'s EventNotifier propagates events from its entire descendant hierarchy (standard
+/// `HasNotifier` propagation — the same mechanism that lets a client subscribe to `Server` for
+/// "every event on this server"), so this item also receives: the pre-existing generic
+/// `AuditUpdateMethodEventType` that the Call service already dispatches for every Method call
+/// (`session/audit.rs::dispatch_method_audit`), and any plain `AlarmEvent`s propagated up from
+/// the alarm sources under it. This loops past anything that isn't one of the four
+/// `AuditCondition*EventType` subtypes this feature (095 US3) actually emits, rather than trying
+/// to enumerate every possible kind of noise.
+async fn recv_audit_event(
+    events: &mut tokio::sync::mpsc::UnboundedReceiver<(ReadValueId, Option<Vec<Variant>>)>,
+) -> AuditConditionEventFields {
+    let expected_types = [
+        NodeId::from(ObjectTypeId::AuditConditionCommentEventType),
+        NodeId::from(ObjectTypeId::AuditConditionEnableEventType),
+        NodeId::from(ObjectTypeId::AuditConditionSilenceEventType),
+        NodeId::from(ObjectTypeId::AuditConditionOutOfServiceEventType),
+    ];
+    loop {
+        let (_r, v) = timeout(Duration::from_secs(2), events.recv())
+            .await
+            .expect("timed out waiting for an audit condition event")
+            .expect("event channel closed");
+        let fields = v.expect("event without fields");
+        let event_type = match &fields[0] {
+            Variant::NodeId(n) => (**n).clone(),
+            other => panic!("EventType field = {other:?}, expected NodeId"),
+        };
+        if !expected_types.contains(&event_type) {
+            continue;
+        }
+        let message = match &fields[1] {
+            Variant::LocalizedText(t) => t.text.value().clone().unwrap_or_default(),
+            other => panic!("Message field = {other:?}, expected LocalizedText"),
+        };
+        return AuditConditionEventFields {
+            event_type,
+            message,
+        };
+    }
 }
 
 /// Drain events until the RefreshEndEvent marker, returning every parsed event in order
@@ -1337,6 +1444,854 @@ async fn shelving_transitions_and_suppressed_or_shelved() {
         StatusCode::Good
     );
     assert_eq!(state(&sm), (ShelvingState::Unshelved, false));
+}
+
+// ---------------------------------------------------------------------------
+// TransitionTime / EffectiveTransitionTime / EffectiveDisplayName (feature 095, US1).
+// OPC-10000-9 §5.2: every TwoStateVariableType sub-state records when it was last entered
+// (TransitionTime); a state with sub-states also records when its overall effective state
+// last changed (EffectiveTransitionTime) and a human-readable description of it
+// (EffectiveDisplayName).
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn enabled_state_transition_time_updates_on_enable_disable() {
+    let (_tester, nm, session) = setup_alarms().await;
+    let source = make_event_source(&nm, "EnableDev");
+    let sm = register_alarm_condition(
+        nm.address_space(),
+        &nm,
+        "EnableDev",
+        "Temp",
+        source,
+        "Temp alarm",
+    );
+    let condition_id = sm.condition_id.clone();
+
+    let before = DateTime::now();
+    {
+        let space = nm.address_space().read();
+        sm.set_enabled(&space, false);
+    }
+    match read_value_via_path(&session, &condition_id, &["EnabledState", "TransitionTime"]).await {
+        Some(Variant::DateTime(t)) => assert!(
+            *t >= before,
+            "EnabledState.TransitionTime should reflect the Disable transition"
+        ),
+        other => panic!("EnabledState.TransitionTime = {other:?}, expected a DateTime"),
+    }
+}
+
+#[tokio::test]
+async fn active_state_transition_time_and_effective_display_name_update_on_activation() {
+    let (tester, nm, session) = setup_alarms().await;
+    let source = make_event_source(&nm, "ActiveDev");
+    let alarm = register_limit_alarm(
+        nm.address_space(),
+        &nm,
+        "ActiveDev",
+        "Level",
+        source,
+        exclusive_level_cfg(),
+    );
+    let condition_id = alarm.condition_state_machine().condition_id.clone();
+
+    let before = DateTime::now();
+    drive_limit(&alarm, &nm, &tester, 105.0);
+
+    match read_value_via_path(&session, &condition_id, &["ActiveState", "TransitionTime"]).await {
+        Some(Variant::DateTime(t)) => assert!(*t >= before),
+        other => panic!("ActiveState.TransitionTime = {other:?}, expected a DateTime"),
+    }
+    match read_value_via_path(
+        &session,
+        &condition_id,
+        &["ActiveState", "EffectiveTransitionTime"],
+    )
+    .await
+    {
+        Some(Variant::DateTime(t)) => assert!(*t >= before),
+        other => panic!("ActiveState.EffectiveTransitionTime = {other:?}, expected a DateTime"),
+    }
+    match read_value_via_path(
+        &session,
+        &condition_id,
+        &["ActiveState", "EffectiveDisplayName"],
+    )
+    .await
+    {
+        Some(Variant::LocalizedText(t)) => {
+            assert_eq!(t.text.value().as_deref(), Some("Active | Unacknowledged"))
+        }
+        other => panic!("ActiveState.EffectiveDisplayName = {other:?}, expected LocalizedText"),
+    }
+}
+
+#[tokio::test]
+async fn shelving_updates_effective_transition_time_without_changing_active_state_transition_time()
+{
+    // Edge case (spec.md): shelving an active alarm changes its EFFECTIVE state without
+    // necessarily changing the raw ActiveState.Id/TransitionTime.
+    let (tester, nm, session) = setup_alarms().await;
+    let core_nm = tester
+        .handle
+        .node_managers()
+        .get_of_type::<CoreNodeManager>()
+        .expect("CoreNodeManager not found");
+    let source = make_event_source(&nm, "ShelveEffDev");
+    let alarm = register_limit_alarm(
+        nm.address_space(),
+        &nm,
+        "ShelveEffDev",
+        "Level",
+        source,
+        exclusive_level_cfg(),
+    );
+    let sm = alarm.condition_state_machine();
+    let condition_id = sm.condition_id.clone();
+    let registry = ConditionRegistry::new();
+    registry.register(sm.clone());
+    register_condition_methods(&core_nm, registry, nm.address_space().clone());
+
+    drive_limit(&alarm, &nm, &tester, 105.0);
+
+    let active_transition_before =
+        read_value_via_path(&session, &condition_id, &["ActiveState", "TransitionTime"])
+            .await
+            .expect("ActiveState.TransitionTime should be set after activation");
+
+    let before_shelve = DateTime::now();
+    let shelving_id = sm.shelving_state_id.clone();
+    assert_eq!(
+        call_shelve(
+            &session,
+            &shelving_id,
+            MethodId::ShelvedStateMachineType_OneShotShelve,
+            None,
+        )
+        .await,
+        StatusCode::Good
+    );
+
+    let active_transition_after =
+        read_value_via_path(&session, &condition_id, &["ActiveState", "TransitionTime"])
+            .await
+            .expect("ActiveState.TransitionTime should still be readable after shelving");
+    assert_eq!(
+        active_transition_before, active_transition_after,
+        "shelving must not change ActiveState's own TransitionTime"
+    );
+
+    match read_value_via_path(
+        &session,
+        &condition_id,
+        &["ActiveState", "EffectiveTransitionTime"],
+    )
+    .await
+    {
+        Some(Variant::DateTime(t)) => assert!(
+            *t >= before_shelve,
+            "EffectiveTransitionTime must update when shelving changes the effective state"
+        ),
+        other => panic!("ActiveState.EffectiveTransitionTime = {other:?}, expected a DateTime"),
+    }
+    match read_value_via_path(
+        &session,
+        &condition_id,
+        &["ActiveState", "EffectiveDisplayName"],
+    )
+    .await
+    {
+        Some(Variant::LocalizedText(t)) => {
+            assert_eq!(t.text.value().as_deref(), Some("Shelved"))
+        }
+        other => panic!("ActiveState.EffectiveDisplayName = {other:?}, expected LocalizedText"),
+    }
+}
+
+#[tokio::test]
+async fn acked_and_confirmed_state_transition_time_update_on_acknowledge_confirm() {
+    let (tester, nm, session) = setup_alarms().await;
+    let core_nm = tester
+        .handle
+        .node_managers()
+        .get_of_type::<CoreNodeManager>()
+        .expect("CoreNodeManager not found");
+    let source = make_event_source(&nm, "AckDev");
+    let alarm = register_limit_alarm(
+        nm.address_space(),
+        &nm,
+        "AckDev",
+        "Level",
+        source.clone(),
+        exclusive_level_cfg(),
+    );
+    let condition_id = alarm.condition_state_machine().condition_id.clone();
+    let registry = ConditionRegistry::new();
+    registry.register(alarm.condition_state_machine());
+    register_condition_methods(&core_nm, registry, nm.address_space().clone());
+
+    let (notifs, _dv, mut events) = ChannelNotifications::new();
+    let sub_id = session
+        .create_subscription(Duration::from_millis(100), 100, 20, 1000, 0, true, notifs)
+        .await
+        .unwrap();
+    let _item = add_event_item(&session, sub_id, &source).await;
+
+    drive_limit(&alarm, &nm, &tester, 105.0);
+    let e = recv_alarm(&mut events).await;
+
+    let before_ack = DateTime::now();
+    session
+        .acknowledge_condition(
+            &condition_id,
+            ByteString::from(e.event_id.clone()),
+            LocalizedText::new("en", "ack"),
+        )
+        .await
+        .expect("acknowledge_condition should succeed");
+    let ack_ev = recv_alarm(&mut events).await;
+
+    match read_value_via_path(&session, &condition_id, &["AckedState", "TransitionTime"]).await {
+        Some(Variant::DateTime(t)) => assert!(*t >= before_ack),
+        other => panic!("AckedState.TransitionTime = {other:?}, expected a DateTime"),
+    }
+
+    let before_confirm = DateTime::now();
+    session
+        .confirm_condition(
+            &condition_id,
+            ByteString::from(ack_ev.event_id.clone()),
+            LocalizedText::new("en", "confirm"),
+        )
+        .await
+        .expect("confirm_condition should succeed");
+
+    match read_value_via_path(
+        &session,
+        &condition_id,
+        &["ConfirmedState", "TransitionTime"],
+    )
+    .await
+    {
+        Some(Variant::DateTime(t)) => assert!(*t >= before_confirm),
+        other => panic!("ConfirmedState.TransitionTime = {other:?}, expected a DateTime"),
+    }
+}
+
+#[tokio::test]
+async fn limit_state_transition_time_updates_on_threshold_crossing() {
+    let (tester, nm, session) = setup_alarms().await;
+    let source = make_event_source(&nm, "LimitTtDev");
+    let alarm = register_limit_alarm(
+        nm.address_space(),
+        &nm,
+        "LimitTtDev",
+        "Level",
+        source,
+        exclusive_level_cfg(),
+    );
+    let condition_id = alarm.condition_state_machine().condition_id.clone();
+
+    let before = DateTime::now();
+    drive_limit(&alarm, &nm, &tester, 105.0);
+
+    match read_value_via_path(
+        &session,
+        &condition_id,
+        &["LimitState", "CurrentState", "TransitionTime"],
+    )
+    .await
+    {
+        Some(Variant::DateTime(t)) => assert!(*t >= before),
+        other => panic!("LimitState.CurrentState.TransitionTime = {other:?}, expected a DateTime"),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Lifecycle Methods: Enable/Disable/Suppress/Unsuppress/RemoveFromService/PlaceInService/Silence
+// (feature 095, US2). OPC-10000-9 §5.5.4-§5.5.5, §5.8.7-§5.8.15.
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn enable_disable_methods_toggle_enabled_state() {
+    let (tester, nm, session) = setup_alarms().await;
+    let core_nm = tester
+        .handle
+        .node_managers()
+        .get_of_type::<CoreNodeManager>()
+        .expect("CoreNodeManager not found");
+    let source = make_event_source(&nm, "EnableMethodDev");
+    let sm = register_alarm_condition(
+        nm.address_space(),
+        &nm,
+        "EnableMethodDev",
+        "Temp",
+        source,
+        "Temp alarm",
+    );
+    let condition_id = sm.condition_id.clone();
+    let registry = ConditionRegistry::new();
+    registry.register(sm.clone());
+    register_condition_methods(&core_nm, registry, nm.address_space().clone());
+
+    assert_eq!(
+        call_shelve(
+            &session,
+            &condition_id,
+            MethodId::ConditionType_Disable,
+            None
+        )
+        .await,
+        StatusCode::Good
+    );
+    {
+        let space = nm.address_space().read();
+        assert!(!sm.get_enabled(&space), "Disable should clear EnabledState");
+    }
+
+    assert_eq!(
+        call_shelve(
+            &session,
+            &condition_id,
+            MethodId::ConditionType_Enable,
+            None
+        )
+        .await,
+        StatusCode::Good
+    );
+    {
+        let space = nm.address_space().read();
+        assert!(sm.get_enabled(&space), "Enable should set EnabledState");
+    }
+
+    // Calling on an unregistered condition NodeId fails closed, not panics.
+    assert_eq!(
+        call_shelve(
+            &session,
+            &NodeId::new(2, "NoSuchCondition"),
+            MethodId::ConditionType_Enable,
+            None
+        )
+        .await,
+        StatusCode::BadNodeIdUnknown
+    );
+}
+
+#[tokio::test]
+async fn suppress_unsuppress_methods_toggle_suppressed_state() {
+    let (tester, nm, session) = setup_alarms().await;
+    let core_nm = tester
+        .handle
+        .node_managers()
+        .get_of_type::<CoreNodeManager>()
+        .expect("CoreNodeManager not found");
+    let source = make_event_source(&nm, "SuppressDev");
+    let sm = register_alarm_condition(
+        nm.address_space(),
+        &nm,
+        "SuppressDev",
+        "Temp",
+        source,
+        "Temp alarm",
+    );
+    let condition_id = sm.condition_id.clone();
+    let registry = ConditionRegistry::new();
+    registry.register(sm.clone());
+    register_condition_methods(&core_nm, registry, nm.address_space().clone());
+
+    assert_eq!(
+        call_shelve(
+            &session,
+            &condition_id,
+            MethodId::AlarmConditionType_Suppress,
+            None
+        )
+        .await,
+        StatusCode::Good
+    );
+    {
+        let space = nm.address_space().read();
+        assert!(sm.get_suppressed(&space));
+        assert!(sm.get_suppressed_or_shelved(&space));
+    }
+
+    assert_eq!(
+        call_shelve(
+            &session,
+            &condition_id,
+            MethodId::AlarmConditionType_Unsuppress,
+            None
+        )
+        .await,
+        StatusCode::Good
+    );
+    {
+        let space = nm.address_space().read();
+        assert!(!sm.get_suppressed(&space));
+        assert!(!sm.get_suppressed_or_shelved(&space));
+    }
+}
+
+#[tokio::test]
+async fn remove_from_service_place_in_service_toggle_out_of_service_state() {
+    let (tester, nm, session) = setup_alarms().await;
+    let core_nm = tester
+        .handle
+        .node_managers()
+        .get_of_type::<CoreNodeManager>()
+        .expect("CoreNodeManager not found");
+    let source = make_event_source(&nm, "OosDev");
+    let sm = register_alarm_condition(
+        nm.address_space(),
+        &nm,
+        "OosDev",
+        "Temp",
+        source,
+        "Temp alarm",
+    );
+    let condition_id = sm.condition_id.clone();
+    let registry = ConditionRegistry::new();
+    registry.register(sm.clone());
+    register_condition_methods(&core_nm, registry, nm.address_space().clone());
+
+    assert_eq!(
+        call_shelve(
+            &session,
+            &condition_id,
+            MethodId::AlarmConditionType_RemoveFromService,
+            None
+        )
+        .await,
+        StatusCode::Good
+    );
+    {
+        let space = nm.address_space().read();
+        assert!(sm.get_out_of_service(&space));
+    }
+
+    assert_eq!(
+        call_shelve(
+            &session,
+            &condition_id,
+            MethodId::AlarmConditionType_PlaceInService,
+            None
+        )
+        .await,
+        StatusCode::Good
+    );
+    {
+        let space = nm.address_space().read();
+        assert!(!sm.get_out_of_service(&space));
+    }
+}
+
+#[tokio::test]
+async fn silence_method_toggles_silence_state_and_is_idempotent() {
+    let (tester, nm, session) = setup_alarms().await;
+    let core_nm = tester
+        .handle
+        .node_managers()
+        .get_of_type::<CoreNodeManager>()
+        .expect("CoreNodeManager not found");
+    let source = make_event_source(&nm, "SilenceDev");
+    let sm = register_alarm_condition(
+        nm.address_space(),
+        &nm,
+        "SilenceDev",
+        "Temp",
+        source,
+        "Temp alarm",
+    );
+    let condition_id = sm.condition_id.clone();
+    let registry = ConditionRegistry::new();
+    registry.register(sm.clone());
+    register_condition_methods(&core_nm, registry, nm.address_space().clone());
+
+    assert_eq!(
+        call_shelve(
+            &session,
+            &condition_id,
+            MethodId::AlarmConditionType_Silence,
+            None
+        )
+        .await,
+        StatusCode::Good
+    );
+    {
+        let space = nm.address_space().read();
+        assert!(sm.get_silenced(&space));
+    }
+
+    // Idempotent: silencing an already-silenced alarm succeeds, no error.
+    assert_eq!(
+        call_shelve(
+            &session,
+            &condition_id,
+            MethodId::AlarmConditionType_Silence,
+            None
+        )
+        .await,
+        StatusCode::Good
+    );
+    {
+        let space = nm.address_space().read();
+        assert!(sm.get_silenced(&space));
+    }
+}
+
+#[tokio::test]
+async fn suppress2_and_place_in_service2_apply_optional_comment() {
+    let (tester, nm, session) = setup_alarms().await;
+    let core_nm = tester
+        .handle
+        .node_managers()
+        .get_of_type::<CoreNodeManager>()
+        .expect("CoreNodeManager not found");
+    let source = make_event_source(&nm, "Comment2Dev");
+    let sm = register_alarm_condition(
+        nm.address_space(),
+        &nm,
+        "Comment2Dev",
+        "Temp",
+        source,
+        "Temp alarm",
+    );
+    let condition_id = sm.condition_id.clone();
+    let registry = ConditionRegistry::new();
+    registry.register(sm.clone());
+    register_condition_methods(&core_nm, registry, nm.address_space().clone());
+
+    assert_eq!(
+        call_shelve(
+            &session,
+            &condition_id,
+            MethodId::AlarmConditionType_Suppress2,
+            Some(vec![Variant::from(LocalizedText::new(
+                "en",
+                "suppressing for maintenance"
+            ))]),
+        )
+        .await,
+        StatusCode::Good
+    );
+    {
+        let space = nm.address_space().read();
+        assert!(sm.get_suppressed(&space));
+        assert_eq!(
+            sm.get_message(&space).text.value().as_deref(),
+            Some("suppressing for maintenance")
+        );
+    }
+
+    assert_eq!(
+        call_shelve(
+            &session,
+            &condition_id,
+            MethodId::AlarmConditionType_PlaceInService2,
+            Some(vec![Variant::from(LocalizedText::new(
+                "en",
+                "back in service"
+            ))]),
+        )
+        .await,
+        StatusCode::Good
+    );
+    {
+        let space = nm.address_space().read();
+        assert_eq!(
+            sm.get_message(&space).text.value().as_deref(),
+            Some("back in service")
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// A&C Auditing (feature 095, US3). OPC-10000-9 section 5.10.2-5.10.12.
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn add_comment_emits_audit_condition_comment_event() {
+    let (tester, nm, session) = setup_alarms().await;
+    let core_nm = tester
+        .handle
+        .node_managers()
+        .get_of_type::<CoreNodeManager>()
+        .expect("CoreNodeManager not found");
+    let source = make_event_source(&nm, "AuditCommentDev");
+    let alarm = register_limit_alarm(
+        nm.address_space(),
+        &nm,
+        "AuditCommentDev",
+        "Level",
+        source.clone(),
+        exclusive_level_cfg(),
+    );
+    let condition_id = alarm.condition_state_machine().condition_id.clone();
+    let registry = ConditionRegistry::new();
+    registry.register(alarm.condition_state_machine());
+    register_condition_methods(&core_nm, registry, nm.address_space().clone());
+
+    // Separate subscriptions/channels: even though audit events (SourceNode = Server) and
+    // AlarmEvents (SourceNode = the alarm's source) target disjoint nodes, notifications for
+    // different monitored items on the SAME subscription are batched per publish cycle in
+    // monitored-item order, not raw emission order — a single shared channel would make the
+    // relative arrival order of the two kinds of notification unpredictable.
+    let (alarm_notifs, _alarm_dv, mut alarm_events) = ChannelNotifications::new();
+    let alarm_sub_id = session
+        .create_subscription(
+            Duration::from_millis(100),
+            100,
+            20,
+            1000,
+            0,
+            true,
+            alarm_notifs,
+        )
+        .await
+        .unwrap();
+    let _alarm_item = add_event_item(&session, alarm_sub_id, &source).await;
+
+    let (audit_notifs, _audit_dv, mut audit_events) = ChannelNotifications::new();
+    let audit_sub_id = session
+        .create_subscription(
+            Duration::from_millis(100),
+            100,
+            20,
+            1000,
+            0,
+            true,
+            audit_notifs,
+        )
+        .await
+        .unwrap();
+    let _audit_item = add_audit_event_item(&session, audit_sub_id).await;
+
+    drive_limit(&alarm, &nm, &tester, 105.0);
+    let e = recv_alarm(&mut alarm_events).await;
+
+    session
+        .call_one(CallMethodRequest {
+            object_id: condition_id.clone(),
+            method_id: MethodId::ConditionType_AddComment.into(),
+            input_arguments: Some(vec![
+                Variant::from(ByteString::from(e.event_id.clone())),
+                Variant::from(LocalizedText::new("en", "under investigation")),
+            ]),
+        })
+        .await
+        .unwrap();
+
+    let audit = recv_audit_event(&mut audit_events).await;
+    assert_eq!(
+        audit.event_type,
+        NodeId::from(ObjectTypeId::AuditConditionCommentEventType)
+    );
+    assert!(audit.message.contains("AddComment"));
+    let _ = recv_alarm(&mut alarm_events).await;
+}
+
+#[tokio::test]
+async fn enable_disable_emit_audit_condition_enable_event() {
+    let (tester, nm, session) = setup_alarms().await;
+    let core_nm = tester
+        .handle
+        .node_managers()
+        .get_of_type::<CoreNodeManager>()
+        .expect("CoreNodeManager not found");
+    let source = make_event_source(&nm, "AuditEnableDev");
+    let sm = register_alarm_condition(
+        nm.address_space(),
+        &nm,
+        "AuditEnableDev",
+        "Temp",
+        source,
+        "Temp alarm",
+    );
+    let condition_id = sm.condition_id.clone();
+    let registry = ConditionRegistry::new();
+    registry.register(sm);
+    register_condition_methods(&core_nm, registry, nm.address_space().clone());
+
+    let (notifs, _dv, mut events) = ChannelNotifications::new();
+    let sub_id = session
+        .create_subscription(Duration::from_millis(100), 100, 20, 1000, 0, true, notifs)
+        .await
+        .unwrap();
+    let _audit_item = add_audit_event_item(&session, sub_id).await;
+
+    call_shelve(
+        &session,
+        &condition_id,
+        MethodId::ConditionType_Disable,
+        None,
+    )
+    .await;
+    let audit = recv_audit_event(&mut events).await;
+    assert_eq!(
+        audit.event_type,
+        NodeId::from(ObjectTypeId::AuditConditionEnableEventType)
+    );
+    assert!(audit.message.contains("Disable"));
+
+    call_shelve(
+        &session,
+        &condition_id,
+        MethodId::ConditionType_Enable,
+        None,
+    )
+    .await;
+    let audit = recv_audit_event(&mut events).await;
+    assert_eq!(
+        audit.event_type,
+        NodeId::from(ObjectTypeId::AuditConditionEnableEventType)
+    );
+    assert!(audit.message.contains("Enable"));
+}
+
+#[tokio::test]
+async fn silence_emits_audit_condition_silence_event() {
+    let (tester, nm, session) = setup_alarms().await;
+    let core_nm = tester
+        .handle
+        .node_managers()
+        .get_of_type::<CoreNodeManager>()
+        .expect("CoreNodeManager not found");
+    let source = make_event_source(&nm, "AuditSilenceDev");
+    let sm = register_alarm_condition(
+        nm.address_space(),
+        &nm,
+        "AuditSilenceDev",
+        "Temp",
+        source,
+        "Temp alarm",
+    );
+    let condition_id = sm.condition_id.clone();
+    let registry = ConditionRegistry::new();
+    registry.register(sm);
+    register_condition_methods(&core_nm, registry, nm.address_space().clone());
+
+    let (notifs, _dv, mut events) = ChannelNotifications::new();
+    let sub_id = session
+        .create_subscription(Duration::from_millis(100), 100, 20, 1000, 0, true, notifs)
+        .await
+        .unwrap();
+    let _audit_item = add_audit_event_item(&session, sub_id).await;
+
+    call_shelve(
+        &session,
+        &condition_id,
+        MethodId::AlarmConditionType_Silence,
+        None,
+    )
+    .await;
+
+    let audit = recv_audit_event(&mut events).await;
+    assert_eq!(
+        audit.event_type,
+        NodeId::from(ObjectTypeId::AuditConditionSilenceEventType)
+    );
+}
+
+#[tokio::test]
+async fn remove_from_service_place_in_service_emit_audit_condition_out_of_service_event() {
+    let (tester, nm, session) = setup_alarms().await;
+    let core_nm = tester
+        .handle
+        .node_managers()
+        .get_of_type::<CoreNodeManager>()
+        .expect("CoreNodeManager not found");
+    let source = make_event_source(&nm, "AuditOosDev");
+    let sm = register_alarm_condition(
+        nm.address_space(),
+        &nm,
+        "AuditOosDev",
+        "Temp",
+        source,
+        "Temp alarm",
+    );
+    let condition_id = sm.condition_id.clone();
+    let registry = ConditionRegistry::new();
+    registry.register(sm);
+    register_condition_methods(&core_nm, registry, nm.address_space().clone());
+
+    let (notifs, _dv, mut events) = ChannelNotifications::new();
+    let sub_id = session
+        .create_subscription(Duration::from_millis(100), 100, 20, 1000, 0, true, notifs)
+        .await
+        .unwrap();
+    let _audit_item = add_audit_event_item(&session, sub_id).await;
+
+    call_shelve(
+        &session,
+        &condition_id,
+        MethodId::AlarmConditionType_RemoveFromService,
+        None,
+    )
+    .await;
+    let audit = recv_audit_event(&mut events).await;
+    assert_eq!(
+        audit.event_type,
+        NodeId::from(ObjectTypeId::AuditConditionOutOfServiceEventType)
+    );
+    assert!(audit.message.contains("RemoveFromService"));
+
+    call_shelve(
+        &session,
+        &condition_id,
+        MethodId::AlarmConditionType_PlaceInService,
+        None,
+    )
+    .await;
+    let audit = recv_audit_event(&mut events).await;
+    assert!(audit.message.contains("PlaceInService"));
+}
+
+// ---------------------------------------------------------------------------
+// Missing alarm subtypes (feature 095, US4). OPC-10000-9 section 5.8.21.
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn level_alarm_reports_level_type_definition_not_generic_limit_and_activates() {
+    let (tester, nm, _session) = setup_alarms().await;
+    let source = make_event_source(&nm, "LevelKindDev");
+    let alarm = register_level_alarm(
+        nm.address_space(),
+        &nm,
+        "LevelKindDev",
+        "Tank",
+        source,
+        exclusive_level_cfg(),
+    );
+    let condition_id = alarm.condition_state_machine().condition_id.clone();
+    {
+        let space = nm.address_space().read();
+        assert!(
+            space.has_reference(
+                &condition_id,
+                &NodeId::from(ObjectTypeId::ExclusiveLevelAlarmType),
+                ReferenceTypeId::HasTypeDefinition,
+            ),
+            "Level alarm should report ExclusiveLevelAlarmType as its TypeDefinition"
+        );
+        assert!(
+            !space.has_reference(
+                &condition_id,
+                &NodeId::from(ObjectTypeId::ExclusiveLimitAlarmType),
+                ReferenceTypeId::HasTypeDefinition,
+            ),
+            "Level alarm must not also report the generic ExclusiveLimitAlarmType"
+        );
+    }
+
+    drive_limit(&alarm, &nm, &tester, 105.0);
+    {
+        let space = nm.address_space().read();
+        assert!(
+            alarm.condition_state_machine().get_active(&space),
+            "Level alarm should activate on threshold crossing exactly like a Limit alarm"
+        );
+    }
 }
 
 #[tokio::test]

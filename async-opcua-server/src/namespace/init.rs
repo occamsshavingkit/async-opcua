@@ -5,8 +5,8 @@
 use crate::address_space::AddressSpace;
 #[cfg(feature = "alarms")]
 use crate::alarms::{
-    read_eurange, ConditionStateMachine, DiscreteAlarm, DiscreteAlarmKind, LimitAlarm, LimitConfig,
-    LimitMode,
+    read_eurange, ConditionStateMachine, DiscreteAlarm, DiscreteAlarmKind, LimitAlarm,
+    LimitAlarmKind, LimitConfig, LimitMode,
 };
 #[cfg(feature = "alarms")]
 use opcua_types::{MethodId, NodeId, ReferenceTypeId, StatusCode, Variant};
@@ -57,11 +57,56 @@ pub fn register_alarm_condition(
 #[cfg(feature = "alarms")]
 pub fn register_limit_alarm(
     address_space: &Arc<opcua_core::sync::RwLock<AddressSpace>>,
+    node_manager: &crate::node_manager::memory::SimpleNodeManager,
+    device: &str,
+    alarm_name: &str,
+    source_node_id: NodeId,
+    cfg: LimitConfig,
+) -> LimitAlarm {
+    register_limit_alarm_kind(
+        address_space,
+        node_manager,
+        device,
+        alarm_name,
+        source_node_id,
+        cfg,
+        LimitAlarmKind::Limit,
+    )
+}
+
+/// Registers a new Level alarm condition (`ExclusiveLevelAlarmType`/`NonExclusiveLevelAlarmType`,
+/// OPC-10000-9 §5.8.21.2/.3) and exposes the standard Acknowledge/Confirm methods. Level alarms
+/// share `LimitAlarm`'s threshold/deadband evaluation exactly; only the `TypeDefinition` differs
+/// from the generic `register_limit_alarm`.
+#[cfg(feature = "alarms")]
+pub fn register_level_alarm(
+    address_space: &Arc<opcua_core::sync::RwLock<AddressSpace>>,
+    node_manager: &crate::node_manager::memory::SimpleNodeManager,
+    device: &str,
+    alarm_name: &str,
+    source_node_id: NodeId,
+    cfg: LimitConfig,
+) -> LimitAlarm {
+    register_limit_alarm_kind(
+        address_space,
+        node_manager,
+        device,
+        alarm_name,
+        source_node_id,
+        cfg,
+        LimitAlarmKind::Level,
+    )
+}
+
+#[cfg(feature = "alarms")]
+fn register_limit_alarm_kind(
+    address_space: &Arc<opcua_core::sync::RwLock<AddressSpace>>,
     _node_manager: &crate::node_manager::memory::SimpleNodeManager,
     device: &str,
     alarm_name: &str,
     source_node_id: NodeId,
     cfg: LimitConfig,
+    kind: LimitAlarmKind,
 ) -> LimitAlarm {
     let alarm = {
         let space = opcua_core::trace_write_lock!(address_space);
@@ -75,6 +120,7 @@ pub fn register_limit_alarm(
                 alarm_name,
                 source_node_id,
                 cfg,
+                kind,
             ),
             LimitMode::NonExclusive => LimitAlarm::create_non_exclusive_in_address_space(
                 &space,
@@ -83,6 +129,7 @@ pub fn register_limit_alarm(
                 alarm_name,
                 source_node_id,
                 cfg,
+                kind,
             ),
         }
     };

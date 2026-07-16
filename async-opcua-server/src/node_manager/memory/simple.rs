@@ -8,6 +8,8 @@ use async_trait::async_trait;
 use opcua_core::{trace_read_lock, trace_write_lock};
 use opcua_nodes::{HasNodeId, NodeSetImport};
 
+#[cfg(all(feature = "alarms", test))]
+use crate::alarms::LimitAlarmKind;
 #[cfg(all(feature = "alarms", feature = "subscriptions"))]
 use crate::alarms::ServerAlarmEvent;
 #[cfg(feature = "alarms")]
@@ -1666,6 +1668,7 @@ mod tests {
                 "High",
                 source.clone(),
                 cfg,
+                LimitAlarmKind::Limit,
             )
         };
 

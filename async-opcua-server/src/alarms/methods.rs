@@ -426,6 +426,129 @@ impl ConditionRefreshHandler {
             .handle_confirm_method(context, args)
     }
 
+    /// Callback executed when the standard Enable method (OPC-10000-9 §5.5.5) is called by a client.
+    pub fn handle_condition_enable(
+        &self,
+        _context: &RequestContext,
+        object_id: &NodeId,
+        _args: &[Variant],
+    ) -> Result<Vec<Variant>, StatusCode> {
+        let condition = self
+            .registry
+            .get(object_id)
+            .ok_or(StatusCode::BadNodeIdUnknown)?;
+        let address_space = opcua_core::trace_write_lock!(self.address_space);
+        condition.set_enabled(&address_space, true);
+        Ok(vec![])
+    }
+
+    /// Callback executed when the standard Disable method (OPC-10000-9 §5.5.4) is called by a client.
+    pub fn handle_condition_disable(
+        &self,
+        _context: &RequestContext,
+        object_id: &NodeId,
+        _args: &[Variant],
+    ) -> Result<Vec<Variant>, StatusCode> {
+        let condition = self
+            .registry
+            .get(object_id)
+            .ok_or(StatusCode::BadNodeIdUnknown)?;
+        let address_space = opcua_core::trace_write_lock!(self.address_space);
+        condition.set_enabled(&address_space, false);
+        Ok(vec![])
+    }
+
+    /// Callback executed when the standard Suppress/Suppress2 method (OPC-10000-9 §5.8.8/§5.8.9)
+    /// is called by a client. `args[0]` (Suppress2 only) is an optional Comment.
+    pub fn handle_condition_suppress(
+        &self,
+        _context: &RequestContext,
+        object_id: &NodeId,
+        args: &[Variant],
+    ) -> Result<Vec<Variant>, StatusCode> {
+        let condition = self
+            .registry
+            .get(object_id)
+            .ok_or(StatusCode::BadNodeIdUnknown)?;
+        let address_space = opcua_core::trace_write_lock!(self.address_space);
+        apply_optional_comment(&condition, args, &address_space)?;
+        condition.set_suppressed(&address_space, true);
+        Ok(vec![])
+    }
+
+    /// Callback executed when the standard Unsuppress/Unsuppress2 method (OPC-10000-9
+    /// §5.8.10/§5.8.11) is called by a client. `args[0]` (Unsuppress2 only) is an optional Comment.
+    pub fn handle_condition_unsuppress(
+        &self,
+        _context: &RequestContext,
+        object_id: &NodeId,
+        args: &[Variant],
+    ) -> Result<Vec<Variant>, StatusCode> {
+        let condition = self
+            .registry
+            .get(object_id)
+            .ok_or(StatusCode::BadNodeIdUnknown)?;
+        let address_space = opcua_core::trace_write_lock!(self.address_space);
+        apply_optional_comment(&condition, args, &address_space)?;
+        condition.set_suppressed(&address_space, false);
+        Ok(vec![])
+    }
+
+    /// Callback executed when the standard RemoveFromService/RemoveFromService2 method
+    /// (OPC-10000-9 §5.8.12/§5.8.13) is called by a client. `args[0]` (RemoveFromService2 only)
+    /// is an optional Comment.
+    pub fn handle_condition_remove_from_service(
+        &self,
+        _context: &RequestContext,
+        object_id: &NodeId,
+        args: &[Variant],
+    ) -> Result<Vec<Variant>, StatusCode> {
+        let condition = self
+            .registry
+            .get(object_id)
+            .ok_or(StatusCode::BadNodeIdUnknown)?;
+        let address_space = opcua_core::trace_write_lock!(self.address_space);
+        apply_optional_comment(&condition, args, &address_space)?;
+        condition.set_out_of_service(&address_space, true);
+        Ok(vec![])
+    }
+
+    /// Callback executed when the standard PlaceInService/PlaceInService2 method (OPC-10000-9
+    /// §5.8.14/§5.8.15) is called by a client. `args[0]` (PlaceInService2 only) is an optional
+    /// Comment.
+    pub fn handle_condition_place_in_service(
+        &self,
+        _context: &RequestContext,
+        object_id: &NodeId,
+        args: &[Variant],
+    ) -> Result<Vec<Variant>, StatusCode> {
+        let condition = self
+            .registry
+            .get(object_id)
+            .ok_or(StatusCode::BadNodeIdUnknown)?;
+        let address_space = opcua_core::trace_write_lock!(self.address_space);
+        apply_optional_comment(&condition, args, &address_space)?;
+        condition.set_out_of_service(&address_space, false);
+        Ok(vec![])
+    }
+
+    /// Callback executed when the standard Silence method (OPC-10000-9 §5.8.7) is called by a
+    /// client. Idempotent: silencing an already-silenced alarm succeeds without error.
+    pub fn handle_condition_silence(
+        &self,
+        _context: &RequestContext,
+        object_id: &NodeId,
+        _args: &[Variant],
+    ) -> Result<Vec<Variant>, StatusCode> {
+        let condition = self
+            .registry
+            .get(object_id)
+            .ok_or(StatusCode::BadNodeIdUnknown)?;
+        let address_space = opcua_core::trace_write_lock!(self.address_space);
+        condition.set_silenced(&address_space, true);
+        Ok(vec![])
+    }
+
     /// Callback executed when the standard OneShotShelve method is called by a client.
     pub fn handle_condition_one_shot_shelve(
         &self,
@@ -671,6 +794,88 @@ pub fn register_condition_methods(
         move |ctx, object_id, args| confirm_handler.handle_condition_confirm(ctx, object_id, args),
     );
 
+    let enable_handler = handler.clone();
+    core_node_manager.inner().add_method_callback_with_context(
+        MethodId::ConditionType_Enable.into(),
+        move |ctx, object_id, args| enable_handler.handle_condition_enable(ctx, object_id, args),
+    );
+
+    let disable_handler = handler.clone();
+    core_node_manager.inner().add_method_callback_with_context(
+        MethodId::ConditionType_Disable.into(),
+        move |ctx, object_id, args| disable_handler.handle_condition_disable(ctx, object_id, args),
+    );
+
+    let suppress_handler = handler.clone();
+    core_node_manager.inner().add_method_callback_with_context(
+        MethodId::AlarmConditionType_Suppress.into(),
+        move |ctx, object_id, args| {
+            suppress_handler.handle_condition_suppress(ctx, object_id, args)
+        },
+    );
+
+    let suppress2_handler = handler.clone();
+    core_node_manager.inner().add_method_callback_with_context(
+        MethodId::AlarmConditionType_Suppress2.into(),
+        move |ctx, object_id, args| {
+            suppress2_handler.handle_condition_suppress(ctx, object_id, args)
+        },
+    );
+
+    let unsuppress_handler = handler.clone();
+    core_node_manager.inner().add_method_callback_with_context(
+        MethodId::AlarmConditionType_Unsuppress.into(),
+        move |ctx, object_id, args| {
+            unsuppress_handler.handle_condition_unsuppress(ctx, object_id, args)
+        },
+    );
+
+    let unsuppress2_handler = handler.clone();
+    core_node_manager.inner().add_method_callback_with_context(
+        MethodId::AlarmConditionType_Unsuppress2.into(),
+        move |ctx, object_id, args| {
+            unsuppress2_handler.handle_condition_unsuppress(ctx, object_id, args)
+        },
+    );
+
+    let remove_from_service_handler = handler.clone();
+    core_node_manager.inner().add_method_callback_with_context(
+        MethodId::AlarmConditionType_RemoveFromService.into(),
+        move |ctx, object_id, args| {
+            remove_from_service_handler.handle_condition_remove_from_service(ctx, object_id, args)
+        },
+    );
+
+    let remove_from_service2_handler = handler.clone();
+    core_node_manager.inner().add_method_callback_with_context(
+        MethodId::AlarmConditionType_RemoveFromService2.into(),
+        move |ctx, object_id, args| {
+            remove_from_service2_handler.handle_condition_remove_from_service(ctx, object_id, args)
+        },
+    );
+
+    let place_in_service_handler = handler.clone();
+    core_node_manager.inner().add_method_callback_with_context(
+        MethodId::AlarmConditionType_PlaceInService.into(),
+        move |ctx, object_id, args| {
+            place_in_service_handler.handle_condition_place_in_service(ctx, object_id, args)
+        },
+    );
+
+    let place_in_service2_handler = handler.clone();
+    core_node_manager.inner().add_method_callback_with_context(
+        MethodId::AlarmConditionType_PlaceInService2.into(),
+        move |ctx, object_id, args| {
+            place_in_service2_handler.handle_condition_place_in_service(ctx, object_id, args)
+        },
+    );
+
+    let silence_handler = handler.clone();
+    core_node_manager.inner().add_method_callback_with_context(
+        MethodId::AlarmConditionType_Silence.into(),
+        move |ctx, object_id, args| silence_handler.handle_condition_silence(ctx, object_id, args),
+    );
+
     let one_shot_shelve_handler = handler.clone();
     core_node_manager.inner().add_method_callback_with_context(
         MethodId::ShelvedStateMachineType_OneShotShelve.into(),
@@ -718,6 +923,27 @@ fn notify_alarm_event(context: &RequestContext, event: &AlarmEvent) {
     let wrapper = ServerAlarmEvent { event };
     let items = std::iter::once((&wrapper as &dyn Event, &event.source_node));
     context.subscriptions.notify_events(items);
+}
+
+/// Applies the optional `Comment` argument used by the "2" variants of the standard AlarmConditionType
+/// lifecycle Methods (Suppress2, Unsuppress2, RemoveFromService2, PlaceInService2 — OPC-10000-9
+/// §5.8.9/§5.8.11/§5.8.13/§5.8.15). A missing argument (the base, non-"2" Method) or a NULL
+/// LocalizedText is a no-op, not an error; a present, non-LocalizedText argument is rejected.
+fn apply_optional_comment(
+    condition: &ConditionStateMachine,
+    args: &[Variant],
+    address_space: &AddressSpace,
+) -> Result<(), StatusCode> {
+    let Some(arg) = args.first() else {
+        return Ok(());
+    };
+    let Variant::LocalizedText(ref text) = arg else {
+        return Err(StatusCode::BadTypeMismatch);
+    };
+    if text.text.value().is_some() {
+        condition.set_message(address_space, (**text).clone());
+    }
+    Ok(())
 }
 
 fn parse_u32_arg(args: &[Variant], index: usize) -> Result<u32, StatusCode> {

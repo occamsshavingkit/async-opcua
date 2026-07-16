@@ -1603,6 +1603,286 @@ async fn limit_state_transition_time_updates_on_threshold_crossing() {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Lifecycle Methods: Enable/Disable/Suppress/Unsuppress/RemoveFromService/PlaceInService/Silence
+// (feature 095, US2). OPC-10000-9 §5.5.4-§5.5.5, §5.8.7-§5.8.15.
+// ---------------------------------------------------------------------------
+
+
+#[tokio::test]
+async fn enable_disable_methods_toggle_enabled_state() {
+    let (tester, nm, session) = setup_alarms().await;
+    let core_nm = tester
+        .handle
+        .node_managers()
+        .get_of_type::<CoreNodeManager>()
+        .expect("CoreNodeManager not found");
+    let source = make_event_source(&nm, "EnableMethodDev");
+    let sm = register_alarm_condition(
+        nm.address_space(),
+        &nm,
+        "EnableMethodDev",
+        "Temp",
+        source,
+        "Temp alarm",
+    );
+    let condition_id = sm.condition_id.clone();
+    let registry = ConditionRegistry::new();
+    registry.register(sm.clone());
+    register_condition_methods(&core_nm, registry, nm.address_space().clone());
+
+    assert_eq!(
+        call_shelve(&session, &condition_id, MethodId::ConditionType_Disable, None).await,
+        StatusCode::Good
+    );
+    {
+        let space = nm.address_space().read();
+        assert!(!sm.get_enabled(&space), "Disable should clear EnabledState");
+    }
+
+    assert_eq!(
+        call_shelve(&session, &condition_id, MethodId::ConditionType_Enable, None).await,
+        StatusCode::Good
+    );
+    {
+        let space = nm.address_space().read();
+        assert!(sm.get_enabled(&space), "Enable should set EnabledState");
+    }
+
+    // Calling on an unregistered condition NodeId fails closed, not panics.
+    assert_eq!(
+        call_shelve(
+            &session,
+            &NodeId::new(2, "NoSuchCondition"),
+            MethodId::ConditionType_Enable,
+            None
+        )
+        .await,
+        StatusCode::BadNodeIdUnknown
+    );
+}
+
+#[tokio::test]
+async fn suppress_unsuppress_methods_toggle_suppressed_state() {
+    let (tester, nm, session) = setup_alarms().await;
+    let core_nm = tester
+        .handle
+        .node_managers()
+        .get_of_type::<CoreNodeManager>()
+        .expect("CoreNodeManager not found");
+    let source = make_event_source(&nm, "SuppressDev");
+    let sm = register_alarm_condition(
+        nm.address_space(),
+        &nm,
+        "SuppressDev",
+        "Temp",
+        source,
+        "Temp alarm",
+    );
+    let condition_id = sm.condition_id.clone();
+    let registry = ConditionRegistry::new();
+    registry.register(sm.clone());
+    register_condition_methods(&core_nm, registry, nm.address_space().clone());
+
+    assert_eq!(
+        call_shelve(
+            &session,
+            &condition_id,
+            MethodId::AlarmConditionType_Suppress,
+            None
+        )
+        .await,
+        StatusCode::Good
+    );
+    {
+        let space = nm.address_space().read();
+        assert!(sm.get_suppressed(&space));
+        assert!(sm.get_suppressed_or_shelved(&space));
+    }
+
+    assert_eq!(
+        call_shelve(
+            &session,
+            &condition_id,
+            MethodId::AlarmConditionType_Unsuppress,
+            None
+        )
+        .await,
+        StatusCode::Good
+    );
+    {
+        let space = nm.address_space().read();
+        assert!(!sm.get_suppressed(&space));
+        assert!(!sm.get_suppressed_or_shelved(&space));
+    }
+}
+
+#[tokio::test]
+async fn remove_from_service_place_in_service_toggle_out_of_service_state() {
+    let (tester, nm, session) = setup_alarms().await;
+    let core_nm = tester
+        .handle
+        .node_managers()
+        .get_of_type::<CoreNodeManager>()
+        .expect("CoreNodeManager not found");
+    let source = make_event_source(&nm, "OosDev");
+    let sm = register_alarm_condition(nm.address_space(), &nm, "OosDev", "Temp", source, "Temp alarm");
+    let condition_id = sm.condition_id.clone();
+    let registry = ConditionRegistry::new();
+    registry.register(sm.clone());
+    register_condition_methods(&core_nm, registry, nm.address_space().clone());
+
+    assert_eq!(
+        call_shelve(
+            &session,
+            &condition_id,
+            MethodId::AlarmConditionType_RemoveFromService,
+            None
+        )
+        .await,
+        StatusCode::Good
+    );
+    {
+        let space = nm.address_space().read();
+        assert!(sm.get_out_of_service(&space));
+    }
+
+    assert_eq!(
+        call_shelve(
+            &session,
+            &condition_id,
+            MethodId::AlarmConditionType_PlaceInService,
+            None
+        )
+        .await,
+        StatusCode::Good
+    );
+    {
+        let space = nm.address_space().read();
+        assert!(!sm.get_out_of_service(&space));
+    }
+}
+
+#[tokio::test]
+async fn silence_method_toggles_silence_state_and_is_idempotent() {
+    let (tester, nm, session) = setup_alarms().await;
+    let core_nm = tester
+        .handle
+        .node_managers()
+        .get_of_type::<CoreNodeManager>()
+        .expect("CoreNodeManager not found");
+    let source = make_event_source(&nm, "SilenceDev");
+    let sm = register_alarm_condition(
+        nm.address_space(),
+        &nm,
+        "SilenceDev",
+        "Temp",
+        source,
+        "Temp alarm",
+    );
+    let condition_id = sm.condition_id.clone();
+    let registry = ConditionRegistry::new();
+    registry.register(sm.clone());
+    register_condition_methods(&core_nm, registry, nm.address_space().clone());
+
+    assert_eq!(
+        call_shelve(
+            &session,
+            &condition_id,
+            MethodId::AlarmConditionType_Silence,
+            None
+        )
+        .await,
+        StatusCode::Good
+    );
+    {
+        let space = nm.address_space().read();
+        assert!(sm.get_silenced(&space));
+    }
+
+    // Idempotent: silencing an already-silenced alarm succeeds, no error.
+    assert_eq!(
+        call_shelve(
+            &session,
+            &condition_id,
+            MethodId::AlarmConditionType_Silence,
+            None
+        )
+        .await,
+        StatusCode::Good
+    );
+    {
+        let space = nm.address_space().read();
+        assert!(sm.get_silenced(&space));
+    }
+}
+
+#[tokio::test]
+async fn suppress2_and_place_in_service2_apply_optional_comment() {
+    let (tester, nm, session) = setup_alarms().await;
+    let core_nm = tester
+        .handle
+        .node_managers()
+        .get_of_type::<CoreNodeManager>()
+        .expect("CoreNodeManager not found");
+    let source = make_event_source(&nm, "Comment2Dev");
+    let sm = register_alarm_condition(
+        nm.address_space(),
+        &nm,
+        "Comment2Dev",
+        "Temp",
+        source,
+        "Temp alarm",
+    );
+    let condition_id = sm.condition_id.clone();
+    let registry = ConditionRegistry::new();
+    registry.register(sm.clone());
+    register_condition_methods(&core_nm, registry, nm.address_space().clone());
+
+    assert_eq!(
+        call_shelve(
+            &session,
+            &condition_id,
+            MethodId::AlarmConditionType_Suppress2,
+            Some(vec![Variant::from(LocalizedText::new(
+                "en",
+                "suppressing for maintenance"
+            ))]),
+        )
+        .await,
+        StatusCode::Good
+    );
+    {
+        let space = nm.address_space().read();
+        assert!(sm.get_suppressed(&space));
+        assert_eq!(
+            sm.get_message(&space).text.value().as_deref(),
+            Some("suppressing for maintenance")
+        );
+    }
+
+    assert_eq!(
+        call_shelve(
+            &session,
+            &condition_id,
+            MethodId::AlarmConditionType_PlaceInService2,
+            Some(vec![Variant::from(LocalizedText::new(
+                "en",
+                "back in service"
+            ))]),
+        )
+        .await,
+        StatusCode::Good
+    );
+    {
+        let space = nm.address_space().read();
+        assert_eq!(
+            sm.get_message(&space).text.value().as_deref(),
+            Some("back in service")
+        );
+    }
+}
+
 #[tokio::test]
 async fn timed_shelve_out_of_range_returns_bad_shelving_time_out_of_range() {
     // OPC UA Part 9 §5.8.17.4: TimedShelve rejects shelving times outside the acceptable range.

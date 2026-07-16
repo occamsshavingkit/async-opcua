@@ -113,24 +113,34 @@ state.
 
 ### Tests for User Story 2
 
-- [ ] T012 [P] [US2] Add integration tests for `Enable`/`Disable` (`ConditionType_Enable`/`ConditionType_Disable`, §5.5.5/§5.5.4) in `alarms.rs`, including the "call on a condition with no source" edge case (Bad status, not panic).
-- [ ] T013 [P] [US2] Add integration tests for `Suppress`/`Unsuppress` (`AlarmConditionType_Suppress`/`_Unsuppress`, §5.8.8/§5.8.10) including the `Bad_MethodInvalid` precondition case for an instance without `SuppressedState`.
-- [ ] T014 [P] [US2] Add integration tests for `RemoveFromService`/`PlaceInService` (`AlarmConditionType_RemoveFromService`/`_PlaceInService`, §5.8.12/§5.8.14) including the `Bad_MethodInvalid` precondition case.
-- [ ] T015 [P] [US2] Add integration test for `Silence` (`AlarmConditionType_Silence`, §5.8.7), including idempotency on an already-silenced alarm (Edge Case in spec.md).
-- [ ] T016 [P] [US2] Add integration tests for `Suppress2`/`Unsuppress2`/`RemoveFromService2`/`PlaceInService2` confirming the optional `Comment` argument (§5.8.9/§5.8.11/§5.8.13/§5.8.15) is accepted and applied.
+- [X] T012 [P] [US2] Add integration tests for `Enable`/`Disable` (`ConditionType_Enable`/`ConditionType_Disable`, §5.5.5/§5.5.4) in `alarms.rs`, including the "call on a condition with no source" edge case (Bad status, not panic).
+- [X] T013 [P] [US2] Add integration tests for `Suppress`/`Unsuppress` (`AlarmConditionType_Suppress`/`_Unsuppress`, §5.8.8/§5.8.10) including the `Bad_MethodInvalid` precondition case for an instance without `SuppressedState`.
+- [X] T014 [P] [US2] Add integration tests for `RemoveFromService`/`PlaceInService` (`AlarmConditionType_RemoveFromService`/`_PlaceInService`, §5.8.12/§5.8.14) including the `Bad_MethodInvalid` precondition case.
+- [X] T015 [P] [US2] Add integration test for `Silence` (`AlarmConditionType_Silence`, §5.8.7), including idempotency on an already-silenced alarm (Edge Case in spec.md).
+- [X] T016 [P] [US2] Add integration tests for `Suppress2`/`Unsuppress2`/`RemoveFromService2`/`PlaceInService2` confirming the optional `Comment` argument (§5.8.9/§5.8.11/§5.8.13/§5.8.15) is accepted and applied.
 
 ### Implementation for User Story 2
 
-- [ ] T017 [US2] In `async-opcua-server/src/alarms/state_machine.rs`, add `get_silence`/`set_silence` accessors mirroring the existing `get_suppressed`/`set_suppressed` pattern (:563-571), backed by `AlarmConditionType_SilenceState` and its `_Id`/`_TransitionTime` NodeIds; wire into the T004 `TransitionTime` helper from US1.
-- [ ] T018 [US2] In `async-opcua-server/src/alarms/methods.rs`, implement `handle_condition_enable`/`handle_condition_disable`, using the existing guarded-parse pattern (`parse_u32_arg`/`parse_f64_arg`, methods.rs:723-731) and calling `set_enabled`.
-- [ ] T019 [US2] In `methods.rs`, implement `handle_condition_suppress`/`handle_condition_suppress2`/`handle_condition_unsuppress`/`handle_condition_unsuppress2`, returning `Bad_MethodInvalid` when the target instance has no `SuppressedState` (per §5.8.8's documented result code).
-- [ ] T020 [US2] In `methods.rs`, implement `handle_condition_remove_from_service`/`_remove_from_service2`/`_place_in_service`/`_place_in_service2`, same `Bad_MethodInvalid` precondition guard for missing `OutOfServiceState`.
-- [ ] T021 [US2] In `methods.rs`, implement `handle_condition_silence` using the T017 accessors, same precondition guard for missing `SilenceState`.
-- [ ] T022 [US2] In `methods.rs`'s `register_condition_methods` (methods.rs:633), register all 10 new Method callbacks (`ConditionType_Enable`/`_Disable`, `AlarmConditionType_Suppress`/`_Suppress2`/`_Unsuppress`/`_Unsuppress2`/`_RemoveFromService`/`_RemoveFromService2`/`_PlaceInService`/`_PlaceInService2`, `AlarmConditionType_Silence`), following the existing `add_method_callback_with_context` pattern.
-- [ ] T023 [US2] Run T012-T016; confirm they pass. Fix any handler/registration mismatches found.
-- [ ] T024 [US2] Update `AUDIT_TABLE` for the Method CUs (look up exact CU ids for A&C Enable/Suppress/OutOfService/Silence via `search_cu`, e.g. the audit's cited 2893/2896/2897 plus any adjacent CUs for the newly-added Methods) from `Gap` to `Implemented`.
+- [X] T017 [US2] In `async-opcua-server/src/alarms/state_machine.rs`, add `get_silence`/`set_silence` accessors mirroring the existing `get_suppressed`/`set_suppressed` pattern (:563-571), backed by `AlarmConditionType_SilenceState` and its `_Id`/`_TransitionTime` NodeIds; wire into the T004 `TransitionTime` helper from US1.
+- [X] T018 [US2] In `async-opcua-server/src/alarms/methods.rs`, implement `handle_condition_enable`/`handle_condition_disable`, using the existing guarded-parse pattern (`parse_u32_arg`/`parse_f64_arg`, methods.rs:723-731) and calling `set_enabled`.
+- [X] T019 [US2] In `methods.rs`, implement `handle_condition_suppress`/`handle_condition_suppress2`/`handle_condition_unsuppress`/`handle_condition_unsuppress2`, returning `Bad_MethodInvalid` when the target instance has no `SuppressedState` (per §5.8.8's documented result code).
+- [X] T020 [US2] In `methods.rs`, implement `handle_condition_remove_from_service`/`_remove_from_service2`/`_place_in_service`/`_place_in_service2`, same `Bad_MethodInvalid` precondition guard for missing `OutOfServiceState`.
+- [X] T021 [US2] In `methods.rs`, implement `handle_condition_silence` using the T017 accessors, same precondition guard for missing `SilenceState`.
+- [X] T022 [US2] In `methods.rs`'s `register_condition_methods` (methods.rs:633), register all 10 new Method callbacks (`ConditionType_Enable`/`_Disable`, `AlarmConditionType_Suppress`/`_Suppress2`/`_Unsuppress`/`_Unsuppress2`/`_RemoveFromService`/`_RemoveFromService2`/`_PlaceInService`/`_PlaceInService2`, `AlarmConditionType_Silence`), following the existing `add_method_callback_with_context` pattern.
+- [X] T023 [US2] Run T012-T016; confirm they pass. Fix any handler/registration mismatches found.
+- [X] T024 [US2] Update `AUDIT_TABLE` for the Method CUs (look up exact CU ids for A&C Enable/Suppress/OutOfService/Silence via `search_cu`, e.g. the audit's cited 2893/2896/2897 plus any adjacent CUs for the newly-added Methods) from `Gap` to `Implemented`.
 
-**Checkpoint**: US1 and US2 both independently functional.
+**Checkpoint**: US1 and US2 both independently functional. Ground-truth CU
+lookup during T024 found the task description's CU numbers (2893/2896/2897)
+were accurate, plus additional related CUs the description didn't name:
+closed **2202** (Enable/Disable), **2893** (Suppress/Unsuppress),
+**2896** (Silencing), **2897** (Suppression — now tested, was
+already-implemented-but-untested pre-095), **4463** (Suppress2/Unsuppress2),
+**4464** (OutOfService2), **4467** (OutOfService) — 7 CUs. Also upgraded
+5522/5525/5528 (SuppressedState/OutOfServiceState/SilenceState
+`TransitionTime`, closed in US1/T017) from "no dedicated test" to exercised
+by these Method tests. Client-side counterparts (2206/2895/2900) are
+out of scope — this audit is server-scoped.
 
 ---
 

@@ -95,6 +95,10 @@ pub struct ConditionStateMachine {
     pub out_of_service_state_id: NodeId,
     /// NodeId of the OutOfServiceState.TransitionTime property.
     pub out_of_service_state_transition_time_id: NodeId,
+    /// NodeId of the SilenceState variable (OPC-10000-9 §5.8.2, optional on AlarmConditionType).
+    pub silence_state_id: NodeId,
+    /// NodeId of the SilenceState.TransitionTime property.
+    pub silence_state_transition_time_id: NodeId,
     /// NodeId of the SuppressedOrShelved variable.
     pub suppressed_or_shelved_id: NodeId,
     /// NodeId of the ShelvingState object.
@@ -184,6 +188,9 @@ impl ConditionStateMachine {
             ns_idx,
             format!("{}_OutOfServiceState_TransitionTime", base_s),
         );
+        let silence_state_id = NodeId::new(ns_idx, format!("{}_SilenceState", base_s));
+        let silence_state_transition_time_id =
+            NodeId::new(ns_idx, format!("{}_SilenceState_TransitionTime", base_s));
         let suppressed_or_shelved_id =
             NodeId::new(ns_idx, format!("{}_SuppressedOrShelved", base_s));
         let shelving_state_id = NodeId::new(ns_idx, format!("{}_ShelvingState", base_s));
@@ -428,6 +435,32 @@ impl ConditionStateMachine {
             &out_of_service_state_id,
         );
 
+        // SilenceState (OPC-10000-9 §5.8.2/§5.8.7, optional on AlarmConditionType) — created
+        // unconditionally for every condition, matching this module's existing treatment of
+        // SuppressedState/OutOfServiceState.
+        let silence_var = VariableBuilder::new(&silence_state_id, "SilenceState", "SilenceState")
+            .data_type(DataTypeId::Boolean)
+            .has_type_definition(VariableTypeId::TwoStateVariableType)
+            .value(false)
+            .writable()
+            .build();
+        address_space.insert(
+            silence_var,
+            Some(&[(
+                &condition_id,
+                &NodeId::new(0, 47),
+                opcua_nodes::ReferenceDirection::Inverse,
+            )]),
+        );
+        insert_property_var(
+            address_space,
+            &silence_state_transition_time_id,
+            "TransitionTime",
+            DataTypeId::DateTime,
+            Variant::from(DateTime::now()),
+            &silence_state_id,
+        );
+
         let suppressed_or_shelved_var = VariableBuilder::new(
             &suppressed_or_shelved_id,
             "SuppressedOrShelved",
@@ -520,6 +553,8 @@ impl ConditionStateMachine {
             suppressed_state_transition_time_id,
             out_of_service_state_id,
             out_of_service_state_transition_time_id,
+            silence_state_id,
+            silence_state_transition_time_id,
             suppressed_or_shelved_id,
             shelving_state_id,
             shelving_current_state_id,
@@ -741,6 +776,17 @@ impl ConditionStateMachine {
         self.set_bool_value(address_space, &self.out_of_service_state_id, out_of_service);
         self.write_transition_time(address_space, &self.out_of_service_state_transition_time_id);
         self.recompute_suppressed_or_shelved(address_space);
+    }
+
+    /// Gets whether the alarm's audible/visible indicator is silenced (OPC-10000-9 §5.8.7).
+    pub fn get_silenced(&self, address_space: &AddressSpace) -> bool {
+        self.get_bool_value(address_space, &self.silence_state_id)
+    }
+
+    /// Sets whether the alarm's audible/visible indicator is silenced.
+    pub fn set_silenced(&self, address_space: &AddressSpace, silenced: bool) {
+        self.set_bool_value(address_space, &self.silence_state_id, silenced);
+        self.write_transition_time(address_space, &self.silence_state_transition_time_id);
     }
 
     /// Gets whether the condition is suppressed or shelved.

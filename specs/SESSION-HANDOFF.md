@@ -1,3 +1,150 @@
+# Session handoff — Alarms & Conditions completion (feature 095, 2026-07-16)
+
+**State:** `master` at `6f1b3cb56` (PR #297 merged, fork). Branch
+`095-ac-completion` deleted (local + remote). Full local CI gate green
+(21/21) and GitHub Actions green (20/20, 2 expected skips) before merge.
+
+## Delivered this session (feature 095)
+
+Closes the largest confirmed-gap cluster from the 2026-07-15 conformance
+audit (`docs/conformance-audit-2026-07-15.md`): 98 gaps + 7 partials out of
+126 audited Part 9 (Alarms & Conditions) CUs. US1-US3 done; US4 partial.
+
+| US | Status | What | CUs closed |
+|----|--------|------|------------|
+| US1 | Done (partial scope) | `TransitionTime`/`EffectiveTransitionTime`/`EffectiveDisplayName` on core sub-states (OPC-10000-9 §5.2) — `EnabledState`/`ActiveState`/`AckedState`/`ConfirmedState`/`SuppressedState`/`OutOfServiceState`/`ShelvingState.CurrentState`, both limit-alarm modes | 14 of 58 in range 5510-5567. Ground-truth CU lookup against the real OPC Foundation snapshot (not just range boundaries) found the range is far more granular than "one shared mechanism" assumed: per-specific-transition-edge timestamps (e.g. distinct `UnshelvedToTimedShelved`/`TimedShelvedToUnshelved`/... properties) and per-substate `Effective*` variants beyond `ActiveState`. Remaining 44 documented precisely in `AUDIT_TABLE`, not silently dropped. |
+| US2 | Done | All 10 lifecycle Methods: `Enable`/`Disable` (§5.5.4/.5), `Suppress`/`Suppress2`/`Unsuppress`/`Unsuppress2` (§5.8.8-.11), `RemoveFromService`/`RemoveFromService2`/`PlaceInService`/`PlaceInService2` (§5.8.12-.15), `Silence` (§5.8.7). First test coverage for previously-untested `SuppressedState`/`OutOfServiceState`. | 7 (2202, 2893, 2896, 2897, 4463, 4464, 4467) |
+| US3 | Done | A&C audit events (§5.10.2-.12): `AuditConditionCommentEventType`/`EnableEventType`/`SilenceEventType`/`OutOfServiceEventType`, closing the stale `alarms/methods.rs:201` `// ponytail` marker | 3 (3763, 3771, 4428) |
+| US4 | Partial | Level-alarm `TypeDefinition` fix (§5.8.21.2/.3): `LimitAlarmKind` parameterizes the existing `LimitAlarm` evaluator instead of duplicating it — `register_level_alarm` new entry point, `register_limit_alarm`'s own signature/behavior unchanged for all 11+ existing call sites | 2 (2746, 3001) |
+
+**26 CUs total** moved Gap/Partial → Implemented, each with file:line + test
+citation in `tools/cu-coverage-report/src/lib.rs`'s `AUDIT_TABLE` (no
+blanket flips). `specs/conformance-tester/CU-COVERAGE.md` regenerated.
+48/48 `async-opcua/tests/integration/alarms.rs` tests passing, confirmed
+across repeated runs (SC-005, zero regressions).
+
+### Real architectural bugs found and fixed mid-implementation
+
+1. **Audit-event `SourceNode` targeting**: the first attempt targeted the
+   alarm's own source device (matching `AlarmEvent`'s convention). This
+   cross-contaminated every plain alarm-event subscription on that device
+   via standard `HasNotifier` propagation (subscribing to a node receives
+   events from its whole descendant hierarchy) and broke a pre-existing
+   test (`alarm_add_comment_reports_without_state_change`) until fixed by
+   targeting `ObjectId::Server`, matching `session/audit.rs`'s own
+   convention.
+2. **Session-audit-context mismatch**: `session/audit.rs`'s
+   `ServerAuditEvent` needs an `AuditEventContext` built from
+   `RequestHeader` (client audit entry id, secure channel id, ...) — not
+   available to a Method callback registered via
+   `add_method_callback_with_context` and invoked from the generic Call
+   service. Added a deliberately lighter `ConditionAuditEvent` struct in
+   `alarms/methods.rs` rather than forcing the architectural mismatch.
+3. **Address-space model correction** (caught at design-review time, before
+   coding): `ConditionStateMachine::create_in_address_space` dynamically
+   mints namespace-2 string NodeIds per condition instance — it does NOT
+   instantiate the full generated 1.05 nodeset per condition. The initial
+   plan/data-model assumed writable generated per-instance NodeIds existed
+   (e.g. `AlarmConditionType_EnabledState_TransitionTime = 9016`); those are
+   abstract-type ModellingRule template declarations, not concrete
+   addresses. Only `ObjectTypeId`/`VariableTypeId` constants are used, for
+   `has_type_definition` references.
+4. **`ReAlarmRepeatCount` semantics** (caught during grounding, before
+   implementation): the spec description assumed it was a client-configured
+   "stop after N re-alarms" limit. OPC UA reference tool grounding
+   (OPC-10000-9 §5.8.2: `ReAlarmRepeatCount`, Int16, `BaseDataVariableType`,
+   not a Property) confirmed it's actually a **server-maintained output
+   counter** — re-alarming continues indefinitely at `ReAlarmTime` intervals
+   while active+unacknowledged; there's no base-spec "stop after N" concept.
+   Corrected across spec.md/data-model.md/tasks.md before any code was
+   written against the wrong assumption.
+5. **CU 2189 mislabeling** (caught during US3 grounding): the original task
+   description cited CU 2189 as "A&C Auditing." The real snapshot shows
+   CU 2189 is "ConditionClasses" (multiple condition classes for alarm
+   grouping/filtering) — an unrelated concept. The real Auditing CUs are
+   3763-3771 + 4428, which is what got closed. `AUDIT_TABLE`'s own evidence
+   text for 2189 was already correct; only the task description's citation
+   was wrong.
+
+### Not done — deferred to a follow-up feature
+
+US4's remaining pieces need genuinely new evaluator/timing logic, not
+parameterization of already-correct code like the Level-alarm fix was —
+deferred given the amount of unplanned complexity US3 alone turned up (2
+real architectural bugs surfaced only through actual test-run failures, not
+foreseeable from grounding/planning alone). Itemized in `TODO.md` with CU
+citations and in `specs/095-ac-completion/tasks.md` (T045-T052, each already
+grounded with file:line targets and generated-NodeId-constant confirmations
+from this session):
+
+| Item | CUs | Needs |
+|------|-----|-------|
+| Deviation alarms (`Exclusive`/`NonExclusiveDeviationAlarmType`) | 2390, 2951 | Setpoint-tracking evaluator (`ExclusiveDeviationAlarmType_SetpointNode` etc. already confirmed to exist as generated NodeIds) |
+| RateOfChange alarms | 2323, 2946 | Rate-window evaluator (new — no existing analog in this codebase) |
+| `SystemOffNormalAlarmType` | 2239 | New instantiation — likely cheap, probably reuses `OffNormalAlarmType`'s existing evaluation logic exactly (same pattern as the Level-alarm fix), just needs confirming |
+| `CertificateExpirationAlarmType` | 2236 | `ExpirationDate`/`ExpirationLimit` wiring (generated NodeIds confirmed present) |
+| `DiscrepancyAlarmType` | 2861 | `TargetValueNode` comparison (generated NodeId confirmed present) |
+| `OnDelay`/`OffDelay` | 2877 | Delay timing added to the per-instance evaluation path (`source_monitor.rs`) |
+| `ReAlarmTime`/`ReAlarmRepeatCount` | 2879 | Re-notification logic; `ReAlarmRepeatCount` is a server-maintained output counter (see bug #4 above), not client-configured |
+| `AudibleSound`/`AudibleEnabled` | 2881 | Property wiring, interacts with US2's Silence mechanism (`state_machine.rs` `get_silenced`/`set_silenced`) |
+
+Also still open in the wider `AUDIT_TABLE` (unrelated to A&C, from the
+2026-07-15 audit, not touched this session): GDS Directory/Auth/
+KeyCredential, File Access, DataAccess variable types, RBAC RolePermissions
+Write path, Historical `ReadAtTimeDetails`, Historical structured-data
+update, Subscription Durability, Scheduler/Redundancy/Sessionless — see
+`TODO.md`'s Remaining section.
+
+### Gotcha for next session: CI playbook backgrounding
+
+**The Bash tool's `timeout` parameter caps at 600000ms (10 min) even with
+`run_in_background: true`.** `tools/ci-playbook.sh --ci` on this repo's full
+workspace (build matrix + all clippy variants + codegen verify + 3-stack
+interop + footprint checks across 4 foundation profiles) takes ~15-20
+minutes end to end and gets silently killed mid-run if launched via the Bash
+tool's own backgrounding — confirmed twice this session (both runs killed
+around the 10-minute mark with no real failure, just still compiling).
+Launch it detached instead:
+
+```bash
+nohup tools/ci-playbook.sh --ci > /path/to/scratchpad/ci-playbook.log 2>&1 &
+disown
+```
+
+Then poll via `ps aux | grep ci-playbook` + `tail`/`grep FAIL` on the log
+file in separate Bash calls, not tied to any single call's timeout. This
+run completed clean (21/21 PASS) in ~15 minutes once launched this way.
+
+Also: **run `cargo fmt --all` before the CI gate**, not after — this session
+skipped it during development and the gate's `cargo fmt` check step failed
+on ~5 files' import ordering / line-wrapping on the first attempt, forcing a
+second full ~15-minute re-run to reconfirm green after `cargo fmt --all`
+fixed it.
+
+### CI gates (all green at merge, PR #297)
+
+- `cargo fmt --all -- --check` — PASS (after `cargo fmt --all` fix)
+- Full local `tools/ci-playbook.sh --ci` — 21/21 PASS, 0 FAIL
+- GitHub Actions — 20/20 PASS (2 expected skips: `external-interop`,
+  `release`)
+- `async-opcua/tests/integration/alarms.rs` — 48/48 PASS, confirmed stable
+  across 3+ repeated runs (no flakiness from the new timing-sensitive audit-
+  event tests)
+
+### Files changed: 8 source + 1 test file + 7 spec artifacts + docs = ~17 files, ~+3130/-136 lines (6 commits, one per user story + polish + fmt)
+
+---
+
+## Next — pick up US4's remainder, or a different backlog item
+
+If continuing feature 095's US4: `specs/095-ac-completion/spec.md`/
+`plan.md`/`tasks.md` are all still valid and merged to master — open a new
+branch and continue at T045 (Deviation alarm evaluator). Otherwise see
+`TODO.md`'s Remaining section for the next-highest-priority conformance
+backlog item.
+
+---
+
 # Session handoff — hot path audit fixes (feature 061, 2026-07-05)
 
 **State:** branch `061-hot-path-audit-fixes` on `master` (fork). Features 060 + 061

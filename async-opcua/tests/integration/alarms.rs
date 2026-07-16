@@ -1339,6 +1339,270 @@ async fn shelving_transitions_and_suppressed_or_shelved() {
     assert_eq!(state(&sm), (ShelvingState::Unshelved, false));
 }
 
+// ---------------------------------------------------------------------------
+// TransitionTime / EffectiveTransitionTime / EffectiveDisplayName (feature 095, US1).
+// OPC-10000-9 §5.2: every TwoStateVariableType sub-state records when it was last entered
+// (TransitionTime); a state with sub-states also records when its overall effective state
+// last changed (EffectiveTransitionTime) and a human-readable description of it
+// (EffectiveDisplayName).
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn enabled_state_transition_time_updates_on_enable_disable() {
+    let (_tester, nm, session) = setup_alarms().await;
+    let source = make_event_source(&nm, "EnableDev");
+    let sm = register_alarm_condition(
+        nm.address_space(),
+        &nm,
+        "EnableDev",
+        "Temp",
+        source,
+        "Temp alarm",
+    );
+    let condition_id = sm.condition_id.clone();
+
+    let before = DateTime::now();
+    {
+        let space = nm.address_space().read();
+        sm.set_enabled(&space, false);
+    }
+    match read_value_via_path(&session, &condition_id, &["EnabledState", "TransitionTime"]).await {
+        Some(Variant::DateTime(t)) => assert!(
+            *t >= before,
+            "EnabledState.TransitionTime should reflect the Disable transition"
+        ),
+        other => panic!("EnabledState.TransitionTime = {other:?}, expected a DateTime"),
+    }
+}
+
+#[tokio::test]
+async fn active_state_transition_time_and_effective_display_name_update_on_activation() {
+    let (tester, nm, session) = setup_alarms().await;
+    let source = make_event_source(&nm, "ActiveDev");
+    let alarm = register_limit_alarm(
+        nm.address_space(),
+        &nm,
+        "ActiveDev",
+        "Level",
+        source,
+        exclusive_level_cfg(),
+    );
+    let condition_id = alarm.condition_state_machine().condition_id.clone();
+
+    let before = DateTime::now();
+    drive_limit(&alarm, &nm, &tester, 105.0);
+
+    match read_value_via_path(&session, &condition_id, &["ActiveState", "TransitionTime"]).await {
+        Some(Variant::DateTime(t)) => assert!(*t >= before),
+        other => panic!("ActiveState.TransitionTime = {other:?}, expected a DateTime"),
+    }
+    match read_value_via_path(
+        &session,
+        &condition_id,
+        &["ActiveState", "EffectiveTransitionTime"],
+    )
+    .await
+    {
+        Some(Variant::DateTime(t)) => assert!(*t >= before),
+        other => panic!("ActiveState.EffectiveTransitionTime = {other:?}, expected a DateTime"),
+    }
+    match read_value_via_path(
+        &session,
+        &condition_id,
+        &["ActiveState", "EffectiveDisplayName"],
+    )
+    .await
+    {
+        Some(Variant::LocalizedText(t)) => {
+            assert_eq!(t.text.value().as_deref(), Some("Active | Unacknowledged"))
+        }
+        other => panic!("ActiveState.EffectiveDisplayName = {other:?}, expected LocalizedText"),
+    }
+}
+
+#[tokio::test]
+async fn shelving_updates_effective_transition_time_without_changing_active_state_transition_time()
+{
+    // Edge case (spec.md): shelving an active alarm changes its EFFECTIVE state without
+    // necessarily changing the raw ActiveState.Id/TransitionTime.
+    let (tester, nm, session) = setup_alarms().await;
+    let core_nm = tester
+        .handle
+        .node_managers()
+        .get_of_type::<CoreNodeManager>()
+        .expect("CoreNodeManager not found");
+    let source = make_event_source(&nm, "ShelveEffDev");
+    let alarm = register_limit_alarm(
+        nm.address_space(),
+        &nm,
+        "ShelveEffDev",
+        "Level",
+        source,
+        exclusive_level_cfg(),
+    );
+    let sm = alarm.condition_state_machine();
+    let condition_id = sm.condition_id.clone();
+    let registry = ConditionRegistry::new();
+    registry.register(sm.clone());
+    register_condition_methods(&core_nm, registry, nm.address_space().clone());
+
+    drive_limit(&alarm, &nm, &tester, 105.0);
+
+    let active_transition_before =
+        read_value_via_path(&session, &condition_id, &["ActiveState", "TransitionTime"])
+            .await
+            .expect("ActiveState.TransitionTime should be set after activation");
+
+    let before_shelve = DateTime::now();
+    let shelving_id = sm.shelving_state_id.clone();
+    assert_eq!(
+        call_shelve(
+            &session,
+            &shelving_id,
+            MethodId::ShelvedStateMachineType_OneShotShelve,
+            None,
+        )
+        .await,
+        StatusCode::Good
+    );
+
+    let active_transition_after =
+        read_value_via_path(&session, &condition_id, &["ActiveState", "TransitionTime"])
+            .await
+            .expect("ActiveState.TransitionTime should still be readable after shelving");
+    assert_eq!(
+        active_transition_before, active_transition_after,
+        "shelving must not change ActiveState's own TransitionTime"
+    );
+
+    match read_value_via_path(
+        &session,
+        &condition_id,
+        &["ActiveState", "EffectiveTransitionTime"],
+    )
+    .await
+    {
+        Some(Variant::DateTime(t)) => assert!(
+            *t >= before_shelve,
+            "EffectiveTransitionTime must update when shelving changes the effective state"
+        ),
+        other => panic!("ActiveState.EffectiveTransitionTime = {other:?}, expected a DateTime"),
+    }
+    match read_value_via_path(
+        &session,
+        &condition_id,
+        &["ActiveState", "EffectiveDisplayName"],
+    )
+    .await
+    {
+        Some(Variant::LocalizedText(t)) => {
+            assert_eq!(t.text.value().as_deref(), Some("Shelved"))
+        }
+        other => panic!("ActiveState.EffectiveDisplayName = {other:?}, expected LocalizedText"),
+    }
+}
+
+#[tokio::test]
+async fn acked_and_confirmed_state_transition_time_update_on_acknowledge_confirm() {
+    let (tester, nm, session) = setup_alarms().await;
+    let core_nm = tester
+        .handle
+        .node_managers()
+        .get_of_type::<CoreNodeManager>()
+        .expect("CoreNodeManager not found");
+    let source = make_event_source(&nm, "AckDev");
+    let alarm = register_limit_alarm(
+        nm.address_space(),
+        &nm,
+        "AckDev",
+        "Level",
+        source.clone(),
+        exclusive_level_cfg(),
+    );
+    let condition_id = alarm.condition_state_machine().condition_id.clone();
+    let registry = ConditionRegistry::new();
+    registry.register(alarm.condition_state_machine());
+    register_condition_methods(&core_nm, registry, nm.address_space().clone());
+
+    let (notifs, _dv, mut events) = ChannelNotifications::new();
+    let sub_id = session
+        .create_subscription(Duration::from_millis(100), 100, 20, 1000, 0, true, notifs)
+        .await
+        .unwrap();
+    let _item = add_event_item(&session, sub_id, &source).await;
+
+    drive_limit(&alarm, &nm, &tester, 105.0);
+    let e = recv_alarm(&mut events).await;
+
+    let before_ack = DateTime::now();
+    session
+        .acknowledge_condition(
+            &condition_id,
+            ByteString::from(e.event_id.clone()),
+            LocalizedText::new("en", "ack"),
+        )
+        .await
+        .expect("acknowledge_condition should succeed");
+    let ack_ev = recv_alarm(&mut events).await;
+
+    match read_value_via_path(&session, &condition_id, &["AckedState", "TransitionTime"]).await {
+        Some(Variant::DateTime(t)) => assert!(*t >= before_ack),
+        other => panic!("AckedState.TransitionTime = {other:?}, expected a DateTime"),
+    }
+
+    let before_confirm = DateTime::now();
+    session
+        .confirm_condition(
+            &condition_id,
+            ByteString::from(ack_ev.event_id.clone()),
+            LocalizedText::new("en", "confirm"),
+        )
+        .await
+        .expect("confirm_condition should succeed");
+
+    match read_value_via_path(
+        &session,
+        &condition_id,
+        &["ConfirmedState", "TransitionTime"],
+    )
+    .await
+    {
+        Some(Variant::DateTime(t)) => assert!(*t >= before_confirm),
+        other => panic!("ConfirmedState.TransitionTime = {other:?}, expected a DateTime"),
+    }
+}
+
+#[tokio::test]
+async fn limit_state_transition_time_updates_on_threshold_crossing() {
+    let (tester, nm, session) = setup_alarms().await;
+    let source = make_event_source(&nm, "LimitTtDev");
+    let alarm = register_limit_alarm(
+        nm.address_space(),
+        &nm,
+        "LimitTtDev",
+        "Level",
+        source,
+        exclusive_level_cfg(),
+    );
+    let condition_id = alarm.condition_state_machine().condition_id.clone();
+
+    let before = DateTime::now();
+    drive_limit(&alarm, &nm, &tester, 105.0);
+
+    match read_value_via_path(
+        &session,
+        &condition_id,
+        &["LimitState", "CurrentState", "TransitionTime"],
+    )
+    .await
+    {
+        Some(Variant::DateTime(t)) => assert!(*t >= before),
+        other => panic!(
+            "LimitState.CurrentState.TransitionTime = {other:?}, expected a DateTime"
+        ),
+    }
+}
+
 #[tokio::test]
 async fn timed_shelve_out_of_range_returns_bad_shelving_time_out_of_range() {
     // OPC UA Part 9 §5.8.17.4: TimedShelve rejects shelving times outside the acceptable range.

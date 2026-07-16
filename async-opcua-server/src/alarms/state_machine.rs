@@ -3,7 +3,9 @@
 
 use crate::address_space::{AddressSpace, ObjectBuilder, VariableBuilder};
 use opcua_nodes::NodeType;
-use opcua_types::{DataTypeId, LocalizedText, NodeId, StatusCode, VariableTypeId, Variant};
+use opcua_types::{
+    DataTypeId, DateTime, LocalizedText, NodeId, StatusCode, VariableTypeId, Variant,
+};
 use std::sync::{Arc, Mutex};
 
 /// Preserved prior state of an OPC UA Condition branch.
@@ -59,12 +61,24 @@ pub struct ConditionStateMachine {
     pub condition_name: String,
     /// NodeId of the EnabledState variable.
     pub enabled_state_id: NodeId,
+    /// NodeId of the EnabledState.TransitionTime property.
+    pub enabled_state_transition_time_id: NodeId,
     /// NodeId of the ActiveState variable.
     pub active_state_id: NodeId,
+    /// NodeId of the ActiveState.TransitionTime property.
+    pub active_state_transition_time_id: NodeId,
+    /// NodeId of the ActiveState.EffectiveTransitionTime property.
+    pub active_state_effective_transition_time_id: NodeId,
+    /// NodeId of the ActiveState.EffectiveDisplayName property.
+    pub active_state_effective_display_name_id: NodeId,
     /// NodeId of the AckedState variable.
     pub acked_state_id: NodeId,
+    /// NodeId of the AckedState.TransitionTime property.
+    pub acked_state_transition_time_id: NodeId,
     /// NodeId of the ConfirmedState variable.
     pub confirmed_state_id: NodeId,
+    /// NodeId of the ConfirmedState.TransitionTime property.
+    pub confirmed_state_transition_time_id: NodeId,
     /// NodeId of the Severity variable.
     pub severity_id: NodeId,
     /// NodeId of the Message variable.
@@ -75,14 +89,20 @@ pub struct ConditionStateMachine {
     pub branch_id_id: NodeId,
     /// NodeId of the SuppressedState variable.
     pub suppressed_state_id: NodeId,
+    /// NodeId of the SuppressedState.TransitionTime property.
+    pub suppressed_state_transition_time_id: NodeId,
     /// NodeId of the OutOfServiceState variable.
     pub out_of_service_state_id: NodeId,
+    /// NodeId of the OutOfServiceState.TransitionTime property.
+    pub out_of_service_state_transition_time_id: NodeId,
     /// NodeId of the SuppressedOrShelved variable.
     pub suppressed_or_shelved_id: NodeId,
     /// NodeId of the ShelvingState object.
     pub shelving_state_id: NodeId,
     /// NodeId of the ShelvingState.CurrentState variable.
     pub shelving_current_state_id: NodeId,
+    /// NodeId of the ShelvingState.CurrentState.TransitionTime property.
+    pub shelving_current_state_transition_time_id: NodeId,
     /// NodeId of the ShelvingState.UnshelveTime property.
     pub unshelve_time_id: NodeId,
     /// EventId of the condition's current (most recent) reportable state, shared across clones.
@@ -90,6 +110,33 @@ pub struct ConditionStateMachine {
     current_event_id: Arc<Mutex<Vec<u8>>>,
     /// Active condition branches, shared across clones.
     branches: Arc<opcua_core::sync::RwLock<Vec<Branch>>>,
+}
+
+/// Creates a `PropertyType` child Variable (e.g. `TransitionTime`, `EffectiveTransitionTime`,
+/// `EffectiveDisplayName`) attached to `parent_id` via a `HasProperty` reference, per the
+/// pattern already used for `ShelvingState.UnshelveTime` (OPC-10000-9 §5.2).
+fn insert_property_var(
+    address_space: &AddressSpace,
+    id: &NodeId,
+    browse_name: &str,
+    data_type: DataTypeId,
+    value: Variant,
+    parent_id: &NodeId,
+) {
+    let var = VariableBuilder::new(id, browse_name, browse_name)
+        .data_type(data_type)
+        .has_type_definition(VariableTypeId::PropertyType)
+        .value(value)
+        .writable()
+        .build();
+    address_space.insert(
+        var,
+        Some(&[(
+            parent_id,
+            &NodeId::new(0, 46),
+            opcua_nodes::ReferenceDirection::Inverse,
+        )]),
+    );
 }
 
 impl ConditionStateMachine {
@@ -106,20 +153,46 @@ impl ConditionStateMachine {
 
         let condition_id = NodeId::new(ns_idx, base_s.clone());
         let enabled_state_id = NodeId::new(ns_idx, format!("{}_EnabledState", base_s));
+        let enabled_state_transition_time_id =
+            NodeId::new(ns_idx, format!("{}_EnabledState_TransitionTime", base_s));
         let active_state_id = NodeId::new(ns_idx, format!("{}_ActiveState", base_s));
+        let active_state_transition_time_id =
+            NodeId::new(ns_idx, format!("{}_ActiveState_TransitionTime", base_s));
+        let active_state_effective_transition_time_id = NodeId::new(
+            ns_idx,
+            format!("{}_ActiveState_EffectiveTransitionTime", base_s),
+        );
+        let active_state_effective_display_name_id = NodeId::new(
+            ns_idx,
+            format!("{}_ActiveState_EffectiveDisplayName", base_s),
+        );
         let acked_state_id = NodeId::new(ns_idx, format!("{}_AckedState", base_s));
+        let acked_state_transition_time_id =
+            NodeId::new(ns_idx, format!("{}_AckedState_TransitionTime", base_s));
         let confirmed_state_id = NodeId::new(ns_idx, format!("{}_ConfirmedState", base_s));
+        let confirmed_state_transition_time_id =
+            NodeId::new(ns_idx, format!("{}_ConfirmedState_TransitionTime", base_s));
         let severity_id = NodeId::new(ns_idx, format!("{}_Severity", base_s));
         let message_id = NodeId::new(ns_idx, format!("{}_Message", base_s));
         let retain_id = NodeId::new(ns_idx, format!("{}_Retain", base_s));
         let branch_id_id = NodeId::new(ns_idx, format!("{}_BranchId", base_s));
         let suppressed_state_id = NodeId::new(ns_idx, format!("{}_SuppressedState", base_s));
+        let suppressed_state_transition_time_id =
+            NodeId::new(ns_idx, format!("{}_SuppressedState_TransitionTime", base_s));
         let out_of_service_state_id = NodeId::new(ns_idx, format!("{}_OutOfServiceState", base_s));
+        let out_of_service_state_transition_time_id = NodeId::new(
+            ns_idx,
+            format!("{}_OutOfServiceState_TransitionTime", base_s),
+        );
         let suppressed_or_shelved_id =
             NodeId::new(ns_idx, format!("{}_SuppressedOrShelved", base_s));
         let shelving_state_id = NodeId::new(ns_idx, format!("{}_ShelvingState", base_s));
         let shelving_current_state_id =
             NodeId::new(ns_idx, format!("{}_ShelvingState_CurrentState", base_s));
+        let shelving_current_state_transition_time_id = NodeId::new(
+            ns_idx,
+            format!("{}_ShelvingState_CurrentState_TransitionTime", base_s),
+        );
         let unshelve_time_id =
             NodeId::new(ns_idx, format!("{}_ShelvingState_UnshelveTime", base_s));
 
@@ -148,6 +221,14 @@ impl ConditionStateMachine {
                 opcua_nodes::ReferenceDirection::Inverse,
             )]),
         );
+        insert_property_var(
+            address_space,
+            &enabled_state_transition_time_id,
+            "TransitionTime",
+            DataTypeId::DateTime,
+            Variant::from(DateTime::now()),
+            &enabled_state_id,
+        );
 
         // 3. Create ActiveState (TwoStateVariableType)
         let active_var = VariableBuilder::new(&active_state_id, "ActiveState", "ActiveState")
@@ -162,6 +243,30 @@ impl ConditionStateMachine {
                 &NodeId::new(0, 47),
                 opcua_nodes::ReferenceDirection::Inverse,
             )]),
+        );
+        insert_property_var(
+            address_space,
+            &active_state_transition_time_id,
+            "TransitionTime",
+            DataTypeId::DateTime,
+            Variant::from(DateTime::now()),
+            &active_state_id,
+        );
+        insert_property_var(
+            address_space,
+            &active_state_effective_transition_time_id,
+            "EffectiveTransitionTime",
+            DataTypeId::DateTime,
+            Variant::from(DateTime::now()),
+            &active_state_id,
+        );
+        insert_property_var(
+            address_space,
+            &active_state_effective_display_name_id,
+            "EffectiveDisplayName",
+            DataTypeId::LocalizedText,
+            Variant::from(LocalizedText::new("en", "Inactive")),
+            &active_state_id,
         );
 
         // 4. Create AckedState (TwoStateVariableType)
@@ -178,6 +283,14 @@ impl ConditionStateMachine {
                 opcua_nodes::ReferenceDirection::Inverse,
             )]),
         );
+        insert_property_var(
+            address_space,
+            &acked_state_transition_time_id,
+            "TransitionTime",
+            DataTypeId::DateTime,
+            Variant::from(DateTime::now()),
+            &acked_state_id,
+        );
 
         // 5. Create ConfirmedState (TwoStateVariableType)
         let confirmed_var =
@@ -193,6 +306,14 @@ impl ConditionStateMachine {
                 &NodeId::new(0, 47),
                 opcua_nodes::ReferenceDirection::Inverse,
             )]),
+        );
+        insert_property_var(
+            address_space,
+            &confirmed_state_transition_time_id,
+            "TransitionTime",
+            DataTypeId::DateTime,
+            Variant::from(DateTime::now()),
+            &confirmed_state_id,
         );
 
         // 6. Create Severity variable
@@ -271,6 +392,14 @@ impl ConditionStateMachine {
                 opcua_nodes::ReferenceDirection::Inverse,
             )]),
         );
+        insert_property_var(
+            address_space,
+            &suppressed_state_transition_time_id,
+            "TransitionTime",
+            DataTypeId::DateTime,
+            Variant::from(DateTime::now()),
+            &suppressed_state_id,
+        );
 
         let out_of_service_var = VariableBuilder::new(
             &out_of_service_state_id,
@@ -289,6 +418,14 @@ impl ConditionStateMachine {
                 &NodeId::new(0, 47),
                 opcua_nodes::ReferenceDirection::Inverse,
             )]),
+        );
+        insert_property_var(
+            address_space,
+            &out_of_service_state_transition_time_id,
+            "TransitionTime",
+            DataTypeId::DateTime,
+            Variant::from(DateTime::now()),
+            &out_of_service_state_id,
         );
 
         let suppressed_or_shelved_var = VariableBuilder::new(
@@ -336,6 +473,14 @@ impl ConditionStateMachine {
                 opcua_nodes::ReferenceDirection::Inverse,
             )]),
         );
+        insert_property_var(
+            address_space,
+            &shelving_current_state_transition_time_id,
+            "TransitionTime",
+            DataTypeId::DateTime,
+            Variant::from(DateTime::now()),
+            &shelving_current_state_id,
+        );
 
         let unshelve_time_var =
             VariableBuilder::new(&unshelve_time_id, "UnshelveTime", "UnshelveTime")
@@ -358,18 +503,27 @@ impl ConditionStateMachine {
             source_node_id,
             condition_name: condition_name.to_string(),
             enabled_state_id,
+            enabled_state_transition_time_id,
             active_state_id,
+            active_state_transition_time_id,
+            active_state_effective_transition_time_id,
+            active_state_effective_display_name_id,
             acked_state_id,
+            acked_state_transition_time_id,
             confirmed_state_id,
+            confirmed_state_transition_time_id,
             severity_id,
             message_id,
             retain_id,
             branch_id_id,
             suppressed_state_id,
+            suppressed_state_transition_time_id,
             out_of_service_state_id,
+            out_of_service_state_transition_time_id,
             suppressed_or_shelved_id,
             shelving_state_id,
             shelving_current_state_id,
+            shelving_current_state_transition_time_id,
             unshelve_time_id,
             current_event_id: Arc::new(Mutex::new(Vec::new())),
             branches: Arc::new(opcua_core::sync::RwLock::new(Vec::new())),
@@ -459,6 +613,7 @@ impl ConditionStateMachine {
     /// Sets whether the condition is enabled.
     pub fn set_enabled(&self, address_space: &AddressSpace, enabled: bool) {
         self.set_bool_value(address_space, &self.enabled_state_id, enabled);
+        self.write_transition_time(address_space, &self.enabled_state_transition_time_id);
     }
 
     /// Gets whether the condition is active.
@@ -469,6 +624,8 @@ impl ConditionStateMachine {
     /// Sets whether the condition is active.
     pub fn set_active(&self, address_space: &AddressSpace, active: bool) {
         self.set_bool_value(address_space, &self.active_state_id, active);
+        self.write_transition_time(address_space, &self.active_state_transition_time_id);
+        self.recompute_effective_state(address_space);
     }
 
     /// Gets whether the condition is acknowledged.
@@ -479,6 +636,8 @@ impl ConditionStateMachine {
     /// Sets whether the condition is acknowledged.
     pub fn set_acked(&self, address_space: &AddressSpace, acked: bool) {
         self.set_bool_value(address_space, &self.acked_state_id, acked);
+        self.write_transition_time(address_space, &self.acked_state_transition_time_id);
+        self.recompute_effective_state(address_space);
     }
 
     /// Gets whether the condition is confirmed.
@@ -489,6 +648,7 @@ impl ConditionStateMachine {
     /// Sets whether the condition is confirmed.
     pub fn set_confirmed(&self, address_space: &AddressSpace, confirmed: bool) {
         self.set_bool_value(address_space, &self.confirmed_state_id, confirmed);
+        self.write_transition_time(address_space, &self.confirmed_state_transition_time_id);
     }
 
     /// Gets the current severity of the condition.
@@ -567,6 +727,7 @@ impl ConditionStateMachine {
     /// Sets whether the condition is system-suppressed.
     pub fn set_suppressed(&self, address_space: &AddressSpace, suppressed: bool) {
         self.set_bool_value(address_space, &self.suppressed_state_id, suppressed);
+        self.write_transition_time(address_space, &self.suppressed_state_transition_time_id);
         self.recompute_suppressed_or_shelved(address_space);
     }
 
@@ -578,6 +739,7 @@ impl ConditionStateMachine {
     /// Sets whether the condition is maintenance-suppressed.
     pub fn set_out_of_service(&self, address_space: &AddressSpace, out_of_service: bool) {
         self.set_bool_value(address_space, &self.out_of_service_state_id, out_of_service);
+        self.write_transition_time(address_space, &self.out_of_service_state_transition_time_id);
         self.recompute_suppressed_or_shelved(address_space);
     }
 
@@ -620,6 +782,7 @@ impl ConditionStateMachine {
                 );
             }
         };
+        self.write_transition_time(address_space, &self.shelving_current_state_transition_time_id);
         self.recompute_suppressed_or_shelved(address_space);
     }
 
@@ -665,6 +828,7 @@ impl ConditionStateMachine {
             &self.suppressed_or_shelved_id,
             suppressed_or_shelved,
         );
+        self.recompute_effective_state(address_space);
     }
 
     /// Shelves the condition until the alarm next goes inactive.
@@ -704,6 +868,56 @@ impl ConditionStateMachine {
         self.set_unshelve_time(address_space, 0.0);
         self.recompute_suppressed_or_shelved(address_space);
         StatusCode::Good
+    }
+
+    /// Writes `TransitionTime`/`EffectiveTransitionTime` (OPC-10000-9 §5.2) on the property node
+    /// identified by `id`, stamped with the current time. `pub(crate)` so sibling alarm-kind
+    /// modules (`limit.rs`, `discrete.rs`) can stamp `TransitionTime` on their own state-machine
+    /// child nodes without duplicating this write pattern.
+    pub(crate) fn write_transition_time(&self, address_space: &AddressSpace, id: &NodeId) {
+        if let Some(mut node) = address_space.find_mut(id) {
+            if let NodeType::Variable(ref mut var) = &mut *node {
+                let _ = var.set_value(
+                    &opcua_types::NumericRange::None,
+                    Variant::from(DateTime::now()),
+                );
+            }
+        };
+    }
+
+    /// Writes `EffectiveDisplayName` (OPC-10000-9 §5.2) with a computed, locale-aware description
+    /// of the condition's current effective state.
+    fn write_effective_display_name(&self, address_space: &AddressSpace, text: &str) {
+        if let Some(mut node) = address_space.find_mut(&self.active_state_effective_display_name_id)
+        {
+            if let NodeType::Variable(ref mut var) = &mut *node {
+                let _ = var.set_value(
+                    &opcua_types::NumericRange::None,
+                    Variant::from(LocalizedText::new("en", text)),
+                );
+            }
+        };
+    }
+
+    /// Recomputes and writes `ActiveState.EffectiveTransitionTime` and `EffectiveDisplayName`
+    /// (OPC-10000-9 §5.2) from the condition's current active/acked/shelving/suppression state.
+    /// Called whenever any of those inputs change.
+    pub fn recompute_effective_state(&self, address_space: &AddressSpace) {
+        let active = self.get_active(address_space);
+        let acked = self.get_acked(address_space);
+        let shelved = self.get_shelving_state(address_space) != ShelvingState::Unshelved;
+        let suppressed = self.get_suppressed(address_space) || self.get_out_of_service(address_space);
+
+        let text = match (active, shelved, suppressed, acked) {
+            (false, _, _, _) => "Inactive",
+            (true, true, _, _) => "Shelved",
+            (true, _, true, _) => "Suppressed",
+            (true, false, false, false) => "Active | Unacknowledged",
+            (true, false, false, true) => "Active | Acknowledged",
+        };
+
+        self.write_transition_time(address_space, &self.active_state_effective_transition_time_id);
+        self.write_effective_display_name(address_space, text);
     }
 
     fn get_bool_value(&self, address_space: &AddressSpace, id: &NodeId) -> bool {

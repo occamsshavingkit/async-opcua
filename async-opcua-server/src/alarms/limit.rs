@@ -264,21 +264,50 @@ pub struct LimitOutcome {
 pub struct NonExclusiveLimitStateIds {
     /// HighHighState.Id node, when HighHigh is configured.
     pub high_high: Option<NodeId>,
+    /// HighHighState.TransitionTime node, when HighHigh is configured.
+    pub high_high_transition_time: Option<NodeId>,
     /// HighState.Id node, when High is configured.
     pub high: Option<NodeId>,
+    /// HighState.TransitionTime node, when High is configured.
+    pub high_transition_time: Option<NodeId>,
     /// LowState.Id node, when Low is configured.
     pub low: Option<NodeId>,
+    /// LowState.TransitionTime node, when Low is configured.
+    pub low_transition_time: Option<NodeId>,
     /// LowLowState.Id node, when LowLow is configured.
     pub low_low: Option<NodeId>,
+    /// LowLowState.TransitionTime node, when LowLow is configured.
+    pub low_low_transition_time: Option<NodeId>,
 }
 
 impl NonExclusiveLimitStateIds {
-    fn set(&mut self, level: LimitLevel, id: NodeId) {
+    fn set(&mut self, level: LimitLevel, id: NodeId, transition_time_id: NodeId) {
         match level {
-            LimitLevel::HighHigh => self.high_high = Some(id),
-            LimitLevel::High => self.high = Some(id),
-            LimitLevel::Low => self.low = Some(id),
-            LimitLevel::LowLow => self.low_low = Some(id),
+            LimitLevel::HighHigh => {
+                self.high_high = Some(id);
+                self.high_high_transition_time = Some(transition_time_id);
+            }
+            LimitLevel::High => {
+                self.high = Some(id);
+                self.high_transition_time = Some(transition_time_id);
+            }
+            LimitLevel::Low => {
+                self.low = Some(id);
+                self.low_transition_time = Some(transition_time_id);
+            }
+            LimitLevel::LowLow => {
+                self.low_low = Some(id);
+                self.low_low_transition_time = Some(transition_time_id);
+            }
+        }
+    }
+
+    fn transition_time_for(&self, level: LimitLevel) -> Option<&NodeId> {
+        match level {
+            LimitLevel::HighHigh => self.high_high_transition_time.as_ref(),
+            LimitLevel::High => self.high_transition_time.as_ref(),
+            LimitLevel::Low => self.low_transition_time.as_ref(),
+            LimitLevel::LowLow => self.low_low_transition_time.as_ref(),
         }
     }
 }
@@ -314,6 +343,8 @@ pub struct LimitAlarm {
     pub limit_current_state_id: NodeId,
     /// Exclusive LimitState.CurrentState.Id property node.
     pub limit_current_state_id_id: NodeId,
+    /// Exclusive LimitState.CurrentState.TransitionTime property node.
+    pub limit_current_state_transition_time_id: NodeId,
     /// Non-exclusive state Id property nodes.
     pub non_exclusive_state_ids: NonExclusiveLimitStateIds,
     /// Previous evaluator state used for deadband hysteresis.
@@ -400,6 +431,10 @@ impl LimitAlarm {
         let limit_current_state_id = NodeId::new(ns, format!("{}_LimitState_CurrentState", base_s));
         let limit_current_state_id_id =
             NodeId::new(ns, format!("{}_LimitState_CurrentState_Id", base_s));
+        let limit_current_state_transition_time_id = NodeId::new(
+            ns,
+            format!("{}_LimitState_CurrentState_TransitionTime", base_s),
+        );
 
         ObjectBuilder::new(&limit_state_id, "LimitState", "LimitState")
             .has_type_definition(ObjectTypeId::ExclusiveLimitStateMachineType)
@@ -422,6 +457,18 @@ impl LimitAlarm {
             .property_of(limit_current_state_id.clone())
             .insert(address_space);
 
+        VariableBuilder::new(
+            &limit_current_state_transition_time_id,
+            "TransitionTime",
+            "TransitionTime",
+        )
+        .data_type(DataTypeId::DateTime)
+        .has_type_definition(VariableTypeId::PropertyType)
+        .value(DateTime::now())
+        .writable()
+        .property_of(limit_current_state_id.clone())
+        .insert(address_space);
+
         let initial_prev = inactive_limits_for_mode(cfg.mode);
 
         Self {
@@ -430,6 +477,7 @@ impl LimitAlarm {
             config: cfg,
             limit_current_state_id,
             limit_current_state_id_id,
+            limit_current_state_transition_time_id,
             non_exclusive_state_ids: NonExclusiveLimitStateIds::default(),
             prev: Mutex::new(initial_prev),
         }
@@ -479,14 +527,14 @@ impl LimitAlarm {
                 limit,
             );
 
-            let state_id = add_non_exclusive_limit_state(
+            let (state_id, transition_time_id) = add_non_exclusive_limit_state(
                 address_space,
                 ns,
                 &condition.condition_id,
                 &base_s,
                 level,
             );
-            non_exclusive_state_ids.set(level, state_id);
+            non_exclusive_state_ids.set(level, state_id, transition_time_id);
         }
 
         let initial_prev = inactive_limits_for_mode(cfg.mode);
@@ -497,6 +545,7 @@ impl LimitAlarm {
             config: cfg,
             limit_current_state_id: NodeId::null(),
             limit_current_state_id_id: NodeId::null(),
+            limit_current_state_transition_time_id: NodeId::null(),
             non_exclusive_state_ids,
             prev: Mutex::new(initial_prev),
         }
@@ -539,7 +588,7 @@ impl LimitAlarm {
         let confirmed = self.condition.get_confirmed(address_space);
         let retain = outcome.active || !acked || !confirmed;
         self.condition.set_retain(address_space, retain);
-        self.write_limit_state(address_space, outcome.limits);
+        self.write_limit_state(address_space, previous, outcome.limits);
 
         let event_id = uuid::Uuid::new_v4().as_bytes().to_vec();
         self.condition.set_current_event_id(&event_id);
@@ -562,15 +611,33 @@ impl LimitAlarm {
         })
     }
 
-    fn write_limit_state(&self, address_space: &AddressSpace, limits: ActiveLimits) {
+    fn write_limit_state(
+        &self,
+        address_space: &AddressSpace,
+        previous: ActiveLimits,
+        limits: ActiveLimits,
+    ) {
         match self.config.mode {
-            LimitMode::Exclusive => self.write_exclusive_limit_state(address_space, limits),
-            LimitMode::NonExclusive => self.write_non_exclusive_limit_state(address_space, limits),
+            LimitMode::Exclusive => {
+                self.write_exclusive_limit_state(address_space, previous, limits)
+            }
+            LimitMode::NonExclusive => {
+                self.write_non_exclusive_limit_state(address_space, previous, limits)
+            }
         }
     }
 
-    fn write_exclusive_limit_state(&self, address_space: &AddressSpace, limits: ActiveLimits) {
+    fn write_exclusive_limit_state(
+        &self,
+        address_space: &AddressSpace,
+        previous: ActiveLimits,
+        limits: ActiveLimits,
+    ) {
         let level = match limits {
+            ActiveLimits::Exclusive(level) => level,
+            ActiveLimits::NonExclusive(_) => None,
+        };
+        let prev_level = match previous {
             ActiveLimits::Exclusive(level) => level,
             ActiveLimits::NonExclusive(_) => None,
         };
@@ -595,25 +662,67 @@ impl LimitAlarm {
             &self.limit_current_state_id_id,
             Variant::from(id),
         );
+        // TransitionTime (OPC-10000-9 §5.2) records when this specific level was last entered —
+        // only stamp it when the exceeded level actually changed, not on every re-evaluation.
+        if level != prev_level {
+            self.condition
+                .write_transition_time(address_space, &self.limit_current_state_transition_time_id);
+        }
     }
 
-    fn write_non_exclusive_limit_state(&self, address_space: &AddressSpace, limits: ActiveLimits) {
+    fn write_non_exclusive_limit_state(
+        &self,
+        address_space: &AddressSpace,
+        previous: ActiveLimits,
+        limits: ActiveLimits,
+    ) {
         let state = match limits {
             ActiveLimits::NonExclusive(state) => state,
             ActiveLimits::Exclusive(_) => NonExclusiveState::default(),
         };
+        let prev_state = match previous {
+            ActiveLimits::NonExclusive(state) => state,
+            ActiveLimits::Exclusive(_) => NonExclusiveState::default(),
+        };
 
-        if let Some(id) = &self.non_exclusive_state_ids.high_high {
-            set_variable_value(address_space, id, Variant::from(state.high_high));
-        }
-        if let Some(id) = &self.non_exclusive_state_ids.high {
-            set_variable_value(address_space, id, Variant::from(state.high));
-        }
-        if let Some(id) = &self.non_exclusive_state_ids.low {
-            set_variable_value(address_space, id, Variant::from(state.low));
-        }
-        if let Some(id) = &self.non_exclusive_state_ids.low_low {
-            set_variable_value(address_space, id, Variant::from(state.low_low));
+        self.write_non_exclusive_level(
+            address_space,
+            LimitLevel::HighHigh,
+            state.high_high,
+            prev_state.high_high,
+        );
+        self.write_non_exclusive_level(address_space, LimitLevel::High, state.high, prev_state.high);
+        self.write_non_exclusive_level(address_space, LimitLevel::Low, state.low, prev_state.low);
+        self.write_non_exclusive_level(
+            address_space,
+            LimitLevel::LowLow,
+            state.low_low,
+            prev_state.low_low,
+        );
+    }
+
+    fn write_non_exclusive_level(
+        &self,
+        address_space: &AddressSpace,
+        level: LimitLevel,
+        active: bool,
+        previous_active: bool,
+    ) {
+        let id = match level {
+            LimitLevel::HighHigh => self.non_exclusive_state_ids.high_high.as_ref(),
+            LimitLevel::High => self.non_exclusive_state_ids.high.as_ref(),
+            LimitLevel::Low => self.non_exclusive_state_ids.low.as_ref(),
+            LimitLevel::LowLow => self.non_exclusive_state_ids.low_low.as_ref(),
+        };
+        let Some(id) = id else {
+            return;
+        };
+        set_variable_value(address_space, id, Variant::from(active));
+        if active != previous_active {
+            if let Some(transition_time_id) = self.non_exclusive_state_ids.transition_time_for(level) {
+                self.condition
+                    .write_transition_time(address_space, transition_time_id);
+            }
         }
     }
 }
@@ -881,12 +990,13 @@ fn add_non_exclusive_limit_state(
     condition_id: &NodeId,
     base_s: &str,
     level: LimitLevel,
-) -> NodeId {
+) -> (NodeId, NodeId) {
     let browse_name = non_exclusive_state_browse_name(level);
     let state_id = NodeId::new(ns, format!("{}_{}", base_s, browse_name));
     let id_id = NodeId::new(ns, format!("{}_{}_Id", base_s, browse_name));
     let true_state_id = NodeId::new(ns, format!("{}_{}_TrueState", base_s, browse_name));
     let false_state_id = NodeId::new(ns, format!("{}_{}_FalseState", base_s, browse_name));
+    let transition_time_id = NodeId::new(ns, format!("{}_{}_TransitionTime", base_s, browse_name));
 
     VariableBuilder::new(&state_id, browse_name, browse_name)
         .data_type(DataTypeId::Boolean)
@@ -919,7 +1029,15 @@ fn add_non_exclusive_limit_state(
         LocalizedText::new("en", non_exclusive_state_text(level, false)),
     );
 
-    id_id
+    VariableBuilder::new(&transition_time_id, "TransitionTime", "TransitionTime")
+        .data_type(DataTypeId::DateTime)
+        .has_type_definition(VariableTypeId::PropertyType)
+        .value(DateTime::now())
+        .writable()
+        .property_of(state_id.clone())
+        .insert(address_space);
+
+    (id_id, transition_time_id)
 }
 
 fn add_localized_text_property(

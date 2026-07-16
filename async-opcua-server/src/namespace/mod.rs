@@ -4,6 +4,7 @@ pub mod init;
 
 #[cfg(feature = "alarms")]
 pub use init::{
-    register_alarm_condition, register_discrete_alarm, register_level_alarm, register_limit_alarm,
-    register_limit_alarm_checked,
+    register_alarm_condition, register_certificate_expiration_alarm, register_deviation_alarm,
+    register_discrepancy_alarm, register_discrete_alarm, register_level_alarm,
+    register_limit_alarm, register_limit_alarm_checked, register_rate_of_change_alarm,
 };

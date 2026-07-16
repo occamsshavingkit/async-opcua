@@ -23,13 +23,14 @@ use opcua_client::alarms::client::{get_alarm_event_select_clauses, parse_alarm_e
 use opcua_core::events::AlarmEvent;
 use opcua_server::alarms::{
     register_condition_methods, register_dialog_condition_methods, ConditionRegistry,
-    DialogCondition, DialogRegistry, DiscreteAlarm, DiscreteAlarmKind, LimitAlarm, LimitConfig,
-    LimitDef, LimitMode, ShelvingState,
+    DeviationAlarm, DialogCondition, DialogRegistry, DiscreteAlarm, DiscreteAlarmKind, LimitAlarm,
+    LimitConfig, LimitDef, LimitMode, RateOfChangeAlarm, ShelvingState,
 };
 use opcua_server::history::InMemoryEventHistory;
 use opcua_server::namespace::{
-    register_alarm_condition, register_discrete_alarm, register_level_alarm, register_limit_alarm,
-    register_limit_alarm_checked,
+    register_alarm_condition, register_certificate_expiration_alarm, register_deviation_alarm,
+    register_discrepancy_alarm, register_discrete_alarm, register_level_alarm,
+    register_limit_alarm, register_limit_alarm_checked, register_rate_of_change_alarm,
 };
 use opcua_types::{
     DataTypeId, DateTime, EventFilter, ExtensionObject, HistoryEvent, HistoryReadValueId, Range,
@@ -2291,6 +2292,553 @@ async fn level_alarm_reports_level_type_definition_not_generic_limit_and_activat
             alarm.condition_state_machine().get_active(&space),
             "Level alarm should activate on threshold crossing exactly like a Limit alarm"
         );
+    }
+}
+
+fn exclusive_deviation_cfg() -> LimitConfig {
+    LimitConfig::new(LimitMode::Exclusive)
+        .with_high(LimitDef {
+            value: 5.0,
+            deadband: 0.5,
+            severity: 600,
+        })
+        .build()
+        .expect("valid config")
+}
+
+/// Apply new process/setpoint values to a deviation alarm and dispatch the resulting condition
+/// event (if any), the same way an application would (mirrors `drive_limit`).
+fn drive_deviation_process(
+    alarm: &DeviationAlarm,
+    nm: &SimpleNodeManager,
+    tester: &Tester,
+    value: f64,
+) {
+    let event = {
+        let mut space = nm.address_space().write();
+        alarm.update_process_value(&mut space, value)
+    };
+    if let Some(ev) = event {
+        let wrapper = opcua::server::alarms::ServerAlarmEvent { event: &ev };
+        tester
+            .handle
+            .subscriptions()
+            .notify_events(std::iter::once((
+                &wrapper as &dyn opcua::nodes::Event,
+                &ev.source_node,
+            )));
+    }
+}
+
+// OPC-10000-9 §5.8.22: ExclusiveDeviationAlarmType/NonExclusiveDeviationAlarmType activate when
+// the monitored process value deviates from its configured SetpointNode by more than the
+// configured threshold, reusing the same LimitAlarmType threshold/deadband evaluation.
+#[tokio::test]
+async fn deviation_alarm_reports_deviation_type_definition_and_activates_on_setpoint_deviation() {
+    let (tester, nm, _session) = setup_alarms().await;
+    let source = make_event_source(&nm, "DeviationDev");
+    let alarm = register_deviation_alarm(
+        nm.address_space(),
+        &nm,
+        "DeviationDev",
+        "Pressure",
+        source,
+        exclusive_deviation_cfg(),
+    );
+    let condition_id = alarm.condition_state_machine().condition_id.clone();
+    {
+        let space = nm.address_space().read();
+        assert!(
+            space.has_reference(
+                &condition_id,
+                &NodeId::from(ObjectTypeId::ExclusiveDeviationAlarmType),
+                ReferenceTypeId::HasTypeDefinition,
+            ),
+            "Deviation alarm should report ExclusiveDeviationAlarmType as its TypeDefinition"
+        );
+        assert!(
+            !space.has_reference(
+                &condition_id,
+                &NodeId::from(ObjectTypeId::ExclusiveLimitAlarmType),
+                ReferenceTypeId::HasTypeDefinition,
+            ),
+            "Deviation alarm must not also report the generic ExclusiveLimitAlarmType"
+        );
+    }
+
+    // Setpoint of 100, deviation threshold 5: a process value of 103 (deviation 3) must not
+    // activate; 106 (deviation 6) must.
+    assert!(alarm
+        .update_setpoint_value(&nm.address_space().write(), 100.0)
+        .is_none());
+    drive_deviation_process(&alarm, &nm, &tester, 103.0);
+    {
+        let space = nm.address_space().read();
+        assert!(
+            !alarm.condition_state_machine().get_active(&space),
+            "deviation within threshold must not activate the alarm"
+        );
+    }
+
+    drive_deviation_process(&alarm, &nm, &tester, 106.0);
+    {
+        let space = nm.address_space().read();
+        assert!(
+            alarm.condition_state_machine().get_active(&space),
+            "deviation beyond threshold should activate the alarm"
+        );
+    }
+}
+
+fn exclusive_rate_of_change_cfg() -> LimitConfig {
+    LimitConfig::new(LimitMode::Exclusive)
+        .with_high(LimitDef {
+            value: 10.0, // 10 units/second
+            deadband: 1.0,
+            severity: 500,
+        })
+        .build()
+        .expect("valid config")
+}
+
+/// Apply a new timestamped process sample to a rate-of-change alarm and dispatch the resulting
+/// condition event (if any), the same way an application would (mirrors `drive_limit`).
+fn drive_rate_of_change(
+    alarm: &RateOfChangeAlarm,
+    nm: &SimpleNodeManager,
+    tester: &Tester,
+    value: f64,
+    at: DateTime,
+) {
+    let event = {
+        let mut space = nm.address_space().write();
+        alarm.update_value(&mut space, value, at)
+    };
+    if let Some(ev) = event {
+        let wrapper = opcua::server::alarms::ServerAlarmEvent { event: &ev };
+        tester
+            .handle
+            .subscriptions()
+            .notify_events(std::iter::once((
+                &wrapper as &dyn opcua::nodes::Event,
+                &ev.source_node,
+            )));
+    }
+}
+
+// OPC-10000-9 §5.8.23: ExclusiveRateOfChangeAlarmType/NonExclusiveRateOfChangeAlarmType activate
+// when the monitored process value's rate of change (per second) between successive samples
+// exceeds the configured threshold, reusing the same LimitAlarmType threshold/deadband
+// evaluation.
+#[tokio::test]
+async fn rate_of_change_alarm_reports_type_definition_and_activates_on_fast_change() {
+    let (tester, nm, _session) = setup_alarms().await;
+    let source = make_event_source(&nm, "RateOfChangeDev");
+    let alarm = register_rate_of_change_alarm(
+        nm.address_space(),
+        &nm,
+        "RateOfChangeDev",
+        "Flow",
+        source,
+        exclusive_rate_of_change_cfg(),
+    );
+    let condition_id = alarm.condition_state_machine().condition_id.clone();
+    {
+        let space = nm.address_space().read();
+        assert!(
+            space.has_reference(
+                &condition_id,
+                &NodeId::from(ObjectTypeId::ExclusiveRateOfChangeAlarmType),
+                ReferenceTypeId::HasTypeDefinition,
+            ),
+            "RateOfChange alarm should report ExclusiveRateOfChangeAlarmType as its TypeDefinition"
+        );
+        assert!(
+            !space.has_reference(
+                &condition_id,
+                &NodeId::from(ObjectTypeId::ExclusiveLimitAlarmType),
+                ReferenceTypeId::HasTypeDefinition,
+            ),
+            "RateOfChange alarm must not also report the generic ExclusiveLimitAlarmType"
+        );
+    }
+
+    let t0 = DateTime::now();
+    let t1 = DateTime::from(t0.checked_ticks() + 10_000_000); // 1 second later
+
+    drive_rate_of_change(&alarm, &nm, &tester, 0.0, t0);
+    {
+        let space = nm.address_space().read();
+        assert!(
+            !alarm.condition_state_machine().get_active(&space),
+            "the first (baseline) sample must not activate the alarm"
+        );
+    }
+
+    // Rate = (105 - 0) / 1s = 105 units/s, well above the 10 units/s threshold.
+    drive_rate_of_change(&alarm, &nm, &tester, 105.0, t1);
+    {
+        let space = nm.address_space().read();
+        assert!(
+            alarm.condition_state_machine().get_active(&space),
+            "rate of change beyond threshold should activate the alarm"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// OPC-10000-9 §5.8.24.3/§5.8.24.7/§5.8.25: SystemOffNormalAlarmType,
+// CertificateExpirationAlarmType, and DiscrepancyAlarmType each activate on their respective
+// trigger (feature 095, US4).
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn system_off_normal_alarm_reports_type_definition_and_activates() {
+    let (tester, nm, _session) = setup_alarms().await;
+    let source = make_event_source(&nm, "SystemOffNormalDev");
+    let alarm = register_discrete_alarm(
+        nm.address_space(),
+        &nm,
+        "SystemOffNormalDev",
+        "CommLink",
+        source,
+        DiscreteAlarmKind::SystemOffNormal,
+        Variant::from(false),
+    );
+    let condition_id = alarm.condition_state_machine().condition_id.clone();
+    {
+        let space = nm.address_space().read();
+        assert!(
+            space.has_reference(
+                &condition_id,
+                &NodeId::from(ObjectTypeId::SystemOffNormalAlarmType),
+                ReferenceTypeId::HasTypeDefinition,
+            ),
+            "should report SystemOffNormalAlarmType as its TypeDefinition"
+        );
+        assert!(
+            !space.has_reference(
+                &condition_id,
+                &NodeId::from(ObjectTypeId::OffNormalAlarmType),
+                ReferenceTypeId::HasTypeDefinition,
+            ),
+            "must not also report the generic OffNormalAlarmType"
+        );
+    }
+
+    let event = {
+        let mut space = nm.address_space().write();
+        alarm.update_value(&mut space, Variant::from(true))
+    }
+    .expect("off-normal value should activate the alarm");
+    assert!(event.active_state);
+    let wrapper = opcua::server::alarms::ServerAlarmEvent { event: &event };
+    tester
+        .handle
+        .subscriptions()
+        .notify_events(std::iter::once((
+            &wrapper as &dyn opcua::nodes::Event,
+            &event.source_node,
+        )));
+    assert!(alarm
+        .condition_state_machine()
+        .get_active(&nm.address_space().read()));
+}
+
+#[tokio::test]
+async fn certificate_expiration_alarm_activates_within_expiration_limit_and_clears_on_renewal() {
+    let (_tester, nm, _session) = setup_alarms().await;
+    let now = DateTime::now();
+    let one_day_out = DateTime::from(now.checked_ticks() + 24 * 60 * 60 * 10_000_000);
+    let two_weeks_ms = 14.0 * 24.0 * 60.0 * 60.0 * 1000.0;
+
+    let alarm = register_certificate_expiration_alarm(
+        nm.address_space(),
+        &nm,
+        "ServerCert",
+        "Expiration",
+        NodeId::new(2, "ServerCert"),
+        one_day_out,
+        two_weeks_ms,
+    );
+    let condition_id = alarm.condition_state_machine().condition_id.clone();
+    {
+        let space = nm.address_space().read();
+        assert!(space.has_reference(
+            &condition_id,
+            &NodeId::from(ObjectTypeId::CertificateExpirationAlarmType),
+            ReferenceTypeId::HasTypeDefinition,
+        ));
+    }
+
+    let event = {
+        let space = nm.address_space().read();
+        alarm.evaluate(&space, now)
+    }
+    .expect("certificate within its expiration limit should activate");
+    assert!(event.active_state);
+
+    let far_future = DateTime::from(now.checked_ticks() + 365 * 24 * 60 * 60 * 10_000_000);
+    {
+        let space = nm.address_space().write();
+        alarm.set_expiration_date(&space, far_future);
+    }
+    let event = {
+        let space = nm.address_space().read();
+        alarm.evaluate(&space, now)
+    }
+    .expect("renewed certificate should deactivate the alarm");
+    assert!(!event.active_state);
+}
+
+#[tokio::test]
+async fn discrepancy_alarm_activates_after_expected_time_and_clears_at_target() {
+    let (_tester, nm, session) = setup_alarms().await;
+    let source = make_event_source(&nm, "Motor1");
+    let mut alarm = register_discrepancy_alarm(
+        nm.address_space(),
+        &nm,
+        "Motor1",
+        "StartDiscrepancy",
+        source,
+        5_000.0, // ExpectedTime: 5 seconds
+        0.5,     // Tolerance
+    );
+    let condition_id = alarm.condition_state_machine().condition_id.clone();
+
+    let target = NodeId::new(2, "Motor1.Setpoint");
+    {
+        let space = nm.address_space().write();
+        alarm.write_target_value_node_property(&space, &target);
+    }
+    match read_value_via_path(&session, &condition_id, &["TargetValueNode"]).await {
+        Some(Variant::NodeId(n)) => assert_eq!(*n, target),
+        other => panic!("TargetValueNode = {other:?}, expected {target:?}"),
+    }
+
+    let t0 = DateTime::now();
+    {
+        let space = nm.address_space().write();
+        alarm.update_target_value(&space, 1.0, t0);
+        alarm.update_process_value(&space, 0.0, t0);
+    }
+    assert!(!alarm
+        .condition_state_machine()
+        .get_active(&nm.address_space().read()));
+
+    let t_plus_6s = DateTime::from(t0.checked_ticks() + 6 * 10_000_000);
+    let event = {
+        let space = nm.address_space().write();
+        alarm.update_process_value(&space, 0.0, t_plus_6s)
+    }
+    .expect("discrepancy persisting beyond ExpectedTime should activate the alarm");
+    assert!(event.active_state);
+
+    let event = {
+        let space = nm.address_space().write();
+        alarm.update_process_value(&space, 1.0, t_plus_6s)
+    }
+    .expect("reaching the target value should deactivate the alarm");
+    assert!(!event.active_state);
+}
+
+// OPC-10000-9 §5.8.2: an alarm configured with a non-zero OnDelay does not activate until the
+// delay elapses; OffDelay analogously defers deactivation (feature 095, US4, T042/T048).
+#[tokio::test]
+async fn on_delay_and_off_delay_defer_activation_and_deactivation() {
+    let (tester, nm, _session) = setup_alarms().await;
+    let source = make_event_source(&nm, "DelayedDev");
+    let alarm = register_limit_alarm(
+        nm.address_space(),
+        &nm,
+        "DelayedDev",
+        "Tank",
+        source,
+        exclusive_level_cfg(),
+    )
+    .with_delays(1_000.0, 500.0);
+
+    let t0 = DateTime::now();
+    assert!(
+        alarm
+            .update_value_at(&nm.address_space().write(), 105.0, t0)
+            .is_none(),
+        "activation must not commit before OnDelay elapses"
+    );
+    assert!(!alarm
+        .condition_state_machine()
+        .get_active(&nm.address_space().read()));
+
+    let t_plus_1100ms = DateTime::from(t0.checked_ticks() + 11_000_000);
+    let event = {
+        let mut space = nm.address_space().write();
+        alarm.update_value_at(&mut space, 105.0, t_plus_1100ms)
+    }
+    .expect("1100ms >= 1000ms OnDelay -- activation should commit");
+    assert!(event.active_state);
+    let wrapper = opcua::server::alarms::ServerAlarmEvent { event: &event };
+    tester
+        .handle
+        .subscriptions()
+        .notify_events(std::iter::once((
+            &wrapper as &dyn opcua::nodes::Event,
+            &event.source_node,
+        )));
+    assert!(alarm
+        .condition_state_machine()
+        .get_active(&nm.address_space().read()));
+
+    assert!(
+        alarm
+            .update_value_at(&nm.address_space().write(), 50.0, t_plus_1100ms)
+            .is_none(),
+        "deactivation must not commit before OffDelay elapses"
+    );
+    assert!(alarm
+        .condition_state_machine()
+        .get_active(&nm.address_space().read()));
+
+    let t_plus_1700ms = DateTime::from(t0.checked_ticks() + 17_000_000);
+    let event = alarm
+        .update_value_at(&nm.address_space().write(), 50.0, t_plus_1700ms)
+        .expect("600ms >= 500ms OffDelay -- deactivation should commit");
+    assert!(!event.active_state);
+    assert!(!alarm
+        .condition_state_machine()
+        .get_active(&nm.address_space().read()));
+}
+
+// OPC-10000-9 §5.8.2/Annex B.1.5: an alarm configured with ReAlarmTime re-notifies while it
+// remains active (whether acknowledged or not) for longer than ReAlarmTime, incrementing
+// ReAlarmRepeatCount each time. Grounding correction vs. the original task description:
+// ReAlarmRepeatCount is reset when the alarm *returns to normal*, not on acknowledge (Part 9
+// text: "The count is reset when an Alarm returns to normal") -- feature 095, US4, T043/T049.
+#[tokio::test]
+async fn re_alarm_time_renotifies_while_active_and_resets_on_return_to_normal() {
+    let (tester, nm, session) = setup_alarms().await;
+    let core_nm = tester
+        .handle
+        .node_managers()
+        .get_of_type::<CoreNodeManager>()
+        .expect("CoreNodeManager not found");
+    let source = make_event_source(&nm, "ReAlarmDev");
+    let alarm = register_limit_alarm(
+        nm.address_space(),
+        &nm,
+        "ReAlarmDev",
+        "Tank",
+        source,
+        exclusive_level_cfg(),
+    )
+    .with_re_alarm(5_000.0);
+    let condition_id = alarm.condition_state_machine().condition_id.clone();
+    let registry = ConditionRegistry::new();
+    registry.register(alarm.condition_state_machine());
+    register_condition_methods(&core_nm, registry, nm.address_space().clone());
+
+    let t0 = DateTime::now();
+    let event = alarm
+        .update_value_at(&nm.address_space().write(), 105.0, t0)
+        .expect("initial activation");
+    assert!(event.active_state && !event.acked_state);
+
+    // Acknowledge it via the standard type method -- still active, now acknowledged.
+    session
+        .acknowledge_condition(
+            &condition_id,
+            ByteString::from(event.event_id.clone()),
+            LocalizedText::new("en", "ack before re-alarm"),
+        )
+        .await
+        .expect("acknowledge_condition should succeed");
+    assert!(alarm
+        .condition_state_machine()
+        .get_acked(&nm.address_space().read()));
+
+    // Still active 6s later (> 5s ReAlarmTime), no new raw value: re-alarms, returning to
+    // unacknowledged and incrementing ReAlarmRepeatCount.
+    let t_plus_6s = DateTime::from(t0.checked_ticks() + 6 * 10_000_000);
+    let event = alarm
+        .update_value_at(&nm.address_space().write(), 105.0, t_plus_6s)
+        .expect("ReAlarmTime elapsed while still active should re-alarm");
+    assert!(event.active_state);
+    assert!(
+        !event.acked_state,
+        "re-alarm returns the alarm to unacknowledged"
+    );
+    match read_value_via_path(&session, &condition_id, &["ReAlarmRepeatCount"]).await {
+        Some(Variant::Int16(1)) => {}
+        other => panic!("ReAlarmRepeatCount = {other:?}, expected Some(1)"),
+    }
+
+    // Returning to normal resets the counter (NOT acknowledge, per the corrected grounding).
+    alarm.update_value_at(&nm.address_space().write(), 50.0, t_plus_6s);
+    match read_value_via_path(&session, &condition_id, &["ReAlarmRepeatCount"]).await {
+        Some(Variant::Int16(0)) => {}
+        other => panic!("ReAlarmRepeatCount = {other:?}, expected Some(0) after return to normal"),
+    }
+}
+
+// OPC-10000-9 §5.8.2: AudibleEnabled is server-computed -- true only while the alarm is active,
+// unacknowledged, and not silenced. Acknowledge shall automatically silence the alarm too
+// (feature 095, US4, T050).
+#[tokio::test]
+async fn audible_enabled_tracks_active_unacked_unsilenced_and_acknowledge_auto_silences() {
+    let (tester, nm, session) = setup_alarms().await;
+    let core_nm = tester
+        .handle
+        .node_managers()
+        .get_of_type::<CoreNodeManager>()
+        .expect("CoreNodeManager not found");
+    let source = make_event_source(&nm, "AudibleDev");
+    let alarm = register_limit_alarm(
+        nm.address_space(),
+        &nm,
+        "AudibleDev",
+        "Tank",
+        source,
+        exclusive_level_cfg(),
+    );
+    let condition_id = alarm.condition_state_machine().condition_id.clone();
+    let registry = ConditionRegistry::new();
+    registry.register(alarm.condition_state_machine());
+    register_condition_methods(&core_nm, registry, nm.address_space().clone());
+
+    // Inactive: AudibleEnabled is false.
+    match read_value_via_path(&session, &condition_id, &["AudibleEnabled"]).await {
+        Some(Variant::Boolean(false)) => {}
+        other => panic!("AudibleEnabled = {other:?}, expected Some(false) while inactive"),
+    }
+
+    let event = alarm
+        .update_value(&nm.address_space().write(), 105.0)
+        .expect("activation");
+    assert!(event.active_state && !event.acked_state);
+    match read_value_via_path(&session, &condition_id, &["AudibleEnabled"]).await {
+        Some(Variant::Boolean(true)) => {}
+        other => panic!(
+            "AudibleEnabled = {other:?}, expected Some(true) while active+unacked+unsilenced"
+        ),
+    }
+
+    // Acknowledge -- shall automatically silence, and AudibleEnabled follows.
+    session
+        .acknowledge_condition(
+            &condition_id,
+            ByteString::from(event.event_id.clone()),
+            LocalizedText::new("en", "ack"),
+        )
+        .await
+        .expect("acknowledge_condition should succeed");
+    assert!(
+        alarm
+            .condition_state_machine()
+            .get_silenced(&nm.address_space().read()),
+        "acknowledging an alarm should automatically silence it"
+    );
+    match read_value_via_path(&session, &condition_id, &["AudibleEnabled"]).await {
+        Some(Variant::Boolean(false)) => {}
+        other => panic!("AudibleEnabled = {other:?}, expected Some(false) after acknowledge"),
     }
 }
 

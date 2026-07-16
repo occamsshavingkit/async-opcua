@@ -29,9 +29,11 @@ pub enum LimitMode {
     NonExclusive,
 }
 
-/// Selects the concrete limit-family alarm ObjectType (OPC-10000-9 §5.8.21). `Limit` and `Level`
-/// share identical threshold/deadband evaluation (`LimitEvaluator`); they differ only in which
-/// `TypeDefinition` the resulting condition instance reports.
+/// Selects the concrete limit-family alarm ObjectType (OPC-10000-9 §5.8.21). `Limit`, `Level`,
+/// `Deviation`, and `RateOfChange` share identical threshold/deadband evaluation
+/// (`LimitEvaluator`); they differ only in which `TypeDefinition` the resulting condition
+/// instance reports and in what value is fed to the evaluator (raw process value, deviation
+/// from a setpoint, or rate of change).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LimitAlarmKind {
     /// Generic process-limit alarm (`ExclusiveLimitAlarmType`/`NonExclusiveLimitAlarmType`).
@@ -39,10 +41,17 @@ pub enum LimitAlarmKind {
     /// Level alarm, a `LimitAlarmType` subtype for level-monitoring use cases
     /// (`ExclusiveLevelAlarmType`/`NonExclusiveLevelAlarmType`, OPC-10000-9 §5.8.21.2/.3).
     Level,
+    /// Deviation alarm, evaluated against `processValue - setpointValue` rather than the raw
+    /// process value (`ExclusiveDeviationAlarmType`/`NonExclusiveDeviationAlarmType`, OPC-10000-9
+    /// §5.8.22).
+    Deviation,
+    /// Rate-of-change alarm, evaluated against a computed rate rather than the raw process value
+    /// (`ExclusiveRateOfChangeAlarmType`/`NonExclusiveRateOfChangeAlarmType`, OPC-10000-9 §5.8.23).
+    RateOfChange,
 }
 
 impl LimitAlarmKind {
-    fn type_id(self, mode: LimitMode) -> NodeId {
+    pub(crate) fn type_id(self, mode: LimitMode) -> NodeId {
         match (self, mode) {
             (Self::Limit, LimitMode::Exclusive) => {
                 NodeId::from(ObjectTypeId::ExclusiveLimitAlarmType)
@@ -55,6 +64,18 @@ impl LimitAlarmKind {
             }
             (Self::Level, LimitMode::NonExclusive) => {
                 NodeId::from(ObjectTypeId::NonExclusiveLevelAlarmType)
+            }
+            (Self::Deviation, LimitMode::Exclusive) => {
+                NodeId::from(ObjectTypeId::ExclusiveDeviationAlarmType)
+            }
+            (Self::Deviation, LimitMode::NonExclusive) => {
+                NodeId::from(ObjectTypeId::NonExclusiveDeviationAlarmType)
+            }
+            (Self::RateOfChange, LimitMode::Exclusive) => {
+                NodeId::from(ObjectTypeId::ExclusiveRateOfChangeAlarmType)
+            }
+            (Self::RateOfChange, LimitMode::NonExclusive) => {
+                NodeId::from(ObjectTypeId::NonExclusiveRateOfChangeAlarmType)
             }
         }
     }
@@ -380,9 +401,38 @@ pub struct LimitAlarm {
     pub prev: Mutex<ActiveLimits>,
     /// Which limit-family ObjectType this instance was created as (OPC-10000-9 §5.8.21).
     kind: LimitAlarmKind,
+    /// OnDelay hysteresis in milliseconds (OPC-10000-9 §5.8.2, optional); 0.0 (default) commits
+    /// activation immediately.
+    on_delay_ms: f64,
+    /// OffDelay hysteresis in milliseconds (OPC-10000-9 §5.8.2, optional); 0.0 (default) commits
+    /// deactivation immediately.
+    off_delay_ms: f64,
+    /// ReAlarmTime in milliseconds (OPC-10000-9 §5.8.2, optional); 0.0 (default) disables
+    /// re-alarming.
+    re_alarm_ms: f64,
 }
 
 impl LimitAlarm {
+    /// Configures OnDelay/OffDelay hysteresis (OPC-10000-9 §5.8.2, optional): activation/
+    /// deactivation is only committed once the desired state has persisted for the respective
+    /// delay, in milliseconds. Defaults to 0.0/0.0 (immediate) when never called.
+    #[must_use]
+    pub fn with_delays(mut self, on_delay_ms: f64, off_delay_ms: f64) -> Self {
+        self.on_delay_ms = on_delay_ms;
+        self.off_delay_ms = off_delay_ms;
+        self
+    }
+
+    /// Configures ReAlarmTime (OPC-10000-9 §5.8.2, optional), in milliseconds: while the alarm
+    /// remains active and unacknowledged for this long since it was last (re-)alarmed, it is
+    /// re-alarmed (see `ConditionStateMachine::maybe_re_alarm`). Defaults to 0.0 (disabled) when
+    /// never called.
+    #[must_use]
+    pub fn with_re_alarm(mut self, re_alarm_ms: f64) -> Self {
+        self.re_alarm_ms = re_alarm_ms;
+        self
+    }
+
     /// Returns the base condition state machine for registry integration.
     #[must_use]
     pub fn condition_state_machine(&self) -> ConditionStateMachine {
@@ -514,6 +564,9 @@ impl LimitAlarm {
             non_exclusive_state_ids: NonExclusiveLimitStateIds::default(),
             prev: Mutex::new(initial_prev),
             kind,
+            on_delay_ms: 0.0,
+            off_delay_ms: 0.0,
+            re_alarm_ms: 0.0,
         }
     }
 
@@ -585,11 +638,26 @@ impl LimitAlarm {
             non_exclusive_state_ids,
             prev: Mutex::new(initial_prev),
             kind,
+            on_delay_ms: 0.0,
+            off_delay_ms: 0.0,
+            re_alarm_ms: 0.0,
         }
     }
 
     /// Evaluates and writes a new process value, returning an alarm event when the limit state changes.
     pub fn update_value(&self, address_space: &AddressSpace, value: f64) -> Option<AlarmEvent> {
+        self.update_value_at(address_space, value, DateTime::now())
+    }
+
+    /// Same as `update_value`, but evaluated at an explicit time `now`: lets OnDelay/OffDelay
+    /// hysteresis (OPC-10000-9 §5.8.2) be tested deterministically, and lets a periodic
+    /// re-sample resolve a pending delay even when the raw process value hasn't changed.
+    pub fn update_value_at(
+        &self,
+        address_space: &AddressSpace,
+        value: f64,
+        now: DateTime,
+    ) -> Option<AlarmEvent> {
         if !self.condition.get_enabled(address_space) {
             return None;
         }
@@ -602,30 +670,65 @@ impl LimitAlarm {
             (previous, outcome)
         };
 
-        if previous == outcome.limits {
+        let was_active = self.condition.get_active(address_space);
+        let was_acked = self.condition.get_acked(address_space);
+        let nothing_changed = previous == outcome.limits && outcome.active == was_active;
+        // ReAlarmTime (OPC-10000-9 §5.8.2) can come due even with no new raw value change, via a
+        // periodic re-sample of an alarm that hasn't yet returned to normal (Annex B.1.5's
+        // example explicitly re-alarms an already-Acknowledged alarm that's still active).
+        let re_alarm_possible = self.re_alarm_ms > 0.0 && was_active;
+
+        if nothing_changed && !re_alarm_possible {
             return None;
         }
 
+        if previous != outcome.limits {
+            self.write_limit_state(address_space, previous, outcome.limits);
+        }
+
+        let mut re_alarmed = false;
+        // OnDelay/OffDelay (OPC-10000-9 §5.8.2) only gates the false<->true ActiveState
+        // transition itself; a severity/message change while already active (e.g. High
+        // escalating to HighHigh) is reported immediately regardless of delay configuration.
+        let reported_active = if outcome.active != was_active {
+            let committed = self.condition.gate_active(
+                address_space,
+                outcome.active,
+                now,
+                self.on_delay_ms,
+                self.off_delay_ms,
+            )?;
+            self.condition.reset_re_alarm(address_space, committed, now);
+            committed
+        } else if nothing_changed {
+            // Only reachable when re_alarm_possible: re-check whether ReAlarmTime has elapsed.
+            re_alarmed = self
+                .condition
+                .maybe_re_alarm(address_space, now, self.re_alarm_ms);
+            if !re_alarmed {
+                return None;
+            }
+            was_active
+        } else {
+            was_active
+        };
+
         let message = LocalizedText::new("en", &outcome.message);
-        let was_active = self.condition.get_active(address_space);
-        let was_acked = self.condition.get_acked(address_space);
-        if was_active && !was_acked && !outcome.active {
+        if was_active && !was_acked && !reported_active {
             self.condition.create_branch(address_space);
         }
-        self.condition.set_active(address_space, outcome.active);
         self.condition.set_severity(address_space, outcome.severity);
         self.condition.set_message(address_space, message.clone());
 
-        if outcome.active {
+        if reported_active && !re_alarmed {
             self.condition.set_acked(address_space, false);
             self.condition.set_confirmed(address_space, false);
         }
 
         let acked = self.condition.get_acked(address_space);
         let confirmed = self.condition.get_confirmed(address_space);
-        let retain = outcome.active || !acked || !confirmed;
+        let retain = reported_active || !acked || !confirmed;
         self.condition.set_retain(address_space, retain);
-        self.write_limit_state(address_space, previous, outcome.limits);
 
         let event_id = uuid::Uuid::new_v4().as_bytes().to_vec();
         self.condition.set_current_event_id(&event_id);
@@ -641,7 +744,7 @@ impl LimitAlarm {
             condition_id: self.condition.condition_id.clone(),
             branch_id: NodeId::null(),
             condition_name: self.condition.condition_name.clone(),
-            active_state: outcome.active,
+            active_state: reported_active,
             acked_state: acked,
             confirmed_state: confirmed,
             retain,
@@ -1149,16 +1252,27 @@ fn set_variable_value(address_space: &AddressSpace, node_id: &NodeId, value: Var
 }
 
 fn ensure_input_node_property(address_space: &AddressSpace, condition_id: &NodeId) -> NodeId {
-    if let Some(node_id) = find_input_node_property(address_space, condition_id) {
+    ensure_node_ref_property(address_space, condition_id, INPUT_NODE_PROPERTY_NAME)
+}
+
+/// Ensures a `NodeId`-valued reference property (e.g. `InputNode`, `SetpointNode`,
+/// `TargetValueNode`) exists on `condition_id` and returns its NodeId, creating it on first use.
+/// Shared by every alarm kind that binds to a second Variable beyond its primary source.
+pub(crate) fn ensure_node_ref_property(
+    address_space: &AddressSpace,
+    condition_id: &NodeId,
+    property_name: &str,
+) -> NodeId {
+    if let Some(node_id) = find_node_ref_property(address_space, condition_id, property_name) {
         return node_id;
     }
 
-    let node_id = input_node_property_node_id(condition_id);
+    let node_id = node_ref_property_node_id(condition_id, property_name);
     if !address_space.node_exists(&node_id) {
         VariableBuilder::new(
             &node_id,
-            QualifiedName::new(0, INPUT_NODE_PROPERTY_NAME),
-            INPUT_NODE_PROPERTY_NAME,
+            QualifiedName::new(0, property_name),
+            property_name,
         )
         .data_type(DataTypeId::NodeId)
         .has_type_definition(VariableTypeId::PropertyType)
@@ -1173,7 +1287,11 @@ fn ensure_input_node_property(address_space: &AddressSpace, condition_id: &NodeI
     node_id
 }
 
-fn find_input_node_property(address_space: &AddressSpace, condition_id: &NodeId) -> Option<NodeId> {
+fn find_node_ref_property(
+    address_space: &AddressSpace,
+    condition_id: &NodeId,
+    property_name: &str,
+) -> Option<NodeId> {
     let type_tree = DefaultTypeTree::new();
     address_space
         .find_node_by_browse_name(
@@ -1181,12 +1299,12 @@ fn find_input_node_property(address_space: &AddressSpace, condition_id: &NodeId)
             Some((ReferenceTypeId::HasProperty, false)),
             &type_tree,
             BrowseDirection::Forward,
-            QualifiedName::new(0, INPUT_NODE_PROPERTY_NAME),
+            QualifiedName::new(0, property_name),
         )
         .map(|node| node.as_node().node_id().clone())
 }
 
-fn input_node_property_node_id(condition_id: &NodeId) -> NodeId {
+fn node_ref_property_node_id(condition_id: &NodeId, property_name: &str) -> NodeId {
     let base = match &condition_id.identifier {
         Identifier::String(value) => value
             .value()
@@ -1196,10 +1314,7 @@ fn input_node_property_node_id(condition_id: &NodeId) -> NodeId {
         _ => condition_id.to_string(),
     };
 
-    NodeId::new(
-        condition_id.namespace,
-        format!("{base}_{INPUT_NODE_PROPERTY_NAME}"),
-    )
+    NodeId::new(condition_id.namespace, format!("{base}_{property_name}"))
 }
 
 #[cfg(test)]
@@ -1362,5 +1477,202 @@ mod tests {
             .count();
 
         assert_eq!(reference_count, 1);
+    }
+
+    fn on_off_delay_cfg() -> LimitConfig {
+        LimitConfig::new(LimitMode::Exclusive)
+            .with_high(LimitDef {
+                value: 100.0,
+                deadband: 1.0,
+                severity: 500,
+            })
+            .build()
+            .expect("limit config should be valid")
+    }
+
+    // OPC-10000-9 §5.8.2: OnDelay/OffDelay defer the ActiveState transition itself until the
+    // desired state has persisted for the configured duration; a same-state severity escalation
+    // (T048 regression coverage) must still report immediately, un-gated.
+    #[test]
+    fn on_delay_defers_activation_until_elapsed_then_off_delay_defers_deactivation() {
+        let address_space = test_address_space();
+        let alarm = LimitAlarm::create_exclusive_in_address_space(
+            &address_space,
+            2,
+            "DeviceA",
+            "Delayed",
+            NodeId::new(2, "InitialSource"),
+            on_off_delay_cfg(),
+            LimitAlarmKind::Limit,
+        )
+        .with_delays(1_000.0, 500.0);
+
+        let t0 = DateTime::now();
+        assert!(
+            alarm.update_value_at(&address_space, 105.0, t0).is_none(),
+            "activation must not commit before OnDelay elapses"
+        );
+        assert!(!alarm.condition_state_machine().get_active(&address_space));
+
+        let t_plus_400ms = DateTime::from(t0.checked_ticks() + 4_000_000);
+        assert!(
+            alarm
+                .update_value_at(&address_space, 105.0, t_plus_400ms)
+                .is_none(),
+            "400ms < 1000ms OnDelay -- still pending"
+        );
+        assert!(!alarm.condition_state_machine().get_active(&address_space));
+
+        let t_plus_1100ms = DateTime::from(t0.checked_ticks() + 11_000_000);
+        let event = alarm
+            .update_value_at(&address_space, 105.0, t_plus_1100ms)
+            .expect("1100ms >= 1000ms OnDelay -- activation should commit");
+        assert!(event.active_state);
+        assert!(alarm.condition_state_machine().get_active(&address_space));
+
+        // Deactivation: OffDelay is 500ms.
+        assert!(
+            alarm
+                .update_value_at(&address_space, 50.0, t_plus_1100ms)
+                .is_none(),
+            "deactivation must not commit before OffDelay elapses"
+        );
+        assert!(alarm.condition_state_machine().get_active(&address_space));
+
+        let t_plus_1700ms = DateTime::from(t0.checked_ticks() + 17_000_000);
+        let event = alarm
+            .update_value_at(&address_space, 50.0, t_plus_1700ms)
+            .expect("600ms >= 500ms OffDelay -- deactivation should commit");
+        assert!(!event.active_state);
+        assert!(!alarm.condition_state_machine().get_active(&address_space));
+    }
+
+    #[test]
+    fn severity_escalation_while_active_reports_immediately_despite_on_delay() {
+        let address_space = test_address_space();
+        let cfg = LimitConfig::new(LimitMode::Exclusive)
+            .with_high(LimitDef {
+                value: 100.0,
+                deadband: 1.0,
+                severity: 400,
+            })
+            .with_high_high(LimitDef {
+                value: 110.0,
+                deadband: 1.0,
+                severity: 700,
+            })
+            .build()
+            .expect("valid config");
+        let alarm = LimitAlarm::create_exclusive_in_address_space(
+            &address_space,
+            2,
+            "DeviceA",
+            "Delayed",
+            NodeId::new(2, "InitialSource"),
+            cfg,
+            LimitAlarmKind::Limit,
+        )
+        .with_delays(1_000.0, 1_000.0);
+
+        let t0 = DateTime::now();
+        let t_plus_1100ms = DateTime::from(t0.checked_ticks() + 11_000_000);
+        alarm.update_value_at(&address_space, 105.0, t0);
+        let event = alarm
+            .update_value_at(&address_space, 105.0, t_plus_1100ms)
+            .expect("activation commits once OnDelay elapses");
+        assert_eq!(event.severity, 400);
+
+        // Escalate to HighHigh at the same instant: no further OnDelay wait, since ActiveState
+        // itself isn't transitioning -- only the severity/message are escalating.
+        let event = alarm
+            .update_value_at(&address_space, 115.0, t_plus_1100ms)
+            .expect("severity escalation while active must report immediately");
+        assert!(event.active_state);
+        assert_eq!(event.severity, 700);
+    }
+
+    // OPC-10000-9 §5.8.2/Annex B.1.5: an alarm still active+unacknowledged after ReAlarmTime is
+    // re-alarmed (as if it just went into alarm) -- AckedState returns to false,
+    // ReAlarmRepeatCount increments, and it re-notifies even with no new raw value change (e.g.
+    // via periodic re-sampling). ReAlarmRepeatCount resets only when the alarm returns to normal.
+    #[test]
+    fn re_alarm_fires_after_re_alarm_time_while_still_active_and_unacked() {
+        let address_space = test_address_space();
+        let alarm = LimitAlarm::create_exclusive_in_address_space(
+            &address_space,
+            2,
+            "DeviceA",
+            "ReAlarmed",
+            NodeId::new(2, "InitialSource"),
+            on_off_delay_cfg(),
+            LimitAlarmKind::Limit,
+        )
+        .with_re_alarm(5_000.0);
+
+        let t0 = DateTime::now();
+        let event = alarm
+            .update_value_at(&address_space, 105.0, t0)
+            .expect("initial activation");
+        assert!(event.active_state && !event.acked_state);
+
+        // Re-sampling the SAME value before ReAlarmTime elapses must not re-alarm.
+        let t_plus_2s = DateTime::from(t0.checked_ticks() + 2 * 10_000_000);
+        assert!(
+            alarm
+                .update_value_at(&address_space, 105.0, t_plus_2s)
+                .is_none(),
+            "2s < 5s ReAlarmTime -- must not re-alarm yet"
+        );
+
+        // Acknowledge it, then let ReAlarmTime elapse: it should come back unacknowledged.
+        {
+            let space = &address_space;
+            alarm.condition.set_acked(space, true);
+        }
+        let t_plus_6s = DateTime::from(t0.checked_ticks() + 6 * 10_000_000);
+        let event = alarm
+            .update_value_at(&address_space, 105.0, t_plus_6s)
+            .expect("ReAlarmTime elapsed while still active -- should re-alarm");
+        assert!(event.active_state);
+        assert!(
+            !event.acked_state,
+            "re-alarm returns the alarm to unacknowledged"
+        );
+
+        let repeat_count_id = alarm.condition.re_alarm_repeat_count_id.clone();
+        let node = address_space
+            .find(&repeat_count_id)
+            .expect("ReAlarmRepeatCount node should exist");
+        let NodeType::Variable(var) = &*node else {
+            panic!("ReAlarmRepeatCount should be a variable");
+        };
+        let count = var
+            .value(
+                TimestampsToReturn::Neither,
+                &NumericRange::None,
+                &DataEncoding::Binary,
+                0.0,
+            )
+            .value;
+        assert_eq!(count, Some(Variant::from(1i16)));
+        drop(node);
+
+        // Returning to normal resets the counter.
+        alarm.update_value_at(&address_space, 50.0, t_plus_6s);
+        let node = address_space
+            .find(&repeat_count_id)
+            .expect("ReAlarmRepeatCount node should exist");
+        let NodeType::Variable(var) = &*node else {
+            panic!("ReAlarmRepeatCount should be a variable");
+        };
+        let count = var
+            .value(
+                TimestampsToReturn::Neither,
+                &NumericRange::None,
+                &DataEncoding::Binary,
+                0.0,
+            )
+            .value;
+        assert_eq!(count, Some(Variant::from(0i16)));
     }
 }

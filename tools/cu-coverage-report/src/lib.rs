@@ -909,9 +909,8 @@ mod tests {
         assert!(report.contains("| 2478 | Time Sync - OS based support | implemented |"));
         // Feature 093: PTP is satisfiable only via a user-supplied TimeSyncSource.
         assert!(report.contains("| 2479 | Time Sync - IEEE 1588 (PTP) | extensible |"));
-        // 3912 was incidentally covered by the 2026-07-15 audit (partial: some
-        // ServerCapabilities fields wired, MaxSessions is not).
-        assert!(report.contains("| 3912 | Base Info Server Capabilities 2 | partial |"));
+        // Feature 096: MaxSessions (the last unwired ServerCapabilities 2 field) now wired.
+        assert!(report.contains("| 3912 | Base Info Server Capabilities 2 | implemented |"));
         // A CU genuinely outside the audit table falls back to needs-proof.
         assert!(
             report.contains("| 99999 | Fixture-only CU outside the audit table | needs-proof |")

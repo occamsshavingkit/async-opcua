@@ -44,11 +44,15 @@ pub enum LimitAlarmKind {
 impl LimitAlarmKind {
     fn type_id(self, mode: LimitMode) -> NodeId {
         match (self, mode) {
-            (Self::Limit, LimitMode::Exclusive) => NodeId::from(ObjectTypeId::ExclusiveLimitAlarmType),
+            (Self::Limit, LimitMode::Exclusive) => {
+                NodeId::from(ObjectTypeId::ExclusiveLimitAlarmType)
+            }
             (Self::Limit, LimitMode::NonExclusive) => {
                 NodeId::from(ObjectTypeId::NonExclusiveLimitAlarmType)
             }
-            (Self::Level, LimitMode::Exclusive) => NodeId::from(ObjectTypeId::ExclusiveLevelAlarmType),
+            (Self::Level, LimitMode::Exclusive) => {
+                NodeId::from(ObjectTypeId::ExclusiveLevelAlarmType)
+            }
             (Self::Level, LimitMode::NonExclusive) => {
                 NodeId::from(ObjectTypeId::NonExclusiveLevelAlarmType)
             }
@@ -724,7 +728,12 @@ impl LimitAlarm {
             state.high_high,
             prev_state.high_high,
         );
-        self.write_non_exclusive_level(address_space, LimitLevel::High, state.high, prev_state.high);
+        self.write_non_exclusive_level(
+            address_space,
+            LimitLevel::High,
+            state.high,
+            prev_state.high,
+        );
         self.write_non_exclusive_level(address_space, LimitLevel::Low, state.low, prev_state.low);
         self.write_non_exclusive_level(
             address_space,
@@ -752,7 +761,9 @@ impl LimitAlarm {
         };
         set_variable_value(address_space, id, Variant::from(active));
         if active != previous_active {
-            if let Some(transition_time_id) = self.non_exclusive_state_ids.transition_time_for(level) {
+            if let Some(transition_time_id) =
+                self.non_exclusive_state_ids.transition_time_for(level)
+            {
                 self.condition
                     .write_transition_time(address_space, transition_time_id);
             }
@@ -1106,7 +1117,6 @@ fn exclusive_state_id(level: LimitLevel) -> NodeId {
         LimitLevel::LowLow => NodeId::new(0, EXCLUSIVE_STATE_LOW_LOW_ID),
     }
 }
-
 
 fn non_exclusive_state_browse_name(level: LimitLevel) -> &'static str {
     match level {

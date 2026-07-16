@@ -828,7 +828,10 @@ impl ConditionStateMachine {
                 );
             }
         };
-        self.write_transition_time(address_space, &self.shelving_current_state_transition_time_id);
+        self.write_transition_time(
+            address_space,
+            &self.shelving_current_state_transition_time_id,
+        );
         self.recompute_suppressed_or_shelved(address_space);
     }
 
@@ -952,7 +955,8 @@ impl ConditionStateMachine {
         let active = self.get_active(address_space);
         let acked = self.get_acked(address_space);
         let shelved = self.get_shelving_state(address_space) != ShelvingState::Unshelved;
-        let suppressed = self.get_suppressed(address_space) || self.get_out_of_service(address_space);
+        let suppressed =
+            self.get_suppressed(address_space) || self.get_out_of_service(address_space);
 
         let text = match (active, shelved, suppressed, acked) {
             (false, _, _, _) => "Inactive",
@@ -962,7 +966,10 @@ impl ConditionStateMachine {
             (true, false, false, true) => "Active | Acknowledged",
         };
 
-        self.write_transition_time(address_space, &self.active_state_effective_transition_time_id);
+        self.write_transition_time(
+            address_space,
+            &self.active_state_effective_transition_time_id,
+        );
         self.write_effective_display_name(address_space, text);
     }
 

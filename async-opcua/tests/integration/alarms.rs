@@ -578,7 +578,10 @@ async fn recv_audit_event(
             Variant::LocalizedText(t) => t.text.value().clone().unwrap_or_default(),
             other => panic!("Message field = {other:?}, expected LocalizedText"),
         };
-        return AuditConditionEventFields { event_type, message };
+        return AuditConditionEventFields {
+            event_type,
+            message,
+        };
     }
 }
 
@@ -1701,9 +1704,7 @@ async fn limit_state_transition_time_updates_on_threshold_crossing() {
     .await
     {
         Some(Variant::DateTime(t)) => assert!(*t >= before),
-        other => panic!(
-            "LimitState.CurrentState.TransitionTime = {other:?}, expected a DateTime"
-        ),
+        other => panic!("LimitState.CurrentState.TransitionTime = {other:?}, expected a DateTime"),
     }
 }
 
@@ -1711,7 +1712,6 @@ async fn limit_state_transition_time_updates_on_threshold_crossing() {
 // Lifecycle Methods: Enable/Disable/Suppress/Unsuppress/RemoveFromService/PlaceInService/Silence
 // (feature 095, US2). OPC-10000-9 §5.5.4-§5.5.5, §5.8.7-§5.8.15.
 // ---------------------------------------------------------------------------
-
 
 #[tokio::test]
 async fn enable_disable_methods_toggle_enabled_state() {
@@ -1736,7 +1736,13 @@ async fn enable_disable_methods_toggle_enabled_state() {
     register_condition_methods(&core_nm, registry, nm.address_space().clone());
 
     assert_eq!(
-        call_shelve(&session, &condition_id, MethodId::ConditionType_Disable, None).await,
+        call_shelve(
+            &session,
+            &condition_id,
+            MethodId::ConditionType_Disable,
+            None
+        )
+        .await,
         StatusCode::Good
     );
     {
@@ -1745,7 +1751,13 @@ async fn enable_disable_methods_toggle_enabled_state() {
     }
 
     assert_eq!(
-        call_shelve(&session, &condition_id, MethodId::ConditionType_Enable, None).await,
+        call_shelve(
+            &session,
+            &condition_id,
+            MethodId::ConditionType_Enable,
+            None
+        )
+        .await,
         StatusCode::Good
     );
     {
@@ -1830,7 +1842,14 @@ async fn remove_from_service_place_in_service_toggle_out_of_service_state() {
         .get_of_type::<CoreNodeManager>()
         .expect("CoreNodeManager not found");
     let source = make_event_source(&nm, "OosDev");
-    let sm = register_alarm_condition(nm.address_space(), &nm, "OosDev", "Temp", source, "Temp alarm");
+    let sm = register_alarm_condition(
+        nm.address_space(),
+        &nm,
+        "OosDev",
+        "Temp",
+        source,
+        "Temp alarm",
+    );
     let condition_id = sm.condition_id.clone();
     let registry = ConditionRegistry::new();
     registry.register(sm.clone());
@@ -2101,7 +2120,13 @@ async fn enable_disable_emit_audit_condition_enable_event() {
         .unwrap();
     let _audit_item = add_audit_event_item(&session, sub_id).await;
 
-    call_shelve(&session, &condition_id, MethodId::ConditionType_Disable, None).await;
+    call_shelve(
+        &session,
+        &condition_id,
+        MethodId::ConditionType_Disable,
+        None,
+    )
+    .await;
     let audit = recv_audit_event(&mut events).await;
     assert_eq!(
         audit.event_type,
@@ -2109,7 +2134,13 @@ async fn enable_disable_emit_audit_condition_enable_event() {
     );
     assert!(audit.message.contains("Disable"));
 
-    call_shelve(&session, &condition_id, MethodId::ConditionType_Enable, None).await;
+    call_shelve(
+        &session,
+        &condition_id,
+        MethodId::ConditionType_Enable,
+        None,
+    )
+    .await;
     let audit = recv_audit_event(&mut events).await;
     assert_eq!(
         audit.event_type,

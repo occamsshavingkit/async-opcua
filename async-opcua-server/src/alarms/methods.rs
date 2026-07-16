@@ -525,7 +525,12 @@ impl ConditionRefreshHandler {
             apply_optional_comment(&condition, args, &address_space)?;
             condition.set_out_of_service(&address_space, true);
         }
-        notify_out_of_service_audit_event(context, &condition, "RemoveFromService", StatusCode::Good);
+        notify_out_of_service_audit_event(
+            context,
+            &condition,
+            "RemoveFromService",
+            StatusCode::Good,
+        );
         Ok(vec![])
     }
 
@@ -875,7 +880,9 @@ impl EventField for ConditionAuditEvent {
         remaining_path: &[QualifiedName],
     ) -> Variant {
         if attribute_id != AttributeId::Value || remaining_path.len() != 1 {
-            return self.base.get_value(attribute_id, index_range, remaining_path);
+            return self
+                .base
+                .get_value(attribute_id, index_range, remaining_path);
         }
 
         match remaining_path[0].name.as_ref() {
@@ -888,7 +895,9 @@ impl EventField for ConditionAuditEvent {
                 Some(text) => Variant::from(text.clone()),
                 None => Variant::from(LocalizedText::null()),
             },
-            _ => self.base.get_value(attribute_id, index_range, remaining_path),
+            _ => self
+                .base
+                .get_value(attribute_id, index_range, remaining_path),
         }
     }
 }

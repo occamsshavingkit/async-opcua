@@ -32,8 +32,8 @@ pub use dialog::{DialogCondition, DialogRegistry};
 pub use discrete::{DiscreteAlarm, DiscreteAlarmKind};
 pub use dispatch::{dispatch_alarm_event, ServerAlarmEvent};
 pub use limit::{
-    read_eurange, ActiveLimits, LimitAlarm, LimitConfig, LimitDef, LimitEvaluator, LimitLevel,
-    LimitMode, LimitOutcome, NonExclusiveState,
+    read_eurange, ActiveLimits, LimitAlarm, LimitAlarmKind, LimitConfig, LimitDef, LimitEvaluator,
+    LimitLevel, LimitMode, LimitOutcome, NonExclusiveState,
 };
 #[cfg(all(feature = "generated-address-space", feature = "method-call"))]
 pub use methods::{register_condition_methods, register_dialog_condition_methods};

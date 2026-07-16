@@ -14,8 +14,6 @@ use opcua_types::{
 };
 use std::sync::Mutex;
 
-const EXCLUSIVE_LIMIT_ALARM_TYPE_ID: u32 = 9341;
-const NON_EXCLUSIVE_LIMIT_ALARM_TYPE_ID: u32 = 9906;
 const EXCLUSIVE_STATE_HIGH_HIGH_ID: u32 = 9329;
 const EXCLUSIVE_STATE_HIGH_ID: u32 = 9331;
 const EXCLUSIVE_STATE_LOW_ID: u32 = 9333;
@@ -29,6 +27,33 @@ pub enum LimitMode {
     Exclusive,
     /// Each configured limit is evaluated independently.
     NonExclusive,
+}
+
+/// Selects the concrete limit-family alarm ObjectType (OPC-10000-9 §5.8.21). `Limit` and `Level`
+/// share identical threshold/deadband evaluation (`LimitEvaluator`); they differ only in which
+/// `TypeDefinition` the resulting condition instance reports.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LimitAlarmKind {
+    /// Generic process-limit alarm (`ExclusiveLimitAlarmType`/`NonExclusiveLimitAlarmType`).
+    Limit,
+    /// Level alarm, a `LimitAlarmType` subtype for level-monitoring use cases
+    /// (`ExclusiveLevelAlarmType`/`NonExclusiveLevelAlarmType`, OPC-10000-9 §5.8.21.2/.3).
+    Level,
+}
+
+impl LimitAlarmKind {
+    fn type_id(self, mode: LimitMode) -> NodeId {
+        match (self, mode) {
+            (Self::Limit, LimitMode::Exclusive) => NodeId::from(ObjectTypeId::ExclusiveLimitAlarmType),
+            (Self::Limit, LimitMode::NonExclusive) => {
+                NodeId::from(ObjectTypeId::NonExclusiveLimitAlarmType)
+            }
+            (Self::Level, LimitMode::Exclusive) => NodeId::from(ObjectTypeId::ExclusiveLevelAlarmType),
+            (Self::Level, LimitMode::NonExclusive) => {
+                NodeId::from(ObjectTypeId::NonExclusiveLevelAlarmType)
+            }
+        }
+    }
 }
 
 /// One of the four process alarm limit bands.
@@ -349,6 +374,8 @@ pub struct LimitAlarm {
     pub non_exclusive_state_ids: NonExclusiveLimitStateIds,
     /// Previous evaluator state used for deadband hysteresis.
     pub prev: Mutex<ActiveLimits>,
+    /// Which limit-family ObjectType this instance was created as (OPC-10000-9 §5.8.21).
+    kind: LimitAlarmKind,
 }
 
 impl LimitAlarm {
@@ -384,7 +411,8 @@ impl LimitAlarm {
         }
     }
 
-    /// Creates an ExclusiveLimitAlarmType instance and its LimitState nodes in the address space.
+    /// Creates an ExclusiveLimitAlarmType (or ExclusiveLevelAlarmType, per `kind`) instance and
+    /// its LimitState nodes in the address space.
     pub fn create_exclusive_in_address_space(
         address_space: &AddressSpace,
         ns: u16,
@@ -392,6 +420,7 @@ impl LimitAlarm {
         alarm_name: &str,
         source_node_id: NodeId,
         cfg: LimitConfig,
+        kind: LimitAlarmKind,
     ) -> Self {
         let condition = ConditionStateMachine::create_in_address_space(
             address_space,
@@ -404,7 +433,7 @@ impl LimitAlarm {
         replace_condition_type_definition(
             address_space,
             &condition.condition_id,
-            NodeId::from(ObjectTypeId::ExclusiveLimitAlarmType),
+            kind.type_id(LimitMode::Exclusive),
         );
 
         let base_s = format!("Alarm_{}_{}", device, alarm_name);
@@ -480,10 +509,12 @@ impl LimitAlarm {
             limit_current_state_transition_time_id,
             non_exclusive_state_ids: NonExclusiveLimitStateIds::default(),
             prev: Mutex::new(initial_prev),
+            kind,
         }
     }
 
-    /// Creates a NonExclusiveLimitAlarmType instance and its limit state nodes in the address space.
+    /// Creates a NonExclusiveLimitAlarmType (or NonExclusiveLevelAlarmType, per `kind`) instance
+    /// and its limit state nodes in the address space.
     pub fn create_non_exclusive_in_address_space(
         address_space: &AddressSpace,
         ns: u16,
@@ -491,6 +522,7 @@ impl LimitAlarm {
         alarm_name: &str,
         source_node_id: NodeId,
         cfg: LimitConfig,
+        kind: LimitAlarmKind,
     ) -> Self {
         let condition = ConditionStateMachine::create_in_address_space(
             address_space,
@@ -503,7 +535,7 @@ impl LimitAlarm {
         replace_condition_type_definition(
             address_space,
             &condition.condition_id,
-            NodeId::from(ObjectTypeId::NonExclusiveLimitAlarmType),
+            kind.type_id(LimitMode::NonExclusive),
         );
 
         let base_s = format!("Alarm_{}_{}", device, alarm_name);
@@ -548,6 +580,7 @@ impl LimitAlarm {
             limit_current_state_transition_time_id: NodeId::null(),
             non_exclusive_state_ids,
             prev: Mutex::new(initial_prev),
+            kind,
         }
     }
 
@@ -595,7 +628,7 @@ impl LimitAlarm {
 
         Some(AlarmEvent {
             event_id,
-            event_type: event_type_id(self.config.mode),
+            event_type: self.kind.type_id(self.config.mode),
             source_node: self.condition.source_node_id.clone(),
             source_name: self.condition.condition_name.clone(),
             time: DateTime::now(),
@@ -1074,12 +1107,6 @@ fn exclusive_state_id(level: LimitLevel) -> NodeId {
     }
 }
 
-fn event_type_id(mode: LimitMode) -> NodeId {
-    match mode {
-        LimitMode::Exclusive => NodeId::new(0, EXCLUSIVE_LIMIT_ALARM_TYPE_ID),
-        LimitMode::NonExclusive => NodeId::new(0, NON_EXCLUSIVE_LIMIT_ALARM_TYPE_ID),
-    }
-}
 
 fn non_exclusive_state_browse_name(level: LimitLevel) -> &'static str {
     match level {
@@ -1226,6 +1253,7 @@ mod tests {
             "HighTemperature",
             NodeId::new(2, "InitialSource"),
             cfg,
+            LimitAlarmKind::Limit,
         );
         let condition_id = alarm.condition.condition_id.clone();
         let type_tree = DefaultTypeTree::new();
@@ -1301,6 +1329,7 @@ mod tests {
             "HighTemperature",
             NodeId::new(2, "InitialSource"),
             cfg,
+            LimitAlarmKind::Limit,
         );
         let condition_id = alarm.condition.condition_id.clone();
         let source = NodeId::new(2, "DeviceA.Temperature");

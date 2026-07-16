@@ -219,7 +219,7 @@ and re-alarm timing separately.
 
 ### Tests for User Story 4
 
-- [ ] T038 [P] [US4] Add integration test: `ExclusiveLevelAlarmType`/`NonExclusiveLevelAlarmType` instance reports the correct `TypeDefinition` (not `ExclusiveLimitAlarmType`/`NonExclusiveLimitAlarmType`) and activates on threshold crossing (§5.8.21).
+- [X] T038 [P] [US4] Add integration test: `ExclusiveLevelAlarmType`/`NonExclusiveLevelAlarmType` instance reports the correct `TypeDefinition` (not `ExclusiveLimitAlarmType`/`NonExclusiveLimitAlarmType`) and activates on threshold crossing (§5.8.21).
 - [ ] T039 [P] [US4] Add integration test: `ExclusiveDeviationAlarmType`/`NonExclusiveDeviationAlarmType` activates when the monitored value deviates from its configured `SetpointNode` beyond threshold (§5.8.22).
 - [ ] T040 [P] [US4] Add integration test: `ExclusiveRateOfChangeAlarmType`/`NonExclusiveRateOfChangeAlarmType` activates when the monitored value's rate of change exceeds a configured threshold (§5.8.23).
 - [ ] T041 [P] [US4] Add integration tests: `SystemOffNormalAlarmType` (§5.8.24.3), `CertificateExpirationAlarmType` using `ExpirationDate`/`ExpirationLimit` (§5.8.24.7), and `DiscrepancyAlarmType` using `TargetValueNode` (§5.8.25) each activate on their respective trigger.
@@ -228,7 +228,7 @@ and re-alarm timing separately.
 
 ### Implementation for User Story 4
 
-- [ ] T044 [US4] In `async-opcua-server/src/alarms/limit.rs`, add a `LimitAlarmKind { Limit, Level }` enum with a `type_id()` method (mirroring `discrete.rs::DiscreteAlarmKind`, discrete.rs:19-23,172-176) returning `ObjectTypeId::ExclusiveLimitAlarmType`/`ExclusiveLevelAlarmType` (and non-exclusive counterparts); parameterize `create_exclusive_in_address_space` (limit.rs:357) and `create_non_exclusive_in_address_space` (:439) by this kind, replacing the hardcoded `ObjectTypeId::ExclusiveLimitAlarmType`/`NonExclusiveLimitAlarmType` at limit.rs:376/458.
+- [X] T044 [US4] In `async-opcua-server/src/alarms/limit.rs`, add a `LimitAlarmKind { Limit, Level }` enum with a `type_id()` method (mirroring `discrete.rs::DiscreteAlarmKind`, discrete.rs:19-23,172-176) returning `ObjectTypeId::ExclusiveLimitAlarmType`/`ExclusiveLevelAlarmType` (and non-exclusive counterparts); parameterize `create_exclusive_in_address_space` (limit.rs:357) and `create_non_exclusive_in_address_space` (:439) by this kind, replacing the hardcoded `ObjectTypeId::ExclusiveLimitAlarmType`/`NonExclusiveLimitAlarmType` at limit.rs:376/458.
 - [ ] T045 [US4] Add a `DeviationAlarm` evaluator + address-space wiring in `limit.rs` (or a new sibling module if it doesn't fit cleanly), using `ExclusiveDeviationAlarmType_SetpointNode`/`NonExclusiveDeviationAlarmType_SetpointNode` (generated NodeIds confirmed present) to reference the setpoint.
 - [ ] T046 [US4] Add a `RateOfChangeAlarm` evaluator + address-space wiring in `limit.rs` (or sibling module), tracking a configured rate window against successive monitored values.
 - [ ] T047 [US4] Add `SystemOffNormalAlarmType`/`CertificateExpirationAlarmType`/`DiscrepancyAlarmType` instantiation, following the `discrete.rs::DiscreteAlarmKind` pattern (either as new variants or a sibling kind enum); wire `CertificateExpirationAlarmType_ExpirationDate`/`_ExpirationLimit` and `DiscrepancyAlarmType_TargetValueNode` (generated NodeIds confirmed present).

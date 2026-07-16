@@ -28,7 +28,7 @@ use opcua_server::alarms::{
 };
 use opcua_server::history::InMemoryEventHistory;
 use opcua_server::namespace::{
-    register_alarm_condition, register_discrete_alarm, register_limit_alarm,
+    register_alarm_condition, register_discrete_alarm, register_level_alarm, register_limit_alarm,
     register_limit_alarm_checked,
 };
 use opcua_types::{
@@ -2214,6 +2214,53 @@ async fn remove_from_service_place_in_service_emit_audit_condition_out_of_servic
     .await;
     let audit = recv_audit_event(&mut events).await;
     assert!(audit.message.contains("PlaceInService"));
+}
+
+// ---------------------------------------------------------------------------
+// Missing alarm subtypes (feature 095, US4). OPC-10000-9 section 5.8.21.
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn level_alarm_reports_level_type_definition_not_generic_limit_and_activates() {
+    let (tester, nm, _session) = setup_alarms().await;
+    let source = make_event_source(&nm, "LevelKindDev");
+    let alarm = register_level_alarm(
+        nm.address_space(),
+        &nm,
+        "LevelKindDev",
+        "Tank",
+        source,
+        exclusive_level_cfg(),
+    );
+    let condition_id = alarm.condition_state_machine().condition_id.clone();
+    {
+        let space = nm.address_space().read();
+        assert!(
+            space.has_reference(
+                &condition_id,
+                &NodeId::from(ObjectTypeId::ExclusiveLevelAlarmType),
+                ReferenceTypeId::HasTypeDefinition,
+            ),
+            "Level alarm should report ExclusiveLevelAlarmType as its TypeDefinition"
+        );
+        assert!(
+            !space.has_reference(
+                &condition_id,
+                &NodeId::from(ObjectTypeId::ExclusiveLimitAlarmType),
+                ReferenceTypeId::HasTypeDefinition,
+            ),
+            "Level alarm must not also report the generic ExclusiveLimitAlarmType"
+        );
+    }
+
+    drive_limit(&alarm, &nm, &tester, 105.0);
+    {
+        let space = nm.address_space().read();
+        assert!(
+            alarm.condition_state_machine().get_active(&space),
+            "Level alarm should activate on threshold crossing exactly like a Limit alarm"
+        );
+    }
 }
 
 #[tokio::test]

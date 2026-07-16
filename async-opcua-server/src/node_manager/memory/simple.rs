@@ -12,6 +12,8 @@ use opcua_nodes::{HasNodeId, NodeSetImport};
 use crate::alarms::ServerAlarmEvent;
 #[cfg(feature = "alarms")]
 use crate::alarms::{AlarmSourceRegistry, LimitAlarm};
+#[cfg(all(feature = "alarms", test))]
+use crate::alarms::LimitAlarmKind;
 #[cfg(feature = "history")]
 use crate::history::read::modification_infos_or_none;
 #[cfg(feature = "method-call")]
@@ -1666,6 +1668,7 @@ mod tests {
                 "High",
                 source.clone(),
                 cfg,
+                LimitAlarmKind::Limit,
             )
         };
 

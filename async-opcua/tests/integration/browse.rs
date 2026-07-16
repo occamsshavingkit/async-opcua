@@ -754,6 +754,44 @@ async fn translate_browse_path_no_match() {
 }
 
 #[tokio::test]
+async fn locations_object_is_reachable_from_objects_folder() {
+    // Feature 096 US3 (CU 4053, Base Info Locations Object): the standard `Locations` Object
+    // (i=31915, FolderType, Organized-by ObjectsFolder) must be reachable via Browse, not merely
+    // present in the generated nodeset.
+    let (_tester, _nm, session) = setup().await;
+    let r = session
+        .translate_browse_paths_to_node_ids(&[BrowsePath {
+            starting_node: ObjectId::ObjectsFolder.into(),
+            relative_path: RelativePath {
+                elements: Some(vec![RelativePathElement {
+                    reference_type_id: ReferenceTypeId::Organizes.into(),
+                    is_inverse: false,
+                    include_subtypes: true,
+                    target_name: "Locations".into(),
+                }]),
+            },
+        }])
+        .await
+        .unwrap();
+    assert_eq!(1, r.len());
+    assert_eq!(
+        r[0].status_code,
+        StatusCode::Good,
+        "Locations object should resolve from the Objects folder"
+    );
+    let targets = r[0].targets.clone().unwrap_or_default();
+    assert!(
+        !targets.is_empty(),
+        "Locations browse path resolved to no targets"
+    );
+    assert_eq!(
+        targets[0].target_id.node_id,
+        NodeId::new(0, 31915u32),
+        "resolved target should be the standard Locations Object NodeId"
+    );
+}
+
+#[tokio::test]
 async fn browse_next_invalid_continuation_point() {
     // Part 4 §5.9.3: a BrowseNext with an unrecognised continuation point returns
     // Bad_ContinuationPointInvalid (distinct from the empty -> BadNothingToDo case).

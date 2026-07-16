@@ -855,6 +855,23 @@ impl CoreNodeManagerImpl {
                 // value is already an f64, so expose it directly (the old `as u32` truncated it).
                 limits.subscriptions.min_sampling_interval_ms.into()
             }
+            VariableId::Server_ServerCapabilities_MaxSessions => {
+                (limits.max_sessions as u32).into()
+            }
+            VariableId::Server_ServerCapabilities_MaxMonitoredItemsQueueSize => {
+                (limits.subscriptions.max_monitored_item_queue_size as u32).into()
+            }
+            VariableId::Server_ServerCapabilities_MaxMonitoredItemsPerSubscription => {
+                (limits.subscriptions.max_monitored_items_per_sub as u32).into()
+            }
+            VariableId::Server_ServerCapabilities_MaxSubscriptionsPerSession => {
+                (limits.subscriptions.max_subscriptions_per_session as u32).into()
+            }
+            // Part 5 §6.3.2: 0 means "no limit". This server enforces per-session/
+            // per-subscription caps (above) but no server-wide total, so these report 0 honestly
+            // rather than a fabricated non-zero number (feature 096, CUs 3911/3912).
+            VariableId::Server_ServerCapabilities_MaxSubscriptions => 0u32.into(),
+            VariableId::Server_ServerCapabilities_MaxMonitoredItems => 0u32.into(),
             VariableId::Server_ServerCapabilities_OperationLimits_MaxMonitoredItemsPerCall => {
                 (limits.operational.max_monitored_items_per_call as u32).into()
             }

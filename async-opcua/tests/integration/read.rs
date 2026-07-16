@@ -1601,6 +1601,121 @@ async fn min_supported_sample_rate_value_matches_duration_datatype() {
 }
 
 // ---------------------------------------------------------------------------
+// Feature 096 US1 (CUs 3911/3912): ServerCapabilities Max* nodes report the server's real
+// configured/effective values, not a static null. OPC UA Part 5 v1.05 §6.3.2.
+// ---------------------------------------------------------------------------
+
+async fn read_u32(session: &Session, variable_id: VariableId) -> u32 {
+    let r = session
+        .read(
+            &[ReadValueId {
+                node_id: variable_id.into(),
+                attribute_id: AttributeId::Value as u32,
+                ..Default::default()
+            }],
+            TimestampsToReturn::Both,
+            0.0,
+        )
+        .await
+        .unwrap();
+    match r[0].value {
+        Some(Variant::UInt32(v)) => v,
+        ref other => panic!("{:?} = {:?}, expected a UInt32", variable_id, other),
+    }
+}
+
+#[tokio::test]
+async fn server_capabilities_max_sessions_reports_configured_limit() {
+    let mut server = default_server();
+    server.limits_mut().max_sessions = 7;
+    let mut tester = Tester::new(server, false).await;
+    let (session, lp) = tester.connect_default().await.unwrap();
+    lp.spawn();
+    session.wait_for_connection().await;
+
+    let value = read_u32(&session, VariableId::Server_ServerCapabilities_MaxSessions).await;
+    assert_eq!(value, 7, "MaxSessions must report the configured limit");
+}
+
+#[tokio::test]
+async fn server_capabilities_max_monitored_items_queue_size_reports_configured_limit() {
+    let mut server = default_server();
+    server
+        .limits_mut()
+        .subscriptions
+        .max_monitored_item_queue_size = 42;
+    let mut tester = Tester::new(server, false).await;
+    let (session, lp) = tester.connect_default().await.unwrap();
+    lp.spawn();
+    session.wait_for_connection().await;
+
+    let value = read_u32(
+        &session,
+        VariableId::Server_ServerCapabilities_MaxMonitoredItemsQueueSize,
+    )
+    .await;
+    assert_eq!(
+        value, 42,
+        "MaxMonitoredItemsQueueSize must report the configured limit, matching the one already \
+         enforced when creating monitored items"
+    );
+}
+
+#[tokio::test]
+async fn server_capabilities_max_monitored_items_per_subscription_and_max_subscriptions_per_session(
+) {
+    let mut server = default_server();
+    server
+        .limits_mut()
+        .subscriptions
+        .max_monitored_items_per_sub = 11;
+    server
+        .limits_mut()
+        .subscriptions
+        .max_subscriptions_per_session = 13;
+    let mut tester = Tester::new(server, false).await;
+    let (session, lp) = tester.connect_default().await.unwrap();
+    lp.spawn();
+    session.wait_for_connection().await;
+
+    let per_sub = read_u32(
+        &session,
+        VariableId::Server_ServerCapabilities_MaxMonitoredItemsPerSubscription,
+    )
+    .await;
+    assert_eq!(per_sub, 11);
+
+    let per_session = read_u32(
+        &session,
+        VariableId::Server_ServerCapabilities_MaxSubscriptionsPerSession,
+    )
+    .await;
+    assert_eq!(per_session, 13);
+}
+
+#[tokio::test]
+async fn server_capabilities_server_wide_max_subscriptions_and_max_monitored_items_are_zero() {
+    // OPC UA Part 5 §6.3.2: 0 means "no limit". This server enforces per-session/per-subscription
+    // caps (MaxSubscriptionsPerSession/MaxMonitoredItemsPerSubscription) but no server-wide total,
+    // so these report 0 honestly rather than a fabricated non-zero number.
+    let (_tester, _nm, session) = setup().await;
+
+    let max_subscriptions = read_u32(
+        &session,
+        VariableId::Server_ServerCapabilities_MaxSubscriptions,
+    )
+    .await;
+    assert_eq!(max_subscriptions, 0);
+
+    let max_monitored_items = read_u32(
+        &session,
+        VariableId::Server_ServerCapabilities_MaxMonitoredItems,
+    )
+    .await;
+    assert_eq!(max_monitored_items, 0);
+}
+
+// ---------------------------------------------------------------------------
 // Feature 053 US1 (P5-04): ServerDiagnosticsType mandatory children.
 // OPC UA Part 5 v1.05 §6.3.3 (Table 11): EnabledFlag, SubscriptionDiagnosticsArray and
 // SessionsDiagnosticsSummary (SessionDiagnosticsArray + SessionSecurityDiagnosticsArray)

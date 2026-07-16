@@ -55,11 +55,11 @@ independent passes over the codebase, one per subsystem cluster); see the
 | 3560 | Address Space Interfaces | gap | Searched 'HasInterface'/'BaseInterfaceType' usage - only nodeset type nodes; no server code creates HasInterface refs. |
 | 3721 | Security ECC Policy | implemented | Reviewed pre-2026-07-15-audit; existing tests/docs provide direct evidence. |
 | 3802 | Time Sync - Configure Clock Skew | implemented | ServerConfig::max_acceptable_clock_skew_ns config/server.rs:669,998-1002; tests config/server.rs:375-432 |
-| 3808 | Documentation - Core Capacities | gap | No doc artifact in docs/ or specs/ enumerating limits; limits.rs:52-151 has scattered config only, no max-secure-channels const |
-| 3912 | Base Info Server Capabilities 2 | partial | core.rs:829-919 wires MaxArrayLength/StringLen/ByteStrLen/BrowseCP/MinSampleRate/OpLimits*; MaxSessions unwired; tests read.rs:1493 |
+| 3808 | Documentation - Core Capacities | implemented | docs/server-capacity-limits.md enumerates every Limits/SubscriptionLimits/OperationalLimits field with its default and configuration method, cross-checked against config/limits.rs's Default impls and the server_conf_limits_match_struct_field_names test |
+| 3912 | Base Info Server Capabilities 2 | implemented | core.rs get_attribute wires MaxSessions to Limits.max_sessions (was the only unwired node in this CU per prior audit); test read.rs::server_capabilities_max_sessions_reports_configured_limit |
 | 3983 | Base Services Diagnostics | implemented | result.rs:17-58 filter_diagnostic_info masks diag bits; wired attribute.rs/node_management.rs; test per_op_diagnostics.rs |
 | 3985 | Session General Service Behaviour | implemented | controller.rs:396 auth-token check, response.rs:207 requestHandle echo, deadline_queue:971-1016 BadTimeout; e2e read.rs:1400-1408 |
-| 4053 | Base Info Locations Object | partial | Locations object present nodeset_16.rs:918-943, loaded via CoreNamespace core.rs:147; no test browses to it |
+| 4053 | Base Info Locations Object | implemented | Locations object (i=31915, nodeset_16.rs:918-943) confirmed reachable via Browse from ObjectsFolder; test browse.rs::locations_object_is_reachable_from_objects_folder |
 | 4237 | Address Space NonVolatile and Constant | partial | NonVolatile/Constant bits defined enums.rs:15-19, generic get/set variable.rs:826-838; tests only exercise other AccessLevelEx bits |
 | 5240 | Base Info Currency | gap | Only inert CurrencyUnitType/CurrencyUnit template nodes exist (nodeset_22.rs:908-934); no builder API, usage, or test |
 | 5505 | Time Sync - UA based support | implemented | UaHeaderTimeSyncSource polls ResponseHeader.timestamp (time_sync_ua.rs:52-80), configurable builder.rs:258-262; test time_sync.rs:33 |
@@ -109,7 +109,7 @@ independent passes over the codebase, one per subsystem cluster); see the
 | 3184 | Base Info Core Structure 2 | implemented | Root/Objects/Server + ServerArray/NamespaceArray/ServiceLevel node_manager/memory/core.rs:986-1063; tests browse.rs:35, read.rs:42-43 |
 | 3186 | Base Info Core Views Folder | implemented | ViewsFolder entry point address_space/mod.rs:774-779; test at same location |
 | 3192 | Base Info Diagnostics | implemented | EnabledFlag/ServerDiagnosticsSummary/SubscriptionDiagnosticsArray diagnostics/server.rs, core.rs:501-509; e2e read.rs:1604-1841 |
-| 3196 | Base Info Fixed SamplingInterval | gap | ServerDiagnostics (diagnostics/server.rs:10-52) only summary counts; no SamplingIntervalDiagnosticsArray, no EnabledFlag gating, no test |
+| 3196 | Base Info Fixed SamplingInterval | implemented | CU is conditional on the Server using a fixed set of sampling intervals (OPC-10000-5 SS7.9/SS12.8); this server negotiates a continuously-variable client-requested interval per monitored item (sanitize_sampling_interval, subscriptions/monitored_item.rs:299-311), so the precondition never holds and non-exposure of SamplingIntervalDiagnosticsArray is spec-conformant, not a gap -- documented in docs/server-capacity-limits.md |
 | 3198 | Base Info Estimated Return Time | gap | EstimatedReturnTime has zero occurrences outside generated files; no wiring near ServerState::Running server_status.rs:198 |
 | 3201 | Base Info Custom Type System | needs-proof | Outside the 2026-07-15 audit's scope; not yet reviewed. |
 | 3530 | View Basic 2 | implemented | Browse/BrowseNext w/ continuation points view.rs:213; tests browse.rs:252, :757 (Bad_ContinuationPointInvalid) |
@@ -119,16 +119,16 @@ independent passes over the codebase, one per subsystem cluster); see the
 | 3721 | Security ECC Policy | implemented | Reviewed pre-2026-07-15-audit; existing tests/docs provide direct evidence. |
 | 3727 | Subscription Basic | implemented | CreateSubscription/Publish/Republish/SetPublishingMode etc implemented (subscriptions/session_subscriptions.rs); tested subscriptions.rs. |
 | 3802 | Time Sync - Configure Clock Skew | implemented | ServerConfig::max_acceptable_clock_skew_ns config/server.rs:669,998-1002; tests config/server.rs:375-432 |
-| 3808 | Documentation - Core Capacities | gap | No doc artifact in docs/ or specs/ enumerating limits; limits.rs:52-151 has scattered config only, no max-secure-channels const |
-| 3911 | Base Info Server Capabilities Subscriptions | partial | Only MaxMonitoredItemsPerCall+AggregateFunctions wired to config (core.rs:858,1158; tested browse.rs:801); other Max* nodes static null. |
-| 3912 | Base Info Server Capabilities 2 | partial | core.rs:829-919 wires MaxArrayLength/StringLen/ByteStrLen/BrowseCP/MinSampleRate/OpLimits*; MaxSessions unwired; tests read.rs:1493 |
+| 3808 | Documentation - Core Capacities | implemented | docs/server-capacity-limits.md enumerates every Limits/SubscriptionLimits/OperationalLimits field with its default and configuration method, cross-checked against config/limits.rs's Default impls and the server_conf_limits_match_struct_field_names test |
+| 3911 | Base Info Server Capabilities Subscriptions | implemented | core.rs get_attribute now wires MaxMonitoredItemsPerSubscription/MaxSubscriptionsPerSession to their SubscriptionLimits config fields, and MaxSubscriptions/MaxMonitoredItems (no server-wide cap exists) report spec-valid 0 per OPC-10000-5 SS6.3.2; tests read.rs::server_capabilities_max_monitored_items_per_subscription_and_max_subscriptions_per_session, ::server_capabilities_server_wide_max_subscriptions_and_max_monitored_items_are_zero |
+| 3912 | Base Info Server Capabilities 2 | implemented | core.rs get_attribute wires MaxSessions to Limits.max_sessions (was the only unwired node in this CU per prior audit); test read.rs::server_capabilities_max_sessions_reports_configured_limit |
 | 3913 | Subscription Publish Basic | implemented | max_publish_requests_per_subscription=4 (server/src/lib.rs:227); Publish exercised across tests/integration/subscriptions.rs. |
 | 3922 | Base Info SemanticChange Bit | implemented | SemanticsChanged bit set monitored_item.rs:1012-1042 via EU-range writes session_subscriptions.rs:1238,1290; tests :1668 |
 | 3923 | Session Multiple | implemented | Reviewed pre-2026-07-15-audit; existing tests/docs provide direct evidence. |
 | 3983 | Base Services Diagnostics | implemented | result.rs:17-58 filter_diagnostic_info masks diag bits; wired attribute.rs/node_management.rs; test per_op_diagnostics.rs |
 | 3985 | Session General Service Behaviour | implemented | controller.rs:396 auth-token check, response.rs:207 requestHandle echo, deadline_queue:971-1016 BadTimeout; e2e read.rs:1400-1408 |
-| 4053 | Base Info Locations Object | partial | Locations object present nodeset_16.rs:918-943, loaded via CoreNamespace core.rs:147; no test browses to it |
-| 4055 | Base Info Server Capabilities MaxMonitoredItemsQueueSize | partial | MaxMonitoredItemsQueueSize node null (nodeset_50.rs:3513); real limit enforced (limits.rs:126, monitored_item.rs:314) but not exposed. |
+| 4053 | Base Info Locations Object | implemented | Locations object (i=31915, nodeset_16.rs:918-943) confirmed reachable via Browse from ObjectsFolder; test browse.rs::locations_object_is_reachable_from_objects_folder |
+| 4055 | Base Info Server Capabilities MaxMonitoredItemsQueueSize | implemented | core.rs get_attribute wires MaxMonitoredItemsQueueSize to SubscriptionLimits.max_monitored_item_queue_size, the same limit already enforced at monitored_item.rs:314; test read.rs::server_capabilities_max_monitored_items_queue_size_reports_configured_limit |
 | 4237 | Address Space NonVolatile and Constant | partial | NonVolatile/Constant bits defined enums.rs:15-19, generic get/set variable.rs:826-838; tests only exercise other AccessLevelEx bits |
 | 5207 | Monitor Items 2 | implemented | No per-subscription item cap below 2 found (server/src/config/limits.rs); 2+ Double items trivially exercised in subscriptions.rs. |
 | 5208 | Monitor Value Change V2 | partial | IndexRange applied to sample monitored_item.rs:931-940 (Variant::range_of); logic tested via read.rs:794-827, no MonitoredItem-level test |
@@ -205,7 +205,7 @@ independent passes over the codebase, one per subsystem cluster); see the
 | 3188 | Base Info Base Types | implemented | Base built-in types present in schemas/1.05; imported via core.rs:147, exercised by address_space/mod.rs test suite. |
 | 3189 | Base Info ServerType | implemented | ServerType is the root of the default AddressSpace; exercised across suite e.g. tests/integration/browse.rs. |
 | 3192 | Base Info Diagnostics | implemented | EnabledFlag/ServerDiagnosticsSummary/SubscriptionDiagnosticsArray diagnostics/server.rs, core.rs:501-509; e2e read.rs:1604-1841 |
-| 3196 | Base Info Fixed SamplingInterval | gap | ServerDiagnostics (diagnostics/server.rs:10-52) only summary counts; no SamplingIntervalDiagnosticsArray, no EnabledFlag gating, no test |
+| 3196 | Base Info Fixed SamplingInterval | implemented | CU is conditional on the Server using a fixed set of sampling intervals (OPC-10000-5 SS7.9/SS12.8); this server negotiates a continuously-variable client-requested interval per monitored item (sanitize_sampling_interval, subscriptions/monitored_item.rs:299-311), so the precondition never holds and non-exposure of SamplingIntervalDiagnosticsArray is spec-conformant, not a gap -- documented in docs/server-capacity-limits.md |
 | 3198 | Base Info Estimated Return Time | gap | EstimatedReturnTime has zero occurrences outside generated files; no wiring near ServerState::Running server_status.rs:198 |
 | 3201 | Base Info Custom Type System | needs-proof | Outside the 2026-07-15 audit's scope; not yet reviewed. |
 | 3207 | Base Info OptionSet DataType | implemented | OptionSet DataType present in schemas/1.05/Opc.Ua.NodeSet2.xml; exposed via CoreNamespace import. |
@@ -241,9 +241,9 @@ independent passes over the codebase, one per subsystem cluster); see the
 | 3758 | Base Info HasContainedComponent | implemented | HasContainedComponent present in schemas/1.05/Opc.Ua.NodeSet2.xml; exposed via CoreNamespace import. |
 | 3759 | Base Info HasAttachedComponent | implemented | HasAttachedComponent present in schemas/1.05/Opc.Ua.NodeSet2.xml; exposed via CoreNamespace import. |
 | 3802 | Time Sync - Configure Clock Skew | implemented | ServerConfig::max_acceptable_clock_skew_ns config/server.rs:669,998-1002; tests config/server.rs:375-432 |
-| 3808 | Documentation - Core Capacities | gap | No doc artifact in docs/ or specs/ enumerating limits; limits.rs:52-151 has scattered config only, no max-secure-channels const |
-| 3911 | Base Info Server Capabilities Subscriptions | partial | Only MaxMonitoredItemsPerCall+AggregateFunctions wired to config (core.rs:858,1158; tested browse.rs:801); other Max* nodes static null. |
-| 3912 | Base Info Server Capabilities 2 | partial | core.rs:829-919 wires MaxArrayLength/StringLen/ByteStrLen/BrowseCP/MinSampleRate/OpLimits*; MaxSessions unwired; tests read.rs:1493 |
+| 3808 | Documentation - Core Capacities | implemented | docs/server-capacity-limits.md enumerates every Limits/SubscriptionLimits/OperationalLimits field with its default and configuration method, cross-checked against config/limits.rs's Default impls and the server_conf_limits_match_struct_field_names test |
+| 3911 | Base Info Server Capabilities Subscriptions | implemented | core.rs get_attribute now wires MaxMonitoredItemsPerSubscription/MaxSubscriptionsPerSession to their SubscriptionLimits config fields, and MaxSubscriptions/MaxMonitoredItems (no server-wide cap exists) report spec-valid 0 per OPC-10000-5 SS6.3.2; tests read.rs::server_capabilities_max_monitored_items_per_subscription_and_max_subscriptions_per_session, ::server_capabilities_server_wide_max_subscriptions_and_max_monitored_items_are_zero |
+| 3912 | Base Info Server Capabilities 2 | implemented | core.rs get_attribute wires MaxSessions to Limits.max_sessions (was the only unwired node in this CU per prior audit); test read.rs::server_capabilities_max_sessions_reports_configured_limit |
 | 3913 | Subscription Publish Basic | implemented | max_publish_requests_per_subscription=4 (server/src/lib.rs:227); Publish exercised across tests/integration/subscriptions.rs. |
 | 3922 | Base Info SemanticChange Bit | implemented | SemanticsChanged bit set monitored_item.rs:1012-1042 via EU-range writes session_subscriptions.rs:1238,1290; tests :1668 |
 | 3923 | Session Multiple | implemented | Reviewed pre-2026-07-15-audit; existing tests/docs provide direct evidence. |
@@ -251,9 +251,9 @@ independent passes over the codebase, one per subsystem cluster); see the
 | 3985 | Session General Service Behaviour | implemented | controller.rs:396 auth-token check, response.rs:207 requestHandle echo, deadline_queue:971-1016 BadTimeout; e2e read.rs:1400-1408 |
 | 3996 | Base Info ReferenceDescription | gap | Searched 'ReferenceDescriptionVariableType'/'HasReferenceDescription' - only nodeset nodes; unused by server code. |
 | 4052 | Base Info TrimmedString | implemented | TrimmedString present in schemas/1.05/Opc.Ua.NodeSet2.xml; exposed via CoreNamespace import. |
-| 4053 | Base Info Locations Object | partial | Locations object present nodeset_16.rs:918-943, loaded via CoreNamespace core.rs:147; no test browses to it |
+| 4053 | Base Info Locations Object | implemented | Locations object (i=31915, nodeset_16.rs:918-943) confirmed reachable via Browse from ObjectsFolder; test browse.rs::locations_object_is_reachable_from_objects_folder |
 | 4054 | Base Info Handle DataType | implemented | Handle DataType present in schemas/1.05/Opc.Ua.NodeSet2.xml; exposed via CoreNamespace import. |
-| 4055 | Base Info Server Capabilities MaxMonitoredItemsQueueSize | partial | MaxMonitoredItemsQueueSize node null (nodeset_50.rs:3513); real limit enforced (limits.rs:126, monitored_item.rs:314) but not exposed. |
+| 4055 | Base Info Server Capabilities MaxMonitoredItemsQueueSize | implemented | core.rs get_attribute wires MaxMonitoredItemsQueueSize to SubscriptionLimits.max_monitored_item_queue_size, the same limit already enforced at monitored_item.rs:314; test read.rs::server_capabilities_max_monitored_items_queue_size_reports_configured_limit |
 | 4237 | Address Space NonVolatile and Constant | partial | NonVolatile/Constant bits defined enums.rs:15-19, generic get/set variable.rs:826-838; tests only exercise other AccessLevelEx bits |
 | 4426 | Base Info Decimal DataType | implemented | Decimal in nodeset + generated types/decimal_data_type.rs; encoded generically as a Structure DataType. |
 | 5207 | Monitor Items 2 | implemented | No per-subscription item cap below 2 found (server/src/config/limits.rs); 2+ Double items trivially exercised in subscriptions.rs. |
@@ -337,7 +337,7 @@ independent passes over the codebase, one per subsystem cluster); see the
 | 3188 | Base Info Base Types | implemented | Base built-in types present in schemas/1.05; imported via core.rs:147, exercised by address_space/mod.rs test suite. |
 | 3189 | Base Info ServerType | implemented | ServerType is the root of the default AddressSpace; exercised across suite e.g. tests/integration/browse.rs. |
 | 3192 | Base Info Diagnostics | implemented | EnabledFlag/ServerDiagnosticsSummary/SubscriptionDiagnosticsArray diagnostics/server.rs, core.rs:501-509; e2e read.rs:1604-1841 |
-| 3196 | Base Info Fixed SamplingInterval | gap | ServerDiagnostics (diagnostics/server.rs:10-52) only summary counts; no SamplingIntervalDiagnosticsArray, no EnabledFlag gating, no test |
+| 3196 | Base Info Fixed SamplingInterval | implemented | CU is conditional on the Server using a fixed set of sampling intervals (OPC-10000-5 SS7.9/SS12.8); this server negotiates a continuously-variable client-requested interval per monitored item (sanitize_sampling_interval, subscriptions/monitored_item.rs:299-311), so the precondition never holds and non-exposure of SamplingIntervalDiagnosticsArray is spec-conformant, not a gap -- documented in docs/server-capacity-limits.md |
 | 3198 | Base Info Estimated Return Time | gap | EstimatedReturnTime has zero occurrences outside generated files; no wiring near ServerState::Running server_status.rs:198 |
 | 3201 | Base Info Custom Type System | needs-proof | Outside the 2026-07-15 audit's scope; not yet reviewed. |
 | 3207 | Base Info OptionSet DataType | implemented | OptionSet DataType present in schemas/1.05/Opc.Ua.NodeSet2.xml; exposed via CoreNamespace import. |
@@ -373,9 +373,9 @@ independent passes over the codebase, one per subsystem cluster); see the
 | 3758 | Base Info HasContainedComponent | implemented | HasContainedComponent present in schemas/1.05/Opc.Ua.NodeSet2.xml; exposed via CoreNamespace import. |
 | 3759 | Base Info HasAttachedComponent | implemented | HasAttachedComponent present in schemas/1.05/Opc.Ua.NodeSet2.xml; exposed via CoreNamespace import. |
 | 3802 | Time Sync - Configure Clock Skew | implemented | ServerConfig::max_acceptable_clock_skew_ns config/server.rs:669,998-1002; tests config/server.rs:375-432 |
-| 3808 | Documentation - Core Capacities | gap | No doc artifact in docs/ or specs/ enumerating limits; limits.rs:52-151 has scattered config only, no max-secure-channels const |
-| 3911 | Base Info Server Capabilities Subscriptions | partial | Only MaxMonitoredItemsPerCall+AggregateFunctions wired to config (core.rs:858,1158; tested browse.rs:801); other Max* nodes static null. |
-| 3912 | Base Info Server Capabilities 2 | partial | core.rs:829-919 wires MaxArrayLength/StringLen/ByteStrLen/BrowseCP/MinSampleRate/OpLimits*; MaxSessions unwired; tests read.rs:1493 |
+| 3808 | Documentation - Core Capacities | implemented | docs/server-capacity-limits.md enumerates every Limits/SubscriptionLimits/OperationalLimits field with its default and configuration method, cross-checked against config/limits.rs's Default impls and the server_conf_limits_match_struct_field_names test |
+| 3911 | Base Info Server Capabilities Subscriptions | implemented | core.rs get_attribute now wires MaxMonitoredItemsPerSubscription/MaxSubscriptionsPerSession to their SubscriptionLimits config fields, and MaxSubscriptions/MaxMonitoredItems (no server-wide cap exists) report spec-valid 0 per OPC-10000-5 SS6.3.2; tests read.rs::server_capabilities_max_monitored_items_per_subscription_and_max_subscriptions_per_session, ::server_capabilities_server_wide_max_subscriptions_and_max_monitored_items_are_zero |
+| 3912 | Base Info Server Capabilities 2 | implemented | core.rs get_attribute wires MaxSessions to Limits.max_sessions (was the only unwired node in this CU per prior audit); test read.rs::server_capabilities_max_sessions_reports_configured_limit |
 | 3913 | Subscription Publish Basic | implemented | max_publish_requests_per_subscription=4 (server/src/lib.rs:227); Publish exercised across tests/integration/subscriptions.rs. |
 | 3922 | Base Info SemanticChange Bit | implemented | SemanticsChanged bit set monitored_item.rs:1012-1042 via EU-range writes session_subscriptions.rs:1238,1290; tests :1668 |
 | 3923 | Session Multiple | implemented | Reviewed pre-2026-07-15-audit; existing tests/docs provide direct evidence. |
@@ -383,9 +383,9 @@ independent passes over the codebase, one per subsystem cluster); see the
 | 3985 | Session General Service Behaviour | implemented | controller.rs:396 auth-token check, response.rs:207 requestHandle echo, deadline_queue:971-1016 BadTimeout; e2e read.rs:1400-1408 |
 | 3996 | Base Info ReferenceDescription | gap | Searched 'ReferenceDescriptionVariableType'/'HasReferenceDescription' - only nodeset nodes; unused by server code. |
 | 4052 | Base Info TrimmedString | implemented | TrimmedString present in schemas/1.05/Opc.Ua.NodeSet2.xml; exposed via CoreNamespace import. |
-| 4053 | Base Info Locations Object | partial | Locations object present nodeset_16.rs:918-943, loaded via CoreNamespace core.rs:147; no test browses to it |
+| 4053 | Base Info Locations Object | implemented | Locations object (i=31915, nodeset_16.rs:918-943) confirmed reachable via Browse from ObjectsFolder; test browse.rs::locations_object_is_reachable_from_objects_folder |
 | 4054 | Base Info Handle DataType | implemented | Handle DataType present in schemas/1.05/Opc.Ua.NodeSet2.xml; exposed via CoreNamespace import. |
-| 4055 | Base Info Server Capabilities MaxMonitoredItemsQueueSize | partial | MaxMonitoredItemsQueueSize node null (nodeset_50.rs:3513); real limit enforced (limits.rs:126, monitored_item.rs:314) but not exposed. |
+| 4055 | Base Info Server Capabilities MaxMonitoredItemsQueueSize | implemented | core.rs get_attribute wires MaxMonitoredItemsQueueSize to SubscriptionLimits.max_monitored_item_queue_size, the same limit already enforced at monitored_item.rs:314; test read.rs::server_capabilities_max_monitored_items_queue_size_reports_configured_limit |
 | 4237 | Address Space NonVolatile and Constant | partial | NonVolatile/Constant bits defined enums.rs:15-19, generic get/set variable.rs:826-838; tests only exercise other AccessLevelEx bits |
 | 4426 | Base Info Decimal DataType | implemented | Decimal in nodeset + generated types/decimal_data_type.rs; encoded generically as a Structure DataType. |
 | 5207 | Monitor Items 2 | implemented | No per-subscription item cap below 2 found (server/src/config/limits.rs); 2+ Double items trivially exercised in subscriptions.rs. |
@@ -404,25 +404,25 @@ One row per facet not already covered by the four canonical profiles above. Coun
 
 | Facet | OPC id | Closure | Implemented | Partial | Gap | Needs-proof | Extensible | Source-issue |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
-| A & C Acknowledgeable Alarm 2022 Server Facet | 1565 | 34 | 18 | 5 | 11 | 0 | 0 | 0 |
+| A & C Acknowledgeable Alarm 2022 Server Facet | 1565 | 34 | 20 | 3 | 11 | 0 | 0 | 0 |
 | A & C Address Space Instance 2022 Server Facet | 1562 | 1 | 1 | 0 | 0 | 0 | 0 | 0 |
-| A & C Alarm 2022 Server Facet | 1502 | 84 | 36 | 6 | 42 | 0 | 0 | 0 |
+| A & C Alarm 2022 Server Facet | 1502 | 84 | 38 | 4 | 42 | 0 | 0 | 0 |
 | A & C Alarm Auditing Server Facet | 1503 | 8 | 3 | 0 | 5 | 0 | 0 | 0 |
 | A & C AlarmMetrics Server Facet | 887 | 1 | 0 | 0 | 1 | 0 | 0 | 0 |
-| A & C Base Condition 2022 Server Facet | 1551 | 26 | 14 | 5 | 7 | 0 | 0 | 0 |
-| A & C CertificateExpiration 2022 Server Facet | 1566 | 32 | 19 | 5 | 8 | 0 | 0 | 0 |
-| A & C Dialog 2022 Server Facet | 1504 | 32 | 15 | 6 | 11 | 0 | 0 | 0 |
-| A & C Enable 2022 Server Facet | 1563 | 31 | 17 | 5 | 9 | 0 | 0 | 0 |
-| A & C Exclusive Alarming 2022 Server Facet | 1500 | 100 | 42 | 6 | 52 | 0 | 0 | 0 |
-| A & C Non-Exclusive Alarming 2022 Server Facet | 1501 | 103 | 45 | 6 | 52 | 0 | 0 | 0 |
-| A & C Previous Instances 2022 Server Facet | 1564 | 27 | 15 | 5 | 7 | 0 | 0 | 0 |
-| A & C Refresh2 2022 Server Facet | 1568 | 27 | 15 | 5 | 7 | 0 | 0 | 0 |
+| A & C Base Condition 2022 Server Facet | 1551 | 26 | 16 | 3 | 7 | 0 | 0 | 0 |
+| A & C CertificateExpiration 2022 Server Facet | 1566 | 32 | 21 | 3 | 8 | 0 | 0 | 0 |
+| A & C Dialog 2022 Server Facet | 1504 | 32 | 17 | 4 | 11 | 0 | 0 | 0 |
+| A & C Enable 2022 Server Facet | 1563 | 31 | 19 | 3 | 9 | 0 | 0 | 0 |
+| A & C Exclusive Alarming 2022 Server Facet | 1500 | 100 | 44 | 4 | 52 | 0 | 0 | 0 |
+| A & C Non-Exclusive Alarming 2022 Server Facet | 1501 | 103 | 47 | 4 | 52 | 0 | 0 | 0 |
+| A & C Previous Instances 2022 Server Facet | 1564 | 27 | 17 | 3 | 7 | 0 | 0 | 0 |
+| A & C Refresh2 2022 Server Facet | 1568 | 27 | 17 | 3 | 7 | 0 | 0 | 0 |
 | A & E Wrapper 2022 Facet | 1346 | 18 | 13 | 2 | 3 | 0 | 0 | 0 |
 | Address Space Notifier Server Facet  | 744 | 2 | 0 | 1 | 1 | 0 | 0 | 0 |
-| Aggregate Subscription 2022 Server Facet | 1582 | 57 | 49 | 4 | 4 | 0 | 0 | 0 |
+| Aggregate Subscription 2022 Server Facet | 1582 | 57 | 52 | 2 | 3 | 0 | 0 | 0 |
 | Attribute WriteMask Server 2023 Facet  | 1996 | 8 | 6 | 0 | 2 | 0 | 0 | 0 |
 | Attribute WriteMask Server Facet | 1997 | 7 | 5 | 0 | 2 | 0 | 0 | 0 |
-| Auditing 2022 Server Facet | 1328 | 30 | 15 | 8 | 7 | 0 | 0 | 0 |
+| Auditing 2022 Server Facet | 1328 | 30 | 17 | 6 | 7 | 0 | 0 | 0 |
 | Authorization Service Server Facet | 1629 | 1 | 0 | 0 | 1 | 0 | 0 | 0 |
 | Base Historical Event 2022 Server Facet | 1577 | 3 | 3 | 0 | 0 | 0 | 0 | 0 |
 | Base Server Behaviour Facet | 1715 | 4 | 3 | 0 | 1 | 0 | 0 | 0 |
@@ -432,12 +432,12 @@ One row per facet not already covered by the four canonical profiles above. Coun
 | Dictionary Reference Server Facet | 1524 | 3 | 0 | 0 | 3 | 0 | 0 | 0 |
 | Documentation Server Facet | 768 | 6 | 4 | 0 | 2 | 0 | 0 | 0 |
 | Durable Subscription 2022 Server Facet | 2098 | 3 | 1 | 0 | 2 | 0 | 0 | 0 |
-| Embedded DataChange Subscription 2022 Server Facet | 2250 | 10 | 6 | 3 | 1 | 0 | 0 | 0 |
+| Embedded DataChange Subscription 2022 Server Facet | 2250 | 10 | 9 | 1 | 0 | 0 | 0 | 0 |
 | Exposes Type System Server Facet | 1219 | 46 | 42 | 1 | 3 | 0 | 0 | 0 |
 | File Access Server Facet | 1348 | 3 | 0 | 2 | 1 | 0 | 0 | 0 |
 | Global Certificate Management Server Facet | 1631 | 1 | 0 | 1 | 0 | 0 | 0 | 0 |
-| Global Discovery Server 2022 Profile | 1343 | 69 | 44 | 11 | 10 | 0 | 3 | 1 |
-| Global Discovery and Certificate Mgmt 2022 Server | 1344 | 94 | 52 | 20 | 18 | 0 | 3 | 1 |
+| Global Discovery Server 2022 Profile | 1343 | 69 | 50 | 7 | 8 | 0 | 3 | 1 |
+| Global Discovery and Certificate Mgmt 2022 Server | 1344 | 94 | 58 | 16 | 16 | 0 | 3 | 1 |
 | Global Service Authorization Request Server Facet | 1026 | 1 | 0 | 0 | 1 | 0 | 0 | 0 |
 | Global Service KeyCredential Pull Facet | 1027 | 1 | 0 | 0 | 1 | 0 | 0 | 0 |
 | Historical Access Modified Data 2022 Server Facet | 1709 | 4 | 4 | 0 | 0 | 0 | 0 | 0 |
@@ -465,9 +465,9 @@ One row per facet not already covered by the four canonical profiles above. Coun
 | Scheduler Base Server Facet | 1875 | 8 | 3 | 2 | 3 | 0 | 0 | 0 |
 | Scheduler Configuration Server Facet | 1876 | 10 | 3 | 2 | 5 | 0 | 0 | 0 |
 | Sessionless Server Facet | 1630 | 2 | 0 | 0 | 2 | 0 | 0 | 0 |
-| Standard DataChange Subscription 2022 Server Facet | 1324 | 17 | 12 | 4 | 1 | 0 | 0 | 0 |
-| Standard Event Subscription 2022 Server Facet | 2085 | 22 | 12 | 5 | 5 | 0 | 0 | 0 |
-| State Machine 2022 Server Facet | 1638 | 30 | 12 | 7 | 11 | 0 | 0 | 0 |
+| Standard DataChange Subscription 2022 Server Facet | 1324 | 17 | 15 | 2 | 0 | 0 | 0 | 0 |
+| Standard Event Subscription 2022 Server Facet | 2085 | 22 | 14 | 3 | 5 | 0 | 0 | 0 |
+| State Machine 2022 Server Facet | 1638 | 30 | 14 | 5 | 11 | 0 | 0 | 0 |
 | Subnet Discovery Server Facet | 2069 | 1 | 1 | 0 | 0 | 0 | 0 | 0 |
 | Temporary File Access Server Facet | 1525 | 5 | 0 | 0 | 5 | 0 | 0 | 0 |
 | User Role Base 2022 Server Facet | 1351 | 3 | 2 | 1 | 0 | 0 | 0 | 0 |
@@ -747,7 +747,7 @@ One row per facet not already covered by the four canonical profiles above. Coun
 | 3189 | Base Info ServerType | implemented | ServerType is the root of the default AddressSpace; exercised across suite e.g. tests/integration/browse.rs. |
 | 3192 | Base Info Diagnostics | implemented | EnabledFlag/ServerDiagnosticsSummary/SubscriptionDiagnosticsArray diagnostics/server.rs, core.rs:501-509; e2e read.rs:1604-1841 |
 | 3194 | Base Info Events Capabilities | partial | MaxSelectClauseParameters/MaxWhereClauseParameters nodes exist (nodeset_28.rs:4158) but Value is DataValue::null(), not live-wired. |
-| 3196 | Base Info Fixed SamplingInterval | gap | ServerDiagnostics (diagnostics/server.rs:10-52) only summary counts; no SamplingIntervalDiagnosticsArray, no EnabledFlag gating, no test |
+| 3196 | Base Info Fixed SamplingInterval | implemented | CU is conditional on the Server using a fixed set of sampling intervals (OPC-10000-5 SS7.9/SS12.8); this server negotiates a continuously-variable client-requested interval per monitored item (sanitize_sampling_interval, subscriptions/monitored_item.rs:299-311), so the precondition never holds and non-exposure of SamplingIntervalDiagnosticsArray is spec-conformant, not a gap -- documented in docs/server-capacity-limits.md |
 | 3197 | Base Info Security Role Capabilities | implemented | RoleSet on ServerCapabilities (role_management.rs:479-481); test rbac.rs:287-316 verifies i=15606 + 8 role nodes. |
 | 3198 | Base Info Estimated Return Time | gap | EstimatedReturnTime has zero occurrences outside generated files; no wiring near ServerState::Running server_status.rs:198 |
 | 3199 | Base Info System Status | gap | SystemStatusChangeEventType has no server-side emission on shutdown; server_status.rs/server_handle.rs never calls notify_event/raise_event |
@@ -846,13 +846,13 @@ One row per facet not already covered by the four canonical profiles above. Coun
 | 3779 | A & C Limit Deadband | implemented | LimitDef.deadband + high/low_exceeded hysteresis (limit.rs:701-715); tested alarms.rs:2040 "deadband cleared" assertion |
 | 3786 | Data Access ArrayItem2Type | gap | Searched 'ArrayItemType' subtype usage - zero instance usage (only nodeset type nodes). |
 | 3802 | Time Sync - Configure Clock Skew | implemented | ServerConfig::max_acceptable_clock_skew_ns config/server.rs:669,998-1002; tests config/server.rs:375-432 |
-| 3808 | Documentation - Core Capacities | gap | No doc artifact in docs/ or specs/ enumerating limits; limits.rs:52-151 has scattered config only, no max-secure-channels const |
+| 3808 | Documentation - Core Capacities | implemented | docs/server-capacity-limits.md enumerates every Limits/SubscriptionLimits/OperationalLimits field with its default and configuration method, cross-checked against config/limits.rs's Default impls and the server_conf_limits_match_struct_field_names test |
 | 3810 | Base Info TemporaryFileTransferType Sync Read | gap | Searched "GenerateFileForRead"/"TemporaryFileTransferType" across *.rs (excl. generated) — zero implementation hits. |
 | 3811 | Base Info TemporaryFileTransferType Async Read | gap | Same search as 3810; no CompletionStateMachine/async read implementation found. |
 | 3812 | Base Info TemporaryFileTransferType Sync Write | gap | Searched "GenerateFileForWrite"/"CloseAndCommit" — zero implementation hits outside generated NodeId constants. |
 | 3813 | Base Info TemporaryFileTransferType Async Write | gap | Same search as 3812; no async-write CompletionStateMachine implementation found. |
-| 3911 | Base Info Server Capabilities Subscriptions | partial | Only MaxMonitoredItemsPerCall+AggregateFunctions wired to config (core.rs:858,1158; tested browse.rs:801); other Max* nodes static null. |
-| 3912 | Base Info Server Capabilities 2 | partial | core.rs:829-919 wires MaxArrayLength/StringLen/ByteStrLen/BrowseCP/MinSampleRate/OpLimits*; MaxSessions unwired; tests read.rs:1493 |
+| 3911 | Base Info Server Capabilities Subscriptions | implemented | core.rs get_attribute now wires MaxMonitoredItemsPerSubscription/MaxSubscriptionsPerSession to their SubscriptionLimits config fields, and MaxSubscriptions/MaxMonitoredItems (no server-wide cap exists) report spec-valid 0 per OPC-10000-5 SS6.3.2; tests read.rs::server_capabilities_max_monitored_items_per_subscription_and_max_subscriptions_per_session, ::server_capabilities_server_wide_max_subscriptions_and_max_monitored_items_are_zero |
+| 3912 | Base Info Server Capabilities 2 | implemented | core.rs get_attribute wires MaxSessions to Limits.max_sessions (was the only unwired node in this CU per prior audit); test read.rs::server_capabilities_max_sessions_reports_configured_limit |
 | 3913 | Subscription Publish Basic | implemented | max_publish_requests_per_subscription=4 (server/src/lib.rs:227); Publish exercised across tests/integration/subscriptions.rs. |
 | 3922 | Base Info SemanticChange Bit | implemented | SemanticsChanged bit set monitored_item.rs:1012-1042 via EU-range writes session_subscriptions.rs:1238,1290; tests :1668 |
 | 3923 | Session Multiple | implemented | Reviewed pre-2026-07-15-audit; existing tests/docs provide direct evidence. |
@@ -868,9 +868,9 @@ One row per facet not already covered by the four canonical profiles above. Coun
 | 3996 | Base Info ReferenceDescription | gap | Searched 'ReferenceDescriptionVariableType'/'HasReferenceDescription' - only nodeset nodes; unused by server code. |
 | 4030 | Monitor Complex Event Filter | implemented | OfType evaluated incl. supertypes (evaluate.rs:211-216, fn of_type:358); arity check validation.rs:345; unit test evaluate.rs:1030-1064. |
 | 4052 | Base Info TrimmedString | implemented | TrimmedString present in schemas/1.05/Opc.Ua.NodeSet2.xml; exposed via CoreNamespace import. |
-| 4053 | Base Info Locations Object | partial | Locations object present nodeset_16.rs:918-943, loaded via CoreNamespace core.rs:147; no test browses to it |
+| 4053 | Base Info Locations Object | implemented | Locations object (i=31915, nodeset_16.rs:918-943) confirmed reachable via Browse from ObjectsFolder; test browse.rs::locations_object_is_reachable_from_objects_folder |
 | 4054 | Base Info Handle DataType | implemented | Handle DataType present in schemas/1.05/Opc.Ua.NodeSet2.xml; exposed via CoreNamespace import. |
-| 4055 | Base Info Server Capabilities MaxMonitoredItemsQueueSize | partial | MaxMonitoredItemsQueueSize node null (nodeset_50.rs:3513); real limit enforced (limits.rs:126, monitored_item.rs:314) but not exposed. |
+| 4055 | Base Info Server Capabilities MaxMonitoredItemsQueueSize | implemented | core.rs get_attribute wires MaxMonitoredItemsQueueSize to SubscriptionLimits.max_monitored_item_queue_size, the same limit already enforced at monitored_item.rs:314; test read.rs::server_capabilities_max_monitored_items_queue_size_reports_configured_limit |
 | 4237 | Address Space NonVolatile and Constant | partial | NonVolatile/Constant bits defined enums.rs:15-19, generic get/set variable.rs:826-838; tests only exercise other AccessLevelEx bits |
 | 4426 | Base Info Decimal DataType | implemented | Decimal in nodeset + generated types/decimal_data_type.rs; encoded generically as a Structure DataType. |
 | 4427 | Base Info Client Events | gap | AuditClientEventType only a generated stub (node_ids.rs:10730, events/generated.rs:148); server-as-client code never raises it |

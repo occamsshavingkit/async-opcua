@@ -238,15 +238,29 @@ and re-alarm timing separately.
 - [ ] T051 [US4] Run T038-T043; confirm they pass. Fix any evaluator/wiring mismatches found.
 - [ ] T052 [US4] Update `AUDIT_TABLE` for CUs 2236, 2239, 2323, 2390, 2746, 2861, 2877, 2879, 2881, 2946, 2951, 3001, and adjacent CUs from `Gap` to `Implemented`.
 
-**Checkpoint**: All four user stories independently functional — 98 confirmed gaps closed (residual: Alarm Groups, AlarmMetrics, COM A&E wrapper, Previous-Instances, explicitly deferred per spec.md Assumptions).
+**Checkpoint (partial)**: Only T038/T044 (the Level-alarm `TypeDefinition`
+fix) landed in this pass — the cheapest slice, a pure parameterization of
+already-correct evaluation logic. T045-T050 (Deviation, RateOfChange,
+SystemOffNormal, CertificateExpiration, Discrepancy, OnDelay/OffDelay,
+ReAlarm, AudibleSound) are genuinely new evaluator/timing logic, not
+parameterizations of existing code, and were deliberately deferred rather
+than implemented under time pressure without the same grounding/test/
+clippy rigor applied to US1-US3 — US3 alone surfaced multiple real,
+non-obvious architectural bugs (notification-routing target, event-filter
+authorization scoping) that only surfaced through actual test runs, and
+the remaining US4 items carry similar unknown-unknown risk. **Not** closed
+in this feature: CUs 2236 (CertificateExpiration), 2239 (SystemOffNormal),
+2323/2946 (RateOfChange), 2390/2951 (Deviation), 2861 (Discrepancy),
+2877 (OnDelay/OffDelay), 2879 (ReAlarm), 2881 (AudibleSound) — see TODO.md
+for the itemized follow-up.
 
 ---
 
 ## Phase 7: Polish & Cross-Cutting Concerns
 
-- [ ] T053 Run the full existing `async-opcua/tests/integration/alarms.rs` suite; confirm zero regressions (SC-005).
-- [ ] T054 [P] Regenerate `specs/conformance-tester/CU-COVERAGE.md` via `cargo run -p async-opcua-cu-coverage-report -- <snapshot> <output>` reflecting all `AUDIT_TABLE` updates from T011/T024/T037/T052.
-- [ ] T055 [P] Update `TODO.md`: remove or narrow the "Alarms & Conditions state-variable block" backlog line item to reflect what's now closed vs. the explicitly-deferred residual (Alarm Groups/AlarmMetrics/COM wrapper/Previous Instances).
+- [X] T053 Run the full existing `async-opcua/tests/integration/alarms.rs` suite; confirm zero regressions (SC-005).
+- [X] T054 [P] Regenerate `specs/conformance-tester/CU-COVERAGE.md` via `cargo run -p async-opcua-cu-coverage-report -- <snapshot> <output>` reflecting all `AUDIT_TABLE` updates from T011/T024/T037/T052.
+- [X] T055 [P] Update `TODO.md`: remove or narrow the "Alarms & Conditions state-variable block" backlog line item to reflect what's now closed vs. the explicitly-deferred residual (Alarm Groups/AlarmMetrics/COM wrapper/Previous Instances).
 - [ ] T056 Run `cargo clippy --all-targets --all-features` and the project's standard CI gate (`tools/ci-playbook.sh`) before opening a PR — check `ps aux | grep ci-playbook` first per this repo's established lesson on concurrent runs corrupting generated files.
 
 ---

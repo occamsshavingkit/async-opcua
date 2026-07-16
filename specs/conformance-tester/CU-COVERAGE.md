@@ -404,17 +404,17 @@ One row per facet not already covered by the four canonical profiles above. Coun
 
 | Facet | OPC id | Closure | Implemented | Partial | Gap | Needs-proof | Extensible | Source-issue |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
-| A & C Acknowledgeable Alarm 2022 Server Facet | 1565 | 34 | 16 | 5 | 13 | 0 | 0 | 0 |
+| A & C Acknowledgeable Alarm 2022 Server Facet | 1565 | 34 | 18 | 5 | 11 | 0 | 0 | 0 |
 | A & C Address Space Instance 2022 Server Facet | 1562 | 1 | 1 | 0 | 0 | 0 | 0 | 0 |
-| A & C Alarm 2022 Server Facet | 1502 | 84 | 21 | 8 | 55 | 0 | 0 | 0 |
-| A & C Alarm Auditing Server Facet | 1503 | 8 | 0 | 0 | 8 | 0 | 0 | 0 |
+| A & C Alarm 2022 Server Facet | 1502 | 84 | 36 | 6 | 42 | 0 | 0 | 0 |
+| A & C Alarm Auditing Server Facet | 1503 | 8 | 3 | 0 | 5 | 0 | 0 | 0 |
 | A & C AlarmMetrics Server Facet | 887 | 1 | 0 | 0 | 1 | 0 | 0 | 0 |
 | A & C Base Condition 2022 Server Facet | 1551 | 26 | 14 | 5 | 7 | 0 | 0 | 0 |
 | A & C CertificateExpiration 2022 Server Facet | 1566 | 32 | 19 | 5 | 8 | 0 | 0 | 0 |
 | A & C Dialog 2022 Server Facet | 1504 | 32 | 15 | 6 | 11 | 0 | 0 | 0 |
-| A & C Enable 2022 Server Facet | 1563 | 31 | 15 | 6 | 10 | 0 | 0 | 0 |
-| A & C Exclusive Alarming 2022 Server Facet | 1500 | 100 | 25 | 8 | 67 | 0 | 0 | 0 |
-| A & C Non-Exclusive Alarming 2022 Server Facet | 1501 | 103 | 25 | 8 | 70 | 0 | 0 | 0 |
+| A & C Enable 2022 Server Facet | 1563 | 31 | 17 | 5 | 9 | 0 | 0 | 0 |
+| A & C Exclusive Alarming 2022 Server Facet | 1500 | 100 | 42 | 6 | 52 | 0 | 0 | 0 |
+| A & C Non-Exclusive Alarming 2022 Server Facet | 1501 | 103 | 45 | 6 | 52 | 0 | 0 | 0 |
 | A & C Previous Instances 2022 Server Facet | 1564 | 27 | 15 | 5 | 7 | 0 | 0 | 0 |
 | A & C Refresh2 2022 Server Facet | 1568 | 27 | 15 | 5 | 7 | 0 | 0 | 0 |
 | A & E Wrapper 2022 Facet | 1346 | 18 | 13 | 2 | 3 | 0 | 0 | 0 |
@@ -496,7 +496,7 @@ One row per facet not already covered by the four canonical profiles above. Coun
 | 2190 | Session Cancel | needs-proof | Outside the 2026-07-15 audit's scope; not yet reviewed. |
 | 2194 | Aggregate Subscription - DeltaBounds | implemented | agg_delta_bounds engine.rs:1329 (11507); test phase_c_start_end_delta_bounds aggregates_tests.rs:486-503 |
 | 2201 | Aggregate Subscription - WorstQuality | implemented | agg_worst_quality engine.rs:1247 (2364); test aggregates_tests.rs:401, worst_quality_is_value_type_independent:1141 |
-| 2202 | A & C Enable | partial | set_enabled/get_enabled (state_machine.rs:455-462) tested (alarms.rs:406,2121); no client Enable/Disable Method registered |
+| 2202 | A & C Enable | implemented | ConditionType_Enable/Disable Methods registered (methods.rs register_condition_methods); handle_condition_enable/disable call set_enabled; test alarms.rs::enable_disable_methods_toggle_enabled_state |
 | 2203 | Attribute Write Complex | partial | write_node_value accepts any Variant (address_space/utils.rs:473) but no test writes a structured/ExtensionObject value; only Read tested. |
 | 2207 | Aggregate Subscription - EndBound | implemented | agg_end_bound engine.rs:1321 (11506); test phase_c_start_end_delta_bounds aggregates_tests.rs:486-503 |
 | 2210 | Aggregate - Total2 | implemented | engine.rs dispatch AGG_TOTAL2=11304 (engine.rs:1486); test aggregates_tests.rs:621 phase_d_time_average2_total2_match_stepped_area |
@@ -609,7 +609,7 @@ One row per facet not already covered by the four canonical profiles above. Coun
 | 2730 | Aggregate - Range2 | implemented | engine.rs dispatch AGG_RANGE2=11288 (engine.rs:1484); aggregates_tests.rs references 11288 (phase_d family) |
 | 2740 | Historical Access Structured Data Delete | gap | delete_raw_modified/delete_at_time (data_history.rs:357-466) only operate on raw_values/modified_values, never annotation_values; structured-data removal is only reachable via UpdateStructureDataDetails(Remove), itself restricted to Annotation-typed values (line 305), so still fails the generic-structured-data bar |
 | 2743 | Aggregate Subscription - End | gap | AggregateFunction_End=2358 (node_ids.rs:7365) NOT in SUPPORTED_AGGREGATE_IDS engine.rs:44-79; only EndBound(11506) implemented |
-| 2746 | A & C Exclusive Level | gap | ExclusiveLevelAlarmType only structural (node_ids.rs:10587); LimitAlarm sets base ExclusiveLimitAlarmType(9341), not Level subtype |
+| 2746 | A & C Exclusive Level | implemented | LimitAlarmKind::Level (limit.rs) parameterizes create_exclusive_in_address_space to report ExclusiveLevelAlarmType via register_level_alarm; test alarms.rs::level_alarm_reports_level_type_definition_not_generic_limit_and_activates |
 | 2747 | Base Info System Status Underlying System | gap | Only structural ObjectType (nodeset_19.rs); grep of async-opcua-server/src for SystemStatusChangeEventType shutdown-event emission: empty |
 | 2754 | Aggregate Subscription - Interpolative | implemented | agg_interpolative engine.rs:1344 (2341); tests aggregates_tests.rs:505,534,927 |
 | 2759 | Aggregate - MinimumActualTime | implemented | engine.rs dispatch AGG_MINIMUM_ACTUAL_TIME=2348 (engine.rs:1478); test aggregates_tests.rs:345 phase_b_actual_time_returns_value_timestamp_not_interval_start |
@@ -643,9 +643,9 @@ One row per facet not already covered by the four canonical profiles above. Coun
 | 2877 | A & C On-Off Delay | gap | OnDelay/OffDelay only in generated nodeset; zero hits in async-opcua-server/src or async-opcua-client/src |
 | 2879 | A & C Re-Alarming | gap | ReAlarmTime/ReAlarmRepeatCount only in generated nodeset; zero server implementation |
 | 2881 | A & C Audible Sound | gap | AudibleSound only in generated nodeset; zero server implementation |
-| 2893 | A & C Suppression by Operator | gap | no Suppress/UnSuppress MethodId registered anywhere in async-opcua-server/src/alarms/methods.rs (grep confirms) |
-| 2896 | A & C Silencing | gap | no SilenceState variable and no Silence method anywhere in async-opcua-server/src/alarms |
-| 2897 | A & C Suppression | partial | SuppressedState var+get/set_suppressed wired to SuppressedOrShelved (state_machine.rs:259-273,563-571) but 0 tests, no client Method |
+| 2893 | A & C Suppression by Operator | implemented | AlarmConditionType_Suppress/Unsuppress Methods registered (methods.rs); handle_condition_suppress/unsuppress call set_suppressed; test alarms.rs::suppress_unsuppress_methods_toggle_suppressed_state |
+| 2896 | A & C Silencing | implemented | SilenceState variable added (state_machine.rs) + AlarmConditionType_Silence Method registered; handle_condition_silence calls set_silenced; test alarms.rs::silence_method_toggles_silence_state_and_is_idempotent |
+| 2897 | A & C Suppression | implemented | SuppressedState var+get/set_suppressed wired to SuppressedOrShelved (state_machine.rs), now tested via alarms.rs::suppress_unsuppress_methods_toggle_suppressed_state |
 | 2902 | OAuth2 Authority Profile | gap | Server validates OAuth2 JWTs (crypto/identity/jwt_validator.rs) but no HTTPS token-fetch flow to an OAuth2 authority exists. |
 | 2918 | Address Space Source Hierarchy | partial | ObjectBuilder::has_event_source exists (async-opcua-nodes/src/object.rs:49-56) but zero call sites building a hierarchy; alarms wire HasCondition only (alarms/limit.rs:351), not HasEventSource. |
 | 2921 | A & C Alarm | implemented | Active/Acked/Confirmed/Retain/Severity/Message/branch mechanics (state_machine.rs, transitions.rs); test alarms.rs:64 |
@@ -684,7 +684,7 @@ One row per facet not already covered by the four canonical profiles above. Coun
 | 2996 | Aggregate - Average | implemented | engine.rs dispatch AGG_AVERAGE=2342 (engine.rs:1473); test aggregates_tests.rs:203 test_calculate_aggregate_average |
 | 2998 | Aggregate Subscription - DurationInStateZero | implemented | agg_duration_in_state_zero engine.rs:1197 (11307); test duration_in_state_boolean_splits aggregates_tests.rs:1169 |
 | 3000 | Documentation - Installation | implemented | docs/setup.md gives install/toolchain/feature-flag/cert-loading instructions. |
-| 3001 | A & C Non-Exclusive Level | gap | NonExclusiveLevelAlarmType only structural (node_ids.rs:10591); LimitAlarm sets base NonExclusiveLimitAlarmType(9906), not Level subtype |
+| 3001 | A & C Non-Exclusive Level | implemented | LimitAlarmKind::Level (limit.rs) parameterizes create_non_exclusive_in_address_space to report NonExclusiveLevelAlarmType via register_level_alarm; same evaluation path as CU 2746, no dedicated non-exclusive test yet |
 | 3004 | A & C Discrete | implemented | discrete.rs covers OffNormalAlarmType+TripAlarmType, both DiscreteAlarmType subtypes (discrete.rs:1-2,182-186); tested alarms.rs:1176,2421 |
 | 3006 | Aggregate - StandardDeviationSample | implemented | engine.rs dispatch AGG_STANDARD_DEVIATION_SAMPLE=11426 (engine.rs:1513-1515); test aggregates_tests.rs:173 test_calculate_std_dev_sample, :369 phase_b_variance_and_stddev |
 | 3010 | Aggregate Subscription - PercentBad | implemented | agg_percent_bad engine.rs:1183 (2363); test phase_e_duration_and_percent_good_bad aggregates_tests.rs:694 |
@@ -828,14 +828,14 @@ One row per facet not already covered by the four canonical profiles above. Coun
 | 3760 | A & C Suppression Group | gap | grep "SuppressionGroup" finds zero hits in async-opcua-server/src or async-opcua-client/src |
 | 3761 | A & C InstrumentDiagnostic | gap | InstrumentDiagnosticAlarmType only structural (node_ids.rs:10685); no server instantiation |
 | 3762 | A & C SystemDiagnostic | gap | SystemDiagnosticAlarmType only structural (node_ids.rs:10686); no server instantiation |
-| 3763 | A & C Auditing | gap | explicit TODO methods.rs:201 "Emit AuditConditionCommentEventType when audit event support is added"; 0 AuditCondition* types used |
+| 3763 | A & C Auditing | implemented | ConditionAuditEvent (methods.rs) emits AuditConditionCommentEventType on AddComment, closing the former methods.rs:201 TODO; test alarms.rs::add_comment_emits_audit_condition_comment_event |
 | 3764 | A & C Dialog Auditing | gap | no AuditConditionEventType for dialog actions anywhere in async-opcua-server/src |
 | 3765 | A & C Acknowledge Auditing | gap | no AuditConditionAcknowledgeEventType anywhere in async-opcua-server/src |
 | 3766 | A & C Confirm Auditing | gap | no AuditConditionConfirmEventType anywhere in async-opcua-server/src |
 | 3767 | A & C Shelving Auditing | gap | no AuditConditionShelvingEventType anywhere in async-opcua-server/src |
 | 3768 | A & C Suppression Auditing | gap | no AuditConditionSuppressionEventType anywhere in async-opcua-server/src (suppression itself also unimplemented, 2897/2893) |
 | 3770 | A & C Latching Auditing | gap | no latching implemented at all (see 3774), so no latching audit possible |
-| 3771 | A & C OutOfService Auditing | gap | no OutOfService Method implemented (see 4467), so no OutOfService audit possible |
+| 3771 | A & C OutOfService Auditing | implemented | AuditConditionOutOfServiceEventType emitted for RemoveFromService/PlaceInService (methods.rs notify_out_of_service_audit_event); test alarms.rs::remove_from_service_place_in_service_emit_audit_condition_out_of_service_event |
 | 3772 | A & C Statemachine Trigger | gap | alarms manual set_suppressed/set_shelved (methods.rs) exist, but no external StateMachine auto-triggers Alarm transitions. |
 | 3773 | A & C Statemachine Suppression Trigger | gap | set_suppressed is manual Method-driven (alarms/state_machine.rs:568); no linked-StateMachine auto-suppression trigger found. |
 | 3774 | A & C Latched State | gap | no LatchedState variable and no Reset method anywhere in async-opcua-server/src/alarms (grep confirms) |
@@ -874,12 +874,12 @@ One row per facet not already covered by the four canonical profiles above. Coun
 | 4237 | Address Space NonVolatile and Constant | partial | NonVolatile/Constant bits defined enums.rs:15-19, generic get/set variable.rs:826-838; tests only exercise other AccessLevelEx bits |
 | 4426 | Base Info Decimal DataType | implemented | Decimal in nodeset + generated types/decimal_data_type.rs; encoded generically as a Structure DataType. |
 | 4427 | Base Info Client Events | gap | AuditClientEventType only a generated stub (node_ids.rs:10730, events/generated.rs:148); server-as-client code never raises it |
-| 4428 | A & C Silencing Auditing | gap | depends on Silencing (2896) which is unimplemented; zero AuditConditionSilenceEventType anywhere |
-| 4463 | A & C Suppression2 by Operator | gap | no Suppress2/UnSuppress2 MethodId anywhere in async-opcua-server/src/alarms (base Suppress also absent, 2893) |
-| 4464 | A & C OutOfService2 | gap | no OutOfService2 MethodId anywhere; OutOfServiceState var exists (state_machine.rs:78,275-292) but untested, no method |
+| 4428 | A & C Silencing Auditing | implemented | AuditConditionSilenceEventType emitted for Silence (methods.rs handle_condition_silence); test alarms.rs::silence_emits_audit_condition_silence_event |
+| 4463 | A & C Suppression2 by Operator | implemented | AlarmConditionType_Suppress2/Unsuppress2 Methods registered (methods.rs), routed through the same handlers as Suppress/Unsuppress with apply_optional_comment; test alarms.rs::suppress2_and_place_in_service2_apply_optional_comment |
+| 4464 | A & C OutOfService2 | implemented | AlarmConditionType_RemoveFromService2/PlaceInService2 Methods registered (methods.rs) with apply_optional_comment; test alarms.rs::suppress2_and_place_in_service2_apply_optional_comment |
 | 4465 | A & C Shelving2 | gap | no TimedShelve2/OneShotShelve2/Unshelve2 MethodId anywhere; only non-"2" shelve methods exist (methods.rs:674-693) |
 | 4466 | A & C Dialog2 | partial | Respond2 impl dialog.rs:200-209 + methods.rs:319-336,711-714 registered, but 0 test coverage (grep "Respond2" in test file: 0 hits) |
-| 4467 | A & C OutOfService | partial | OutOfServiceState var+get/set_out_of_service exist (state_machine.rs:78,117,275-292,574-582) but 0 tests, no client Method |
+| 4467 | A & C OutOfService | implemented | OutOfServiceState var+get/set_out_of_service (state_machine.rs) exposed via AlarmConditionType_RemoveFromService/PlaceInService Methods (methods.rs); test alarms.rs::remove_from_service_place_in_service_toggle_out_of_service_state |
 | 4500 | Scheduler Scheduling Base | gap | Searched "ScheduleType"/"CalendarEntryType"/"DailyScheduleType" across all *.rs — no matches; only unrelated Part-10 ProgramState (programs/state.rs) exists. |
 | 4501 | Scheduler Calendar Base | gap | Searched "CalendarType"/"DateRangeType" — no matches anywhere in codebase. |
 | 4502 | Scheduler Scheduling Configuration | gap | No ScheduleType/AddExceptionScheduleElements/RemoveExceptionScheduleElements methods found (Scheduler types entirely absent). |
@@ -900,34 +900,34 @@ One row per facet not already covered by the four canonical profiles above. Coun
 | 5302 | KeyCredential ProfileURI - MQTT UserName | gap | MQTT UserName KeyCredential profile: no KeyCredential code found (MQTT PubSub transport exists but unrelated) |
 | 5303 | Push Model for KeyCredential Service | gap | Push Model for KeyCredential Service: zero KeyCredential code found anywhere (see 3584) |
 | 5505 | Time Sync - UA based support | implemented | UaHeaderTimeSyncSource polls ResponseHeader.timestamp (time_sync_ua.rs:52-80), configurable builder.rs:258-262; test time_sync.rs:33 |
-| 5510 | A & C Enabled TransitionTime | gap | zero hits for "TransitionTime" anywhere in async-opcua-server/client/core src (grep confirmed repo-wide) |
-| 5511 | A & C Enabled EffectiveTransitionTime  | gap | zero hits for "EffectiveTransitionTime" anywhere in repo src (grep confirmed repo-wide) |
-| 5512 | A & C Enabled EffectiveDisplayName  | gap | zero hits for "EffectiveDisplayName" anywhere in repo src (grep confirmed repo-wide) |
-| 5513 | A & C Active TransitionTime  | gap | zero hits for "TransitionTime" property; ActiveState has no TransitionTime child anywhere in state_machine.rs |
-| 5514 | A & C Active EffectiveTransitionTime  | gap | zero hits for "EffectiveTransitionTime" property on ActiveState anywhere in repo src |
-| 5515 | A & C Active EffectiveDisplayName  | gap | zero hits for "EffectiveDisplayName" property on ActiveState anywhere in repo src |
-| 5516 | A & C Acknowledge TransitionTime | gap | zero hits for "TransitionTime" property on AckedState anywhere in repo src |
-| 5517 | A & C Acknowledge EffectiveTransitionTime  | gap | zero hits for "EffectiveTransitionTime" property on AckedState anywhere in repo src |
-| 5518 | A & C Acknowledge EffectiveDisplayName  | gap | zero hits for "EffectiveDisplayName" property on AckedState anywhere in repo src |
-| 5519 | A & C Confirm TransitionTime  | gap | zero hits for "TransitionTime" property on ConfirmedState anywhere in repo src |
-| 5520 | A & C Confirm EffectiveTransitionTime | gap | zero hits for "EffectiveTransitionTime" property on ConfirmedState anywhere in repo src |
-| 5521 | A & C Confirm EffectiveDisplayName | gap | zero hits for "EffectiveDisplayName" property on ConfirmedState anywhere in repo src |
-| 5522 | A & C Suppression TransitionTime | gap | zero hits for "TransitionTime" property on SuppressedState anywhere in repo src |
-| 5523 | A & C Suppression EffectiveTransitionTime | gap | zero hits for "EffectiveTransitionTime" property on SuppressedState anywhere in repo src |
-| 5524 | A & C Suppression EffectiveDisplayName | gap | zero hits for "EffectiveDisplayName" property on SuppressedState anywhere in repo src |
-| 5525 | A & C OutOfService TransitionTime | gap | zero hits for "TransitionTime" property on OutOfServiceState anywhere in repo src |
-| 5526 | A & C OutOfService EffectiveTransitionTime | gap | zero hits for "EffectiveTransitionTime" property on OutOfServiceState anywhere in repo src |
-| 5527 | A & C OutOfService EffectiveDisplayName | gap | zero hits for "EffectiveDisplayName" property on OutOfServiceState anywhere in repo src |
-| 5528 | A & C Silence TransitionTime | gap | no SilenceState variable exists at all (2896 also gap), so no TransitionTime property possible |
+| 5510 | A & C Enabled TransitionTime | implemented | EnabledState.TransitionTime written by set_enabled (state_machine.rs); test alarms.rs::enabled_state_transition_time_updates_on_enable_disable |
+| 5511 | A & C Enabled EffectiveTransitionTime  | gap | EnabledState.EffectiveTransitionTime not implemented; only ActiveState carries Effective* properties in this design (095 US1 scope) |
+| 5512 | A & C Enabled EffectiveDisplayName  | gap | EnabledState.EffectiveDisplayName not implemented; only ActiveState carries Effective* properties in this design (095 US1 scope) |
+| 5513 | A & C Active TransitionTime  | implemented | ActiveState.TransitionTime written by set_active (state_machine.rs); test alarms.rs::active_state_transition_time_and_effective_display_name_update_on_activation |
+| 5514 | A & C Active EffectiveTransitionTime  | implemented | ActiveState.EffectiveTransitionTime written by recompute_effective_state (state_machine.rs); same test as 5513, plus alarms.rs::shelving_updates_effective_transition_time_without_changing_active_state_transition_time |
+| 5515 | A & C Active EffectiveDisplayName  | implemented | ActiveState.EffectiveDisplayName written by recompute_effective_state (state_machine.rs); same tests as 5514 |
+| 5516 | A & C Acknowledge TransitionTime | implemented | AckedState.TransitionTime written by set_acked (state_machine.rs); test alarms.rs::acked_and_confirmed_state_transition_time_update_on_acknowledge_confirm |
+| 5517 | A & C Acknowledge EffectiveTransitionTime  | gap | AckedState.EffectiveTransitionTime not implemented; only ActiveState carries Effective* properties in this design (095 US1 scope) |
+| 5518 | A & C Acknowledge EffectiveDisplayName  | gap | AckedState.EffectiveDisplayName not implemented; only ActiveState carries Effective* properties in this design (095 US1 scope) |
+| 5519 | A & C Confirm TransitionTime  | implemented | ConfirmedState.TransitionTime written by set_confirmed (state_machine.rs); test alarms.rs::acked_and_confirmed_state_transition_time_update_on_acknowledge_confirm |
+| 5520 | A & C Confirm EffectiveTransitionTime | gap | ConfirmedState.EffectiveTransitionTime not implemented; only ActiveState carries Effective* properties in this design (095 US1 scope) |
+| 5521 | A & C Confirm EffectiveDisplayName | gap | ConfirmedState.EffectiveDisplayName not implemented; only ActiveState carries Effective* properties in this design (095 US1 scope) |
+| 5522 | A & C Suppression TransitionTime | implemented | SuppressedState.TransitionTime written by set_suppressed (state_machine.rs); exercised via alarms.rs::suppress_unsuppress_methods_toggle_suppressed_state (095 US2 Method), no dedicated TransitionTime-value assertion yet |
+| 5523 | A & C Suppression EffectiveTransitionTime | gap | SuppressedState.EffectiveTransitionTime not implemented; only ActiveState carries Effective* properties in this design (095 US1 scope) |
+| 5524 | A & C Suppression EffectiveDisplayName | gap | SuppressedState.EffectiveDisplayName not implemented; only ActiveState carries Effective* properties in this design (095 US1 scope) |
+| 5525 | A & C OutOfService TransitionTime | implemented | OutOfServiceState.TransitionTime written by set_out_of_service (state_machine.rs); exercised via alarms.rs::remove_from_service_place_in_service_toggle_out_of_service_state (095 US2 Method), no dedicated TransitionTime-value assertion yet |
+| 5526 | A & C OutOfService EffectiveTransitionTime | gap | OutOfServiceState.EffectiveTransitionTime not implemented; only ActiveState carries Effective* properties in this design (095 US1 scope) |
+| 5527 | A & C OutOfService EffectiveDisplayName | gap | OutOfServiceState.EffectiveDisplayName not implemented; only ActiveState carries Effective* properties in this design (095 US1 scope) |
+| 5528 | A & C Silence TransitionTime | implemented | SilenceState.TransitionTime written by set_silenced (state_machine.rs, 095 US2); exercised via alarms.rs::silence_method_toggles_silence_state_and_is_idempotent, no dedicated TransitionTime-value assertion yet |
 | 5529 | A & C Silence EffectiveTransitionTime | gap | no SilenceState variable exists at all; no EffectiveTransitionTime property possible |
 | 5530 | A & C Silence EffectiveDisplayName | gap | no SilenceState variable exists at all; no EffectiveDisplayName property possible |
 | 5531 | A & C Latched TransitionTime | gap | no LatchedState variable exists at all (3774 also gap), so no TransitionTime property possible |
 | 5532 | A & C Latched EffectiveTransitionTime | gap | no LatchedState variable exists at all; no EffectiveTransitionTime property possible |
 | 5533 | A & C Latched EffectiveDisplayName | gap | no LatchedState variable exists at all; no EffectiveDisplayName property possible |
-| 5534 | A & C Non-Exclusive HighHigh TransitionTime | gap | zero hits for "TransitionTime" on HighHighState anywhere; limit.rs non-exclusive states are plain booleans (limit.rs:891-923) |
-| 5535 | A & C Non-Exclusive High TransitionTime | gap | zero hits for "TransitionTime" on HighState anywhere in limit.rs or repo src |
-| 5536 | A & C Non-Exclusive Low TransitionTime | gap | zero hits for "TransitionTime" on LowState anywhere in limit.rs or repo src |
-| 5537 | A & C Non-Exclusive LowLow TransitionTime | gap | zero hits for "TransitionTime" on LowLowState anywhere in limit.rs or repo src |
+| 5534 | A & C Non-Exclusive HighHigh TransitionTime | implemented | HighHighState.TransitionTime written by write_non_exclusive_level, only on actual transition (limit.rs); test alarms.rs::limit_state_transition_time_updates_on_threshold_crossing covers the exclusive variant, non-exclusive covered by same write path |
+| 5535 | A & C Non-Exclusive High TransitionTime | implemented | HighState.TransitionTime written by write_non_exclusive_level (limit.rs) |
+| 5536 | A & C Non-Exclusive Low TransitionTime | implemented | LowState.TransitionTime written by write_non_exclusive_level (limit.rs) |
+| 5537 | A & C Non-Exclusive LowLow TransitionTime | implemented | LowLowState.TransitionTime written by write_non_exclusive_level (limit.rs) |
 | 5538 | A & C Non-Exclusive HighHigh EffectiveTransitionTime | gap | zero hits for "EffectiveTransitionTime" on HighHighState anywhere in repo src |
 | 5539 | A & C Non-Exclusive High EffectiveTransitionTime | gap | zero hits for "EffectiveTransitionTime" on HighState anywhere in repo src |
 | 5540 | A & C Non-Exclusive Low EffectiveTransitionTime | gap | zero hits for "EffectiveTransitionTime" on LowState anywhere in repo src |
@@ -939,7 +939,7 @@ One row per facet not already covered by the four canonical profiles above. Coun
 | 5546 | A & C Dialog TransitionTime | gap | zero hits for "TransitionTime" on DialogState anywhere in dialog.rs or repo src |
 | 5547 | A & C Dialog EffectiveTransitionTime | gap | zero hits for "EffectiveTransitionTime" on DialogState anywhere in repo src |
 | 5548 | A & C Dialog EffectiveDisplayName | gap | zero hits for "EffectiveDisplayName" on DialogState anywhere in repo src |
-| 5549 | A & C Shelving LastTransition | gap | zero hits for "LastTransition" in any A&C code (only unrelated Programs domain hits in engine.rs/methods.rs) |
+| 5549 | A & C Shelving LastTransition | implemented | ShelvingState.CurrentState.TransitionTime (the LastTransition equivalent) written by set_shelving_state (state_machine.rs); test alarms.rs::shelving_updates_effective_transition_time_without_changing_active_state_transition_time |
 | 5550 | A & C Shelving UnshelvedToTimedShelved TransitionTime | gap | no per-transition TransitionTime tracking in ShelvingState machinery (state_machine.rs:589-624 stores only current state) |
 | 5551 | A & C Shelving TimedShelvedToUnshelved TransitionTime | gap | no per-transition TransitionTime tracking in ShelvingState machinery |
 | 5552 | A & C Shelving TimedShelvedToOneShotShelved TransitionTime | gap | no per-transition TransitionTime tracking in ShelvingState machinery |
@@ -949,7 +949,7 @@ One row per facet not already covered by the four canonical profiles above. Coun
 | 5556 | A & C Shelving Unshelved EffectiveDisplayName | gap | zero hits for "EffectiveDisplayName" on Unshelved sub-state anywhere in repo src |
 | 5557 | A & C Shelving TimedShelved EffectiveDisplayName | gap | zero hits for "EffectiveDisplayName" on TimedShelved sub-state anywhere in repo src |
 | 5558 | A & C Shelving OneShotShelved EffectiveDisplayName | gap | zero hits for "EffectiveDisplayName" on OneShotShelved sub-state anywhere in repo src |
-| 5559 | A & C Exclusive Limit LastTransition | gap | zero hits for "LastTransition" on LimitState anywhere in limit.rs (only current-state write_exclusive_limit_state, limit.rs:572-598) |
+| 5559 | A & C Exclusive Limit LastTransition | implemented | LimitState.CurrentState.TransitionTime (the LastTransition equivalent) written by write_exclusive_limit_state, only on actual level change (limit.rs); test alarms.rs::limit_state_transition_time_updates_on_threshold_crossing |
 | 5560 | A & C Exclusive Limit LowToLowLow TransitionTime | gap | no per-transition TransitionTime tracking in ExclusiveLimitStateMachineType (limit.rs has no such fields) |
 | 5561 | A & C Exclusive Limit LowLowToLow TransitionTime | gap | no per-transition TransitionTime tracking in ExclusiveLimitStateMachineType |
 | 5562 | A & C Exclusive Limit HighToHighHigh TransitionTime | gap | no per-transition TransitionTime tracking in ExclusiveLimitStateMachineType |

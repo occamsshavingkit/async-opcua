@@ -1,5 +1,5 @@
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan:
-specs/100-data-access-completion/plan.md
+specs/101-gds-push-fix/plan.md
 <!-- SPECKIT END -->

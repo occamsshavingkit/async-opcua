@@ -778,6 +778,39 @@ impl X509 {
         Ok(X509 { value: built })
     }
 
+    /// Creates a PKCS#10 DER-encoded Certificate Signing Request for `pkey`, signed with `pkey`
+    /// itself and carrying `application_uri` as a URI `subjectAltName` entry, per OPC UA Part 12
+    /// §7.10.10 (`CreateSigningRequest`): "The ApplicationUri shall be specified in the CSR."
+    pub fn create_signing_request(
+        pkey: &PrivateKey,
+        subject_name: &str,
+        application_uri: &str,
+    ) -> Result<Vec<u8>, String> {
+        use std::str::FromStr;
+
+        use der::Encode;
+        use x509_cert::builder::{Builder, RequestBuilder};
+        use x509_cert::name::Name;
+
+        let subject = Name::from_str(subject_name).map_err(|e| e.to_string())?;
+
+        let rsa_key = pkey
+            .rsa_key_for_x509()
+            .map_err(|_| "private key is not a usable RSA key".to_string())?;
+        let signing_key = pkcs1v15::SigningKey::<sha2::Sha256>::new(rsa_key.clone());
+
+        let mut builder = RequestBuilder::new(subject, &signing_key).map_err(|e| e.to_string())?;
+
+        let mut alt_names = AlternateNames::new();
+        alt_names.add_uri(application_uri);
+        builder
+            .add_extension(&alt_names.names)
+            .map_err(|e| e.to_string())?;
+
+        let request = builder.build().map_err(|e| e.to_string())?;
+        request.to_der().map_err(|e| e.to_string())
+    }
+
     /// Load a certificate from a der byte string.
     pub fn from_byte_string(data: &ByteString) -> Result<X509, Error> {
         if data.is_null_or_empty() {

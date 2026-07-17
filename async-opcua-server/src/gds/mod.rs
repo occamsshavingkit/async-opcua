@@ -4,12 +4,17 @@
 use std::sync::Arc;
 
 #[cfg(feature = "method-call")]
-use crate::node_manager::memory::SimpleNodeManager;
+use crate::{
+    node_manager::memory::{CoreNodeManager, SimpleNodeManager},
+    ServerHandle,
+};
 
 #[cfg(feature = "method-call")]
 use self::{
     pull_methods::{register_gds_pull_methods, GdsPullMethodRegistry},
-    push_methods::{register_gds_push_methods, GdsSigningRequestRegistry},
+    push_methods::{
+        register_gds_push_methods, register_gds_push_methods_with_handle, GdsPushRegistry,
+    },
 };
 
 /// Maximum entries retained by each in-memory GDS certificate-management registry.
@@ -28,19 +33,41 @@ pub mod push_methods;
 /// Registries backing the standard GDS method callbacks.
 #[cfg(feature = "method-call")]
 pub struct GdsMethodRegistries {
-    /// Signing request registry used by push-model callbacks.
-    pub signing_requests: Arc<GdsSigningRequestRegistry>,
-    /// Pull certificate registry used by pull-model callbacks.
+    /// Registry used by push-model (`ServerConfigurationType`) callbacks.
+    pub push_methods: Arc<GdsPushRegistry>,
+    /// Registry used by pull-model callbacks.
     pub pull_methods: GdsPullMethodRegistry,
 }
 
-/// Registers the standard GDS certificate management callbacks.
+/// Registers the standard GDS certificate management callbacks, without shutdown support for
+/// the push model's `ResetToServerDefaults` (it will report `Bad_NotSupported`). Prefer
+/// [`register_gds_certificate_management_methods_with_handle`] when a [`ServerHandle`] is
+/// available.
+///
+/// `core_node_manager` must be the server's core (namespace 0) node manager -- the push model's
+/// `ServerConfiguration` and its methods are standard namespace-0 nodes. `simple_node_manager` is
+/// used for the (separately tracked, currently unfixed) pull-model callbacks.
 #[cfg(feature = "method-call")]
 pub fn register_gds_certificate_management_methods(
-    node_manager: &SimpleNodeManager,
+    core_node_manager: &CoreNodeManager,
+    simple_node_manager: &SimpleNodeManager,
 ) -> GdsMethodRegistries {
     GdsMethodRegistries {
-        signing_requests: register_gds_push_methods(node_manager),
-        pull_methods: register_gds_pull_methods(node_manager),
+        push_methods: register_gds_push_methods(core_node_manager),
+        pull_methods: register_gds_pull_methods(simple_node_manager),
+    }
+}
+
+/// Registers the standard GDS certificate management callbacks, wiring the push model's
+/// `ResetToServerDefaults` to actually schedule a shutdown via the supplied [`ServerHandle`].
+#[cfg(feature = "method-call")]
+pub fn register_gds_certificate_management_methods_with_handle(
+    core_node_manager: &CoreNodeManager,
+    simple_node_manager: &SimpleNodeManager,
+    handle: ServerHandle,
+) -> GdsMethodRegistries {
+    GdsMethodRegistries {
+        push_methods: register_gds_push_methods_with_handle(core_node_manager, handle),
+        pull_methods: register_gds_pull_methods(simple_node_manager),
     }
 }

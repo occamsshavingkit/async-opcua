@@ -992,7 +992,8 @@ impl CertificateStore {
     }
 
     /// Validates `der` as a well-formed CRL and writes it to the issuer CRLs directory, named by
-    /// a hash of its DER encoding. If the write succeeds, returns a path to the written file.
+    /// a unique, non-content-derived file name. If the write succeeds, returns a path to the
+    /// written file.
     ///
     /// # Errors
     ///
@@ -1004,11 +1005,16 @@ impl CertificateStore {
 
     fn store_crl_der(der: &[u8], dir: &Path) -> Result<PathBuf, String> {
         CertificateList::from_der(der).map_err(|e| format!("Not a valid CRL: {e:?}"))?;
-        use sha1::Digest;
-        let mut hasher = sha1::Sha1::new();
-        hasher.update(der);
-        let hash = hasher.finalize();
-        let file_name = hash.iter().map(|b| format!("{b:02x}")).collect::<String>();
+        // Named uniquely rather than content-addressed: this is a filesystem detail with no
+        // security property to uphold, and a cryptographic hash here would be pure overhead (and
+        // trips static analysis for "insecure hashing" if a weak hash such as SHA-1 is used).
+        static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let id = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let nanos = SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or_default();
+        let file_name = format!("{nanos:x}-{}-{id:x}", std::process::id());
         let mut path = PathBuf::from(dir);
         path.push(format!("{file_name}.der"));
         CertificateStore::write_to_file(der, &path, true)?;

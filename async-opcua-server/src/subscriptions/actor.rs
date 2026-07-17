@@ -72,6 +72,10 @@ pub(crate) enum SubscriptionCommand {
         request: RepublishRequest,
         response: oneshot::Sender<Result<RepublishResponseShared, StatusCode>>,
     },
+    CancelPublishRequests {
+        request_handle: u32,
+        response: oneshot::Sender<u32>,
+    },
 
     // Monitored item operations
     CreateMonitoredItems {
@@ -298,6 +302,17 @@ impl SubscriptionActorHandle {
         let (response, recv) = oneshot::channel();
         self.commands
             .send(SubscriptionCommand::RepublishRq { request, response })
+            .map_err(|_| ())?;
+        recv.await.map_err(|_| ())
+    }
+
+    pub(crate) async fn cancel_publish_requests(&self, request_handle: u32) -> Result<u32, ()> {
+        let (response, recv) = oneshot::channel();
+        self.commands
+            .send(SubscriptionCommand::CancelPublishRequests {
+                request_handle,
+                response,
+            })
             .map_err(|_| ())?;
         recv.await.map_err(|_| ())
     }
@@ -656,6 +671,11 @@ impl SubscriptionActor {
                         Some(SubscriptionCommand::RepublishRq { request, response }) => {
                             self.drain_ring().await;
                             let result = self.subs.republish(&request);
+                            let _ = response.send(result);
+                        }
+                        Some(SubscriptionCommand::CancelPublishRequests { request_handle, response }) => {
+                            self.drain_ring().await;
+                            let result = self.subs.cancel_publish_requests(request_handle);
                             let _ = response.send(result);
                         }
 

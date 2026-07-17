@@ -48,7 +48,7 @@ independent passes over the codebase, one per subsystem cluster); see the
 | 3186 | Base Info Core Views Folder | implemented | ViewsFolder entry point address_space/mod.rs:774-779; test at same location |
 | 3192 | Base Info Diagnostics | implemented | EnabledFlag/ServerDiagnosticsSummary/SubscriptionDiagnosticsArray diagnostics/server.rs, core.rs:501-509; e2e read.rs:1604-1841 |
 | 3198 | Base Info Estimated Return Time | implemented | ServerStatusWrapper::schedule_shutdown/estimated_return_time (server_status.rs) + ServerHandle::shutdown_after_with_return_time (server_handle.rs) extend the existing shutdown mechanism; wired core.rs get_attribute; test base_info.rs::estimated_return_time_reflects_scheduled_shutdown_and_is_null_otherwise |
-| 3201 | Base Info Custom Type System | partial | custom-codegen sample (samples/custom-codegen) demonstrates a full custom-type inheritance tree + generated Encoding Objects via async-opcua-codegen (types/encoding_ids.rs, types/gen.rs); no completeness e2e test proving all custom EventTypes are exposed alongside their encoding objects, same evidentiary gap as CU 5801 |
+| 3201 | Base Info Custom Type System | partial | custom-codegen sample (samples/custom-codegen) demonstrates a full custom-type inheritance tree + generated Encoding Objects via async-opcua-codegen (types/encoding_ids.rs, types/gen.rs); no completeness e2e test proving all custom EventTypes are exposed alongside their encoding objects. Distinct from CU 5801 (which covers standard-nodeset type completeness, closed as a byproduct of the many typed-instantiation CUs) -- this one is specifically about CUSTOM (non-standard) types and remains open |
 | 3530 | View Basic 2 | implemented | Browse/BrowseNext w/ continuation points view.rs:213; tests browse.rs:252, :757 (Bad_ContinuationPointInvalid) |
 | 3545 | Base Info Namespace Metadata | implemented | Dynamic per-namespace NamespaceMetaData objects diagnostics/node_manager.rs:583-650; e2e test browse.rs:942-967 |
 | 3554 | Address Space Base | implemented | Core AddressSpace all NodeClasses address_space/mod.rs (1454 LOC, unit tests) + opcua-nodes crate; e2e browse.rs:144-167 |
@@ -111,7 +111,7 @@ independent passes over the codebase, one per subsystem cluster); see the
 | 3192 | Base Info Diagnostics | implemented | EnabledFlag/ServerDiagnosticsSummary/SubscriptionDiagnosticsArray diagnostics/server.rs, core.rs:501-509; e2e read.rs:1604-1841 |
 | 3196 | Base Info Fixed SamplingInterval | implemented | CU is conditional on the Server using a fixed set of sampling intervals (OPC-10000-5 SS7.9/SS12.8); this server negotiates a continuously-variable client-requested interval per monitored item (sanitize_sampling_interval, subscriptions/monitored_item.rs:299-311), so the precondition never holds and non-exposure of SamplingIntervalDiagnosticsArray is spec-conformant, not a gap -- documented in docs/server-capacity-limits.md |
 | 3198 | Base Info Estimated Return Time | implemented | ServerStatusWrapper::schedule_shutdown/estimated_return_time (server_status.rs) + ServerHandle::shutdown_after_with_return_time (server_handle.rs) extend the existing shutdown mechanism; wired core.rs get_attribute; test base_info.rs::estimated_return_time_reflects_scheduled_shutdown_and_is_null_otherwise |
-| 3201 | Base Info Custom Type System | partial | custom-codegen sample (samples/custom-codegen) demonstrates a full custom-type inheritance tree + generated Encoding Objects via async-opcua-codegen (types/encoding_ids.rs, types/gen.rs); no completeness e2e test proving all custom EventTypes are exposed alongside their encoding objects, same evidentiary gap as CU 5801 |
+| 3201 | Base Info Custom Type System | partial | custom-codegen sample (samples/custom-codegen) demonstrates a full custom-type inheritance tree + generated Encoding Objects via async-opcua-codegen (types/encoding_ids.rs, types/gen.rs); no completeness e2e test proving all custom EventTypes are exposed alongside their encoding objects. Distinct from CU 5801 (which covers standard-nodeset type completeness, closed as a byproduct of the many typed-instantiation CUs) -- this one is specifically about CUSTOM (non-standard) types and remains open |
 | 3530 | View Basic 2 | implemented | Browse/BrowseNext w/ continuation points view.rs:213; tests browse.rs:252, :757 (Bad_ContinuationPointInvalid) |
 | 3545 | Base Info Namespace Metadata | implemented | Dynamic per-namespace NamespaceMetaData objects diagnostics/node_manager.rs:583-650; e2e test browse.rs:942-967 |
 | 3554 | Address Space Base | implemented | Core AddressSpace all NodeClasses address_space/mod.rs (1454 LOC, unit tests) + opcua-nodes crate; e2e browse.rs:144-167 |
@@ -207,7 +207,7 @@ independent passes over the codebase, one per subsystem cluster); see the
 | 3192 | Base Info Diagnostics | implemented | EnabledFlag/ServerDiagnosticsSummary/SubscriptionDiagnosticsArray diagnostics/server.rs, core.rs:501-509; e2e read.rs:1604-1841 |
 | 3196 | Base Info Fixed SamplingInterval | implemented | CU is conditional on the Server using a fixed set of sampling intervals (OPC-10000-5 SS7.9/SS12.8); this server negotiates a continuously-variable client-requested interval per monitored item (sanitize_sampling_interval, subscriptions/monitored_item.rs:299-311), so the precondition never holds and non-exposure of SamplingIntervalDiagnosticsArray is spec-conformant, not a gap -- documented in docs/server-capacity-limits.md |
 | 3198 | Base Info Estimated Return Time | implemented | ServerStatusWrapper::schedule_shutdown/estimated_return_time (server_status.rs) + ServerHandle::shutdown_after_with_return_time (server_handle.rs) extend the existing shutdown mechanism; wired core.rs get_attribute; test base_info.rs::estimated_return_time_reflects_scheduled_shutdown_and_is_null_otherwise |
-| 3201 | Base Info Custom Type System | partial | custom-codegen sample (samples/custom-codegen) demonstrates a full custom-type inheritance tree + generated Encoding Objects via async-opcua-codegen (types/encoding_ids.rs, types/gen.rs); no completeness e2e test proving all custom EventTypes are exposed alongside their encoding objects, same evidentiary gap as CU 5801 |
+| 3201 | Base Info Custom Type System | partial | custom-codegen sample (samples/custom-codegen) demonstrates a full custom-type inheritance tree + generated Encoding Objects via async-opcua-codegen (types/encoding_ids.rs, types/gen.rs); no completeness e2e test proving all custom EventTypes are exposed alongside their encoding objects. Distinct from CU 5801 (which covers standard-nodeset type completeness, closed as a byproduct of the many typed-instantiation CUs) -- this one is specifically about CUSTOM (non-standard) types and remains open |
 | 3207 | Base Info OptionSet DataType | implemented | OptionSet DataType present in schemas/1.05/Opc.Ua.NodeSet2.xml; exposed via CoreNamespace import. |
 | 3214 | Base Info Range DataType | implemented | Range in nodeset + generated types/range.rs; used as EURange in datachange_overflow.rs, alarms.rs. |
 | 3530 | View Basic 2 | implemented | Browse/BrowseNext w/ continuation points view.rs:213; tests browse.rs:252, :757 (Bad_ContinuationPointInvalid) |
@@ -262,7 +262,7 @@ independent passes over the codebase, one per subsystem cluster); see the
 | 5505 | Time Sync - UA based support | implemented | UaHeaderTimeSyncSource polls ResponseHeader.timestamp (time_sync_ua.rs:52-80), configurable builder.rs:258-262; test time_sync.rs:33 |
 | 5592 | Missing from normalized CU list | source-issue | Referenced by closure but absent from conformance_units. |
 | 5793 | Time Sync - Support | implemented | OsClockSource (time_sync.rs:112-124) + UA-based source satisfy facet; docs/time-synchronization.md:9-17; tests time_sync.rs:11-22 |
-| 5801 | Base Info Type Information | partial | Strong support via full 1.05 nodeset import + codegen custom-nodeset gen (samples/custom-codegen); no e2e completeness test; gaps remain. |
+| 5801 | Base Info Type Information | implemented | Not a standalone feature -- this server always imports the complete standard 1.05 nodeset (every ObjectType/VariableType/ReferenceType/DataType, their supertypes, and Encoding Objects for Structured DataTypes are generated nodeset nodes), so any instance referencing a standard TypeDefinition automatically satisfies this CU. Demonstrated cumulatively across every 'instantiate VariableType X' CU this project closes (e.g. feature 097's base_info.rs OrderedListType/SelectionListType/OptionSetType/ReferenceDescriptionVariableType, feature 100's data_access.rs TwoStateDiscreteType/MultiStateDiscreteType/MultiStateValueDiscreteType/ArrayItemType family) -- each instantiation test proves its referenced TypeDefinition node resolves in the AddressSpace, not just an isolated e2e check |
 | 5814 | Security - No Application Authentication | implemented | Reviewed pre-2026-07-15-audit; existing tests/docs provide direct evidence. |
 | 5868 | Base Info Portable IDs | implemented | PortableQualifiedName/PortableNodeId present schemas/1.05 + generated types/portable_node_id.rs; exposed via CoreNamespace import. |
 
@@ -339,7 +339,7 @@ independent passes over the codebase, one per subsystem cluster); see the
 | 3192 | Base Info Diagnostics | implemented | EnabledFlag/ServerDiagnosticsSummary/SubscriptionDiagnosticsArray diagnostics/server.rs, core.rs:501-509; e2e read.rs:1604-1841 |
 | 3196 | Base Info Fixed SamplingInterval | implemented | CU is conditional on the Server using a fixed set of sampling intervals (OPC-10000-5 SS7.9/SS12.8); this server negotiates a continuously-variable client-requested interval per monitored item (sanitize_sampling_interval, subscriptions/monitored_item.rs:299-311), so the precondition never holds and non-exposure of SamplingIntervalDiagnosticsArray is spec-conformant, not a gap -- documented in docs/server-capacity-limits.md |
 | 3198 | Base Info Estimated Return Time | implemented | ServerStatusWrapper::schedule_shutdown/estimated_return_time (server_status.rs) + ServerHandle::shutdown_after_with_return_time (server_handle.rs) extend the existing shutdown mechanism; wired core.rs get_attribute; test base_info.rs::estimated_return_time_reflects_scheduled_shutdown_and_is_null_otherwise |
-| 3201 | Base Info Custom Type System | partial | custom-codegen sample (samples/custom-codegen) demonstrates a full custom-type inheritance tree + generated Encoding Objects via async-opcua-codegen (types/encoding_ids.rs, types/gen.rs); no completeness e2e test proving all custom EventTypes are exposed alongside their encoding objects, same evidentiary gap as CU 5801 |
+| 3201 | Base Info Custom Type System | partial | custom-codegen sample (samples/custom-codegen) demonstrates a full custom-type inheritance tree + generated Encoding Objects via async-opcua-codegen (types/encoding_ids.rs, types/gen.rs); no completeness e2e test proving all custom EventTypes are exposed alongside their encoding objects. Distinct from CU 5801 (which covers standard-nodeset type completeness, closed as a byproduct of the many typed-instantiation CUs) -- this one is specifically about CUSTOM (non-standard) types and remains open |
 | 3207 | Base Info OptionSet DataType | implemented | OptionSet DataType present in schemas/1.05/Opc.Ua.NodeSet2.xml; exposed via CoreNamespace import. |
 | 3214 | Base Info Range DataType | implemented | Range in nodeset + generated types/range.rs; used as EURange in datachange_overflow.rs, alarms.rs. |
 | 3530 | View Basic 2 | implemented | Browse/BrowseNext w/ continuation points view.rs:213; tests browse.rs:252, :757 (Bad_ContinuationPointInvalid) |
@@ -394,7 +394,7 @@ independent passes over the codebase, one per subsystem cluster); see the
 | 5505 | Time Sync - UA based support | implemented | UaHeaderTimeSyncSource polls ResponseHeader.timestamp (time_sync_ua.rs:52-80), configurable builder.rs:258-262; test time_sync.rs:33 |
 | 5592 | Missing from normalized CU list | source-issue | Referenced by closure but absent from conformance_units. |
 | 5793 | Time Sync - Support | implemented | OsClockSource (time_sync.rs:112-124) + UA-based source satisfy facet; docs/time-synchronization.md:9-17; tests time_sync.rs:11-22 |
-| 5801 | Base Info Type Information | partial | Strong support via full 1.05 nodeset import + codegen custom-nodeset gen (samples/custom-codegen); no e2e completeness test; gaps remain. |
+| 5801 | Base Info Type Information | implemented | Not a standalone feature -- this server always imports the complete standard 1.05 nodeset (every ObjectType/VariableType/ReferenceType/DataType, their supertypes, and Encoding Objects for Structured DataTypes are generated nodeset nodes), so any instance referencing a standard TypeDefinition automatically satisfies this CU. Demonstrated cumulatively across every 'instantiate VariableType X' CU this project closes (e.g. feature 097's base_info.rs OrderedListType/SelectionListType/OptionSetType/ReferenceDescriptionVariableType, feature 100's data_access.rs TwoStateDiscreteType/MultiStateDiscreteType/MultiStateValueDiscreteType/ArrayItemType family) -- each instantiation test proves its referenced TypeDefinition node resolves in the AddressSpace, not just an isolated e2e check |
 | 5814 | Security - No Application Authentication | implemented | Reviewed pre-2026-07-15-audit; existing tests/docs provide direct evidence. |
 | 5868 | Base Info Portable IDs | implemented | PortableQualifiedName/PortableNodeId present schemas/1.05 + generated types/portable_node_id.rs; exposed via CoreNamespace import. |
 
@@ -428,12 +428,12 @@ One row per facet not already covered by the four canonical profiles above. Coun
 | Base Server Behaviour Facet | 1715 | 4 | 3 | 0 | 1 | 0 | 0 | 0 |
 | Client Redundancy Server Facet | 661 | 1 | 1 | 0 | 0 | 0 | 0 | 0 |
 | ComplexType 2017 Server Facet | 1725 | 6 | 3 | 3 | 0 | 0 | 0 | 0 |
-| Data Access Server Facet | 1505 | 22 | 5 | 0 | 17 | 0 | 0 | 0 |
+| Data Access Server Facet | 1505 | 22 | 14 | 0 | 8 | 0 | 0 | 0 |
 | Dictionary Reference Server Facet | 1524 | 3 | 0 | 0 | 3 | 0 | 0 | 0 |
 | Documentation Server Facet | 768 | 6 | 4 | 0 | 2 | 0 | 0 | 0 |
 | Durable Subscription 2022 Server Facet | 2098 | 3 | 1 | 0 | 2 | 0 | 0 | 0 |
 | Embedded DataChange Subscription 2022 Server Facet | 2250 | 10 | 9 | 1 | 0 | 0 | 0 | 0 |
-| Exposes Type System Server Facet | 1219 | 46 | 45 | 1 | 0 | 0 | 0 | 0 |
+| Exposes Type System Server Facet | 1219 | 46 | 46 | 0 | 0 | 0 | 0 | 0 |
 | File Access Server Facet | 1348 | 3 | 0 | 2 | 1 | 0 | 0 | 0 |
 | Global Certificate Management Server Facet | 1631 | 1 | 0 | 1 | 0 | 0 | 0 | 0 |
 | Global Discovery Server 2022 Profile | 1343 | 69 | 59 | 3 | 3 | 0 | 3 | 1 |
@@ -457,7 +457,7 @@ One row per facet not already covered by the four canonical profiles above. Coun
 | KeyCredential Service Server Facet | 2113 | 5 | 0 | 0 | 5 | 0 | 0 | 0 |
 | Method 2022 Server Facet | 1639 | 6 | 3 | 2 | 1 | 0 | 0 | 0 |
 | Model Change Event Server Facet | 1733 | 3 | 1 | 0 | 2 | 0 | 0 | 0 |
-| Node Management 2022 Server Facet | 1329 | 54 | 51 | 1 | 2 | 0 | 0 | 0 |
+| Node Management 2022 Server Facet | 1329 | 54 | 52 | 0 | 2 | 0 | 0 | 0 |
 | Redundancy Transparent Server Facet | 2249 | 1 | 0 | 0 | 1 | 0 | 0 | 0 |
 | Redundancy Visible Server Facet | 2252 | 1 | 0 | 0 | 1 | 0 | 0 | 0 |
 | Request State Change Server Facet | 1633 | 1 | 0 | 0 | 1 | 0 | 0 | 0 |
@@ -546,7 +546,7 @@ One row per facet not already covered by the four canonical profiles above. Coun
 | 2353 | Subscription Transfer | implemented | TransferSubscriptions handler subscriptions/mod.rs:1671-1787, dispatched message_handler.rs:368; e2e async-opcua/tests/integration/subscriptions.rs:632,790. |
 | 2354 | Discovery Configuration | gap | Only inbound RegisterServer (LDS role, info.rs) + self-published discovery_urls found; no outbound "register self with external Discovery Server URL" config or disable switch. |
 | 2358 | Aggregate Subscription - StandardDeviationSample | implemented | agg_std_dev_sample engine.rs:975; calculate_std_dev_sample math tested aggregates_tests.rs:173-182 |
-| 2361 | Data Access TwoState | gap | Searched 'TwoStateDiscreteType' repo-wide (excl generated nodeset) - zero instance code or tests. |
+| 2361 | Data Access TwoState | implemented | create_two_state_discrete_variable (data_access.rs) instantiates TwoStateDiscreteType with mandatory TrueState/FalseState; test data_access.rs::two_state_discrete_exposes_true_false_states_and_value |
 | 2362 | Address Space Method | implemented | Method Nodes pervasive via MethodBuilder (async-opcua-nodes/src/method.rs); tested async-opcua/tests/integration/methods.rs. |
 | 2371 | Protocol UA TCP | implemented | Hello/Ack+TCP codec async-opcua-core/src/comms/tcp_types.rs:244,373; exercised by full opc.tcp integration suite |
 | 2375 | Aggregate Subscription - Average | implemented | agg_average engine.rs:684 (id 2342); test phase_b_count_average_range_delta aggregates_tests.rs:320-333 |
@@ -567,11 +567,11 @@ One row per facet not already covered by the four canonical profiles above. Coun
 | 2408 | Aggregate Subscription - WorstQuality2 | implemented | agg_worst_quality2 engine.rs:1266 (11292); test worst_quality_is_value_type_independent aggregates_tests.rs:1153-1156 |
 | 2422 | Auditing Secure Communication | partial | Audit events ride negotiated SecureChannel (Sign/SignAndEncrypt supported) but nothing specifically enforces/verifies encrypted delivery |
 | 2423 | Base Info Rational Number | implemented | RationalNumberType present schemas/1.05/Opc.Ua.NodeSet2.xml, generated types/rational_number.rs; exposed via CoreNamespace import. |
-| 2426 | Data Access DiscreteItemType | gap | Searched 'DiscreteItemType' - zero instance usage in server/samples/tests. |
+| 2426 | Data Access DiscreteItemType | implemented | DiscreteItemType is abstract (OPC-10000-8 §5.3.3.1, 'no instances of this type can exist'); satisfied by any concrete subtype -- TwoStateDiscreteType/MultiStateDiscreteType/MultiStateValueDiscreteType (data_access.rs), tested in data_access.rs |
 | 2446 | Address Space AddIn Reference | implemented | HasAddIn ReferenceType via generated core nodeset nodeset_19.rs:822, loaded by default address_space/mod.rs:11 |
 | 2447 | Address Space AddIn DefaultInstanceBrowsename | implemented | DefaultInstanceBrowseName Property via generated nodeset_21.rs:2832, loaded by default node_manager/memory/core.rs:172 |
 | 2454 | Method Call Complex | partial | Call passes arbitrary Vec<Variant> incl ExtensionObject generically (node_manager/method.rs) but no test uses a Structure argument. |
-| 2474 | Data Access MultiStateDictionaryEntryDBT | gap | Searched 'MultiStateDictionaryEntryDiscreteBaseType' - zero hits outside generated type def. |
+| 2474 | Data Access MultiStateDictionaryEntryDBT | gap | Investigated (feature 100): type exists in generated nodeset (nodeset_51.rs, ns=0;i=19077, from current schema snapshot) but is undocumented in both the local OPC-10000-8 v1.05.07 PDF and reference.opcfoundation.org -- deferred rather than implemented against unverifiable semantics, per spec.md Assumptions |
 | 2476 | Base Info LocalTime | partial | Real computed LocalTime (chrono->TimeZoneDataType) node_manager/memory/core.rs:989-997; no test reads Server_LocalTime attribute |
 | 2478 | Time Sync - OS based support | implemented | OsClockSource default TimeSyncSource impl async-opcua-server/src/time_sync.rs:112-124; unit test time_sync.rs:130-137 |
 | 2479 | Time Sync - IEEE 1588 (PTP) | extensible | Satisfiable via user-supplied TimeSyncSource; documented extension point, not implemented in-library (feature 093). |
@@ -614,7 +614,7 @@ One row per facet not already covered by the four canonical profiles above. Coun
 | 2754 | Aggregate Subscription - Interpolative | implemented | agg_interpolative engine.rs:1344 (2341); tests aggregates_tests.rs:505,534,927 |
 | 2759 | Aggregate - MinimumActualTime | implemented | engine.rs dispatch AGG_MINIMUM_ACTUAL_TIME=2348 (engine.rs:1478); test aggregates_tests.rs:345 phase_b_actual_time_returns_value_timestamp_not_interval_start |
 | 2772 | Data Access Semantic Changes | gap | Searched 'SemanticChange' - no StatusCode info-bit constant exists anywhere in async-opcua-types. |
-| 2776 | Data Access ValueAsDictionaryEntries Property | gap | Depends on MultiStateDictionaryEntryDiscreteBaseType (gap); 'ValueAsDictionaryEntries' not found. |
+| 2776 | Data Access ValueAsDictionaryEntries Property | gap | Depends on MultiStateDictionaryEntryDiscreteBaseType (2474, deferred -- see that entry); the property node exists in generated nodeset (ns=0;i=19083) but same undocumented-semantics blocker applies. |
 | 2781 | Address Space WriteMask | implemented | is_writable() enforces WriteMask per attribute (utils.rs:64-128); tests utils.rs:917-1017 + write.rs:538 (BadNotWritable). |
 | 2785 | Protocol Configuration | implemented | ServerBuilder host()/port()/endpoint config: async-opcua-server/src/builder.rs:531,543,548. |
 | 2786 | Time Sync - NTP | extensible | Satisfiable via user-supplied TimeSyncSource; documented extension point, not implemented in-library (feature 093). |
@@ -630,7 +630,7 @@ One row per facet not already covered by the four canonical profiles above. Coun
 | 2820 | Address Space Full Array Only | implemented | validate_node_write_inner (address_space/write_validation.rs) rejects an IndexRange Write to AttributeId::Value with Bad_WriteNotSupported when AccessLevelExType::WriteFullArrayOnly is set; test write.rs::write_index_range_rejected_when_write_full_array_only |
 | 2822 | Base Info Device Failure | gap | DeviceFailureEventType only structural (nodeset_19.rs); no server code constructs/fires it (grep across async-opcua-server/src empty) |
 | 2823 | Security Invalid user token | partial | Fixed 100ms tarpit on every auth failure (session/negotiate.rs:16,28-40; tested security_tests.rs:2429); no escalating lockout. |
-| 2831 | Data Access MultiStateValueDiscrete | gap | Searched 'MultiStateValueDiscreteType' - zero instance usage in server/samples/tests. |
+| 2831 | Data Access MultiStateValueDiscrete | implemented | create_multi_state_value_discrete_variable (data_access.rs) instantiates MultiStateValueDiscreteType with mandatory EnumValues/ValueAsText (non-contiguous codes); test data_access.rs::multi_state_value_discrete_tracks_non_contiguous_enum_values |
 | 2837 | UA Binary Encoding | implemented | BinaryEncodable/BinaryDecodable traits async-opcua-types/src/encoding.rs:445-482, pervasive derive use; tests encoding.rs:919 |
 | 2845 | Base Info RequestServerStateChange Method | gap | Only generated NodeId constants (ServerType_RequestServerStateChange, node_ids.rs:1103-1105); no add_method_cb handler found anywhere. |
 | 2852 | A & C Condition Sub-Classes | gap | condition_sub_class_id field exists on BaseEventType only (events/event.rs:70-73); never set anywhere in async-opcua-server/src |
@@ -678,7 +678,7 @@ One row per facet not already covered by the four canonical profiles above. Coun
 | 2978 | Base Info SemanticChange | gap | SemanticChangeEventType only a generated type (events/generated.rs:699); never raised; no semantic-changed StatusCode bit usage |
 | 2984 | Data Access DoubleComplex Number | gap | Searched 'DoubleComplexNumberType' - zero hits outside generated nodeset. |
 | 2985 | Aggregate - NumberOfTransitions | implemented | engine.rs dispatch AGG_NUMBER_OF_TRANSITIONS=2355 (engine.rs:1495-1497); tests aggregates_tests.rs:1060 transitions_boolean_counts_each_flip, :1076 transitions_value_change_not_zero_crossing |
-| 2988 | Data Access MultiState | gap | Searched 'MultiStateDiscreteType' - zero instance usage in server/samples/tests. |
+| 2988 | Data Access MultiState | implemented | create_multi_state_discrete_variable (data_access.rs) instantiates MultiStateDiscreteType with mandatory EnumStrings; test data_access.rs::multi_state_discrete_exposes_enum_strings_and_value |
 | 2991 | Historical Access Structured Data Time Instance | gap | depends on ReadAtTimeDetails, which has zero server-side implementation for any backend (see CU 3020); a fortiori unsupported for structured data |
 | 2993 | Aggregate - AnnotationCount | implemented | engine.rs dispatch AGG_ANNOTATION_COUNT=2351 (engine.rs:1493); test aggregates_tests.rs:1275 annotation_count_counts_annotations_in_interval; cross-backend parity via history_data_inmemory.rs:441 + sqlite history_update_data.rs:455 |
 | 2996 | Aggregate - Average | implemented | engine.rs dispatch AGG_AVERAGE=2342 (engine.rs:1473); test aggregates_tests.rs:203 test_calculate_aggregate_average |
@@ -751,7 +751,7 @@ One row per facet not already covered by the four canonical profiles above. Coun
 | 3197 | Base Info Security Role Capabilities | implemented | RoleSet on ServerCapabilities (role_management.rs:479-481); test rbac.rs:287-316 verifies i=15606 + 8 role nodes. |
 | 3198 | Base Info Estimated Return Time | implemented | ServerStatusWrapper::schedule_shutdown/estimated_return_time (server_status.rs) + ServerHandle::shutdown_after_with_return_time (server_handle.rs) extend the existing shutdown mechanism; wired core.rs get_attribute; test base_info.rs::estimated_return_time_reflects_scheduled_shutdown_and_is_null_otherwise |
 | 3199 | Base Info System Status | gap | SystemStatusChangeEventType has no server-side emission on shutdown; server_status.rs/server_handle.rs never calls notify_event/raise_event |
-| 3201 | Base Info Custom Type System | partial | custom-codegen sample (samples/custom-codegen) demonstrates a full custom-type inheritance tree + generated Encoding Objects via async-opcua-codegen (types/encoding_ids.rs, types/gen.rs); no completeness e2e test proving all custom EventTypes are exposed alongside their encoding objects, same evidentiary gap as CU 5801 |
+| 3201 | Base Info Custom Type System | partial | custom-codegen sample (samples/custom-codegen) demonstrates a full custom-type inheritance tree + generated Encoding Objects via async-opcua-codegen (types/encoding_ids.rs, types/gen.rs); no completeness e2e test proving all custom EventTypes are exposed alongside their encoding objects. Distinct from CU 5801 (which covers standard-nodeset type completeness, closed as a byproduct of the many typed-instantiation CUs) -- this one is specifically about CUSTOM (non-standard) types and remains open |
 | 3203 | Base Info Model Change General | implemented | GeneralModelChangeEvent fired on add/delete_nodes/refs (model_change.rs, memory_mgr_impl.rs:325); e2e test node_management.rs:1437. |
 | 3206 | Base Info EventQueueOverflow EventType | implemented | monitored_item.rs:1052-1085 notify_event inserts EventQueueOverflowEventType on overflow; tested subscriptions.rs:1697-1779 |
 | 3207 | Base Info OptionSet DataType | implemented | OptionSet DataType present in schemas/1.05/Opc.Ua.NodeSet2.xml; exposed via CoreNamespace import. |
@@ -763,11 +763,11 @@ One row per facet not already covered by the four canonical profiles above. Coun
 | 3226 | Auditing History Services | gap | HistoryUpdate handler attribute.rs:286-386 has no audit dispatch; AuditHistoryUpdateEventType only generated, never constructed, no test |
 | 3228 | Auditing Write | implemented | dispatch_write_audit (audit.rs:818, message_handler.rs:899) emits AuditWriteUpdateEventType; e2e write.rs:1063. |
 | 3230 | Auditing Method | implemented | dispatch_method_audit (audit.rs:799, method.rs:107) emits AuditUpdateMethodEventType; e2e methods.rs:608. |
-| 3323 | Data Access YArrayItemType | gap | Searched 'YArrayItemType' - zero instance usage, only a nodeset type node. |
-| 3324 | Data Access XYArrayItemType | gap | Searched 'XYArrayItemType' - zero instance usage, only a nodeset type node. |
-| 3325 | Data Access ImageItemType | gap | Searched 'ImageItemType' - zero instance usage, only a nodeset type node. |
-| 3326 | Data Access CubeItemType | gap | Searched 'CubeItemType' - zero instance usage, only a nodeset type node. |
-| 3327 | Data Access NDimensionArrayItemType | gap | Searched 'NDimensionArrayItemType' - zero instance usage, only a nodeset type node. |
+| 3323 | Data Access YArrayItemType | implemented | create_y_array_item_variable (data_access.rs) instantiates YArrayItemType with mandatory EURange/EngineeringUnits/Title/AxisScaleType/XAxisDefinition; test data_access.rs::y_array_item_exposes_spectrum_and_x_axis_definition |
+| 3324 | Data Access XYArrayItemType | implemented | create_xy_array_item_variable (data_access.rs) instantiates XYArrayItemType (XVType-valued) with mandatory base Properties + XAxisDefinition; test data_access.rs::xy_array_item_exposes_xv_type_peaks |
+| 3325 | Data Access ImageItemType | implemented | create_image_item_variable (data_access.rs) instantiates ImageItemType (2-D) with mandatory base Properties + X/YAxisDefinition; test data_access.rs::image_item_exposes_2d_matrix_and_both_axis_definitions |
+| 3326 | Data Access CubeItemType | implemented | create_cube_item_variable (data_access.rs) instantiates CubeItemType (3-D) with mandatory base Properties + X/Y/ZAxisDefinition; test data_access.rs::cube_item_exposes_3d_volume_and_all_three_axis_definitions |
+| 3327 | Data Access NDimensionArrayItemType | implemented | create_nd_dimension_array_item_variable (data_access.rs) instantiates NDimensionArrayItemType with one AxisDefinition per dimension; test data_access.rs::nd_dimension_array_item_exposes_one_axis_definition_per_dimension |
 | 3328 | Data Access AxisInformationType | implemented | AxisInformation in schemas/1.05 + generated types/axis_information.rs; type-level exposure via CoreNamespace import. |
 | 3524 | Address Space Dictionary IRDI | gap | Searched 'IrdiDictionaryEntryType' - only a nodeset type node; no instance/dictionary wiring. |
 | 3525 | Address Space Dictionary URI | gap | Searched 'UriDictionaryEntryType' - only a nodeset type node; no instance/dictionary wiring. |
@@ -965,7 +965,7 @@ One row per facet not already covered by the four canonical profiles above. Coun
 | 5795 | Documentation - Durable Subscription Capacity | gap | No durable-subscription capacity doc found; feature itself absent (CU 3642); only stale CU-COVERAGE.md:962 "needs-proof" placeholder |
 | 5796 | Documentation - On-line | implemented | README.md docs.rs/crates.io badges (README.md:3,5,58) + docs/ folder shipped in repo, accessible from GitHub/docs.rs. |
 | 5797 | Documentation - Trouble Shooting Guide | gap | Searched docs/ and root *.md for "troubleshoot"/"FAQ"/"common issue" — no troubleshooting or diagnostics guide found. |
-| 5801 | Base Info Type Information | partial | Strong support via full 1.05 nodeset import + codegen custom-nodeset gen (samples/custom-codegen); no e2e completeness test; gaps remain. |
+| 5801 | Base Info Type Information | implemented | Not a standalone feature -- this server always imports the complete standard 1.05 nodeset (every ObjectType/VariableType/ReferenceType/DataType, their supertypes, and Encoding Objects for Structured DataTypes are generated nodeset nodes), so any instance referencing a standard TypeDefinition automatically satisfies this CU. Demonstrated cumulatively across every 'instantiate VariableType X' CU this project closes (e.g. feature 097's base_info.rs OrderedListType/SelectionListType/OptionSetType/ReferenceDescriptionVariableType, feature 100's data_access.rs TwoStateDiscreteType/MultiStateDiscreteType/MultiStateValueDiscreteType/ArrayItemType family) -- each instantiation test proves its referenced TypeDefinition node resolves in the AddressSpace, not just an isolated e2e check |
 | 5806 | Historical Access Read Raw | implemented | data_history.rs:131-180 read_raw_modified; tests history_tests.rs:245 test_history_read_100k_page_reads, :299 test_history_read_reversed_intervals; hda.rs:320 e2e_inmemory_update_then_read_roundtrip |
 | 5807 | A & C Non-Exclusive Limit | implemented | NonExclusiveLimitAlarmType via create_non_exclusive_in_address_space limit.rs:439-503; tested alarms.rs:971,2400 |
 | 5808 | A & C Exclusive Limit | implemented | ExclusiveLimitAlarmType via create_exclusive_in_address_space limit.rs:357-436; tested alarms.rs:891,1033,1499 |

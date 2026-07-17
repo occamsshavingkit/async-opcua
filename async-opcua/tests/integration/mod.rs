@@ -6,6 +6,7 @@ mod browse;
 mod conformance;
 mod core_tests;
 mod custom_types;
+mod data_access;
 mod datachange_overflow;
 mod discovery;
 #[cfg(feature = "ecc")]

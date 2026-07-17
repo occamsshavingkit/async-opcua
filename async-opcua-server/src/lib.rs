@@ -31,6 +31,9 @@ mod companion;
 mod config;
 /// Dedicated lower-priority executor for server-side asymmetric crypto (T010A).
 pub mod crypto_executor;
+/// Data Access conformance-unit instantiation helpers (TwoStateDiscreteType,
+/// MultiStateDiscreteType, MultiStateValueDiscreteType, and the ArrayItemType family).
+pub mod data_access;
 #[cfg(feature = "diagnostics")]
 pub mod diagnostics;
 #[cfg(feature = "discovery-server-registration")]

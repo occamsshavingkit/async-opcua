@@ -859,12 +859,7 @@ impl CertificateStore {
     /// A string description of any failure
     ///
     pub fn store_trusted_cert(&self, cert: &X509) -> Result<PathBuf, String> {
-        // Store the cert in the trusted folder where trusted certs go
-        let cert_file_name = CertificateStore::cert_file_name(cert);
-        let mut cert_path = self.trusted_certs_dir();
-        cert_path.push(&cert_file_name);
-        let _ = CertificateStore::store_cert(cert, &cert_path, true)?;
-        Ok(cert_path)
+        self.store_cert_in_dir(cert, &self.trusted_certs_dir())
     }
 
     /// Writes a cert to the issuer directory. If the write succeeds, the function
@@ -875,9 +870,12 @@ impl CertificateStore {
     /// A string description of any failure
     ///
     pub fn store_issuer_cert(&self, cert: &X509) -> Result<PathBuf, String> {
-        let cert_file_name = CertificateStore::cert_file_name(cert);
-        let mut cert_path = self.issuer_certs_dir();
-        cert_path.push(&cert_file_name);
+        self.store_cert_in_dir(cert, &self.issuer_certs_dir())
+    }
+
+    fn store_cert_in_dir(&self, cert: &X509, dir: &Path) -> Result<PathBuf, String> {
+        let mut cert_path = dir.to_path_buf();
+        cert_path.push(CertificateStore::cert_file_name(cert));
         let _ = CertificateStore::store_cert(cert, &cert_path, true)?;
         Ok(cert_path)
     }
@@ -979,9 +977,9 @@ impl CertificateStore {
     }
 
     /// Validates `der` as a well-formed CRL and writes it to the trusted CRLs directory, named
-    /// by a hash of its DER encoding. If the write succeeds, returns a path to the written file.
-    /// Takes raw DER bytes (rather than a parsed `CertificateList`) so callers outside this crate
-    /// don't need `x509_cert` as a direct dependency.
+    /// by a unique, non-content-derived file name. If the write succeeds, returns a path to the
+    /// written file. Takes raw DER bytes (rather than a parsed `CertificateList`) so callers
+    /// outside this crate don't need `x509_cert` as a direct dependency.
     ///
     /// # Errors
     ///
@@ -1032,12 +1030,10 @@ impl CertificateStore {
     /// A string description of any failure
     ///
     pub fn replace_trusted_certs(&self, certs_der: &[Vec<u8>]) -> Result<(), String> {
-        Self::clear_dir(&self.trusted_certs_dir());
-        for der in certs_der {
+        Self::replace_list(&self.trusted_certs_dir(), certs_der, |der| {
             let cert = X509::from_der(der).map_err(|e| format!("Not a valid certificate: {e}"))?;
-            self.store_trusted_cert(&cert)?;
-        }
-        Ok(())
+            self.store_trusted_cert(&cert).map(|_| ())
+        })
     }
 
     /// Replaces the entire issuer-certificates list with `certs_der`. See
@@ -1048,12 +1044,10 @@ impl CertificateStore {
     /// A string description of any failure
     ///
     pub fn replace_issuer_certs(&self, certs_der: &[Vec<u8>]) -> Result<(), String> {
-        Self::clear_dir(&self.issuer_certs_dir());
-        for der in certs_der {
+        Self::replace_list(&self.issuer_certs_dir(), certs_der, |der| {
             let cert = X509::from_der(der).map_err(|e| format!("Not a valid certificate: {e}"))?;
-            self.store_issuer_cert(&cert)?;
-        }
-        Ok(())
+            self.store_issuer_cert(&cert).map(|_| ())
+        })
     }
 
     /// Replaces the entire trusted-CRLs list with `crls_der`. See
@@ -1064,11 +1058,9 @@ impl CertificateStore {
     /// A string description of any failure
     ///
     pub fn replace_trusted_crls(&self, crls_der: &[Vec<u8>]) -> Result<(), String> {
-        Self::clear_dir(&self.trusted_crls_dir());
-        for der in crls_der {
-            self.store_trusted_crl(der)?;
-        }
-        Ok(())
+        Self::replace_list(&self.trusted_crls_dir(), crls_der, |der| {
+            self.store_trusted_crl(der).map(|_| ())
+        })
     }
 
     /// Replaces the entire issuer-CRLs list with `crls_der`. See
@@ -1079,9 +1071,21 @@ impl CertificateStore {
     /// A string description of any failure
     ///
     pub fn replace_issuer_crls(&self, crls_der: &[Vec<u8>]) -> Result<(), String> {
-        Self::clear_dir(&self.issuer_crls_dir());
-        for der in crls_der {
-            self.store_issuer_crl(der)?;
+        Self::replace_list(&self.issuer_crls_dir(), crls_der, |der| {
+            self.store_issuer_crl(der).map(|_| ())
+        })
+    }
+
+    /// Clears `dir` and re-populates it by calling `store_one` for each item in `items_der`,
+    /// sharing the "clear then repopulate" shape common to every `replace_*` method above.
+    fn replace_list(
+        dir: &Path,
+        items_der: &[Vec<u8>],
+        mut store_one: impl FnMut(&[u8]) -> Result<(), String>,
+    ) -> Result<(), String> {
+        Self::clear_dir(dir);
+        for der in items_der {
+            store_one(der)?;
         }
         Ok(())
     }

@@ -9,33 +9,43 @@ use crate::Session;
 use opcua_types::{ByteString, CallMethodRequest, NodeId, StatusCode, Variant};
 use tracing::error;
 
-/// Client helper for dynamic certificate signing request exchange with GDS Certificate Managers.
+/// Client helper for dynamic certificate signing request exchange with a GDS Directory.
+///
+/// Constructed from real, discovered NodeIds -- see [`crate::gds::GdsClient::discover`]. Every
+/// real GDS deployment assigns its own namespace index to the GDS companion types, so there is no
+/// valid fixed default to construct this with.
 pub struct GdsCsrClient {
-    /// NodeId of the CertificateManager object (standard ns=0;i=22388)
-    pub certificate_manager_id: NodeId,
-    /// NodeId of the StartSigningRequest method (standard ns=0;i=22400)
+    /// NodeId of the GDS Directory object (`CertificateDirectoryType` instance, OPC-10000-12
+    /// §7.9.2). `StartSigningRequest`/`FinishRequest` are methods on this same object -- there is
+    /// no separate "CertificateManager" object; "CertificateManager" is the deployment role a
+    /// server hosting this object plays, per §7.9.2's own wording.
+    pub directory_object_id: NodeId,
+    /// NodeId of the `StartSigningRequest` method (§7.9.3).
     pub start_signing_request_id: NodeId,
-    /// NodeId of the FinishSigningRequest method (standard ns=0;i=22402)
+    /// NodeId of the `FinishRequest` method (§7.9.5). Field name kept as
+    /// `finish_signing_request_id` to match this client's existing `finish_signing_request`
+    /// method name -- the real OPC UA method name is `FinishRequest`, shared by both the
+    /// CSR-signing and new-key-pair-request flows.
     pub finish_signing_request_id: NodeId,
 }
 
-impl Default for GdsCsrClient {
-    fn default() -> Self {
+impl GdsCsrClient {
+    /// Creates a `GdsCsrClient` from real, already-resolved NodeIds.
+    pub fn new(
+        directory_object_id: NodeId,
+        start_signing_request_id: NodeId,
+        finish_signing_request_id: NodeId,
+    ) -> Self {
         Self {
-            certificate_manager_id: NodeId::new(0, 22388),
-            start_signing_request_id: NodeId::new(0, 22400),
-            finish_signing_request_id: NodeId::new(0, 22402),
+            directory_object_id,
+            start_signing_request_id,
+            finish_signing_request_id,
         }
     }
-}
 
-impl GdsCsrClient {
-    /// Creates a new `GdsCsrClient` with default standard GDS NodeIds.
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Submits a CSR to the GDS CertificateManager to start the signing process.
+    /// Submits a CSR to the GDS Directory to start the signing process (§7.9.3:
+    /// `(ApplicationId, CertificateGroupId, CertificateTypeId, CertificateRequest) -> RequestId`,
+    /// four input arguments -- verified against the real GDS companion NodeSet2.xml).
     /// Returns the GDS-allocated `NodeId` representing the request ID.
     pub async fn start_signing_request(
         &self,
@@ -44,17 +54,15 @@ impl GdsCsrClient {
         certificate_group_id: NodeId,
         certificate_type_id: NodeId,
         csr_der: &[u8],
-        regenerate_private_key: bool,
     ) -> Result<NodeId, StatusCode> {
         let request = CallMethodRequest {
-            object_id: self.certificate_manager_id.clone(),
+            object_id: self.directory_object_id.clone(),
             method_id: self.start_signing_request_id.clone(),
             input_arguments: Some(vec![
                 Variant::from(application_id),
                 Variant::from(certificate_group_id),
                 Variant::from(certificate_type_id),
                 Variant::from(ByteString::from(csr_der)),
-                Variant::from(regenerate_private_key),
             ]),
         };
 
@@ -80,7 +88,7 @@ impl GdsCsrClient {
         }
     }
 
-    /// Polls or calls FinishSigningRequest to fetch the signed certificate (and optional private key).
+    /// Polls or calls `FinishRequest` to fetch the signed certificate (and optional private key).
     /// Returns a tuple containing the signed DER certificate bytes, and optionally the PEM private key if regenerated.
     pub async fn finish_signing_request(
         &self,
@@ -89,7 +97,7 @@ impl GdsCsrClient {
         request_id: NodeId,
     ) -> Result<(Vec<u8>, Option<Vec<u8>>), StatusCode> {
         let request = CallMethodRequest {
-            object_id: self.certificate_manager_id.clone(),
+            object_id: self.directory_object_id.clone(),
             method_id: self.finish_signing_request_id.clone(),
             input_arguments: Some(vec![
                 Variant::from(application_id),

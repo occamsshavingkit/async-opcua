@@ -856,7 +856,24 @@ impl<TImpl: InMemoryNodeManagerImpl> NodeManagerCore for InMemoryNodeManager<TIm
     }
 
     fn namespaces_for_user(&self, _context: &RequestContext) -> Vec<NamespaceMetadata> {
-        self.inner.namespaces()
+        // Start from the impl's own explicitly-authored metadata (richer than a bare
+        // index/URI pair -- e.g. `is_namespace_subset`), then fill in any namespace this node
+        // manager actually owns (per `Self::namespaces`, refreshed after a runtime companion
+        // import via `Self::refresh_namespaces`) that the impl didn't already report. Without
+        // this, `Server_NamespaceArray` (Part 5 §6.3.4) would never reflect a namespace added at
+        // runtime, and no client -- including this SDK's own -- could discover it by URI.
+        let mut result = self.inner.namespaces();
+        for (index, uri) in self.namespaces() {
+            if result.iter().any(|ns| ns.namespace_index == index) {
+                continue;
+            }
+            result.push(NamespaceMetadata {
+                namespace_uri: uri,
+                namespace_index: index,
+                ..Default::default()
+            });
+        }
+        result
     }
 
     #[cfg(feature = "node-management")]

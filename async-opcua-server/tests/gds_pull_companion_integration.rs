@@ -69,8 +69,11 @@ async fn start_new_key_pair_request_call_reaches_the_pull_method_callback() {
         .node_managers()
         .get_of_type::<CoreNodeManager>()
         .expect("default server should have a CoreNodeManager for namespace 0");
-    let pull_handler = register_gds_pull_methods_from_companion(&core_node_manager)
-        .expect("companion XML is present, Pull-model wiring should succeed");
+    let pull_handler = register_gds_pull_methods_from_companion(
+        &core_node_manager,
+        &server_handle.type_tree().read(),
+    )
+    .expect("companion XML is present, Pull-model wiring should succeed");
     let directory_object_id = pull_handler.directory().directory_object_id.clone();
     let start_new_key_pair_request_id = pull_handler
         .directory()

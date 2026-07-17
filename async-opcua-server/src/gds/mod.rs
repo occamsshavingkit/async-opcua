@@ -21,6 +21,9 @@ use self::push_methods::GdsPushRegistry;
 #[cfg(all(feature = "method-call", feature = "generated-address-space"))]
 use self::push_methods::{register_gds_push_methods, register_gds_push_methods_with_handle};
 
+#[cfg(all(feature = "method-call", feature = "generated-address-space"))]
+use self::trust_list::{register_trust_list_methods, TrustListMethodHandler};
+
 /// Maximum entries retained by each in-memory GDS certificate-management registry.
 ///
 /// On overflow, registries evict their oldest entry before inserting the new one. This keeps
@@ -33,6 +36,8 @@ pub mod cache;
 pub mod pull_methods;
 /// Push model method callbacks for certificate signing requests.
 pub mod push_methods;
+/// TrustList method callbacks for the `DefaultApplicationGroup` CertificateGroup.
+pub mod trust_list;
 
 /// Registries backing the standard GDS method callbacks.
 #[cfg(feature = "method-call")]
@@ -41,6 +46,9 @@ pub struct GdsMethodRegistries {
     pub push_methods: Arc<GdsPushRegistry>,
     /// Registry used by pull-model callbacks.
     pub pull_methods: GdsPullMethodRegistry,
+    /// Handler backing the `DefaultApplicationGroup.TrustList` callbacks.
+    #[cfg(feature = "generated-address-space")]
+    pub trust_list: Arc<TrustListMethodHandler>,
 }
 
 /// Registers the standard GDS certificate management callbacks, without shutdown support for
@@ -56,8 +64,10 @@ pub fn register_gds_certificate_management_methods(
     core_node_manager: &CoreNodeManager,
     simple_node_manager: &SimpleNodeManager,
 ) -> GdsMethodRegistries {
+    let push_methods = register_gds_push_methods(core_node_manager);
     GdsMethodRegistries {
-        push_methods: register_gds_push_methods(core_node_manager),
+        trust_list: register_trust_list_methods(core_node_manager, push_methods.clone()),
+        push_methods,
         pull_methods: register_gds_pull_methods(simple_node_manager),
     }
 }
@@ -70,8 +80,10 @@ pub fn register_gds_certificate_management_methods_with_handle(
     simple_node_manager: &SimpleNodeManager,
     handle: ServerHandle,
 ) -> GdsMethodRegistries {
+    let push_methods = register_gds_push_methods_with_handle(core_node_manager, handle);
     GdsMethodRegistries {
-        push_methods: register_gds_push_methods_with_handle(core_node_manager, handle),
+        trust_list: register_trust_list_methods(core_node_manager, push_methods.clone()),
+        push_methods,
         pull_methods: register_gds_pull_methods(simple_node_manager),
     }
 }

@@ -428,7 +428,7 @@ One row per facet not already covered by the four canonical profiles above. Coun
 | Base Server Behaviour Facet | 1715 | 4 | 3 | 0 | 1 | 0 | 0 | 0 |
 | Client Redundancy Server Facet | 661 | 1 | 1 | 0 | 0 | 0 | 0 | 0 |
 | ComplexType 2017 Server Facet | 1725 | 6 | 3 | 3 | 0 | 0 | 0 | 0 |
-| Data Access Server Facet | 1505 | 22 | 5 | 0 | 17 | 0 | 0 | 0 |
+| Data Access Server Facet | 1505 | 22 | 14 | 0 | 8 | 0 | 0 | 0 |
 | Dictionary Reference Server Facet | 1524 | 3 | 0 | 0 | 3 | 0 | 0 | 0 |
 | Documentation Server Facet | 768 | 6 | 4 | 0 | 2 | 0 | 0 | 0 |
 | Durable Subscription 2022 Server Facet | 2098 | 3 | 1 | 0 | 2 | 0 | 0 | 0 |
@@ -546,7 +546,7 @@ One row per facet not already covered by the four canonical profiles above. Coun
 | 2353 | Subscription Transfer | implemented | TransferSubscriptions handler subscriptions/mod.rs:1671-1787, dispatched message_handler.rs:368; e2e async-opcua/tests/integration/subscriptions.rs:632,790. |
 | 2354 | Discovery Configuration | gap | Only inbound RegisterServer (LDS role, info.rs) + self-published discovery_urls found; no outbound "register self with external Discovery Server URL" config or disable switch. |
 | 2358 | Aggregate Subscription - StandardDeviationSample | implemented | agg_std_dev_sample engine.rs:975; calculate_std_dev_sample math tested aggregates_tests.rs:173-182 |
-| 2361 | Data Access TwoState | gap | Searched 'TwoStateDiscreteType' repo-wide (excl generated nodeset) - zero instance code or tests. |
+| 2361 | Data Access TwoState | implemented | create_two_state_discrete_variable (data_access.rs) instantiates TwoStateDiscreteType with mandatory TrueState/FalseState; test data_access.rs::two_state_discrete_exposes_true_false_states_and_value |
 | 2362 | Address Space Method | implemented | Method Nodes pervasive via MethodBuilder (async-opcua-nodes/src/method.rs); tested async-opcua/tests/integration/methods.rs. |
 | 2371 | Protocol UA TCP | implemented | Hello/Ack+TCP codec async-opcua-core/src/comms/tcp_types.rs:244,373; exercised by full opc.tcp integration suite |
 | 2375 | Aggregate Subscription - Average | implemented | agg_average engine.rs:684 (id 2342); test phase_b_count_average_range_delta aggregates_tests.rs:320-333 |
@@ -567,11 +567,11 @@ One row per facet not already covered by the four canonical profiles above. Coun
 | 2408 | Aggregate Subscription - WorstQuality2 | implemented | agg_worst_quality2 engine.rs:1266 (11292); test worst_quality_is_value_type_independent aggregates_tests.rs:1153-1156 |
 | 2422 | Auditing Secure Communication | partial | Audit events ride negotiated SecureChannel (Sign/SignAndEncrypt supported) but nothing specifically enforces/verifies encrypted delivery |
 | 2423 | Base Info Rational Number | implemented | RationalNumberType present schemas/1.05/Opc.Ua.NodeSet2.xml, generated types/rational_number.rs; exposed via CoreNamespace import. |
-| 2426 | Data Access DiscreteItemType | gap | Searched 'DiscreteItemType' - zero instance usage in server/samples/tests. |
+| 2426 | Data Access DiscreteItemType | implemented | DiscreteItemType is abstract (OPC-10000-8 §5.3.3.1, 'no instances of this type can exist'); satisfied by any concrete subtype -- TwoStateDiscreteType/MultiStateDiscreteType/MultiStateValueDiscreteType (data_access.rs), tested in data_access.rs |
 | 2446 | Address Space AddIn Reference | implemented | HasAddIn ReferenceType via generated core nodeset nodeset_19.rs:822, loaded by default address_space/mod.rs:11 |
 | 2447 | Address Space AddIn DefaultInstanceBrowsename | implemented | DefaultInstanceBrowseName Property via generated nodeset_21.rs:2832, loaded by default node_manager/memory/core.rs:172 |
 | 2454 | Method Call Complex | partial | Call passes arbitrary Vec<Variant> incl ExtensionObject generically (node_manager/method.rs) but no test uses a Structure argument. |
-| 2474 | Data Access MultiStateDictionaryEntryDBT | gap | Searched 'MultiStateDictionaryEntryDiscreteBaseType' - zero hits outside generated type def. |
+| 2474 | Data Access MultiStateDictionaryEntryDBT | gap | Investigated (feature 100): type exists in generated nodeset (nodeset_51.rs, ns=0;i=19077, from current schema snapshot) but is undocumented in both the local OPC-10000-8 v1.05.07 PDF and reference.opcfoundation.org -- deferred rather than implemented against unverifiable semantics, per spec.md Assumptions |
 | 2476 | Base Info LocalTime | partial | Real computed LocalTime (chrono->TimeZoneDataType) node_manager/memory/core.rs:989-997; no test reads Server_LocalTime attribute |
 | 2478 | Time Sync - OS based support | implemented | OsClockSource default TimeSyncSource impl async-opcua-server/src/time_sync.rs:112-124; unit test time_sync.rs:130-137 |
 | 2479 | Time Sync - IEEE 1588 (PTP) | extensible | Satisfiable via user-supplied TimeSyncSource; documented extension point, not implemented in-library (feature 093). |
@@ -614,7 +614,7 @@ One row per facet not already covered by the four canonical profiles above. Coun
 | 2754 | Aggregate Subscription - Interpolative | implemented | agg_interpolative engine.rs:1344 (2341); tests aggregates_tests.rs:505,534,927 |
 | 2759 | Aggregate - MinimumActualTime | implemented | engine.rs dispatch AGG_MINIMUM_ACTUAL_TIME=2348 (engine.rs:1478); test aggregates_tests.rs:345 phase_b_actual_time_returns_value_timestamp_not_interval_start |
 | 2772 | Data Access Semantic Changes | gap | Searched 'SemanticChange' - no StatusCode info-bit constant exists anywhere in async-opcua-types. |
-| 2776 | Data Access ValueAsDictionaryEntries Property | gap | Depends on MultiStateDictionaryEntryDiscreteBaseType (gap); 'ValueAsDictionaryEntries' not found. |
+| 2776 | Data Access ValueAsDictionaryEntries Property | gap | Depends on MultiStateDictionaryEntryDiscreteBaseType (2474, deferred -- see that entry); the property node exists in generated nodeset (ns=0;i=19083) but same undocumented-semantics blocker applies. |
 | 2781 | Address Space WriteMask | implemented | is_writable() enforces WriteMask per attribute (utils.rs:64-128); tests utils.rs:917-1017 + write.rs:538 (BadNotWritable). |
 | 2785 | Protocol Configuration | implemented | ServerBuilder host()/port()/endpoint config: async-opcua-server/src/builder.rs:531,543,548. |
 | 2786 | Time Sync - NTP | extensible | Satisfiable via user-supplied TimeSyncSource; documented extension point, not implemented in-library (feature 093). |
@@ -630,7 +630,7 @@ One row per facet not already covered by the four canonical profiles above. Coun
 | 2820 | Address Space Full Array Only | implemented | validate_node_write_inner (address_space/write_validation.rs) rejects an IndexRange Write to AttributeId::Value with Bad_WriteNotSupported when AccessLevelExType::WriteFullArrayOnly is set; test write.rs::write_index_range_rejected_when_write_full_array_only |
 | 2822 | Base Info Device Failure | gap | DeviceFailureEventType only structural (nodeset_19.rs); no server code constructs/fires it (grep across async-opcua-server/src empty) |
 | 2823 | Security Invalid user token | partial | Fixed 100ms tarpit on every auth failure (session/negotiate.rs:16,28-40; tested security_tests.rs:2429); no escalating lockout. |
-| 2831 | Data Access MultiStateValueDiscrete | gap | Searched 'MultiStateValueDiscreteType' - zero instance usage in server/samples/tests. |
+| 2831 | Data Access MultiStateValueDiscrete | implemented | create_multi_state_value_discrete_variable (data_access.rs) instantiates MultiStateValueDiscreteType with mandatory EnumValues/ValueAsText (non-contiguous codes); test data_access.rs::multi_state_value_discrete_tracks_non_contiguous_enum_values |
 | 2837 | UA Binary Encoding | implemented | BinaryEncodable/BinaryDecodable traits async-opcua-types/src/encoding.rs:445-482, pervasive derive use; tests encoding.rs:919 |
 | 2845 | Base Info RequestServerStateChange Method | gap | Only generated NodeId constants (ServerType_RequestServerStateChange, node_ids.rs:1103-1105); no add_method_cb handler found anywhere. |
 | 2852 | A & C Condition Sub-Classes | gap | condition_sub_class_id field exists on BaseEventType only (events/event.rs:70-73); never set anywhere in async-opcua-server/src |
@@ -678,7 +678,7 @@ One row per facet not already covered by the four canonical profiles above. Coun
 | 2978 | Base Info SemanticChange | gap | SemanticChangeEventType only a generated type (events/generated.rs:699); never raised; no semantic-changed StatusCode bit usage |
 | 2984 | Data Access DoubleComplex Number | gap | Searched 'DoubleComplexNumberType' - zero hits outside generated nodeset. |
 | 2985 | Aggregate - NumberOfTransitions | implemented | engine.rs dispatch AGG_NUMBER_OF_TRANSITIONS=2355 (engine.rs:1495-1497); tests aggregates_tests.rs:1060 transitions_boolean_counts_each_flip, :1076 transitions_value_change_not_zero_crossing |
-| 2988 | Data Access MultiState | gap | Searched 'MultiStateDiscreteType' - zero instance usage in server/samples/tests. |
+| 2988 | Data Access MultiState | implemented | create_multi_state_discrete_variable (data_access.rs) instantiates MultiStateDiscreteType with mandatory EnumStrings; test data_access.rs::multi_state_discrete_exposes_enum_strings_and_value |
 | 2991 | Historical Access Structured Data Time Instance | gap | depends on ReadAtTimeDetails, which has zero server-side implementation for any backend (see CU 3020); a fortiori unsupported for structured data |
 | 2993 | Aggregate - AnnotationCount | implemented | engine.rs dispatch AGG_ANNOTATION_COUNT=2351 (engine.rs:1493); test aggregates_tests.rs:1275 annotation_count_counts_annotations_in_interval; cross-backend parity via history_data_inmemory.rs:441 + sqlite history_update_data.rs:455 |
 | 2996 | Aggregate - Average | implemented | engine.rs dispatch AGG_AVERAGE=2342 (engine.rs:1473); test aggregates_tests.rs:203 test_calculate_aggregate_average |
@@ -763,11 +763,11 @@ One row per facet not already covered by the four canonical profiles above. Coun
 | 3226 | Auditing History Services | gap | HistoryUpdate handler attribute.rs:286-386 has no audit dispatch; AuditHistoryUpdateEventType only generated, never constructed, no test |
 | 3228 | Auditing Write | implemented | dispatch_write_audit (audit.rs:818, message_handler.rs:899) emits AuditWriteUpdateEventType; e2e write.rs:1063. |
 | 3230 | Auditing Method | implemented | dispatch_method_audit (audit.rs:799, method.rs:107) emits AuditUpdateMethodEventType; e2e methods.rs:608. |
-| 3323 | Data Access YArrayItemType | gap | Searched 'YArrayItemType' - zero instance usage, only a nodeset type node. |
-| 3324 | Data Access XYArrayItemType | gap | Searched 'XYArrayItemType' - zero instance usage, only a nodeset type node. |
-| 3325 | Data Access ImageItemType | gap | Searched 'ImageItemType' - zero instance usage, only a nodeset type node. |
-| 3326 | Data Access CubeItemType | gap | Searched 'CubeItemType' - zero instance usage, only a nodeset type node. |
-| 3327 | Data Access NDimensionArrayItemType | gap | Searched 'NDimensionArrayItemType' - zero instance usage, only a nodeset type node. |
+| 3323 | Data Access YArrayItemType | implemented | create_y_array_item_variable (data_access.rs) instantiates YArrayItemType with mandatory EURange/EngineeringUnits/Title/AxisScaleType/XAxisDefinition; test data_access.rs::y_array_item_exposes_spectrum_and_x_axis_definition |
+| 3324 | Data Access XYArrayItemType | implemented | create_xy_array_item_variable (data_access.rs) instantiates XYArrayItemType (XVType-valued) with mandatory base Properties + XAxisDefinition; test data_access.rs::xy_array_item_exposes_xv_type_peaks |
+| 3325 | Data Access ImageItemType | implemented | create_image_item_variable (data_access.rs) instantiates ImageItemType (2-D) with mandatory base Properties + X/YAxisDefinition; test data_access.rs::image_item_exposes_2d_matrix_and_both_axis_definitions |
+| 3326 | Data Access CubeItemType | implemented | create_cube_item_variable (data_access.rs) instantiates CubeItemType (3-D) with mandatory base Properties + X/Y/ZAxisDefinition; test data_access.rs::cube_item_exposes_3d_volume_and_all_three_axis_definitions |
+| 3327 | Data Access NDimensionArrayItemType | implemented | create_nd_dimension_array_item_variable (data_access.rs) instantiates NDimensionArrayItemType with one AxisDefinition per dimension; test data_access.rs::nd_dimension_array_item_exposes_one_axis_definition_per_dimension |
 | 3328 | Data Access AxisInformationType | implemented | AxisInformation in schemas/1.05 + generated types/axis_information.rs; type-level exposure via CoreNamespace import. |
 | 3524 | Address Space Dictionary IRDI | gap | Searched 'IrdiDictionaryEntryType' - only a nodeset type node; no instance/dictionary wiring. |
 | 3525 | Address Space Dictionary URI | gap | Searched 'UriDictionaryEntryType' - only a nodeset type node; no instance/dictionary wiring. |

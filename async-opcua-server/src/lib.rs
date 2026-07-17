@@ -23,6 +23,9 @@ pub mod authorization {
     pub use crate::session::identity::SessionAuthorizationProfile;
 }
 pub mod authenticator;
+/// Base Info conformance-unit instantiation helpers (OrderedListType, SelectionListType,
+/// OptionSetType, ValueAsText, ReferenceDescriptionVariableType, CurrencyUnit).
+pub mod base_info;
 mod builder;
 mod companion;
 mod config;

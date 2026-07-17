@@ -35,6 +35,9 @@ struct ShutdownTarget {
     deadline: Instant,
     #[allow(unused)]
     time: DateTime,
+    /// OPC-10000-5, `ServerType.EstimatedReturnTime`: when the server is expected to have a
+    /// `ServerStatus.State` of `RUNNING_0` again, if known.
+    estimated_return_time: Option<DateTime>,
 }
 
 #[allow(unused)]
@@ -199,12 +202,25 @@ impl ServerStatusWrapper {
         self.set_start_time(DateTime::now());
     }
 
-    pub(crate) fn schedule_shutdown(&self, reason: LocalizedText, deadline: Instant) {
+    pub(crate) fn schedule_shutdown(
+        &self,
+        reason: LocalizedText,
+        deadline: Instant,
+        estimated_return_time: Option<DateTime>,
+    ) {
         let _ = self.shutdown.set(ShutdownTarget {
             time: DateTime::now(),
             reason,
             deadline,
+            estimated_return_time,
         });
+    }
+
+    /// OPC-10000-5, `ServerType.EstimatedReturnTime`: the time at which the server is expected
+    /// to have a `ServerStatus.State` of `RUNNING_0` again, if a graceful shutdown with a known
+    /// return time has been scheduled; `None` otherwise.
+    pub fn estimated_return_time(&self) -> Option<DateTime> {
+        self.shutdown.get().and_then(|v| v.estimated_return_time)
     }
 
     /// Get a copy of the current build info.

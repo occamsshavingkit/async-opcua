@@ -1012,6 +1012,11 @@ impl CoreNodeManagerImpl {
                     daylight_saving_in_offset: false,
                 }).into()
             }
+            // OPC-10000-5, ServerType.EstimatedReturnTime (feature 097, CU 3198): null unless a
+            // graceful shutdown with a known estimated return time has been scheduled.
+            VariableId::Server_EstimatedReturnTime => {
+                self.status.estimated_return_time()?.into()
+            }
 
             // ServerStatus
             VariableId::Server_ServerStatus => {

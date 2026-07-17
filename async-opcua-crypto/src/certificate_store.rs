@@ -805,6 +805,11 @@ impl CertificateStore {
         CertificateStore::read_cert_dir(&self.issuer_certs_dir())
     }
 
+    /// Read all rejected certificates from the store (OPC UA Part 12 §7.10.12 GetRejectedList).
+    pub fn read_rejected_certs(&self) -> Vec<X509> {
+        CertificateStore::read_cert_dir(&self.rejected_certs_dir())
+    }
+
     /// Read all trusted CRLs from the store.
     pub fn read_trusted_crls(&self) -> Vec<CertificateList> {
         CertificateStore::read_crl_dir(&self.trusted_crls_dir())

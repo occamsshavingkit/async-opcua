@@ -433,27 +433,43 @@ impl MessageHandler {
             }
 
             RequestMessage::Cancel(request) => {
-                // Part 4 §5.7.5: Cancel cancels outstanding requests for the Session and returns the
-                // number cancelled. This server processes requests without a cancellable queue, so
-                // there is nothing outstanding to cancel; respond Good with cancelCount = 0.
-                let session_id = Some(data.session.read().session_id().clone());
-                audit::dispatch_cancel(
-                    #[cfg(feature = "events")]
-                    &self.subscriptions,
-                    &self.info,
-                    &request.request_header,
-                    session_id,
-                    request.request_handle,
-                    StatusCode::Good,
-                );
-                HandleMessageResult::SyncMessage(Response {
-                    message: CancelResponse {
-                        response_header: ResponseHeader::new_good(&request.request_header),
-                        cancel_count: 0,
+                // Part 4 §5.7.5: Cancel cancels every outstanding request for this Session with a
+                // matching requestHandle; successfully cancelled requests respond with
+                // Bad_RequestCancelledByClient. Publish is the only request this server holds
+                // outstanding for any meaningful duration (see SessionSubscriptions::
+                // cancel_publish_requests) -- everything else completes synchronously or within one
+                // quick actor round-trip, so there is nothing else in-flight to cancel.
+                #[cfg(feature = "subscriptions")]
+                let subscriptions = self.subscriptions.clone();
+                let info = self.info.clone();
+                HandleMessageResult::AsyncMessage(tokio::task::spawn(async move {
+                    #[cfg(feature = "subscriptions")]
+                    let cancel_count = subscriptions
+                        .cancel_publish_requests(data.session_id, request.request_handle)
+                        .await
+                        .unwrap_or(0);
+                    #[cfg(not(feature = "subscriptions"))]
+                    let cancel_count = 0;
+
+                    let session_id = Some(data.session.read().session_id().clone());
+                    audit::dispatch_cancel(
+                        #[cfg(feature = "events")]
+                        &subscriptions,
+                        &info,
+                        &request.request_header,
+                        session_id,
+                        request.request_handle,
+                        StatusCode::Good,
+                    );
+                    Response {
+                        message: CancelResponse {
+                            response_header: ResponseHeader::new_good(&request.request_header),
+                            cancel_count,
+                        }
+                        .into(),
+                        request_id,
                     }
-                    .into(),
-                    request_id,
-                })
+                }))
             }
 
             message => {

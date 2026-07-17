@@ -1027,6 +1027,29 @@ impl SubscriptionCache {
             .map_err(|_| StatusCode::BadNoSubscription)?
     }
 
+    /// Part 4 §5.7.5 (Cancel): cancel every Publish request queued for this
+    /// session with a matching `requestHandle`. Returns the number
+    /// cancelled (0 if the session has no active subscription cache, which
+    /// is not an error — there is simply nothing outstanding to cancel).
+    pub(crate) async fn cancel_publish_requests(
+        &self,
+        session_id: u32,
+        request_handle: u32,
+    ) -> Result<u32, StatusCode> {
+        let Some(cache) = ({
+            let lck = trace_read_lock!(self.inner);
+            lck.session_subscriptions
+                .get(&session_id)
+                .map(SessionEntry::handle)
+        }) else {
+            return Ok(0);
+        };
+        cache
+            .cancel_publish_requests(request_handle)
+            .await
+            .map_err(|_| StatusCode::BadNoSubscription)
+    }
+
     pub(crate) async fn enqueue_publish_request(
         &self,
         session_id: u32,

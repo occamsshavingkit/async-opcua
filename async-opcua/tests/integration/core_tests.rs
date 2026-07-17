@@ -5,7 +5,7 @@ use std::{
     time::Duration,
 };
 
-use super::utils::hostname;
+use super::utils::{hostname, ChannelNotifications};
 use async_trait::async_trait;
 use bytes::BytesMut;
 use log::debug;
@@ -22,7 +22,7 @@ use opcua::{
         Variant, X509IdentityToken,
     },
 };
-use opcua_client::IssuedTokenWrapper;
+use opcua_client::{services::Publish, IssuedTokenWrapper, UARequest};
 use opcua_server::{
     authenticator::{issued_token_security_policy, AuthManager, UserToken},
     ServerEndpoint,
@@ -616,9 +616,10 @@ async fn issued_token_test() {
         .unwrap();
 }
 
-/// Cancel service (OPC UA Part 4 v1.05 §5.7.5, Session Service Set). This server processes requests
-/// without a cancellable queue, so Cancel of any handle is a clean no-op: cancelCount 0, and the
-/// session stays fully usable afterwards.
+/// Cancel service (OPC UA Part 4 v1.05 §5.7.5, Session Service Set). Cancelling a requestHandle with
+/// no matching outstanding Publish request is a clean no-op: cancelCount 0, and the session stays
+/// fully usable afterwards. See `cancel_aborts_a_queued_publish_request` for the real-cancellation
+/// case.
 #[tokio::test]
 async fn cancel_is_a_clean_noop() {
     let mut tester = Tester::new_default_server(false).await;
@@ -637,6 +638,79 @@ async fn cancel_is_a_clean_noop() {
 
     let cancelled = session.cancel(42).await.unwrap();
     assert_eq!(cancelled, 0, "no outstanding requests to cancel");
+
+    // The session is still usable after Cancel.
+    session
+        .read(
+            &[ReadValueId::from(<VariableId as Into<NodeId>>::into(
+                VariableId::Server_ServiceLevel,
+            ))],
+            TimestampsToReturn::Both,
+            0.0,
+        )
+        .await
+        .unwrap();
+}
+
+/// Cancel service (OPC UA Part 4 v1.05 §5.7.5): "Successfully cancelled service requests shall
+/// respond with Bad_RequestCancelledByClient." Publish is the one request type this server holds
+/// outstanding for any meaningful duration (queued in `SessionSubscriptions::publish_request_queue`
+/// until data, a keep-alive, or Cancel resolves it) -- this proves Cancel actually reaches into that
+/// queue and aborts a specific in-flight Publish, rather than being a permanent no-op.
+#[tokio::test]
+async fn cancel_aborts_a_queued_publish_request() {
+    let mut tester = Tester::new_default_server(false).await;
+    let (session, handle) = tester
+        .connect(
+            SecurityPolicy::None,
+            MessageSecurityMode::None,
+            IdentityToken::Anonymous,
+        )
+        .await
+        .unwrap();
+    let _h = handle.spawn();
+    tokio::time::timeout(Duration::from_secs(20), session.wait_for_connection())
+        .await
+        .unwrap();
+
+    let (notifs, _data, _) = ChannelNotifications::new();
+    // A long publishing interval and huge keep-alive count so nothing resolves
+    // this subscription's Publish requests on its own within the test window --
+    // any resolution has to come from Cancel.
+    session
+        .create_subscription(Duration::from_secs(10), 1000, 1000, 1000, 0, true, notifs)
+        .await
+        .unwrap();
+
+    let publish = Publish::new(&session).timeout(Duration::from_secs(30));
+    let publish_handle = publish.header().request_handle;
+
+    let publish_session = session.clone();
+    let publish_task = tokio::spawn(async move { publish.send(publish_session.channel()).await });
+
+    // Retry Cancel until the Publish request has actually reached the server's
+    // queue (it's sent concurrently above, so there's no synchronous signal for
+    // "now queued").
+    let mut cancelled = 0;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    while tokio::time::Instant::now() < deadline {
+        cancelled = session.cancel(publish_handle).await.unwrap();
+        if cancelled > 0 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert_eq!(
+        cancelled, 1,
+        "the queued Publish request should have been cancelled"
+    );
+
+    let result = tokio::time::timeout(Duration::from_secs(5), publish_task)
+        .await
+        .expect("publish task should resolve promptly once cancelled")
+        .expect("publish task should not panic");
+    let err = result.expect_err("cancelled Publish should return an error, not a notification");
+    assert_eq!(err.status(), StatusCode::BadRequestCancelledByClient);
 
     // The session is still usable after Cancel.
     session

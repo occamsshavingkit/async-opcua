@@ -1166,6 +1166,35 @@ impl SessionSubscriptions {
         self.publish_request_queue = kept;
     }
 
+    /// Part 4 §5.7.5 (Cancel): cancel every queued Publish request whose
+    /// `requestHandle` matches, responding to each with
+    /// `Bad_RequestCancelledByClient` as required. Returns the number
+    /// cancelled. Publish is the only request type this server holds
+    /// outstanding for any meaningful duration — all other services complete
+    /// synchronously or within one quick actor round-trip, so there is
+    /// nothing else in-flight to cancel.
+    pub(crate) fn cancel_publish_requests(&mut self, request_handle: u32) -> u32 {
+        let queue = std::mem::take(&mut self.publish_request_queue);
+        let mut kept = VecDeque::with_capacity(queue.len());
+        let mut cancelled = 0u32;
+        for req in queue {
+            if req.request.request_header.request_handle == request_handle {
+                let _ = req.response.send(
+                    ServiceFault::new(
+                        &req.request.request_header,
+                        StatusCode::BadRequestCancelledByClient,
+                    )
+                    .into(),
+                );
+                cancelled += 1;
+            } else {
+                kept.push_back(req);
+            }
+        }
+        self.publish_request_queue = kept;
+        cancelled
+    }
+
     fn process_subscription_acks(&mut self, request: &PublishRequest) -> Option<Vec<StatusCode>> {
         let acks = request.subscription_acknowledgements.as_ref()?;
         if acks.is_empty() {

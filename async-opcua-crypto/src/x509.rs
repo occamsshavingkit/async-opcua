@@ -811,6 +811,112 @@ impl X509 {
         request.to_der().map_err(|e| e.to_string())
     }
 
+    /// Extracts the DER-encoded `SubjectPublicKeyInfo` from a PKCS#10 CSR (OPC UA Part 12 §7.9.3
+    /// `StartSigningRequest`'s `CertificateRequest` argument), for use with
+    /// [`X509::issue_certificate_for_public_key`].
+    pub fn public_key_from_signing_request(csr_der: &[u8]) -> Result<Vec<u8>, String> {
+        use der::{Decode, Encode};
+        use x509_cert::request::CertReq;
+
+        let request = CertReq::from_der(csr_der).map_err(|e| format!("invalid CSR: {e}"))?;
+        request.info.public_key.to_der().map_err(|e| e.to_string())
+    }
+
+    /// Issues a new certificate for `subject_public_key_der` (a caller-supplied public key --
+    /// from a PKCS#10 CSR for OPC UA Part 12 §7.9.3 `StartSigningRequest`, or from a freshly
+    /// generated key pair for §7.9.4 `StartNewKeyPairRequest`), signed by `issuer_pkey` /
+    /// `issuer_cert` (this server acting as the Pull model's CertificateManager). Mirrors
+    /// `create_from_pkey`'s extension set, but the issuer and subject are distinct (this is not
+    /// a self-signed certificate).
+    pub fn issue_certificate_for_public_key(
+        subject_public_key_der: &[u8],
+        issuer_pkey: &PrivateKey,
+        issuer_cert: &X509,
+        subject_name: &str,
+        application_uri: &str,
+        duration_days: u32,
+    ) -> Result<Vec<u8>, String> {
+        use std::str::FromStr;
+        use std::time::Duration;
+
+        use der::Decode;
+        use x509_cert::builder::{Builder, CertificateBuilder, Profile};
+        use x509_cert::name::Name;
+        use x509_cert::serial_number::SerialNumber;
+        use x509_cert::spki::SubjectPublicKeyInfoOwned;
+        use x509_cert::time::Validity;
+
+        let subject_public_key = SubjectPublicKeyInfoOwned::from_der(subject_public_key_der)
+            .map_err(|e| format!("invalid public key: {e}"))?;
+
+        let issuer_name = Name::from_str(&issuer_cert.subject_name()).map_err(|e| e.to_string())?;
+        let subject = Name::from_str(subject_name).map_err(|e| e.to_string())?;
+
+        let rsa_key = issuer_pkey
+            .rsa_key_for_x509()
+            .map_err(|_| "issuer private key is not a usable RSA key".to_string())?;
+        let signing_key = pkcs1v15::SigningKey::<sha2::Sha256>::new(rsa_key.clone());
+
+        #[allow(clippy::unwrap_used)]
+        let validity = Validity::from_now(Duration::new(86400 * duration_days as u64, 0)).unwrap();
+
+        // Serial numbers must be unique per issuer; a real CA would track a counter or use a
+        // random value. This mirrors `create_from_pkey`'s existing simplification (a fixed
+        // value) rather than introducing new serial-number-tracking state for this feature.
+        let serial_number = SerialNumber::from(42u32);
+
+        let profile = Profile::Manual {
+            issuer: Some(issuer_name),
+        };
+
+        let mut builder = CertificateBuilder::new(
+            profile,
+            serial_number,
+            validity,
+            subject,
+            subject_public_key,
+            &signing_key,
+        )
+        .map_err(|e| e.to_string())?;
+
+        builder
+            .add_extension(&x509::ext::pkix::BasicConstraints {
+                ca: false,
+                path_len_constraint: None,
+            })
+            .map_err(|e| e.to_string())?;
+
+        {
+            use x509::ext::pkix::{KeyUsage, KeyUsages};
+            let key_usage = KeyUsages::DigitalSignature
+                | KeyUsages::NonRepudiation
+                | KeyUsages::KeyEncipherment;
+            builder
+                .add_extension(&KeyUsage(key_usage))
+                .map_err(|e| e.to_string())?;
+        }
+
+        {
+            use x509::ext::pkix::ExtendedKeyUsage;
+            let usage = vec![
+                const_oid::db::rfc5280::ID_KP_CLIENT_AUTH,
+                const_oid::db::rfc5280::ID_KP_SERVER_AUTH,
+            ];
+            builder
+                .add_extension(&ExtendedKeyUsage(usage))
+                .map_err(|e| e.to_string())?;
+        }
+
+        let mut alt_names = AlternateNames::new();
+        alt_names.add_uri(application_uri);
+        builder
+            .add_extension(&alt_names.names)
+            .map_err(|e| e.to_string())?;
+
+        let built = builder.build().map_err(|e| e.to_string())?;
+        built.to_der().map_err(|e| e.to_string())
+    }
+
     /// Load a certificate from a der byte string.
     pub fn from_byte_string(data: &ByteString) -> Result<X509, Error> {
         if data.is_null_or_empty() {
@@ -1274,6 +1380,67 @@ impl X509 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn test_x509_data(common_name: &str) -> X509Data {
+        X509Data {
+            key_size: 2048,
+            common_name: common_name.to_owned(),
+            organization: "async-opcua tests".to_owned(),
+            organizational_unit: String::new(),
+            country: "IE".to_owned(),
+            state: String::new(),
+            alt_host_names: AlternateNames::new(),
+            certificate_duration_days: 365,
+        }
+    }
+
+    #[test]
+    fn issues_a_certificate_for_a_csrs_public_key() {
+        let (issuer_cert, issuer_pkey) =
+            X509::cert_and_pkey(&test_x509_data("issuer")).expect("issuer cert should generate");
+
+        let (_requester_cert, requester_pkey) = X509::cert_and_pkey(&test_x509_data("requester"))
+            .expect("requester key pair should generate");
+        let csr_der = X509::create_signing_request(
+            &requester_pkey,
+            "CN=requester",
+            "urn:test:requester-application",
+        )
+        .expect("CSR should build");
+
+        let public_key_der = X509::public_key_from_signing_request(&csr_der)
+            .expect("public key should extract from CSR");
+
+        let issued_der = X509::issue_certificate_for_public_key(
+            &public_key_der,
+            &issuer_pkey,
+            &issuer_cert,
+            "CN=requester",
+            "urn:test:requester-application",
+            365,
+        )
+        .expect("certificate should be issued");
+
+        let issued = X509::from_der(&issued_der).expect("issued cert should parse");
+        assert!(
+            !issued.is_self_signed(),
+            "issued cert must not be self-signed"
+        );
+        assert_eq!(issued.issuer_name(), issuer_cert.subject_name());
+        assert!(issued
+            .is_application_uri_valid("urn:test:requester-application")
+            .is_ok());
+
+        // The issued certificate carries the *requester's* public key, not the issuer's.
+        let requester_public_key_info = requester_pkey
+            .public_key_to_info()
+            .expect("requester public key should convert");
+        use der::Encode;
+        let requester_public_key_der = requester_public_key_info
+            .to_der()
+            .expect("requester public key should encode");
+        assert_eq!(public_key_der, requester_public_key_der);
+    }
 
     #[cfg(feature = "ecc")]
     mod ec_fixtures {

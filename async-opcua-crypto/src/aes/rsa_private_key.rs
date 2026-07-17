@@ -354,6 +354,16 @@ impl PrivateKey {
         Ok(pem.to_string())
     }
 
+    /// Returns the DER-encoded `SubjectPublicKeyInfo` for this private key's public half, for
+    /// use with [`crate::X509::issue_certificate_for_public_key`].
+    pub fn public_key_to_der(&self) -> Result<Vec<u8>, String> {
+        use x509_cert::der::Encode;
+        self.public_key_to_info()
+            .map_err(|e| e.to_string())?
+            .to_der()
+            .map_err(|e| e.to_string())
+    }
+
     /// Get the public key info for this private key.
     pub fn public_key_to_info(&self) -> x509_cert::spki::Result<SubjectPublicKeyInfoOwned> {
         use rsa::pkcs8::EncodePublicKey;

@@ -9,11 +9,12 @@ use crate::{node_manager::memory::SimpleNodeManager, ServerHandle};
 #[cfg(all(feature = "method-call", feature = "generated-address-space"))]
 use crate::node_manager::memory::CoreNodeManager;
 
-#[cfg(feature = "method-call")]
+#[cfg(all(
+    feature = "method-call",
+    feature = "generated-address-space",
+    feature = "companion-gds"
+))]
 use self::pull_methods::GdsPullMethodRegistry;
-
-#[cfg(all(feature = "method-call", feature = "generated-address-space"))]
-use self::pull_methods::register_gds_pull_methods;
 
 #[cfg(feature = "method-call")]
 use self::push_methods::GdsPushRegistry;
@@ -24,6 +25,13 @@ use self::push_methods::{register_gds_push_methods, register_gds_push_methods_wi
 #[cfg(all(feature = "method-call", feature = "generated-address-space"))]
 use self::trust_list::{register_trust_list_methods, TrustListMethodHandler};
 
+#[cfg(all(
+    feature = "method-call",
+    feature = "generated-address-space",
+    feature = "companion-gds"
+))]
+use self::pull_methods::GdsPullMethodHandler;
+
 /// Maximum entries retained by each in-memory GDS certificate-management registry.
 ///
 /// On overflow, registries evict their oldest entry before inserting the new one. This keeps
@@ -32,58 +40,97 @@ pub(crate) const GDS_REGISTRY_CAPACITY: usize = 1024;
 
 /// Filesystem cache for GDS certificate credentials.
 pub mod cache;
-/// Pull model method callbacks for certificate management.
+/// Instantiates a real `CertificateDirectoryType` object from the GDS companion NodeSet import.
+#[cfg(feature = "method-call")]
+pub mod directory_instance;
+/// Pull model method callbacks for certificate management (`CertificateDirectoryType`, Part 12
+/// §7.9). Requires the `companion-gds` feature (see [`register_gds_pull_methods_from_companion`])
+/// to have any real AddressSpace nodes to dispatch against.
 pub mod pull_methods;
 /// Push model method callbacks for certificate signing requests.
 pub mod push_methods;
 /// TrustList method callbacks for the `DefaultApplicationGroup` CertificateGroup.
 pub mod trust_list;
 
-/// Registries backing the standard GDS method callbacks.
+/// Registries backing the standard GDS Push-model method callbacks.
 #[cfg(feature = "method-call")]
 pub struct GdsMethodRegistries {
     /// Registry used by push-model (`ServerConfigurationType`) callbacks.
     pub push_methods: Arc<GdsPushRegistry>,
-    /// Registry used by pull-model callbacks.
-    pub pull_methods: GdsPullMethodRegistry,
     /// Handler backing the `DefaultApplicationGroup.TrustList` callbacks.
     #[cfg(feature = "generated-address-space")]
     pub trust_list: Arc<TrustListMethodHandler>,
 }
 
-/// Registers the standard GDS certificate management callbacks, without shutdown support for
-/// the push model's `ResetToServerDefaults` (it will report `Bad_NotSupported`). Prefer
+/// Registers the standard GDS Push-model certificate management callbacks, without shutdown
+/// support for `ResetToServerDefaults` (it will report `Bad_NotSupported`). Prefer
 /// [`register_gds_certificate_management_methods_with_handle`] when a [`ServerHandle`] is
 /// available.
 ///
-/// `core_node_manager` must be the server's core (namespace 0) node manager -- the push model's
+/// `core_node_manager` must be the server's core (namespace 0) node manager -- the Push model's
 /// `ServerConfiguration` and its methods are standard namespace-0 nodes. `simple_node_manager` is
-/// used for the (separately tracked, currently unfixed) pull-model callbacks.
+/// no longer used here (the Pull-model methods that used to be registered on it were broken --
+/// see [`register_gds_pull_methods_from_companion`] for the real Pull-model surface) but remains
+/// a parameter for source compatibility with existing callers.
 #[cfg(all(feature = "method-call", feature = "generated-address-space"))]
 pub fn register_gds_certificate_management_methods(
     core_node_manager: &CoreNodeManager,
-    simple_node_manager: &SimpleNodeManager,
+    _simple_node_manager: &SimpleNodeManager,
 ) -> GdsMethodRegistries {
     let push_methods = register_gds_push_methods(core_node_manager);
     GdsMethodRegistries {
         trust_list: register_trust_list_methods(core_node_manager, push_methods.clone()),
         push_methods,
-        pull_methods: register_gds_pull_methods(simple_node_manager),
     }
 }
 
-/// Registers the standard GDS certificate management callbacks, wiring the push model's
+/// Registers the standard GDS Push-model certificate management callbacks, wiring
 /// `ResetToServerDefaults` to actually schedule a shutdown via the supplied [`ServerHandle`].
 #[cfg(all(feature = "method-call", feature = "generated-address-space"))]
 pub fn register_gds_certificate_management_methods_with_handle(
     core_node_manager: &CoreNodeManager,
-    simple_node_manager: &SimpleNodeManager,
+    _simple_node_manager: &SimpleNodeManager,
     handle: ServerHandle,
 ) -> GdsMethodRegistries {
     let push_methods = register_gds_push_methods_with_handle(core_node_manager, handle);
     GdsMethodRegistries {
         trust_list: register_trust_list_methods(core_node_manager, push_methods.clone()),
         push_methods,
-        pull_methods: register_gds_pull_methods(simple_node_manager),
     }
+}
+
+/// Imports the GDS companion NodeSet (if `schemas/companion/GDS/Opc.Ua.Gds.NodeSet2.xml` is
+/// present locally -- see `schemas/companion/README.md`), instantiates a real
+/// `CertificateDirectoryType` "Directory" object, and registers the Pull-model method callbacks
+/// (Part 12 §7.9) against it on `core_node_manager`.
+///
+/// This is an explicit, opt-in call (not wired into any `ServerBuilder` default), matching this
+/// project's existing companion-spec operator model. Returns `None` (logging a warning, never
+/// panicking) if the companion NodeSet wasn't actually importable -- the server otherwise
+/// continues exactly as if this function had never been called.
+#[cfg(all(
+    feature = "method-call",
+    feature = "generated-address-space",
+    feature = "companion-gds"
+))]
+pub fn register_gds_pull_methods_from_companion(
+    core_node_manager: &CoreNodeManager,
+) -> Option<Arc<GdsPullMethodHandler>> {
+    crate::companion::import_gds(core_node_manager.address_space());
+    // `import_gds` adds the GDS namespace to the shared address space, but
+    // `CoreNodeManager`'s namespace cache (used by `owns_node`, and therefore Call/Read/Write/
+    // Browse dispatch) was snapshotted at construction time, before this import ran -- refresh it
+    // so the newly-instantiated Directory object's namespace is recognized as owned.
+    core_node_manager.refresh_namespaces();
+
+    let directory = {
+        let address_space = core_node_manager.address_space().read();
+        directory_instance::instantiate_certificate_directory(&address_space)?
+    };
+
+    let registry = GdsPullMethodRegistry::default();
+    let handler = Arc::new(GdsPullMethodHandler::new(registry, directory));
+    pull_methods::register_pull_method_callbacks(core_node_manager, handler.clone());
+
+    Some(handler)
 }

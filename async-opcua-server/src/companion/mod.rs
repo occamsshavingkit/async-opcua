@@ -5,7 +5,7 @@
 //!
 //! Clone the repository into `schemas/companion/` before building with any
 //! `companion-*` features. See `schemas/companion/README.md` for instructions.
-#![allow(dead_code, unused_imports, unreachable_pub, clippy::all)]
+#![allow(dead_code, unused_imports, unreachable_pub, missing_docs, clippy::all)]
 
 use std::path::PathBuf;
 
@@ -49,7 +49,18 @@ fn import_companion_xml(
         }
     };
     let space = address_space.write();
-    let mut namespaces = opcua_nodes::NamespaceMap::default();
+    // Seed the namespace map from the address space's *already-registered* namespaces (not a
+    // blank slate): a fresh, disconnected `NamespaceMap::default()` has no knowledge of indices
+    // this server has already assigned (e.g. its own default application namespace, commonly
+    // index 1), and would silently reassign the companion spec's namespace to whatever index its
+    // own from-scratch bookkeeping picks next -- overwriting/corrupting that existing entry in
+    // the address space's real namespace table rather than actually colliding gracefully.
+    let existing: hashbrown::HashMap<String, u16> = space
+        .namespaces()
+        .into_iter()
+        .map(|(index, uri)| (uri, index))
+        .collect();
+    let mut namespaces = opcua_nodes::NamespaceMap::new_full(existing);
     space.import_node_set(&import, &mut namespaces);
     tracing::info!("Imported companion spec '{}' into address space", name);
 }

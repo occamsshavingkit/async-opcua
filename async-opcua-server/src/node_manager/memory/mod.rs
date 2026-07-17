@@ -92,7 +92,7 @@ struct BrowseContinuationPoint {
 /// [InMemoryNodeManagerImpl].
 pub struct InMemoryNodeManager<TImpl> {
     address_space: Arc<RwLock<AddressSpace>>,
-    namespaces: HashMap<u16, String>,
+    namespaces: RwLock<HashMap<u16, String>>,
     inner: TImpl,
 }
 
@@ -126,7 +126,7 @@ impl<T: InMemoryNodeManagerImplBuilder> NodeManagerBuilder for InMemoryNodeManag
 impl<TImpl: InMemoryNodeManagerImpl> InMemoryNodeManager<TImpl> {
     pub(crate) fn new(inner: TImpl, address_space: AddressSpace) -> Self {
         Self {
-            namespaces: address_space.namespaces(),
+            namespaces: RwLock::new(address_space.namespaces()),
             address_space: Arc::new(RwLock::new(address_space)),
             inner,
         }
@@ -142,10 +142,25 @@ impl<TImpl: InMemoryNodeManagerImpl> InMemoryNodeManager<TImpl> {
         &self.address_space
     }
 
-    /// Get a reference to the namespaces managed by this node manager,
-    /// by namespace index.
-    pub fn namespaces(&self) -> &HashMap<u16, String> {
-        &self.namespaces
+    /// Get a snapshot of the namespaces managed by this node manager, by namespace index.
+    ///
+    /// This is a snapshot taken at construction time, refreshed by [`Self::refresh_namespaces`]
+    /// (e.g. after a runtime NodeSet import adds new namespaces to the shared address space --
+    /// see [`Self::address_space`]).
+    pub fn namespaces(&self) -> HashMap<u16, String> {
+        self.namespaces.read().clone()
+    }
+
+    /// Refreshes the cached namespace set from the current state of [`Self::address_space`].
+    ///
+    /// [`Self::owns_node`] (and therefore Call/Read/Write/Browse dispatch) checks this cached
+    /// set, not the address space directly, so anything that adds namespaces to the address
+    /// space *after* this node manager was constructed (e.g. importing a companion NodeSet at
+    /// runtime, `crate::companion::import_gds` et al.) must call this afterward, or nodes in the
+    /// newly-added namespace will never be recognized as owned by this node manager.
+    pub fn refresh_namespaces(&self) {
+        let current = self.address_space.read().namespaces();
+        *self.namespaces.write() = current;
     }
 
     #[cfg(feature = "method-call")]
@@ -814,7 +829,7 @@ impl<TImpl: InMemoryNodeManagerImpl> InMemoryNodeManager<TImpl> {
 #[async_trait]
 impl<TImpl: InMemoryNodeManagerImpl> NodeManagerCore for InMemoryNodeManager<TImpl> {
     fn owns_node(&self, id: &NodeId) -> bool {
-        self.namespaces.contains_key(&id.namespace)
+        self.namespaces.read().contains_key(&id.namespace)
     }
 
     fn role_permissions(&self, node_id: &NodeId) -> Option<Vec<RolePermissionType>> {
@@ -968,7 +983,8 @@ impl<TImpl: InMemoryNodeManagerImpl> ViewProvider for InMemoryNodeManager<TImpl>
                     node.set_next_continuation_point(point);
                 }
             } else {
-                Self::browse_node(&address_space, &type_tree, context, node, &self.namespaces);
+                let namespaces = self.namespaces.read();
+                Self::browse_node(&address_space, &type_tree, context, node, &namespaces);
             }
         }
 
@@ -992,12 +1008,13 @@ impl<TImpl: InMemoryNodeManagerImpl> ViewProvider for InMemoryNodeManager<TImpl>
         let address_space = trace_read_lock!(self.address_space);
         let type_tree = trace_read_lock!(context.type_tree);
 
+        let namespaces = self.namespaces.read();
         for node in nodes {
             Self::translate_browse_paths(
                 &address_space,
                 type_tree.deref(),
                 context,
-                &self.namespaces,
+                &namespaces,
                 node,
             );
         }

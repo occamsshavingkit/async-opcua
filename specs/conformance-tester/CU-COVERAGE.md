@@ -33,10 +33,10 @@ independent passes over the codebase, one per subsystem cluster); see the
 | 2786 | Time Sync - NTP | extensible | Satisfiable via user-supplied TimeSyncSource; documented extension point, not implemented in-library (feature 093). |
 | 2808 | Security Role Server Authorization | implemented | Opt-in RBAC enforcement async-opcua-server/src/rbac/decision.rs:46-81; dedicated suite async-opcua/tests/integration/rbac.rs |
 | 2809 | Address Space Atomicity | implemented | AccessLevelExType NonatomicRead/Write async-opcua-nodes/src/variable.rs:62,827-837; unit test variable.rs:990-997 |
-| 2820 | Address Space Full Array Only | partial | WriteFullArrayOnly bit stored/read/written async-opcua-nodes/src/variable.rs:62,831 but never enforced against IndexRange array writes |
+| 2820 | Address Space Full Array Only | implemented | validate_node_write_inner (address_space/write_validation.rs) rejects an IndexRange Write to AttributeId::Value with Bad_WriteNotSupported when AccessLevelExType::WriteFullArrayOnly is set; test write.rs::write_index_range_rejected_when_write_full_array_only |
 | 2837 | UA Binary Encoding | implemented | BinaryEncodable/BinaryDecodable traits async-opcua-types/src/encoding.rs:445-482, pervasive derive use; tests encoding.rs:919 |
 | 2853 | UA Secure Conversation | implemented | SecureChannel/OpenSecureChannel comms/secure_channel.rs:657; tests secure_channel.rs:136-663, integration secure_channel.rs:15 |
-| 2936 | Attribute Write StatusCode & Timestamp | partial | Write stores client status/source_timestamp async-opcua-nodes/src/variable.rs:737-739; no test reads value back post-Write |
+| 2936 | Attribute Write StatusCode & Timestamp | implemented | write_node_value (address_space/utils.rs) threads client status/source_timestamp/server_timestamp through to Variable::set_value_range (fixed a real bug: server_timestamp was hardcoded to now()); test write.rs::write_status_code_and_timestamps_round_trip |
 | 2969 | Base Info ValueAsText | implemented | base_info::create_enum_variable_with_value_as_text/update_enum_value attach a ValueAsText property kept in sync with an enumerated Variable's Value; test base_info.rs::value_as_text_tracks_enumerated_value_changes |
 | 3072 | Attribute Read | implemented | Read applies IndexRange via NumericRange::range_of node_manager/memory/core.rs:1079-1080; tests read.rs:1425,794 |
 | 3073 | View RegisterNodes | implemented | RegisterNodes/UnregisterNodes handler session/services/view.rs:540, memory_mgr_impl.rs:1608; e2e test browse.rs:675 |
@@ -60,7 +60,7 @@ independent passes over the codebase, one per subsystem cluster); see the
 | 3983 | Base Services Diagnostics | implemented | result.rs:17-58 filter_diagnostic_info masks diag bits; wired attribute.rs/node_management.rs; test per_op_diagnostics.rs |
 | 3985 | Session General Service Behaviour | implemented | controller.rs:396 auth-token check, response.rs:207 requestHandle echo, deadline_queue:971-1016 BadTimeout; e2e read.rs:1400-1408 |
 | 4053 | Base Info Locations Object | implemented | Locations object (i=31915, nodeset_16.rs:918-943) confirmed reachable via Browse from ObjectsFolder; test browse.rs::locations_object_is_reachable_from_objects_folder |
-| 4237 | Address Space NonVolatile and Constant | partial | NonVolatile/Constant bits defined enums.rs:15-19, generic get/set variable.rs:826-838; tests only exercise other AccessLevelEx bits |
+| 4237 | Address Space NonVolatile and Constant | implemented | NonVolatile/Constant bits defined enums.rs:15-19, generic get/set variable.rs:826-838; test write.rs::access_level_ex_non_volatile_and_constant_round_trip |
 | 5240 | Base Info Currency | implemented | base_info::create_currency_variable attaches a CurrencyUnit property (CurrencyUnitType) to a monetary DataVariable; test base_info.rs::currency_unit_property_reports_iso4217_fields |
 | 5505 | Time Sync - UA based support | implemented | UaHeaderTimeSyncSource polls ResponseHeader.timestamp (time_sync_ua.rs:52-80), configurable builder.rs:258-262; test time_sync.rs:33 |
 | 5592 | Missing from normalized CU list | source-issue | Referenced by closure but absent from conformance_units. |
@@ -93,10 +93,10 @@ independent passes over the codebase, one per subsystem cluster); see the
 | 2786 | Time Sync - NTP | extensible | Satisfiable via user-supplied TimeSyncSource; documented extension point, not implemented in-library (feature 093). |
 | 2808 | Security Role Server Authorization | implemented | Opt-in RBAC enforcement async-opcua-server/src/rbac/decision.rs:46-81; dedicated suite async-opcua/tests/integration/rbac.rs |
 | 2809 | Address Space Atomicity | implemented | AccessLevelExType NonatomicRead/Write async-opcua-nodes/src/variable.rs:62,827-837; unit test variable.rs:990-997 |
-| 2820 | Address Space Full Array Only | partial | WriteFullArrayOnly bit stored/read/written async-opcua-nodes/src/variable.rs:62,831 but never enforced against IndexRange array writes |
+| 2820 | Address Space Full Array Only | implemented | validate_node_write_inner (address_space/write_validation.rs) rejects an IndexRange Write to AttributeId::Value with Bad_WriteNotSupported when AccessLevelExType::WriteFullArrayOnly is set; test write.rs::write_index_range_rejected_when_write_full_array_only |
 | 2837 | UA Binary Encoding | implemented | BinaryEncodable/BinaryDecodable traits async-opcua-types/src/encoding.rs:445-482, pervasive derive use; tests encoding.rs:919 |
 | 2853 | UA Secure Conversation | implemented | SecureChannel/OpenSecureChannel comms/secure_channel.rs:657; tests secure_channel.rs:136-663, integration secure_channel.rs:15 |
-| 2936 | Attribute Write StatusCode & Timestamp | partial | Write stores client status/source_timestamp async-opcua-nodes/src/variable.rs:737-739; no test reads value back post-Write |
+| 2936 | Attribute Write StatusCode & Timestamp | implemented | write_node_value (address_space/utils.rs) threads client status/source_timestamp/server_timestamp through to Variable::set_value_range (fixed a real bug: server_timestamp was hardcoded to now()); test write.rs::write_status_code_and_timestamps_round_trip |
 | 2963 | Monitor Basic | implemented | create/modify/delete_monitored_items + set_monitoring_mode (session/services/monitored_items.rs:170-573); tested subscriptions.rs. |
 | 2969 | Base Info ValueAsText | implemented | base_info::create_enum_variable_with_value_as_text/update_enum_value attach a ValueAsText property kept in sync with an enumerated Variable's Value; test base_info.rs::value_as_text_tracks_enumerated_value_changes |
 | 3072 | Attribute Read | implemented | Read applies IndexRange via NumericRange::range_of node_manager/memory/core.rs:1079-1080; tests read.rs:1425,794 |
@@ -129,7 +129,7 @@ independent passes over the codebase, one per subsystem cluster); see the
 | 3985 | Session General Service Behaviour | implemented | controller.rs:396 auth-token check, response.rs:207 requestHandle echo, deadline_queue:971-1016 BadTimeout; e2e read.rs:1400-1408 |
 | 4053 | Base Info Locations Object | implemented | Locations object (i=31915, nodeset_16.rs:918-943) confirmed reachable via Browse from ObjectsFolder; test browse.rs::locations_object_is_reachable_from_objects_folder |
 | 4055 | Base Info Server Capabilities MaxMonitoredItemsQueueSize | implemented | core.rs get_attribute wires MaxMonitoredItemsQueueSize to SubscriptionLimits.max_monitored_item_queue_size, the same limit already enforced at monitored_item.rs:314; test read.rs::server_capabilities_max_monitored_items_queue_size_reports_configured_limit |
-| 4237 | Address Space NonVolatile and Constant | partial | NonVolatile/Constant bits defined enums.rs:15-19, generic get/set variable.rs:826-838; tests only exercise other AccessLevelEx bits |
+| 4237 | Address Space NonVolatile and Constant | implemented | NonVolatile/Constant bits defined enums.rs:15-19, generic get/set variable.rs:826-838; test write.rs::access_level_ex_non_volatile_and_constant_round_trip |
 | 5207 | Monitor Items 2 | implemented | No per-subscription item cap below 2 found (server/src/config/limits.rs); 2+ Double items trivially exercised in subscriptions.rs. |
 | 5208 | Monitor Value Change V2 | partial | IndexRange applied to sample monitored_item.rs:931-940 (Variant::range_of); logic tested via read.rs:794-827, no MonitoredItem-level test |
 | 5240 | Base Info Currency | implemented | base_info::create_currency_variable attaches a CurrencyUnit property (CurrencyUnitType) to a monetary DataVariable; test base_info.rs::currency_unit_property_reports_iso4217_fields |
@@ -181,13 +181,13 @@ independent passes over the codebase, one per subsystem cluster); see the
 | 2786 | Time Sync - NTP | extensible | Satisfiable via user-supplied TimeSyncSource; documented extension point, not implemented in-library (feature 093). |
 | 2808 | Security Role Server Authorization | implemented | Opt-in RBAC enforcement async-opcua-server/src/rbac/decision.rs:46-81; dedicated suite async-opcua/tests/integration/rbac.rs |
 | 2809 | Address Space Atomicity | implemented | AccessLevelExType NonatomicRead/Write async-opcua-nodes/src/variable.rs:62,827-837; unit test variable.rs:990-997 |
-| 2820 | Address Space Full Array Only | partial | WriteFullArrayOnly bit stored/read/written async-opcua-nodes/src/variable.rs:62,831 but never enforced against IndexRange array writes |
+| 2820 | Address Space Full Array Only | implemented | validate_node_write_inner (address_space/write_validation.rs) rejects an IndexRange Write to AttributeId::Value with Bad_WriteNotSupported when AccessLevelExType::WriteFullArrayOnly is set; test write.rs::write_index_range_rejected_when_write_full_array_only |
 | 2823 | Security Invalid user token | partial | Fixed 100ms tarpit on every auth failure (session/negotiate.rs:16,28-40; tested security_tests.rs:2429); no escalating lockout. |
 | 2837 | UA Binary Encoding | implemented | BinaryEncodable/BinaryDecodable traits async-opcua-types/src/encoding.rs:445-482, pervasive derive use; tests encoding.rs:919 |
 | 2853 | UA Secure Conversation | implemented | SecureChannel/OpenSecureChannel comms/secure_channel.rs:657; tests secure_channel.rs:136-663, integration secure_channel.rs:15 |
 | 2863 | Security Policy Required | implemented | Modern policies default-on, legacy Basic128Rsa15/Basic256 opt-in behind legacy-crypto feature builder.rs:142-166; matrix test |
 | 2928 | Monitored Items Deadband Filter | implemented | Absolute DataChangeFilter deadband subscriptions/monitored_item/filters.rs:128-137; unit test filters.rs:175 |
-| 2936 | Attribute Write StatusCode & Timestamp | partial | Write stores client status/source_timestamp async-opcua-nodes/src/variable.rs:737-739; no test reads value back post-Write |
+| 2936 | Attribute Write StatusCode & Timestamp | implemented | write_node_value (address_space/utils.rs) threads client status/source_timestamp/server_timestamp through to Variable::set_value_range (fixed a real bug: server_timestamp was hardcoded to now()); test write.rs::write_status_code_and_timestamps_round_trip |
 | 2940 | Base Info GetMonitoredItems Method | implemented | GetMonitoredItems method node_manager/memory/core.rs:1195-1207; test methods.rs:291-332 call_get_monitored_items |
 | 2963 | Monitor Basic | implemented | create/modify/delete_monitored_items + set_monitoring_mode (session/services/monitored_items.rs:170-573); tested subscriptions.rs. |
 | 2969 | Base Info ValueAsText | implemented | base_info::create_enum_variable_with_value_as_text/update_enum_value attach a ValueAsText property kept in sync with an enumerated Variable's Value; test base_info.rs::value_as_text_tracks_enumerated_value_changes |
@@ -254,7 +254,7 @@ independent passes over the codebase, one per subsystem cluster); see the
 | 4053 | Base Info Locations Object | implemented | Locations object (i=31915, nodeset_16.rs:918-943) confirmed reachable via Browse from ObjectsFolder; test browse.rs::locations_object_is_reachable_from_objects_folder |
 | 4054 | Base Info Handle DataType | implemented | Handle DataType present in schemas/1.05/Opc.Ua.NodeSet2.xml; exposed via CoreNamespace import. |
 | 4055 | Base Info Server Capabilities MaxMonitoredItemsQueueSize | implemented | core.rs get_attribute wires MaxMonitoredItemsQueueSize to SubscriptionLimits.max_monitored_item_queue_size, the same limit already enforced at monitored_item.rs:314; test read.rs::server_capabilities_max_monitored_items_queue_size_reports_configured_limit |
-| 4237 | Address Space NonVolatile and Constant | partial | NonVolatile/Constant bits defined enums.rs:15-19, generic get/set variable.rs:826-838; tests only exercise other AccessLevelEx bits |
+| 4237 | Address Space NonVolatile and Constant | implemented | NonVolatile/Constant bits defined enums.rs:15-19, generic get/set variable.rs:826-838; test write.rs::access_level_ex_non_volatile_and_constant_round_trip |
 | 4426 | Base Info Decimal DataType | implemented | Decimal in nodeset + generated types/decimal_data_type.rs; encoded generically as a Structure DataType. |
 | 5207 | Monitor Items 2 | implemented | No per-subscription item cap below 2 found (server/src/config/limits.rs); 2+ Double items trivially exercised in subscriptions.rs. |
 | 5208 | Monitor Value Change V2 | partial | IndexRange applied to sample monitored_item.rs:931-940 (Variant::range_of); logic tested via read.rs:794-827, no MonitoredItem-level test |
@@ -311,13 +311,13 @@ independent passes over the codebase, one per subsystem cluster); see the
 | 2786 | Time Sync - NTP | extensible | Satisfiable via user-supplied TimeSyncSource; documented extension point, not implemented in-library (feature 093). |
 | 2808 | Security Role Server Authorization | implemented | Opt-in RBAC enforcement async-opcua-server/src/rbac/decision.rs:46-81; dedicated suite async-opcua/tests/integration/rbac.rs |
 | 2809 | Address Space Atomicity | implemented | AccessLevelExType NonatomicRead/Write async-opcua-nodes/src/variable.rs:62,827-837; unit test variable.rs:990-997 |
-| 2820 | Address Space Full Array Only | partial | WriteFullArrayOnly bit stored/read/written async-opcua-nodes/src/variable.rs:62,831 but never enforced against IndexRange array writes |
+| 2820 | Address Space Full Array Only | implemented | validate_node_write_inner (address_space/write_validation.rs) rejects an IndexRange Write to AttributeId::Value with Bad_WriteNotSupported when AccessLevelExType::WriteFullArrayOnly is set; test write.rs::write_index_range_rejected_when_write_full_array_only |
 | 2823 | Security Invalid user token | partial | Fixed 100ms tarpit on every auth failure (session/negotiate.rs:16,28-40; tested security_tests.rs:2429); no escalating lockout. |
 | 2837 | UA Binary Encoding | implemented | BinaryEncodable/BinaryDecodable traits async-opcua-types/src/encoding.rs:445-482, pervasive derive use; tests encoding.rs:919 |
 | 2853 | UA Secure Conversation | implemented | SecureChannel/OpenSecureChannel comms/secure_channel.rs:657; tests secure_channel.rs:136-663, integration secure_channel.rs:15 |
 | 2863 | Security Policy Required | implemented | Modern policies default-on, legacy Basic128Rsa15/Basic256 opt-in behind legacy-crypto feature builder.rs:142-166; matrix test |
 | 2928 | Monitored Items Deadband Filter | implemented | Absolute DataChangeFilter deadband subscriptions/monitored_item/filters.rs:128-137; unit test filters.rs:175 |
-| 2936 | Attribute Write StatusCode & Timestamp | partial | Write stores client status/source_timestamp async-opcua-nodes/src/variable.rs:737-739; no test reads value back post-Write |
+| 2936 | Attribute Write StatusCode & Timestamp | implemented | write_node_value (address_space/utils.rs) threads client status/source_timestamp/server_timestamp through to Variable::set_value_range (fixed a real bug: server_timestamp was hardcoded to now()); test write.rs::write_status_code_and_timestamps_round_trip |
 | 2940 | Base Info GetMonitoredItems Method | implemented | GetMonitoredItems method node_manager/memory/core.rs:1195-1207; test methods.rs:291-332 call_get_monitored_items |
 | 2963 | Monitor Basic | implemented | create/modify/delete_monitored_items + set_monitoring_mode (session/services/monitored_items.rs:170-573); tested subscriptions.rs. |
 | 2969 | Base Info ValueAsText | implemented | base_info::create_enum_variable_with_value_as_text/update_enum_value attach a ValueAsText property kept in sync with an enumerated Variable's Value; test base_info.rs::value_as_text_tracks_enumerated_value_changes |
@@ -386,7 +386,7 @@ independent passes over the codebase, one per subsystem cluster); see the
 | 4053 | Base Info Locations Object | implemented | Locations object (i=31915, nodeset_16.rs:918-943) confirmed reachable via Browse from ObjectsFolder; test browse.rs::locations_object_is_reachable_from_objects_folder |
 | 4054 | Base Info Handle DataType | implemented | Handle DataType present in schemas/1.05/Opc.Ua.NodeSet2.xml; exposed via CoreNamespace import. |
 | 4055 | Base Info Server Capabilities MaxMonitoredItemsQueueSize | implemented | core.rs get_attribute wires MaxMonitoredItemsQueueSize to SubscriptionLimits.max_monitored_item_queue_size, the same limit already enforced at monitored_item.rs:314; test read.rs::server_capabilities_max_monitored_items_queue_size_reports_configured_limit |
-| 4237 | Address Space NonVolatile and Constant | partial | NonVolatile/Constant bits defined enums.rs:15-19, generic get/set variable.rs:826-838; tests only exercise other AccessLevelEx bits |
+| 4237 | Address Space NonVolatile and Constant | implemented | NonVolatile/Constant bits defined enums.rs:15-19, generic get/set variable.rs:826-838; test write.rs::access_level_ex_non_volatile_and_constant_round_trip |
 | 4426 | Base Info Decimal DataType | implemented | Decimal in nodeset + generated types/decimal_data_type.rs; encoded generically as a Structure DataType. |
 | 5207 | Monitor Items 2 | implemented | No per-subscription item cap below 2 found (server/src/config/limits.rs); 2+ Double items trivially exercised in subscriptions.rs. |
 | 5208 | Monitor Value Change V2 | partial | IndexRange applied to sample monitored_item.rs:931-940 (Variant::range_of); logic tested via read.rs:794-827, no MonitoredItem-level test |
@@ -436,8 +436,8 @@ One row per facet not already covered by the four canonical profiles above. Coun
 | Exposes Type System Server Facet | 1219 | 46 | 45 | 1 | 0 | 0 | 0 | 0 |
 | File Access Server Facet | 1348 | 3 | 0 | 2 | 1 | 0 | 0 | 0 |
 | Global Certificate Management Server Facet | 1631 | 1 | 0 | 1 | 0 | 0 | 0 | 0 |
-| Global Discovery Server 2022 Profile | 1343 | 69 | 56 | 6 | 3 | 0 | 3 | 1 |
-| Global Discovery and Certificate Mgmt 2022 Server | 1344 | 94 | 64 | 15 | 11 | 0 | 3 | 1 |
+| Global Discovery Server 2022 Profile | 1343 | 69 | 59 | 3 | 3 | 0 | 3 | 1 |
+| Global Discovery and Certificate Mgmt 2022 Server | 1344 | 94 | 67 | 12 | 11 | 0 | 3 | 1 |
 | Global Service Authorization Request Server Facet | 1026 | 1 | 0 | 0 | 1 | 0 | 0 | 0 |
 | Global Service KeyCredential Pull Facet | 1027 | 1 | 0 | 0 | 1 | 0 | 0 | 0 |
 | Historical Access Modified Data 2022 Server Facet | 1709 | 4 | 4 | 0 | 0 | 0 | 0 | 0 |
@@ -627,7 +627,7 @@ One row per facet not already covered by the four canonical profiles above. Coun
 | 2814 | Base Info Finite State Machine Instance | partial | ProgramStateMachine/ShelvingStateMachine real instances w/ tests, but AvailableStates/AvailableTransitions not populated. |
 | 2817 | Security User JWT Token Policy | gap | UserTokenPolicy.issuer_endpoint_url hardcoded UAString::null() (authenticator.rs:327,341,353; session/manager.rs:2742) — never set. |
 | 2818 | Monitor Complex Value | partial | Monitored-item sampling reuses Read's Variant pipeline (subscriptions/mod.rs:1230) but no test monitors a structured value. |
-| 2820 | Address Space Full Array Only | partial | WriteFullArrayOnly bit stored/read/written async-opcua-nodes/src/variable.rs:62,831 but never enforced against IndexRange array writes |
+| 2820 | Address Space Full Array Only | implemented | validate_node_write_inner (address_space/write_validation.rs) rejects an IndexRange Write to AttributeId::Value with Bad_WriteNotSupported when AccessLevelExType::WriteFullArrayOnly is set; test write.rs::write_index_range_rejected_when_write_full_array_only |
 | 2822 | Base Info Device Failure | gap | DeviceFailureEventType only structural (nodeset_19.rs); no server code constructs/fires it (grep across async-opcua-server/src empty) |
 | 2823 | Security Invalid user token | partial | Fixed 100ms tarpit on every auth failure (session/negotiate.rs:16,28-40; tested security_tests.rs:2429); no escalating lockout. |
 | 2831 | Data Access MultiStateValueDiscrete | gap | Searched 'MultiStateValueDiscreteType' - zero instance usage in server/samples/tests. |
@@ -652,7 +652,7 @@ One row per facet not already covered by the four canonical profiles above. Coun
 | 2927 | A & C Acknowledge | implemented | handle_ack_method methods.rs:65-150 + AcknowledgeableConditionType_Acknowledge registered methods.rs:654-658; tested alarms.rs:64,706 |
 | 2928 | Monitored Items Deadband Filter | implemented | Absolute DataChangeFilter deadband subscriptions/monitored_item/filters.rs:128-137; unit test filters.rs:175 |
 | 2929 | Historical Access Modified Values | implemented | data_history.rs:79-120 read_modified_values + record_modified (raw data); tests history_data_inmemory.rs:285 replace_is_readable_as_modified_replace, :303 deletes_are_readable_as_modified_delete, :331 never_modified_value_has_no_modified_entry |
-| 2936 | Attribute Write StatusCode & Timestamp | partial | Write stores client status/source_timestamp async-opcua-nodes/src/variable.rs:737-739; no test reads value back post-Write |
+| 2936 | Attribute Write StatusCode & Timestamp | implemented | write_node_value (address_space/utils.rs) threads client status/source_timestamp/server_timestamp through to Variable::set_value_range (fixed a real bug: server_timestamp was hardcoded to now()); test write.rs::write_status_code_and_timestamps_round_trip |
 | 2937 | Historical Access Structured Data Update | gap | update_structure_data (data_history.rs:290-355) rejects non-Annotation values at line 306 (BadTypeMismatch); same restriction in sqlite backend.rs:1030 — no generic structured-data update |
 | 2939 | Node Management Add Ref | implemented | add_references_impl (memory_mgr_impl.rs:414); tested memory_mgr_impl.rs:2453 (mismatch rejection). |
 | 2940 | Base Info GetMonitoredItems Method | implemented | GetMonitoredItems method node_manager/memory/core.rs:1195-1207; test methods.rs:291-332 call_get_monitored_items |
@@ -871,7 +871,7 @@ One row per facet not already covered by the four canonical profiles above. Coun
 | 4053 | Base Info Locations Object | implemented | Locations object (i=31915, nodeset_16.rs:918-943) confirmed reachable via Browse from ObjectsFolder; test browse.rs::locations_object_is_reachable_from_objects_folder |
 | 4054 | Base Info Handle DataType | implemented | Handle DataType present in schemas/1.05/Opc.Ua.NodeSet2.xml; exposed via CoreNamespace import. |
 | 4055 | Base Info Server Capabilities MaxMonitoredItemsQueueSize | implemented | core.rs get_attribute wires MaxMonitoredItemsQueueSize to SubscriptionLimits.max_monitored_item_queue_size, the same limit already enforced at monitored_item.rs:314; test read.rs::server_capabilities_max_monitored_items_queue_size_reports_configured_limit |
-| 4237 | Address Space NonVolatile and Constant | partial | NonVolatile/Constant bits defined enums.rs:15-19, generic get/set variable.rs:826-838; tests only exercise other AccessLevelEx bits |
+| 4237 | Address Space NonVolatile and Constant | implemented | NonVolatile/Constant bits defined enums.rs:15-19, generic get/set variable.rs:826-838; test write.rs::access_level_ex_non_volatile_and_constant_round_trip |
 | 4426 | Base Info Decimal DataType | implemented | Decimal in nodeset + generated types/decimal_data_type.rs; encoded generically as a Structure DataType. |
 | 4427 | Base Info Client Events | gap | AuditClientEventType only a generated stub (node_ids.rs:10730, events/generated.rs:148); server-as-client code never raises it |
 | 4428 | A & C Silencing Auditing | implemented | AuditConditionSilenceEventType emitted for Silence (methods.rs handle_condition_silence); test alarms.rs::silence_emits_audit_condition_silence_event |

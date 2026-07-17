@@ -28,7 +28,10 @@ use opcua::{
 };
 use opcua_core::{trace_read_lock, trace_write_lock};
 use opcua_nodes::{DefaultTypeTree, TypeTree, TypeTreeNode};
-use opcua_server::{address_space::add_namespaces, diagnostics::NamespaceMetadata};
+use opcua_server::{
+    address_space::{add_namespaces, write_node_value},
+    diagnostics::NamespaceMetadata,
+};
 use opcua_types::DataEncoding;
 
 #[allow(unused)]
@@ -340,39 +343,30 @@ impl InMemoryNodeManagerImpl for TestNodeManagerImpl {
                     }
                 };
 
-            if matches!(write.value().attribute_id, AttributeId::Value)
-                && node.node_class() == NodeClass::Variable
-            {
-                let NodeType::Variable(ref mut var) = *node else {
-                    write.set_status(StatusCode::BadAttributeIdInvalid);
-                    continue;
-                };
-                if let Err(e) = var.set_value(
-                    &write.value().index_range,
-                    write.value().value.value.clone().unwrap_or(Variant::Empty),
-                ) {
-                    write.set_status(e);
-                    continue;
-                }
-
-                if var.historizing() {
-                    let mut history_data = trace_write_lock!(self.history_data);
-                    let values = history_data
-                        .entry(write.value().node_id.clone())
-                        .or_default();
-                    values.values.push(var.value(
-                        TimestampsToReturn::Both,
-                        &opcua::types::NumericRange::None,
-                        &DataEncoding::Binary,
-                        0.0,
-                    ));
-                }
-            } else if let Err(e) = node.as_mut_node().set_attribute(
-                write.value().attribute_id,
-                write.value().value.value.clone().unwrap_or(Variant::Empty),
-            ) {
+            // Route through the same write_node_value() the production
+            // SimpleNodeManagerImpl uses, so the client's StatusCode and
+            // Source/Server Timestamps (Part 4 §5.11.4 Table 53) are honored
+            // instead of being silently replaced with Good/now.
+            if let Err(e) = write_node_value(&context.info, &mut node, write.value()) {
                 write.set_status(e);
                 continue;
+            }
+
+            if write.value().attribute_id == AttributeId::Value {
+                if let NodeType::Variable(ref var) = *node {
+                    if var.historizing() {
+                        let mut history_data = trace_write_lock!(self.history_data);
+                        let values = history_data
+                            .entry(write.value().node_id.clone())
+                            .or_default();
+                        values.values.push(var.value(
+                            TimestampsToReturn::Both,
+                            &opcua::types::NumericRange::None,
+                            &DataEncoding::Binary,
+                            0.0,
+                        ));
+                    }
+                }
             }
 
             write.set_status(StatusCode::Good);

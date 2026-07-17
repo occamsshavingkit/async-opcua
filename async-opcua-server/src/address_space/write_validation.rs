@@ -3,9 +3,9 @@ use std::collections::HashSet;
 use crate::node_manager::{ParsedWriteValue, RequestContext};
 use opcua_nodes::{NodeBase, TypeTree};
 use opcua_types::{
-    AttributeId, BrowseDirection, DataEncoding, DataTypeDefinition, DataTypeId, NodeId,
-    NumericRange, QualifiedName, Range, ReferenceTypeId, StatusCode, TimestampsToReturn, Variant,
-    VariantScalarTypeId, VariantTypeId,
+    AccessLevelExType, AttributeId, BrowseDirection, DataEncoding, DataTypeDefinition, DataTypeId,
+    NodeId, NumericRange, QualifiedName, Range, ReferenceTypeId, StatusCode, TimestampsToReturn,
+    Variant, VariantScalarTypeId, VariantTypeId,
 };
 
 use super::{
@@ -223,6 +223,15 @@ fn validate_node_write_inner(
         match node {
             NodeType::Variable(var) => {
                 let has_index_range = node_to_write.index_range.has_range();
+                // Part 3 §8.58 Table 42: WriteFullArrayOnly=1 means Write of
+                // IndexRange is NOT supported. Part 4 §5.11.4 Table 53: a Server
+                // shall return Bad_WriteNotSupported in that case.
+                if has_index_range
+                    && var.access_level_ex() & AccessLevelExType::WriteFullArrayOnly.bits() as u32
+                        != 0
+                {
+                    return Err(StatusCode::BadWriteNotSupported);
+                }
                 if let Some(address_space) = address_space {
                     if !validate_modeled_enum_value_to_write(
                         address_space,

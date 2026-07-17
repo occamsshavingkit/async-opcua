@@ -6,8 +6,9 @@ use crate::{
 };
 use dashmap::DashMap;
 use opcua_types::{
-    AttributeId, DataEncoding, DataValue, DateTime, LocalizedText, NodeId, NumericRange,
-    PermissionType, RolePermissionType, StatusCode, TimestampsToReturn, Variant, WriteMask,
+    AttributeId, DataEncoding, DataTypeId, DataValue, DateTime, LocalizedText, NodeId,
+    NumericRange, PermissionType, RolePermissionType, StatusCode, TimestampsToReturn, Variant,
+    WriteMask,
 };
 use tracing::debug;
 
@@ -478,11 +479,27 @@ pub fn write_node_value(
     let now = DateTime::now();
     if node_to_write.attribute_id == AttributeId::Value {
         if let NodeType::Variable(variable) = node {
+            let mut value = node_to_write.value.value.clone().unwrap_or_default();
+            // Part 4 §5.11.4 Table 53: "A ByteString is structurally the same as
+            // a one dimensional array of Byte. A Server shall accept a
+            // ByteString if an array of Byte is expected."
+            if matches!(variable.value_rank(), -3 | -2 | 1)
+                && variable.data_type() == DataTypeId::Byte
+            {
+                if let Variant::ByteString(_) = value {
+                    value = value
+                        .to_byte_array()
+                        .map_err(|_| StatusCode::BadUnexpectedError)?;
+                }
+            }
             return variable.set_value_range(
-                node_to_write.value.value.clone().unwrap_or_default(),
+                value,
                 &node_to_write.index_range,
                 node_to_write.value.status.unwrap_or_default(),
-                &now,
+                // Part 4 §5.11.4 Table 53: "If the SourceTimestamp or the
+                // ServerTimestamp is specified, the Server shall use these
+                // values."
+                &node_to_write.value.server_timestamp.unwrap_or(now),
                 &node_to_write.value.source_timestamp.unwrap_or(now),
             );
         }

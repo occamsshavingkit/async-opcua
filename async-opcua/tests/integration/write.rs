@@ -9,10 +9,10 @@ use opcua::{
         ObjectTypeBuilder, ReferenceTypeBuilder, VariableBuilder, VariableTypeBuilder, ViewBuilder,
     },
     types::{
-        AttributeId, ByteString, DataTypeId, DataValue, DateTime, HistoryData, HistoryReadValueId,
-        LocalizedText, NodeId, ObjectId, ObjectTypeId, QualifiedName, ReadRawModifiedDetails,
-        ReferenceTypeId, StatusCode, TimestampsToReturn, UpdateDataDetails, VariableTypeId,
-        Variant, WriteMask, WriteValue,
+        AccessLevelExType, AttributeId, ByteString, DataTypeId, DataValue, DateTime, HistoryData,
+        HistoryReadValueId, LocalizedText, NodeId, ObjectId, ObjectTypeId, QualifiedName,
+        ReadRawModifiedDetails, ReferenceTypeId, StatusCode, TimestampsToReturn, UpdateDataDetails,
+        VariableTypeId, Variant, WriteMask, WriteValue,
     },
 };
 use opcua_types::NumericRange;
@@ -760,6 +760,216 @@ async fn write_index_range() {
         bytes[i] = (i - 3) as u8;
     }
     assert_eq!(val.value.unwrap(), bytes.into());
+}
+
+// CU 2820: Part 3 §8.58 Table 42 — WriteFullArrayOnly=1 means Write of
+// IndexRange is NOT supported for that Variable. Part 4 §5.11.4 Table 53 — a
+// Server shall return Bad_WriteNotSupported in that case.
+#[tokio::test]
+async fn write_index_range_rejected_when_write_full_array_only() {
+    let (tester, nm, session) = setup().await;
+
+    let full_array_only_id = nm.inner().next_node_id();
+    let normal_id = nm.inner().next_node_id();
+
+    nm.inner().add_node(
+        nm.address_space(),
+        tester.handle.type_tree(),
+        VariableBuilder::new(&full_array_only_id, "FullArrayOnlyVar", "FullArrayOnlyVar")
+            .value(vec![0u8; 4])
+            .data_type(DataTypeId::Byte)
+            .value_rank(1)
+            .access_level(AccessLevel::CURRENT_READ | AccessLevel::CURRENT_WRITE)
+            .user_access_level(AccessLevel::CURRENT_READ | AccessLevel::CURRENT_WRITE)
+            .access_level_ex(AccessLevelExType::WriteFullArrayOnly)
+            .build()
+            .into(),
+        &ObjectId::ObjectsFolder.into(),
+        &ReferenceTypeId::Organizes.into(),
+        Some(&VariableTypeId::BaseDataVariableType.into()),
+        Vec::new(),
+    );
+    nm.inner().add_node(
+        nm.address_space(),
+        tester.handle.type_tree(),
+        VariableBuilder::new(&normal_id, "NormalArrayVar", "NormalArrayVar")
+            .value(vec![0u8; 4])
+            .data_type(DataTypeId::Byte)
+            .value_rank(1)
+            .access_level(AccessLevel::CURRENT_READ | AccessLevel::CURRENT_WRITE)
+            .user_access_level(AccessLevel::CURRENT_READ | AccessLevel::CURRENT_WRITE)
+            .build()
+            .into(),
+        &ObjectId::ObjectsFolder.into(),
+        &ReferenceTypeId::Organizes.into(),
+        Some(&VariableTypeId::BaseDataVariableType.into()),
+        Vec::new(),
+    );
+
+    // An IndexRange Write to the WriteFullArrayOnly Variable is rejected...
+    let r = session
+        .write(&[WriteValue {
+            node_id: full_array_only_id.clone(),
+            attribute_id: AttributeId::Value as u32,
+            index_range: NumericRange::Index(1),
+            value: DataValue::new_now(vec![9u8]),
+        }])
+        .await
+        .unwrap();
+    assert_eq!(r[0], StatusCode::BadWriteNotSupported);
+
+    // ...and the stored value is unchanged.
+    let read = session
+        .read(
+            &[read_value_id(AttributeId::Value, &full_array_only_id)],
+            TimestampsToReturn::Both,
+            0.0,
+        )
+        .await
+        .unwrap();
+    assert_eq!(read[0].value, Some(vec![0u8; 4].into()));
+
+    // A full-array (no IndexRange) Write to the same Variable still succeeds.
+    let r = session
+        .write(&[WriteValue {
+            node_id: full_array_only_id.clone(),
+            attribute_id: AttributeId::Value as u32,
+            index_range: NumericRange::None,
+            value: DataValue::new_now(vec![1u8, 2, 3, 4]),
+        }])
+        .await
+        .unwrap();
+    assert_eq!(r[0], StatusCode::Good);
+    let read = session
+        .read(
+            &[read_value_id(AttributeId::Value, &full_array_only_id)],
+            TimestampsToReturn::Both,
+            0.0,
+        )
+        .await
+        .unwrap();
+    assert_eq!(read[0].value, Some(vec![1u8, 2, 3, 4].into()));
+
+    // A Variable WITHOUT WriteFullArrayOnly still accepts IndexRange Writes
+    // (regression guard for CU 3147's existing IndexRange write support).
+    let r = session
+        .write(&[WriteValue {
+            node_id: normal_id.clone(),
+            attribute_id: AttributeId::Value as u32,
+            index_range: NumericRange::Index(1),
+            value: DataValue::new_now(vec![9u8]),
+        }])
+        .await
+        .unwrap();
+    assert_eq!(r[0], StatusCode::Good);
+}
+
+// CU 2936: Part 4 §5.11.4 Table 53 — "If the SourceTimestamp or the
+// ServerTimestamp is specified, the Server shall use these values." Proves a
+// non-Good client StatusCode plus explicit, distinct timestamps round-trip
+// through Write then Read (not just the value payload).
+#[tokio::test]
+async fn write_status_code_and_timestamps_round_trip() {
+    let (tester, nm, session) = setup().await;
+
+    let id = nm.inner().next_node_id();
+    nm.inner().add_node(
+        nm.address_space(),
+        tester.handle.type_tree(),
+        VariableBuilder::new(&id, "StatusTimestampVar", "StatusTimestampVar")
+            .value(0i32)
+            .data_type(DataTypeId::Int32)
+            .access_level(AccessLevel::CURRENT_READ | AccessLevel::CURRENT_WRITE)
+            .user_access_level(AccessLevel::CURRENT_READ | AccessLevel::CURRENT_WRITE)
+            .build()
+            .into(),
+        &ObjectId::ObjectsFolder.into(),
+        &ReferenceTypeId::Organizes.into(),
+        Some(&VariableTypeId::BaseDataVariableType.into()),
+        Vec::new(),
+    );
+
+    let source_timestamp = DateTime::now() - TimeDelta::try_seconds(120).unwrap();
+    let server_timestamp = DateTime::now() - TimeDelta::try_seconds(60).unwrap();
+
+    let r = session
+        .write(&[WriteValue {
+            node_id: id.clone(),
+            attribute_id: AttributeId::Value as u32,
+            index_range: NumericRange::None,
+            value: DataValue {
+                value: Some(42i32.into()),
+                status: Some(StatusCode::Uncertain),
+                source_timestamp: Some(source_timestamp),
+                server_timestamp: Some(server_timestamp),
+                ..Default::default()
+            },
+        }])
+        .await
+        .unwrap();
+    assert_eq!(r[0], StatusCode::Good);
+
+    let read = session
+        .read(
+            &[read_value_id(AttributeId::Value, &id)],
+            TimestampsToReturn::Both,
+            0.0,
+        )
+        .await
+        .unwrap();
+    assert_eq!(read[0].value, Some(42i32.into()));
+    assert_eq!(read[0].status, Some(StatusCode::Uncertain));
+    assert_eq!(read[0].source_timestamp, Some(source_timestamp));
+    assert_eq!(read[0].server_timestamp, Some(server_timestamp));
+}
+
+// CU 4237: Part 3 §8.58 Table 42 — NonVolatile (bit 12) and Constant (bit 13)
+// on AccessLevelEx. The generic AccessLevelEx bitmask plumbing already
+// handles arbitrary bits; this proves it for this specific pair.
+#[tokio::test]
+async fn access_level_ex_non_volatile_and_constant_round_trip() {
+    let (tester, nm, session) = setup().await;
+
+    let id = nm.inner().next_node_id();
+    nm.inner().add_node(
+        nm.address_space(),
+        tester.handle.type_tree(),
+        VariableBuilder::new(&id, "NonVolatileConstantVar", "NonVolatileConstantVar")
+            .value(1i32)
+            .data_type(DataTypeId::Int32)
+            .access_level(AccessLevel::CURRENT_READ)
+            .user_access_level(AccessLevel::CURRENT_READ)
+            .access_level_ex(AccessLevelExType::NonVolatile | AccessLevelExType::Constant)
+            .build()
+            .into(),
+        &ObjectId::ObjectsFolder.into(),
+        &ReferenceTypeId::Organizes.into(),
+        Some(&VariableTypeId::BaseDataVariableType.into()),
+        Vec::new(),
+    );
+
+    let read = session
+        .read(
+            &[read_value_id(AttributeId::AccessLevelEx, &id)],
+            TimestampsToReturn::Both,
+            0.0,
+        )
+        .await
+        .unwrap();
+    let Some(Variant::UInt32(access_level_ex)) = read[0].value else {
+        panic!(
+            "expected UInt32 AccessLevelEx value, got {:?}",
+            read[0].value
+        );
+    };
+    assert_ne!(
+        0,
+        access_level_ex & AccessLevelExType::NonVolatile.bits() as u32
+    );
+    assert_ne!(
+        0,
+        access_level_ex & AccessLevelExType::Constant.bits() as u32
+    );
 }
 
 #[tokio::test]

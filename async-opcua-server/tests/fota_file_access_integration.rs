@@ -89,7 +89,13 @@ async fn client_writes_and_reads_back_real_file_content() {
     let read_id = file_node.read_id.clone();
     let write_id = file_node.write_id.clone();
 
-    register_file_access_methods(&node_manager, &file_node, backing_path, 64 * 1024);
+    register_file_access_methods(
+        &node_manager,
+        &file_node,
+        backing_path.clone(),
+        64 * 1024,
+        true,
+    );
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -165,6 +171,14 @@ async fn client_writes_and_reads_back_real_file_content() {
         .await
         .unwrap();
     assert_eq!(result.status_code, StatusCode::Good, "Close should succeed");
+
+    // Independently verify the bytes actually landed on disk -- not just that a subsequent Read
+    // through the same handler reports them, which could pass even without real file-backed I/O.
+    assert_eq!(
+        std::fs::read(&backing_path).expect("backing file should exist after Write"),
+        payload,
+        "Write should persist real bytes to the backing file on disk"
+    );
 
     // Open for read, read the whole file back, close, and diff the bytes.
     let read_mode = 1u8; // Read

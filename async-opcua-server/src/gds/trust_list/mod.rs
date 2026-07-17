@@ -428,7 +428,7 @@ impl TrustListMethodHandler {
         let target = find_cert_by_thumbprint(&store, &thumbprint, is_trusted_certificate)
             .ok_or(StatusCode::BadInvalidArgument)?;
 
-        if is_cert_still_needed(&store, &target, &thumbprint) {
+        if is_cert_still_needed(&store, &target) {
             return Err(StatusCode::BadCertificateChainIncomplete);
         }
 
@@ -453,18 +453,34 @@ pub(super) fn apply_trust_list_update(
     store: &CertificateStore,
     trust_list: &TrustListDataType,
 ) -> Result<(), String> {
-    let specified = trust_list.specified_lists;
-    if specified & masks::TRUSTED_CERTIFICATES != 0 {
-        store.replace_trusted_certs(&byte_strings_to_der(&trust_list.trusted_certificates))?;
-    }
-    if specified & masks::ISSUER_CERTIFICATES != 0 {
-        store.replace_issuer_certs(&byte_strings_to_der(&trust_list.issuer_certificates))?;
-    }
-    if specified & masks::TRUSTED_CRLS != 0 {
-        store.replace_trusted_crls(&byte_strings_to_der(&trust_list.trusted_crls))?;
-    }
-    if specified & masks::ISSUER_CRLS != 0 {
-        store.replace_issuer_crls(&byte_strings_to_der(&trust_list.issuer_crls))?;
+    type ReplaceFn = fn(&CertificateStore, &[Vec<u8>]) -> Result<(), String>;
+    let mask = trust_list.specified_lists;
+    let lists: [(u32, &Option<Vec<ByteString>>, ReplaceFn); 4] = [
+        (
+            masks::TRUSTED_CERTIFICATES,
+            &trust_list.trusted_certificates,
+            CertificateStore::replace_trusted_certs,
+        ),
+        (
+            masks::ISSUER_CERTIFICATES,
+            &trust_list.issuer_certificates,
+            CertificateStore::replace_issuer_certs,
+        ),
+        (
+            masks::TRUSTED_CRLS,
+            &trust_list.trusted_crls,
+            CertificateStore::replace_trusted_crls,
+        ),
+        (
+            masks::ISSUER_CRLS,
+            &trust_list.issuer_crls,
+            CertificateStore::replace_issuer_crls,
+        ),
+    ];
+    for (bit, field, replace) in lists {
+        if mask & bit != 0 {
+            replace(store, &byte_strings_to_der(field))?;
+        }
     }
     Ok(())
 }
@@ -480,49 +496,54 @@ fn byte_strings_to_der(list: &Option<Vec<ByteString>>) -> Vec<Vec<u8>> {
         .unwrap_or_default()
 }
 
-fn build_trust_list_data(store: &CertificateStore, masks: u32) -> TrustListDataType {
+/// Populates `*target` with `ders()`'s output (as `ByteString`s) if `bit` is set in `mask`;
+/// `ders` is a thunk so an unset bit skips the (potentially file-reading) collection entirely.
+fn set_der_list(
+    target: &mut Option<Vec<ByteString>>,
+    mask: u32,
+    bit: u32,
+    ders: impl FnOnce() -> Vec<Vec<u8>>,
+) {
+    if mask & bit != 0 {
+        *target = Some(ders().into_iter().map(ByteString::from).collect());
+    }
+}
+
+fn build_trust_list_data(store: &CertificateStore, mask: u32) -> TrustListDataType {
     let mut data = TrustListDataType {
-        specified_lists: masks,
+        specified_lists: mask,
         ..Default::default()
     };
-    if masks & masks::TRUSTED_CERTIFICATES != 0 {
-        data.trusted_certificates = Some(
+    set_der_list(
+        &mut data.trusted_certificates,
+        mask,
+        masks::TRUSTED_CERTIFICATES,
+        || {
             store
                 .read_trusted_certs()
                 .iter()
                 .filter_map(|c| c.to_der().ok())
-                .map(ByteString::from)
-                .collect(),
-        );
-    }
-    if masks & masks::TRUSTED_CRLS != 0 {
-        data.trusted_crls = Some(
-            store
-                .read_trusted_crls_der()
-                .into_iter()
-                .map(ByteString::from)
-                .collect(),
-        );
-    }
-    if masks & masks::ISSUER_CERTIFICATES != 0 {
-        data.issuer_certificates = Some(
+                .collect()
+        },
+    );
+    set_der_list(&mut data.trusted_crls, mask, masks::TRUSTED_CRLS, || {
+        store.read_trusted_crls_der()
+    });
+    set_der_list(
+        &mut data.issuer_certificates,
+        mask,
+        masks::ISSUER_CERTIFICATES,
+        || {
             store
                 .read_issuer_certs()
                 .iter()
                 .filter_map(|c| c.to_der().ok())
-                .map(ByteString::from)
-                .collect(),
-        );
-    }
-    if masks & masks::ISSUER_CRLS != 0 {
-        data.issuer_crls = Some(
-            store
-                .read_issuer_crls_der()
-                .into_iter()
-                .map(ByteString::from)
-                .collect(),
-        );
-    }
+                .collect()
+        },
+    );
+    set_der_list(&mut data.issuer_crls, mask, masks::ISSUER_CRLS, || {
+        store.read_issuer_crls_der()
+    });
     data
 }
 
@@ -582,19 +603,14 @@ fn find_cert_by_thumbprint(
 
 /// Whether `target` (a candidate for removal) is a CA still needed to validate some *other*
 /// certificate currently in the trusted or issuer store (Part 12 §7.8.2.7).
-fn is_cert_still_needed(
-    store: &CertificateStore,
-    target: &X509,
-    target_thumbprint: &Thumbprint,
-) -> bool {
+fn is_cert_still_needed(store: &CertificateStore, target: &X509) -> bool {
+    let target_thumbprint = target.thumbprint();
     let subject_name = target.subject_name();
     store
         .read_trusted_certs()
         .iter()
         .chain(store.read_issuer_certs().iter())
-        .any(|other| {
-            other.thumbprint() != *target_thumbprint && other.issuer_name() == subject_name
-        })
+        .any(|other| other.thumbprint() != target_thumbprint && other.issuer_name() == subject_name)
 }
 
 /// Returns the standard `DefaultApplicationGroup.TrustList` object id.
@@ -661,75 +677,50 @@ pub fn register_trust_list_methods(
 ) -> Arc<TrustListMethodHandler> {
     let handler = Arc::new(TrustListMethodHandler::new(push_registry));
 
-    let h = handler.clone();
-    node_manager
-        .inner()
-        .add_method_callback_with_context(open_method_id(), move |ctx, _id, args| {
-            h.handle_open(ctx, args)
-        });
+    type Handle = fn(
+        &TrustListMethodHandler,
+        &RequestContext,
+        &[Variant],
+    ) -> Result<Vec<Variant>, StatusCode>;
+    let bindings: [(NodeId, Handle); 10] = [
+        (open_method_id(), TrustListMethodHandler::handle_open),
+        (
+            open_with_masks_method_id(),
+            TrustListMethodHandler::handle_open_with_masks,
+        ),
+        (read_method_id(), TrustListMethodHandler::handle_read),
+        (write_method_id(), TrustListMethodHandler::handle_write),
+        (
+            get_position_method_id(),
+            TrustListMethodHandler::handle_get_position,
+        ),
+        (
+            set_position_method_id(),
+            TrustListMethodHandler::handle_set_position,
+        ),
+        (close_method_id(), TrustListMethodHandler::handle_close),
+        (
+            close_and_update_method_id(),
+            TrustListMethodHandler::handle_close_and_update,
+        ),
+        (
+            add_certificate_method_id(),
+            TrustListMethodHandler::handle_add_certificate,
+        ),
+        (
+            remove_certificate_method_id(),
+            TrustListMethodHandler::handle_remove_certificate,
+        ),
+    ];
 
-    let h = handler.clone();
-    node_manager
-        .inner()
-        .add_method_callback_with_context(open_with_masks_method_id(), move |ctx, _id, args| {
-            h.handle_open_with_masks(ctx, args)
-        });
-
-    let h = handler.clone();
-    node_manager
-        .inner()
-        .add_method_callback_with_context(read_method_id(), move |ctx, _id, args| {
-            h.handle_read(ctx, args)
-        });
-
-    let h = handler.clone();
-    node_manager
-        .inner()
-        .add_method_callback_with_context(write_method_id(), move |ctx, _id, args| {
-            h.handle_write(ctx, args)
-        });
-
-    let h = handler.clone();
-    node_manager
-        .inner()
-        .add_method_callback_with_context(get_position_method_id(), move |ctx, _id, args| {
-            h.handle_get_position(ctx, args)
-        });
-
-    let h = handler.clone();
-    node_manager
-        .inner()
-        .add_method_callback_with_context(set_position_method_id(), move |ctx, _id, args| {
-            h.handle_set_position(ctx, args)
-        });
-
-    let h = handler.clone();
-    node_manager
-        .inner()
-        .add_method_callback_with_context(close_method_id(), move |ctx, _id, args| {
-            h.handle_close(ctx, args)
-        });
-
-    let h = handler.clone();
-    node_manager
-        .inner()
-        .add_method_callback_with_context(close_and_update_method_id(), move |ctx, _id, args| {
-            h.handle_close_and_update(ctx, args)
-        });
-
-    let h = handler.clone();
-    node_manager
-        .inner()
-        .add_method_callback_with_context(add_certificate_method_id(), move |ctx, _id, args| {
-            h.handle_add_certificate(ctx, args)
-        });
-
-    let h = handler.clone();
-    node_manager
-        .inner()
-        .add_method_callback_with_context(remove_certificate_method_id(), move |ctx, _id, args| {
-            h.handle_remove_certificate(ctx, args)
-        });
+    for (method_id, invoke) in bindings {
+        let h = handler.clone();
+        node_manager
+            .inner()
+            .add_method_callback_with_context(method_id, move |ctx, _id, args| {
+                invoke(&h, ctx, args)
+            });
+    }
 
     handler
 }

@@ -463,10 +463,14 @@ mod tests {
         use std::sync::atomic::{AtomicU32, Ordering};
         static COUNTER: AtomicU32 = AtomicU32::new(0);
         let id = COUNTER.fetch_add(1, Ordering::Relaxed);
-        std::env::temp_dir().join(format!(
-            "async-opcua-gds-push-test-pki-{}-{id}",
-            std::process::id()
-        ))
+        tempfile::Builder::new()
+            .prefix(&format!(
+                "async-opcua-gds-push-test-pki-{}-{id}-",
+                std::process::id()
+            ))
+            .tempdir()
+            .expect("failed to create a securely-permissioned test PKI directory")
+            .keep()
     }
 
     fn request_context(

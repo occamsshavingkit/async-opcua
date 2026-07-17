@@ -27,6 +27,10 @@ async-opcua/certs
 **/pki-ext-client
 local/
 
+# Companion NodeSet XMLs are fetched locally by the operator (schemas/companion/README.md);
+# never distributed with async-opcua, never committed.
+/schemas/companion/*/
+
 
 # Stray runtime logs
 *.log

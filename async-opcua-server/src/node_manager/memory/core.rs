@@ -1207,12 +1207,12 @@ impl CoreNodeManagerImpl {
         call: &mut MethodCall,
         context: &RequestContext,
     ) -> Result<(), StatusCode> {
+        // Only namespace-0 methods have a `MethodId` representation -- a method in any other
+        // namespace (e.g. a companion-spec-instantiated method, see `gds::directory_instance`)
+        // correctly fails `as_method_id()` here and must fall through to the generic
+        // `method_with_context_cbs` registry below, not skip it.
         #[cfg(feature = "subscriptions-standard")]
-        {
-            let Ok(id) = call.method_id().as_method_id() else {
-                return Ok(());
-            };
-
+        if let Ok(id) = call.method_id().as_method_id() {
             match id {
                 MethodId::Server_GetMonitoredItems => {
                     let id = load_method_args!(call, UInt32)?;

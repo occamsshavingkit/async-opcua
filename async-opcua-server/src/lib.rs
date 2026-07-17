@@ -27,7 +27,8 @@ pub mod authenticator;
 /// OptionSetType, ValueAsText, ReferenceDescriptionVariableType, CurrencyUnit).
 pub mod base_info;
 mod builder;
-mod companion;
+/// OPC UA companion specification NodeSet imports (runtime, opt-in per `companion-*` feature).
+pub mod companion;
 mod config;
 /// Dedicated lower-priority executor for server-side asymmetric crypto (T010A).
 pub mod crypto_executor;

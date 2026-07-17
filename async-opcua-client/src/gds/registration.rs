@@ -10,26 +10,25 @@ use opcua_types::{ApplicationDescription, CallMethodRequest, NodeId, StatusCode,
 use tracing::{error, info};
 
 /// Client helper for interacting with the GDS registration and directory services.
+///
+/// Constructed from real, discovered NodeIds -- see [`crate::gds::GdsClient::discover`]. Every
+/// real GDS deployment assigns its own namespace index to the GDS companion types, so there is no
+/// valid fixed default to construct this with.
 pub struct GdsRegistrationClient {
-    /// NodeId of the GDS Directory object (standard ns=0;i=22384)
+    /// NodeId of the GDS Directory object (`CertificateDirectoryType` instance, OPC-10000-12
+    /// §7.9.2).
     pub directory_object_id: NodeId,
-    /// NodeId of the RegisterApplication method (standard ns=0;i=22385)
+    /// NodeId of the `RegisterApplication` method.
     pub register_method_id: NodeId,
 }
 
-impl Default for GdsRegistrationClient {
-    fn default() -> Self {
-        Self {
-            directory_object_id: NodeId::new(0, 22384),
-            register_method_id: NodeId::new(0, 22385),
-        }
-    }
-}
-
 impl GdsRegistrationClient {
-    /// Creates a new `GdsRegistrationClient` with default standard GDS NodeIds.
-    pub fn new() -> Self {
-        Self::default()
+    /// Creates a `GdsRegistrationClient` from real, already-resolved NodeIds.
+    pub fn new(directory_object_id: NodeId, register_method_id: NodeId) -> Self {
+        Self {
+            directory_object_id,
+            register_method_id,
+        }
     }
 
     /// Register an application with the GDS directory.

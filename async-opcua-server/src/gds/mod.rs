@@ -115,7 +115,25 @@ pub fn register_gds_certificate_management_methods_with_handle(
 ))]
 pub fn register_gds_pull_methods_from_companion(
     core_node_manager: &CoreNodeManager,
+    type_tree: &opcua_nodes::DefaultTypeTree,
 ) -> Option<Arc<GdsPullMethodHandler>> {
+    // The address space's own namespace table (what the companion import's "next free index"
+    // allocation consults) and the type tree's namespace table (e.g. populated by
+    // `DiagnosticsNodeManager` registering the server's own application namespace at startup) are
+    // two independently-maintained tables that can disagree about which indices are taken --
+    // reconcile before importing, so the companion import can't allocate an index (e.g. 1) the
+    // type tree already claims for something else, which would otherwise make
+    // `Server_NamespaceArray` silently misreport one of the two colliding namespaces to clients.
+    {
+        let address_space = core_node_manager.address_space().read();
+        let existing = address_space.namespaces();
+        for (uri, index) in type_tree.namespaces().known_namespaces() {
+            if !existing.contains_key(index) {
+                address_space.add_namespace(uri, *index);
+            }
+        }
+    }
+
     crate::companion::import_gds(core_node_manager.address_space());
     // `import_gds` adds the GDS namespace to the shared address space, but
     // `CoreNodeManager`'s namespace cache (used by `owns_node`, and therefore Call/Read/Write/

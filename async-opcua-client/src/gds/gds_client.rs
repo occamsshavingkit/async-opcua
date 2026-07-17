@@ -8,8 +8,15 @@ use super::{csr::GdsCsrClient, registration::GdsRegistrationClient};
 use crate::Session;
 use opcua_core::sync::RwLock;
 use opcua_crypto::{gds_reload, CertificateStore};
-use opcua_types::{ApplicationDescription, NodeId, StatusCode};
+use opcua_types::{
+    ApplicationDescription, BrowsePath, BrowsePathResult, Error, NodeId, ObjectId, QualifiedName,
+    ReferenceTypeId, RelativePath, RelativePathElement, StatusCode,
+};
 use std::fs;
+
+/// The GDS companion namespace URI (OPC-10000-12), declared in the companion NodeSet's own
+/// `<NamespaceUris>`.
+const GDS_NAMESPACE_URI: &str = "http://opcfoundation.org/UA/GDS/";
 
 /// Facade over the GDS registration and certificate signing helpers.
 pub struct GdsClient {
@@ -17,22 +24,53 @@ pub struct GdsClient {
     csr: GdsCsrClient,
 }
 
-impl Default for GdsClient {
-    fn default() -> Self {
-        Self {
-            registration: GdsRegistrationClient::new(),
-            csr: GdsCsrClient::new(),
-        }
-    }
-}
-
 impl GdsClient {
-    /// Creates a GDS client using the standard GDS NodeIds.
-    pub fn new() -> Self {
-        Self::default()
+    /// Discovers the real GDS Directory object and its `RegisterApplication`/
+    /// `StartSigningRequest`/`FinishRequest` method NodeIds against `session`, via the target
+    /// server's own namespace array and `TranslateBrowsePathsToNodeIds` (OPC-10000-4 §5.8.4) --
+    /// the standard mechanism for resolving a well-known node whose namespace index isn't known
+    /// in advance. Every real GDS deployment assigns its own index to the GDS companion
+    /// namespace, so there is no fixed NodeId this could ever use instead.
+    ///
+    /// Fails closed (a specific [`Error`], never a panic) if the server doesn't expose the GDS
+    /// companion namespace, or if any expected node is missing.
+    ///
+    /// Discovery is one-shot: it runs once here and the resolved NodeIds are held by the
+    /// returned `GdsClient` for its lifetime. There is no internal re-discovery path -- call this
+    /// again (e.g. after reconnecting to a different server) if you need a fresh resolution.
+    pub async fn discover(session: &Session) -> Result<Self, Error> {
+        let gds_ns = session.get_namespace_index(GDS_NAMESPACE_URI).await?;
+
+        let browse_paths = vec![
+            directory_browse_path(gds_ns, &["Directory"]),
+            directory_browse_path(gds_ns, &["Directory", "RegisterApplication"]),
+            directory_browse_path(gds_ns, &["Directory", "StartSigningRequest"]),
+            directory_browse_path(gds_ns, &["Directory", "FinishRequest"]),
+        ];
+        let results = session
+            .translate_browse_paths_to_node_ids(&browse_paths)
+            .await?;
+
+        let directory_object_id = resolve_target(&results, 0, "Directory")?;
+        let register_method_id = resolve_target(&results, 1, "RegisterApplication")?;
+        let start_signing_request_id = resolve_target(&results, 2, "StartSigningRequest")?;
+        let finish_request_id = resolve_target(&results, 3, "FinishRequest")?;
+
+        Ok(Self {
+            registration: GdsRegistrationClient::new(
+                directory_object_id.clone(),
+                register_method_id,
+            ),
+            csr: GdsCsrClient::new(
+                directory_object_id,
+                start_signing_request_id,
+                finish_request_id,
+            ),
+        })
     }
 
-    /// Creates a GDS client from explicit helper clients.
+    /// Creates a GDS client from explicit helper clients (e.g. NodeIds already known or
+    /// discovered out-of-band). Prefer [`GdsClient::discover`] when connected to a live session.
     pub fn from_parts(registration: GdsRegistrationClient, csr: GdsCsrClient) -> Self {
         Self { registration, csr }
     }
@@ -66,7 +104,6 @@ impl GdsClient {
         certificate_group_id: NodeId,
         certificate_type_id: NodeId,
         csr_der: &[u8],
-        regenerate_private_key: bool,
     ) -> Result<NodeId, StatusCode> {
         self.csr
             .start_signing_request(
@@ -75,7 +112,6 @@ impl GdsClient {
                 certificate_group_id,
                 certificate_type_id,
                 csr_der,
-                regenerate_private_key,
             )
             .await
     }
@@ -115,6 +151,72 @@ impl GdsClient {
     }
 }
 
+/// Builds a `BrowsePath` from the standard `ObjectsFolder`, following `hops` by `BrowseName` in
+/// the GDS companion namespace -- the first hop via `Organizes` (matching how the real Directory
+/// object is organized under `ObjectsFolder`), every subsequent hop via `HasComponent` (matching
+/// how the real Directory object's methods are wired to it).
+fn directory_browse_path(gds_ns: u16, hops: &[&str]) -> BrowsePath {
+    let elements = hops
+        .iter()
+        .enumerate()
+        .map(|(i, name)| {
+            let reference_type_id = if i == 0 {
+                ReferenceTypeId::Organizes
+            } else {
+                ReferenceTypeId::HasComponent
+            };
+            RelativePathElement {
+                reference_type_id: NodeId::from(reference_type_id),
+                is_inverse: false,
+                include_subtypes: true,
+                target_name: QualifiedName::new(gds_ns, *name),
+            }
+        })
+        .collect();
+
+    BrowsePath {
+        starting_node: NodeId::from(ObjectId::ObjectsFolder),
+        relative_path: RelativePath {
+            elements: Some(elements),
+        },
+    }
+}
+
+/// Extracts the resolved `NodeId` for the `index`th browse path in `results`, failing closed with
+/// a specific error naming `label` if that node wasn't found.
+fn resolve_target(
+    results: &[BrowsePathResult],
+    index: usize,
+    label: &str,
+) -> Result<NodeId, Error> {
+    let result = results.get(index).ok_or_else(|| {
+        Error::new(
+            StatusCode::BadUnexpectedError,
+            format!("GDS discovery: missing TranslateBrowsePathsToNodeIds result for {label}"),
+        )
+    })?;
+    if !result.status_code.is_good() {
+        return Err(Error::new(
+            result.status_code,
+            format!(
+                "GDS discovery: could not resolve {label} ({})",
+                result.status_code
+            ),
+        ));
+    }
+    let target = result
+        .targets
+        .as_ref()
+        .and_then(|targets| targets.first())
+        .ok_or_else(|| {
+            Error::new(
+                StatusCode::BadNotFound,
+                format!("GDS discovery: no targets resolved for {label}"),
+            )
+        })?;
+    Ok(target.target_id.node_id.clone())
+}
+
 fn write_certificate(store: &CertificateStore, certificate_der: &[u8]) -> Result<(), String> {
     let cert_path = store.own_certificate_path();
     if let Some(parent) = cert_path.parent() {
@@ -127,7 +229,6 @@ fn write_certificate(store: &CertificateStore, certificate_der: &[u8]) -> Result
 #[cfg(test)]
 mod tests {
     use super::*;
-    use opcua_types::NodeId;
     use std::path::{Path, PathBuf};
 
     struct TempPki {
@@ -154,31 +255,22 @@ mod tests {
         }
     }
 
-    #[test]
-    fn default_client_uses_standard_gds_helpers() {
-        let client = GdsClient::new();
-
-        assert_eq!(
-            client.registration().directory_object_id,
-            NodeId::new(0, 22384)
-        );
-        assert_eq!(
-            client.registration().register_method_id,
-            NodeId::new(0, 22385)
-        );
-        assert_eq!(client.csr().certificate_manager_id, NodeId::new(0, 22388));
-        assert_eq!(client.csr().start_signing_request_id, NodeId::new(0, 22400));
-        assert_eq!(
-            client.csr().finish_signing_request_id,
-            NodeId::new(0, 22402)
-        );
+    fn client_with_dummy_node_ids() -> GdsClient {
+        GdsClient::from_parts(
+            GdsRegistrationClient::new(NodeId::new(1, "Directory"), NodeId::new(1, "Register")),
+            GdsCsrClient::new(
+                NodeId::new(1, "Directory"),
+                NodeId::new(1, "StartSigningRequest"),
+                NodeId::new(1, "FinishRequest"),
+            ),
+        )
     }
 
     #[test]
     fn apply_renewed_certificate_rejects_invalid_security_material() {
         let temp_pki = TempPki::new("gds-client-invalid-material");
         let store = RwLock::new(CertificateStore::new(temp_pki.path()));
-        let client = GdsClient::new();
+        let client = client_with_dummy_node_ids();
 
         let result = client.apply_renewed_certificate(&store, b"not-a-certificate", None);
 

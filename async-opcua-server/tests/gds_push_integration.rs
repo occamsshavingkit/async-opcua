@@ -7,7 +7,11 @@
 //! don't exist, so a real Call against the (correct) standard NodeIds would previously have
 //! failed with `BadNodeIdUnknown`/`BadMethodInvalid` rather than ever reaching the handler.
 
-#![cfg(all(feature = "gds", feature = "method-call"))]
+#![cfg(all(
+    feature = "gds",
+    feature = "method-call",
+    feature = "generated-address-space"
+))]
 
 use std::time::Duration;
 
@@ -15,9 +19,12 @@ use tokio::net::TcpListener;
 
 use opcua_client::{ClientBuilder, IdentityToken};
 use opcua_server::{
-    gds::push_methods::{
-        create_signing_request_method_id, register_gds_push_methods_with_handle,
-        server_configuration_object_id,
+    gds::{
+        push_methods::{
+            create_signing_request_method_id, register_gds_push_methods_with_handle,
+            server_configuration_object_id,
+        },
+        trust_list::{open_method_id, register_trust_list_methods, trust_list_object_id},
     },
     node_manager::memory::CoreNodeManager,
     ServerBuilder, ServerConfig, ServerEndpoint, ANONYMOUS_USER_TOKEN_ID,
@@ -55,7 +62,9 @@ async fn create_signing_request_call_reaches_the_push_method_callback() {
         .node_managers()
         .get_of_type::<CoreNodeManager>()
         .expect("default server should have a CoreNodeManager for namespace 0");
-    register_gds_push_methods_with_handle(&core_node_manager, server_handle.clone());
+    let push_registry =
+        register_gds_push_methods_with_handle(&core_node_manager, server_handle.clone());
+    register_trust_list_methods(&core_node_manager, push_registry);
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -115,6 +124,27 @@ async fn create_signing_request_call_reaches_the_push_method_callback() {
         "CreateSigningRequest should reach the registered push-method handler and be rejected \
          for lacking an encrypted channel -- a different error here means the Call service never \
          reached the handler at all"
+    );
+
+    // Same wire-dispatch proof for the TrustList surface (feature 102): Open (Part 5, mode=Read)
+    // against DefaultApplicationGroup.TrustList's verified NodeId. Requires only an authenticated
+    // (not necessarily encrypted) channel, so over this test's `None`-security anonymous channel
+    // it should still reach the handler and be rejected for the same reason.
+    let trust_list_result = session
+        .call_one((
+            trust_list_object_id(),
+            open_method_id(),
+            Some(vec![opcua_types::Variant::from(1u8)]),
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        trust_list_result.status_code,
+        StatusCode::BadSecurityModeInsufficient,
+        "TrustList Open should reach the registered handler and be rejected for lacking an \
+         authenticated channel -- a different error here means the Call service never reached \
+         the handler at all"
     );
 
     let _ = session.disconnect().await;

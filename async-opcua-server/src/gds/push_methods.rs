@@ -10,7 +10,9 @@ use std::sync::Arc;
 
 use opcua_core::sync::RwLock;
 use opcua_crypto::{gds_reload, PrivateKey, X509};
-use opcua_types::{ByteString, LocalizedText, MessageSecurityMode, NodeId, StatusCode, Variant};
+use opcua_types::{
+    ByteString, LocalizedText, MessageSecurityMode, NodeId, StatusCode, TrustListDataType, Variant,
+};
 
 #[cfg(all(feature = "method-call", feature = "generated-address-space"))]
 use crate::node_manager::memory::CoreNodeManager;
@@ -24,21 +26,33 @@ const CANCEL_CHANGES_METHOD_ID: u32 = 25708;
 const GET_REJECTED_LIST_METHOD_ID: u32 = 12777;
 const RESET_TO_SERVER_DEFAULTS_METHOD_ID: u32 = 25709;
 
-/// A staged, not-yet-effective certificate update created by `UpdateCertificate`, resolved by
+/// A staged, not-yet-effective certificate and/or TrustList update, resolved by
 /// `ApplyChanges`/`CancelChanges` (Part 12 §7.10.2 transaction lifecycle). This server supports
-/// exactly one active transaction at a time, scoped to `UpdateCertificate` only -- the TrustList
-/// methods that would also participate in a shared transaction are a follow-up (see spec.md).
+/// exactly one active transaction at a time, shared between `UpdateCertificate`
+/// (`certificate_der`/`private_key_pem`) and the TrustList's `CloseAndUpdate`
+/// (`pending_trust_list`, see `gds::trust_list` and specs/102-gds-push-trustlist/data-model.md).
 #[derive(Clone)]
-struct PushTransaction {
-    owning_session_id: u32,
-    certificate_der: Vec<u8>,
-    private_key_pem: Option<Vec<u8>>,
+pub(super) struct PushTransaction {
+    pub(super) owning_session_id: u32,
+    pub(super) certificate_der: Option<Vec<u8>>,
+    pub(super) private_key_pem: Option<Vec<u8>>,
+    pub(super) pending_trust_list: Option<TrustListDataType>,
 }
 
 /// In-memory state backing the GDS push model method callbacks.
 #[derive(Default)]
 pub struct GdsPushRegistry {
-    transaction: RwLock<Option<PushTransaction>>,
+    pub(super) transaction: RwLock<Option<PushTransaction>>,
+}
+
+impl GdsPushRegistry {
+    /// Whether a transaction is currently open, owned by a session other than `session_id`.
+    /// Used by methods that must not proceed while another session's transaction is pending
+    /// (TrustList `Open` in write mode, `AddCertificate`, `RemoveCertificate`), without
+    /// themselves reserving or creating a transaction.
+    pub(super) fn transaction_pending_for_other_session(&self, session_id: u32) -> bool {
+        matches!(&*self.transaction.read(), Some(t) if t.owning_session_id != session_id)
+    }
 }
 
 /// Handler for GDS push model method calls.
@@ -142,23 +156,26 @@ impl GdsPushMethodHandler {
 
         {
             let mut transaction = self.registry.transaction.write();
-            match &*transaction {
+            let pending_trust_list = match &*transaction {
                 Some(existing) if existing.owning_session_id != context.session_id() => {
                     return Err(StatusCode::BadTransactionPending);
                 }
-                _ => {}
-            }
+                Some(existing) => existing.pending_trust_list.clone(),
+                None => None,
+            };
             *transaction = Some(PushTransaction {
                 owning_session_id: context.session_id(),
-                certificate_der,
+                certificate_der: Some(certificate_der),
                 private_key_pem,
+                pending_trust_list,
             });
         }
 
         Ok(vec![Variant::from(true)])
     }
 
-    /// Handles `ApplyChanges` (Part 12 §7.10.9): commits a pending certificate update.
+    /// Handles `ApplyChanges` (Part 12 §7.10.9): commits a pending certificate update and/or a
+    /// pending TrustList update (Part 12 §7.8.2.5, staged by `gds::trust_list::CloseAndUpdate`).
     pub fn handle_apply_changes(
         &self,
         context: &RequestContext,
@@ -176,25 +193,33 @@ impl GdsPushMethodHandler {
             }
         };
 
-        let store = context.info.certificate_store.read();
-        let pkey_pem = match staged.private_key_pem {
-            Some(pem) => pem,
-            None => store
-                .read_own_pkey()
-                .map_err(|_| StatusCode::BadInternalError)?
-                .to_pem()
-                .map_err(|_| StatusCode::BadInternalError)?
-                .into_bytes(),
-        };
-        gds_reload::save_new_credentials(&store, &staged.certificate_der, &pkey_pem)
-            .map_err(|_| StatusCode::BadInternalError)?;
-        let (cert, pkey) =
-            gds_reload::reload_store_from_disk(&store).map_err(|_| StatusCode::BadInternalError)?;
-        drop(store);
+        if let Some(certificate_der) = staged.certificate_der {
+            let store = context.info.certificate_store.read();
+            let pkey_pem = match staged.private_key_pem {
+                Some(pem) => pem,
+                None => store
+                    .read_own_pkey()
+                    .map_err(|_| StatusCode::BadInternalError)?
+                    .to_pem()
+                    .map_err(|_| StatusCode::BadInternalError)?
+                    .into_bytes(),
+            };
+            gds_reload::save_new_credentials(&store, &certificate_der, &pkey_pem)
+                .map_err(|_| StatusCode::BadInternalError)?;
+            let (cert, pkey) = gds_reload::reload_store_from_disk(&store)
+                .map_err(|_| StatusCode::BadInternalError)?;
+            drop(store);
 
-        let mut endpoint_certs = context.info.endpoint_certificates.write();
-        for entry in endpoint_certs.values_mut() {
-            *entry = Some((cert.clone(), pkey.clone()));
+            let mut endpoint_certs = context.info.endpoint_certificates.write();
+            for entry in endpoint_certs.values_mut() {
+                *entry = Some((cert.clone(), pkey.clone()));
+            }
+        }
+
+        if let Some(trust_list) = staged.pending_trust_list {
+            let store = context.info.certificate_store.read();
+            super::trust_list::apply_trust_list_update(&store, &trust_list)
+                .map_err(|_| StatusCode::BadInternalError)?;
         }
 
         Ok(vec![])
@@ -372,21 +397,25 @@ pub fn register_gds_push_methods_with_registry(
     );
 }
 
-fn authorize_encrypted_security_admin(context: &RequestContext) -> Result<(), StatusCode> {
+pub(super) fn authorize_encrypted_security_admin(
+    context: &RequestContext,
+) -> Result<(), StatusCode> {
     if context.security_mode() != MessageSecurityMode::SignAndEncrypt {
         return Err(StatusCode::BadSecurityModeInsufficient);
     }
     require_security_admin(context)
 }
 
-fn authorize_authenticated_security_admin(context: &RequestContext) -> Result<(), StatusCode> {
+pub(super) fn authorize_authenticated_security_admin(
+    context: &RequestContext,
+) -> Result<(), StatusCode> {
     if context.security_mode() == MessageSecurityMode::None {
         return Err(StatusCode::BadSecurityModeInsufficient);
     }
     require_security_admin(context)
 }
 
-fn require_security_admin(context: &RequestContext) -> Result<(), StatusCode> {
+pub(super) fn require_security_admin(context: &RequestContext) -> Result<(), StatusCode> {
     if !context
         .user_roles()
         .contains(&WellKnownRole::SecurityAdmin.node_id())
@@ -396,7 +425,7 @@ fn require_security_admin(context: &RequestContext) -> Result<(), StatusCode> {
     Ok(())
 }
 
-fn node_id_arg(args: &[Variant], index: usize) -> Result<NodeId, StatusCode> {
+pub(super) fn node_id_arg(args: &[Variant], index: usize) -> Result<NodeId, StatusCode> {
     match args.get(index) {
         Some(Variant::NodeId(node_id)) => Ok(node_id.as_ref().clone()),
         Some(_) => Err(StatusCode::BadTypeMismatch),
@@ -404,7 +433,7 @@ fn node_id_arg(args: &[Variant], index: usize) -> Result<NodeId, StatusCode> {
     }
 }
 
-fn byte_string_arg(args: &[Variant], index: usize) -> Result<ByteString, StatusCode> {
+pub(super) fn byte_string_arg(args: &[Variant], index: usize) -> Result<ByteString, StatusCode> {
     match args.get(index) {
         Some(Variant::ByteString(value)) => Ok(value.clone()),
         Some(_) => Err(StatusCode::BadTypeMismatch),
@@ -412,7 +441,10 @@ fn byte_string_arg(args: &[Variant], index: usize) -> Result<ByteString, StatusC
     }
 }
 
-fn non_empty_byte_string_arg(args: &[Variant], index: usize) -> Result<ByteString, StatusCode> {
+pub(super) fn non_empty_byte_string_arg(
+    args: &[Variant],
+    index: usize,
+) -> Result<ByteString, StatusCode> {
     let value = byte_string_arg(args, index)?;
     if value.is_null_or_empty() {
         Err(StatusCode::BadInvalidArgument)
@@ -421,7 +453,7 @@ fn non_empty_byte_string_arg(args: &[Variant], index: usize) -> Result<ByteStrin
     }
 }
 
-fn bool_arg(args: &[Variant], index: usize) -> Result<bool, StatusCode> {
+pub(super) fn bool_arg(args: &[Variant], index: usize) -> Result<bool, StatusCode> {
     match args.get(index) {
         Some(Variant::Boolean(value)) => Ok(*value),
         Some(_) => Err(StatusCode::BadTypeMismatch),
@@ -429,7 +461,7 @@ fn bool_arg(args: &[Variant], index: usize) -> Result<bool, StatusCode> {
     }
 }
 
-fn opt_string_arg(args: &[Variant], index: usize) -> Result<Option<String>, StatusCode> {
+pub(super) fn opt_string_arg(args: &[Variant], index: usize) -> Result<Option<String>, StatusCode> {
     match args.get(index) {
         Some(Variant::String(value)) if value.is_null() => Ok(None),
         Some(Variant::String(value)) => Ok(Some(value.as_ref().to_owned())),
@@ -724,6 +756,108 @@ mod tests {
         assert_eq!(
             handler.handle_cancel_changes(&context),
             Err(StatusCode::BadNothingToDo)
+        );
+    }
+
+    #[tokio::test]
+    async fn apply_changes_commits_a_pending_trust_list_update() {
+        let (context, _handle) =
+            security_admin_request_context(MessageSecurityMode::SignAndEncrypt);
+        let registry = Arc::new(GdsPushRegistry::default());
+        let handler = GdsPushMethodHandler::new(registry.clone(), None);
+        let original_own_cert_der = self_signed_cert_der(&context);
+        let new_trusted_der = self_signed_cert_der(&context);
+
+        *registry.transaction.write() = Some(PushTransaction {
+            owning_session_id: context.session_id(),
+            certificate_der: None,
+            private_key_pem: None,
+            pending_trust_list: Some(TrustListDataType {
+                specified_lists: 1, // TrustListMasks::TrustedCertificates
+                trusted_certificates: Some(vec![ByteString::from(new_trusted_der)]),
+                trusted_crls: None,
+                issuer_certificates: None,
+                issuer_crls: None,
+            }),
+        });
+
+        handler
+            .handle_apply_changes(&context)
+            .expect("apply changes should succeed");
+
+        assert!(handler.registry.transaction.read().is_none());
+        let store = context.info.certificate_store.read();
+        // The TrustList update must not affect the server's own application certificate.
+        let own_cert = store.read_own_cert().expect("own cert should exist");
+        assert_eq!(
+            own_cert.to_der().expect("cert should encode"),
+            original_own_cert_der
+        );
+        assert_eq!(store.read_trusted_certs().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn cancel_changes_discards_a_pending_trust_list_update() {
+        let (context, _handle) =
+            security_admin_request_context(MessageSecurityMode::SignAndEncrypt);
+        let registry = Arc::new(GdsPushRegistry::default());
+        let handler = GdsPushMethodHandler::new(registry.clone(), None);
+
+        *registry.transaction.write() = Some(PushTransaction {
+            owning_session_id: context.session_id(),
+            certificate_der: None,
+            private_key_pem: None,
+            pending_trust_list: Some(TrustListDataType {
+                specified_lists: 1,
+                trusted_certificates: Some(vec![ByteString::from(self_signed_cert_der(&context))]),
+                trusted_crls: None,
+                issuer_certificates: None,
+                issuer_crls: None,
+            }),
+        });
+
+        handler
+            .handle_cancel_changes(&context)
+            .expect("cancel should succeed");
+
+        assert!(handler.registry.transaction.read().is_none());
+        assert!(context
+            .info
+            .certificate_store
+            .read()
+            .read_trusted_certs()
+            .is_empty());
+    }
+
+    #[tokio::test]
+    async fn update_certificate_is_rejected_while_a_trust_list_transaction_is_open_elsewhere() {
+        let registry = Arc::new(GdsPushRegistry::default());
+        let handler = GdsPushMethodHandler::new(registry.clone(), None);
+        *registry.transaction.write() = Some(PushTransaction {
+            owning_session_id: 1,
+            certificate_der: None,
+            private_key_pem: None,
+            pending_trust_list: Some(TrustListDataType::default()),
+        });
+
+        let (context2_base, _h2) =
+            security_admin_request_context(MessageSecurityMode::SignAndEncrypt);
+        let context2 = RequestContext::new_test(Arc::new(RequestContextInner {
+            session: context2_base.session.clone(),
+            session_id: 2,
+            authenticator: context2_base.authenticator.clone(),
+            token: context2_base.token.clone(),
+            user_roles: context2_base.user_roles.clone(),
+            type_tree: context2_base.type_tree.clone(),
+            type_tree_getter: context2_base.type_tree_getter.clone(),
+            subscriptions: context2_base.subscriptions.clone(),
+            info: context2_base.info.clone(),
+        }));
+        let cert_der = self_signed_cert_der(&context2);
+
+        assert_eq!(
+            handler.handle_update_certificate(&context2, &update_certificate_args(cert_der)),
+            Err(StatusCode::BadTransactionPending)
         );
     }
 

@@ -820,6 +820,21 @@ impl CertificateStore {
         CertificateStore::read_crl_dir(&self.issuer_crls_dir())
     }
 
+    /// Read all trusted CRLs from the store as raw DER bytes (avoids exposing the `x509_cert`
+    /// crate's `CertificateList` type across the crate boundary).
+    pub fn read_trusted_crls_der(&self) -> Vec<Vec<u8>> {
+        Self::crls_to_der(self.read_trusted_crls())
+    }
+
+    /// Read all issuer CRLs from the store as raw DER bytes.
+    pub fn read_issuer_crls_der(&self) -> Vec<Vec<u8>> {
+        Self::crls_to_der(self.read_issuer_crls())
+    }
+
+    fn crls_to_der(crls: Vec<CertificateList>) -> Vec<Vec<u8>> {
+        crls.iter().filter_map(|crl| crl.to_der().ok()).collect()
+    }
+
     /// Write a cert to the rejected directory. If the write succeeds, the function
     /// returns a path to the written file.
     ///
@@ -843,14 +858,238 @@ impl CertificateStore {
     ///
     /// A string description of any failure
     ///
-    #[allow(dead_code)] // retained for the US5 legacy trust-list path
-    fn store_trusted_cert(&self, cert: &X509) -> Result<PathBuf, String> {
+    pub fn store_trusted_cert(&self, cert: &X509) -> Result<PathBuf, String> {
         // Store the cert in the trusted folder where trusted certs go
         let cert_file_name = CertificateStore::cert_file_name(cert);
         let mut cert_path = self.trusted_certs_dir();
         cert_path.push(&cert_file_name);
         let _ = CertificateStore::store_cert(cert, &cert_path, true)?;
         Ok(cert_path)
+    }
+
+    /// Writes a cert to the issuer directory. If the write succeeds, the function
+    /// returns a path to the written file.
+    ///
+    /// # Errors
+    ///
+    /// A string description of any failure
+    ///
+    pub fn store_issuer_cert(&self, cert: &X509) -> Result<PathBuf, String> {
+        let cert_file_name = CertificateStore::cert_file_name(cert);
+        let mut cert_path = self.issuer_certs_dir();
+        cert_path.push(&cert_file_name);
+        let _ = CertificateStore::store_cert(cert, &cert_path, true)?;
+        Ok(cert_path)
+    }
+
+    /// Removes a certificate matching `thumbprint` from the trusted directory, along with any
+    /// CRLs whose issuer matches the removed certificate's subject (OPC UA Part 12 §7.8.2.7:
+    /// "If the Certificate is a CA Certificate that has CRLs then all CRLs for that CA are
+    /// removed as well"). Returns whether a matching certificate was found and removed.
+    ///
+    /// # Errors
+    ///
+    /// A string description of any failure
+    ///
+    pub fn remove_trusted_cert(&self, thumbprint: &crate::Thumbprint) -> Result<bool, String> {
+        self.remove_cert_and_crls(
+            &self.trusted_certs_dir(),
+            &self.trusted_crls_dir(),
+            thumbprint,
+        )
+    }
+
+    /// Removes a certificate matching `thumbprint` from the issuer directory, along with any
+    /// CRLs whose issuer matches the removed certificate's subject.
+    ///
+    /// # Errors
+    ///
+    /// A string description of any failure
+    ///
+    pub fn remove_issuer_cert(&self, thumbprint: &crate::Thumbprint) -> Result<bool, String> {
+        self.remove_cert_and_crls(
+            &self.issuer_certs_dir(),
+            &self.issuer_crls_dir(),
+            thumbprint,
+        )
+    }
+
+    fn remove_cert_and_crls(
+        &self,
+        certs_dir: &Path,
+        crls_dir: &Path,
+        thumbprint: &crate::Thumbprint,
+    ) -> Result<bool, String> {
+        let Some((cert, cert_path)) = Self::find_cert_by_thumbprint(certs_dir, thumbprint) else {
+            return Ok(false);
+        };
+
+        std::fs::remove_file(&cert_path).map_err(|e| {
+            format!(
+                "Could not remove certificate file {}: {e}",
+                cert_path.display()
+            )
+        })?;
+
+        let subject_name = cert.subject_name();
+        for (crl, crl_path) in Self::crls_with_paths(crls_dir) {
+            let issuer_name = crl.tbs_cert_list.issuer.to_string().replace(';', "/");
+            if issuer_name == subject_name {
+                let _ = std::fs::remove_file(&crl_path);
+            }
+        }
+
+        Ok(true)
+    }
+
+    fn find_cert_by_thumbprint(
+        dir: &Path,
+        thumbprint: &crate::Thumbprint,
+    ) -> Option<(X509, PathBuf)> {
+        let entries = read_dir(dir).ok()?;
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !CertificateStore::is_der_or_pem_file(&path) {
+                continue;
+            }
+            if let Ok(cert) = CertificateStore::read_cert(&path) {
+                if cert.thumbprint() == *thumbprint {
+                    return Some((cert, path));
+                }
+            }
+        }
+        None
+    }
+
+    fn crls_with_paths(dir: &Path) -> Vec<(CertificateList, PathBuf)> {
+        let Ok(entries) = read_dir(dir) else {
+            return Vec::new();
+        };
+        let mut crls = Vec::new();
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !CertificateStore::is_der_or_pem_file(&path) {
+                continue;
+            }
+            if let Ok(crl) = CertificateStore::read_crl(&path) {
+                crls.push((crl, path));
+            }
+        }
+        crls
+    }
+
+    /// Validates `der` as a well-formed CRL and writes it to the trusted CRLs directory, named
+    /// by a hash of its DER encoding. If the write succeeds, returns a path to the written file.
+    /// Takes raw DER bytes (rather than a parsed `CertificateList`) so callers outside this crate
+    /// don't need `x509_cert` as a direct dependency.
+    ///
+    /// # Errors
+    ///
+    /// A string description of any failure
+    ///
+    pub fn store_trusted_crl(&self, der: &[u8]) -> Result<PathBuf, String> {
+        Self::store_crl_der(der, &self.trusted_crls_dir())
+    }
+
+    /// Validates `der` as a well-formed CRL and writes it to the issuer CRLs directory, named by
+    /// a hash of its DER encoding. If the write succeeds, returns a path to the written file.
+    ///
+    /// # Errors
+    ///
+    /// A string description of any failure
+    ///
+    pub fn store_issuer_crl(&self, der: &[u8]) -> Result<PathBuf, String> {
+        Self::store_crl_der(der, &self.issuer_crls_dir())
+    }
+
+    fn store_crl_der(der: &[u8], dir: &Path) -> Result<PathBuf, String> {
+        CertificateList::from_der(der).map_err(|e| format!("Not a valid CRL: {e:?}"))?;
+        use sha1::Digest;
+        let mut hasher = sha1::Sha1::new();
+        hasher.update(der);
+        let hash = hasher.finalize();
+        let file_name = hash.iter().map(|b| format!("{b:02x}")).collect::<String>();
+        let mut path = PathBuf::from(dir);
+        path.push(format!("{file_name}.der"));
+        CertificateStore::write_to_file(der, &path, true)?;
+        Ok(path)
+    }
+
+    /// Replaces the entire trusted-certificates list with `certs_der` (OPC UA Part 12 §7.8.2.5
+    /// `CloseAndUpdate`: a set bit in the uploaded TrustList's mask means that whole list is
+    /// replaced, not merged). Existing files are removed first; if any new certificate fails to
+    /// parse, the directory is left cleared and an error is returned (the caller -- `CloseAndUpdate`
+    /// -- is expected to have already validated every certificate before calling this).
+    ///
+    /// # Errors
+    ///
+    /// A string description of any failure
+    ///
+    pub fn replace_trusted_certs(&self, certs_der: &[Vec<u8>]) -> Result<(), String> {
+        Self::clear_dir(&self.trusted_certs_dir());
+        for der in certs_der {
+            let cert = X509::from_der(der).map_err(|e| format!("Not a valid certificate: {e}"))?;
+            self.store_trusted_cert(&cert)?;
+        }
+        Ok(())
+    }
+
+    /// Replaces the entire issuer-certificates list with `certs_der`. See
+    /// [`CertificateStore::replace_trusted_certs`].
+    ///
+    /// # Errors
+    ///
+    /// A string description of any failure
+    ///
+    pub fn replace_issuer_certs(&self, certs_der: &[Vec<u8>]) -> Result<(), String> {
+        Self::clear_dir(&self.issuer_certs_dir());
+        for der in certs_der {
+            let cert = X509::from_der(der).map_err(|e| format!("Not a valid certificate: {e}"))?;
+            self.store_issuer_cert(&cert)?;
+        }
+        Ok(())
+    }
+
+    /// Replaces the entire trusted-CRLs list with `crls_der`. See
+    /// [`CertificateStore::replace_trusted_certs`].
+    ///
+    /// # Errors
+    ///
+    /// A string description of any failure
+    ///
+    pub fn replace_trusted_crls(&self, crls_der: &[Vec<u8>]) -> Result<(), String> {
+        Self::clear_dir(&self.trusted_crls_dir());
+        for der in crls_der {
+            self.store_trusted_crl(der)?;
+        }
+        Ok(())
+    }
+
+    /// Replaces the entire issuer-CRLs list with `crls_der`. See
+    /// [`CertificateStore::replace_trusted_certs`].
+    ///
+    /// # Errors
+    ///
+    /// A string description of any failure
+    ///
+    pub fn replace_issuer_crls(&self, crls_der: &[Vec<u8>]) -> Result<(), String> {
+        Self::clear_dir(&self.issuer_crls_dir());
+        for der in crls_der {
+            self.store_issuer_crl(der)?;
+        }
+        Ok(())
+    }
+
+    fn clear_dir(dir: &Path) {
+        let Ok(entries) = read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if CertificateStore::is_der_or_pem_file(&path) {
+                let _ = std::fs::remove_file(&path);
+            }
+        }
     }
 
     /// Writes a cert to the specified directory

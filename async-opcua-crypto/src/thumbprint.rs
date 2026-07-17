@@ -54,6 +54,34 @@ impl Thumbprint {
         hex_string
     }
 
+    /// Parses a thumbprint from a hexadecimal string as produced by [`Thumbprint::as_hex_string`]
+    /// (e.g. the `Thumbprint` argument of OPC UA Part 12's `RemoveCertificate` Method).
+    pub fn parse_hex(s: &str) -> Result<Thumbprint, Error> {
+        let s = s.trim();
+        if s.len() != Thumbprint::THUMBPRINT_SIZE * 2 {
+            return Err(Error::new(
+                StatusCode::BadInvalidArgument,
+                format!("Thumbprint hex string has the wrong length, {}", s.len()),
+            ));
+        }
+        let mut value = [0u8; Thumbprint::THUMBPRINT_SIZE];
+        for (i, byte) in value.iter_mut().enumerate() {
+            let hex_byte = s.get(i * 2..i * 2 + 2).ok_or_else(|| {
+                Error::new(
+                    StatusCode::BadInvalidArgument,
+                    "Invalid thumbprint hex string",
+                )
+            })?;
+            *byte = u8::from_str_radix(hex_byte, 16).map_err(|_| {
+                Error::new(
+                    StatusCode::BadInvalidArgument,
+                    "Invalid thumbprint hex string",
+                )
+            })?;
+        }
+        Ok(Thumbprint { value })
+    }
+
     /// Returns the thumbprint
     pub fn value(&self) -> &[u8] {
         &self.value[..]

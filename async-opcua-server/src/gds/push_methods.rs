@@ -12,7 +12,7 @@ use opcua_core::sync::RwLock;
 use opcua_crypto::{gds_reload, PrivateKey, X509};
 use opcua_types::{ByteString, LocalizedText, MessageSecurityMode, NodeId, StatusCode, Variant};
 
-#[cfg(feature = "method-call")]
+#[cfg(all(feature = "method-call", feature = "generated-address-space"))]
 use crate::node_manager::memory::CoreNodeManager;
 use crate::{node_manager::RequestContext, rbac::WellKnownRole, ServerHandle};
 
@@ -303,7 +303,7 @@ pub fn reset_to_server_defaults_method_id() -> NodeId {
 /// user-added [`SimpleNodeManager`](crate::node_manager::memory::SimpleNodeManager). Without
 /// shutdown support for `ResetToServerDefaults` (it will report `Bad_NotSupported`). Prefer
 /// [`register_gds_push_methods_with_handle`] when a [`ServerHandle`] is available.
-#[cfg(feature = "method-call")]
+#[cfg(all(feature = "method-call", feature = "generated-address-space"))]
 pub fn register_gds_push_methods(node_manager: &CoreNodeManager) -> Arc<GdsPushRegistry> {
     let registry = Arc::new(GdsPushRegistry::default());
     register_gds_push_methods_with_registry(node_manager, registry.clone(), None);
@@ -312,7 +312,7 @@ pub fn register_gds_push_methods(node_manager: &CoreNodeManager) -> Arc<GdsPushR
 
 /// Registers GDS push method callbacks on the core node manager, wiring `ResetToServerDefaults`
 /// to actually schedule a shutdown via the supplied [`ServerHandle`].
-#[cfg(feature = "method-call")]
+#[cfg(all(feature = "method-call", feature = "generated-address-space"))]
 pub fn register_gds_push_methods_with_handle(
     node_manager: &CoreNodeManager,
     handle: ServerHandle,
@@ -323,7 +323,7 @@ pub fn register_gds_push_methods_with_handle(
 }
 
 /// Registers GDS push method callbacks using the supplied registry.
-#[cfg(feature = "method-call")]
+#[cfg(all(feature = "method-call", feature = "generated-address-space"))]
 pub fn register_gds_push_methods_with_registry(
     node_manager: &CoreNodeManager,
     registry: Arc<GdsPushRegistry>,

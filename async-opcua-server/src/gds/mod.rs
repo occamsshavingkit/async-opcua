@@ -3,19 +3,23 @@
 #[cfg(feature = "method-call")]
 use std::sync::Arc;
 
-#[cfg(feature = "method-call")]
-use crate::{
-    node_manager::memory::{CoreNodeManager, SimpleNodeManager},
-    ServerHandle,
-};
+#[cfg(all(feature = "method-call", feature = "generated-address-space"))]
+use crate::{node_manager::memory::SimpleNodeManager, ServerHandle};
+
+#[cfg(all(feature = "method-call", feature = "generated-address-space"))]
+use crate::node_manager::memory::CoreNodeManager;
 
 #[cfg(feature = "method-call")]
-use self::{
-    pull_methods::{register_gds_pull_methods, GdsPullMethodRegistry},
-    push_methods::{
-        register_gds_push_methods, register_gds_push_methods_with_handle, GdsPushRegistry,
-    },
-};
+use self::pull_methods::GdsPullMethodRegistry;
+
+#[cfg(all(feature = "method-call", feature = "generated-address-space"))]
+use self::pull_methods::register_gds_pull_methods;
+
+#[cfg(feature = "method-call")]
+use self::push_methods::GdsPushRegistry;
+
+#[cfg(all(feature = "method-call", feature = "generated-address-space"))]
+use self::push_methods::{register_gds_push_methods, register_gds_push_methods_with_handle};
 
 /// Maximum entries retained by each in-memory GDS certificate-management registry.
 ///
@@ -47,7 +51,7 @@ pub struct GdsMethodRegistries {
 /// `core_node_manager` must be the server's core (namespace 0) node manager -- the push model's
 /// `ServerConfiguration` and its methods are standard namespace-0 nodes. `simple_node_manager` is
 /// used for the (separately tracked, currently unfixed) pull-model callbacks.
-#[cfg(feature = "method-call")]
+#[cfg(all(feature = "method-call", feature = "generated-address-space"))]
 pub fn register_gds_certificate_management_methods(
     core_node_manager: &CoreNodeManager,
     simple_node_manager: &SimpleNodeManager,
@@ -60,7 +64,7 @@ pub fn register_gds_certificate_management_methods(
 
 /// Registers the standard GDS certificate management callbacks, wiring the push model's
 /// `ResetToServerDefaults` to actually schedule a shutdown via the supplied [`ServerHandle`].
-#[cfg(feature = "method-call")]
+#[cfg(all(feature = "method-call", feature = "generated-address-space"))]
 pub fn register_gds_certificate_management_methods_with_handle(
     core_node_manager: &CoreNodeManager,
     simple_node_manager: &SimpleNodeManager,

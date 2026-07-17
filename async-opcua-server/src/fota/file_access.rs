@@ -481,12 +481,14 @@ mod tests {
 
     impl TempDir {
         fn new(name: &str) -> Self {
-            let path = std::env::temp_dir().join(format!(
-                "async-opcua-file-access-test-{name}-{}",
-                std::process::id()
-            ));
-            let _ = std::fs::remove_dir_all(&path);
-            std::fs::create_dir_all(&path).expect("create temp dir");
+            // `tempfile::Builder` (not `std::env::temp_dir()` directly) so the directory gets a
+            // securely-permissioned, randomized name rather than a predictable one -- matching
+            // `gds/pull_methods/tests.rs`'s `unique_test_pki_dir()` precedent.
+            let path = tempfile::Builder::new()
+                .prefix(&format!("async-opcua-file-access-test-{name}-"))
+                .tempdir()
+                .expect("failed to create a securely-permissioned test scratch directory")
+                .keep();
             Self { path }
         }
 

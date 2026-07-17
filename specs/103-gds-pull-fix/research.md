@@ -1,5 +1,16 @@
 # Research: GDS Pull Model Fix (Run 1)
 
+> **Correction (feature 104, 2026-07-17)**: The "CertificateDirectoryType has no pre-built
+> instance" section below is **wrong**. The real GDS companion NodeSet2.xml ships a fully
+> pre-instantiated "Directory" object (source `ns=1;i=141`, `HasTypeDefinition -> ns=1;i=63`)
+> with real instance methods at every Mandatory/Optional NodeId this section lists as
+> "template-only". This feature's own "exhaustive grep" evidently searched for the literal
+> string `CertificateDirectoryType` inside `<Reference>` elements — but a `<Reference>` only
+> ever encodes a target's bare NodeId (`ns=1;i=63`), never the type's display name, so that
+> search could never match even though the reference exists. See
+> `specs/104-gds-pull-directory-fix/research.md` for the corrected, independently re-verified
+> findings and the fix that replaced the hand-built object this wrong conclusion led to.
+
 ## The real bug found (verified, not assumed)
 
 `gds/pull_methods.rs` defines `GET_REJECTED_LIST_METHOD_ID = 22407` and

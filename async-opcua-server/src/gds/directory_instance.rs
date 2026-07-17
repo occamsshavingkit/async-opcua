@@ -1,19 +1,20 @@
-//! Instantiates a real `CertificateDirectoryType` "Directory" object (OPC UA Part 12 §7.9.2)
-//! from the GDS companion NodeSet import, since that companion spec ships only the type
-//! definition -- no pre-instantiated singleton, unlike `ServerConfigurationType` in the core
-//! nodeset (see `specs/103-gds-pull-fix/research.md`).
+//! Resolves the real `CertificateDirectoryType` "Directory" object (OPC UA Part 12 §7.9.2) that
+//! the GDS companion NodeSet ships as a pre-instantiated singleton (NodeId `ns=1;i=141` in the
+//! source XML, remapped only in namespace by import -- verified against the real
+//! `Opc.Ua.Gds.NodeSet2.xml`; see `specs/104-gds-pull-directory-fix/research.md`).
 //!
-//! This is intentionally narrow: it instantiates exactly the object graph
-//! `CertificateDirectoryType` needs (its six Mandatory methods, plus a
-//! `CertificateGroups`/`DefaultApplicationGroup`/`TrustList` subtree built from *core*
-//! namespace-0 types, which already exist in the generated nodeset), not a general-purpose
-//! "instantiate any ObjectType from its Mandatory modelling rules" engine.
+//! An earlier version of this module (feature 103) incorrectly concluded no such singleton
+//! existed and hand-built a parallel "Directory" object with fabricated string NodeIds. That was
+//! wrong and has been corrected: the real object already carries every Mandatory method and the
+//! `CertificateGroups`/`DefaultApplicationGroup`/`TrustList` subtree this Pull-model needs, wired
+//! via `HasComponent`/`Organizes` references the plain 1:1 NodeSet import already produces --
+//! nothing needs to be constructed here, only resolved and verified present.
 
 use tracing::warn;
 
-use opcua_types::{Argument, DataTypeId, LocalizedText, NodeId, ObjectTypeId};
+use opcua_types::NodeId;
 
-use crate::address_space::{AddressSpace, MethodBuilder, ObjectBuilder};
+use crate::address_space::AddressSpace;
 
 /// The GDS companion namespace URI (declared in the NodeSet2.xml's own `<NamespaceUris>`).
 const GDS_NAMESPACE_URI: &str = "http://opcfoundation.org/UA/GDS/";
@@ -23,11 +24,24 @@ const GDS_NAMESPACE_URI: &str = "http://opcfoundation.org/UA/GDS/";
 /// only ever remaps the namespace portion of a NodeId -- see research.md).
 const CERTIFICATE_DIRECTORY_TYPE_ID: u32 = 63;
 
-/// Real NodeIds of the instantiated Directory object and its methods/subtree, resolved once at
-/// server-startup wiring time.
+/// The real, companion-shipped "Directory" object instance's identifier (source XML `ns=1;i=141`).
+const DIRECTORY_OBJECT_ID: u32 = 141;
+/// Real instance method identifiers on the Directory object (Mandatory, Part 12 Table 74).
+const START_SIGNING_REQUEST_ID: u32 = 157;
+const START_NEW_KEY_PAIR_REQUEST_ID: u32 = 154;
+const FINISH_REQUEST_ID: u32 = 163;
+const GET_CERTIFICATE_GROUPS_ID: u32 = 508;
+const GET_TRUST_LIST_ID: u32 = 204;
+const GET_CERTIFICATE_STATUS_ID: u32 = 225;
+/// Real `CertificateGroups`/`DefaultApplicationGroup`/`TrustList` subtree identifiers (§7.8).
+const DEFAULT_APPLICATION_GROUP_ID: u32 = 615;
+const DEFAULT_APPLICATION_GROUP_TRUST_LIST_ID: u32 = 616;
+
+/// Real NodeIds of the Directory object and its methods/subtree, resolved once at server-startup
+/// wiring time.
 #[derive(Debug, Clone)]
 pub struct DirectoryInstanceNodeIds {
-    /// The instantiated `CertificateDirectoryType` "Directory" object.
+    /// The real, companion-shipped `CertificateDirectoryType` "Directory" object.
     pub directory_object_id: NodeId,
     /// Instance method NodeId.
     pub start_signing_request_id: NodeId,
@@ -41,9 +55,9 @@ pub struct DirectoryInstanceNodeIds {
     pub get_trust_list_id: NodeId,
     /// Instance method NodeId.
     pub get_certificate_status_id: NodeId,
-    /// The `DefaultApplicationGroup` object instantiated under `CertificateGroups`.
+    /// The real `DefaultApplicationGroup` object under the Directory's `CertificateGroups`.
     pub default_application_group_id: NodeId,
-    /// The TrustList object under `DefaultApplicationGroup` -- what `GetTrustList` returns.
+    /// The real TrustList object under `DefaultApplicationGroup` -- what `GetTrustList` returns.
     pub default_application_group_trust_list_id: NodeId,
 }
 
@@ -59,17 +73,17 @@ fn resolve_gds_namespace(address_space: &AddressSpace) -> Option<u16> {
         .map(|(index, _)| index)
 }
 
-/// Instantiates the `CertificateDirectoryType` "Directory" object graph in `address_space`,
-/// assuming the GDS companion NodeSet has already been imported into it (via
-/// `companion::import_gds`). Fails closed (returns `None`, logs a warning) if the companion type
-/// isn't actually present -- never panics.
+/// Resolves the real `CertificateDirectoryType` "Directory" object and its Mandatory
+/// method/subtree NodeIds in `address_space`, assuming the GDS companion NodeSet has already been
+/// imported into it (via `companion::import_gds`). Fails closed (returns `None`, logs a warning)
+/// if any expected node isn't actually present -- never panics.
 pub fn instantiate_certificate_directory(
     address_space: &AddressSpace,
 ) -> Option<DirectoryInstanceNodeIds> {
     let Some(gds_ns) = resolve_gds_namespace(address_space) else {
         warn!(
             "GDS companion NodeSet not imported (namespace '{}' not found) -- \
-             Pull-model Certificate Directory will not be instantiated",
+             Pull-model Certificate Directory will not be wired",
             GDS_NAMESPACE_URI
         );
         return None;
@@ -79,188 +93,47 @@ pub fn instantiate_certificate_directory(
     if address_space.find(&certificate_directory_type_id).is_none() {
         warn!(
             "CertificateDirectoryType ({certificate_directory_type_id}) not found in the \
-             imported GDS companion NodeSet -- Pull-model Certificate Directory will not be \
-             instantiated"
+             imported GDS companion NodeSet -- Pull-model Certificate Directory will not be wired"
         );
         return None;
     }
 
-    let directory_object_id = NodeId::new(gds_ns, "Directory");
-    ObjectBuilder::new(&directory_object_id, "Directory", "Directory")
-        .has_type_definition(certificate_directory_type_id)
-        .organized_by(NodeId::from(opcua_types::ObjectId::ObjectsFolder))
-        .insert(address_space);
+    let ids = DirectoryInstanceNodeIds {
+        directory_object_id: NodeId::new(gds_ns, DIRECTORY_OBJECT_ID),
+        start_signing_request_id: NodeId::new(gds_ns, START_SIGNING_REQUEST_ID),
+        start_new_key_pair_request_id: NodeId::new(gds_ns, START_NEW_KEY_PAIR_REQUEST_ID),
+        finish_request_id: NodeId::new(gds_ns, FINISH_REQUEST_ID),
+        get_certificate_groups_id: NodeId::new(gds_ns, GET_CERTIFICATE_GROUPS_ID),
+        get_trust_list_id: NodeId::new(gds_ns, GET_TRUST_LIST_ID),
+        get_certificate_status_id: NodeId::new(gds_ns, GET_CERTIFICATE_STATUS_ID),
+        default_application_group_id: NodeId::new(gds_ns, DEFAULT_APPLICATION_GROUP_ID),
+        default_application_group_trust_list_id: NodeId::new(
+            gds_ns,
+            DEFAULT_APPLICATION_GROUP_TRUST_LIST_ID,
+        ),
+    };
 
-    let start_signing_request_id = insert_method(
-        address_space,
-        gds_ns,
-        &directory_object_id,
-        "StartSigningRequest",
-        &[
-            argument("ApplicationId", DataTypeId::NodeId),
-            argument("CertificateGroupId", DataTypeId::NodeId),
-            argument("CertificateTypeId", DataTypeId::NodeId),
-            argument("CertificateRequest", DataTypeId::ByteString),
-        ],
-        &[argument("RequestId", DataTypeId::NodeId)],
-    );
-    let start_new_key_pair_request_id = insert_method(
-        address_space,
-        gds_ns,
-        &directory_object_id,
-        "StartNewKeyPairRequest",
-        &[
-            argument("ApplicationId", DataTypeId::NodeId),
-            argument("CertificateGroupId", DataTypeId::NodeId),
-            argument("CertificateTypeId", DataTypeId::NodeId),
-            argument("SubjectName", DataTypeId::String),
-            array_argument("DomainNames", DataTypeId::String),
-            argument("PrivateKeyFormat", DataTypeId::String),
-            argument("PrivateKeyPassword", DataTypeId::String),
-        ],
-        &[argument("RequestId", DataTypeId::NodeId)],
-    );
-    let finish_request_id = insert_method(
-        address_space,
-        gds_ns,
-        &directory_object_id,
-        "FinishRequest",
-        &[
-            argument("ApplicationId", DataTypeId::NodeId),
-            argument("RequestId", DataTypeId::NodeId),
-        ],
-        &[
-            argument("Certificate", DataTypeId::ByteString),
-            argument("PrivateKey", DataTypeId::ByteString),
-            array_argument("IssuerCertificates", DataTypeId::ByteString),
-        ],
-    );
-    let get_certificate_groups_id = insert_method(
-        address_space,
-        gds_ns,
-        &directory_object_id,
-        "GetCertificateGroups",
-        &[argument("ApplicationId", DataTypeId::NodeId)],
-        &[array_argument("CertificateGroupIds", DataTypeId::NodeId)],
-    );
-    let get_trust_list_id = insert_method(
-        address_space,
-        gds_ns,
-        &directory_object_id,
-        "GetTrustList",
-        &[
-            argument("ApplicationId", DataTypeId::NodeId),
-            argument("CertificateGroupId", DataTypeId::NodeId),
-        ],
-        &[argument("TrustListId", DataTypeId::NodeId)],
-    );
-    let get_certificate_status_id = insert_method(
-        address_space,
-        gds_ns,
-        &directory_object_id,
-        "GetCertificateStatus",
-        &[
-            argument("ApplicationId", DataTypeId::NodeId),
-            argument("CertificateGroupId", DataTypeId::NodeId),
-            argument("CertificateTypeId", DataTypeId::NodeId),
-        ],
-        &[argument("UpdateRequired", DataTypeId::Boolean)],
-    );
-
-    // CertificateGroups / DefaultApplicationGroup / TrustList subtree -- built from *core*
-    // namespace-0 types (CertificateGroupFolderType/CertificateGroupType/TrustListType already
-    // exist in the generated nodeset; only CertificateDirectoryType itself is companion-specific).
-    let certificate_groups_id = NodeId::new(gds_ns, "Directory.CertificateGroups");
-    ObjectBuilder::new(
-        &certificate_groups_id,
-        "CertificateGroups",
-        "CertificateGroups",
-    )
-    .has_type_definition(ObjectTypeId::CertificateGroupFolderType)
-    .organized_by(directory_object_id.clone())
-    .insert(address_space);
-
-    let default_application_group_id = NodeId::new(
-        gds_ns,
-        "Directory.CertificateGroups.DefaultApplicationGroup",
-    );
-    ObjectBuilder::new(
-        &default_application_group_id,
-        "DefaultApplicationGroup",
-        "DefaultApplicationGroup",
-    )
-    .has_type_definition(ObjectTypeId::CertificateGroupType)
-    .organized_by(certificate_groups_id.clone())
-    .insert(address_space);
-
-    let default_application_group_trust_list_id = NodeId::new(
-        gds_ns,
-        "Directory.CertificateGroups.DefaultApplicationGroup.TrustList",
-    );
-    ObjectBuilder::new(
-        &default_application_group_trust_list_id,
-        "TrustList",
-        "TrustList",
-    )
-    .has_type_definition(ObjectTypeId::TrustListType)
-    .component_of(default_application_group_id.clone())
-    .insert(address_space);
-
-    Some(DirectoryInstanceNodeIds {
-        directory_object_id,
-        start_signing_request_id,
-        start_new_key_pair_request_id,
-        finish_request_id,
-        get_certificate_groups_id,
-        get_trust_list_id,
-        get_certificate_status_id,
-        default_application_group_id,
-        default_application_group_trust_list_id,
-    })
-}
-
-fn insert_method(
-    address_space: &AddressSpace,
-    gds_ns: u16,
-    parent_id: &NodeId,
-    name: &str,
-    input_args: &[Argument],
-    output_args: &[Argument],
-) -> NodeId {
-    let method_id = NodeId::new(gds_ns, format!("Directory.{name}"));
-    let input_args_id = NodeId::new(gds_ns, format!("Directory.{name}.InputArguments"));
-    let output_args_id = NodeId::new(gds_ns, format!("Directory.{name}.OutputArguments"));
-
-    let mut builder = MethodBuilder::new(&method_id, name, name).component_of(parent_id.clone());
-    if !input_args.is_empty() {
-        builder = builder.input_args(address_space, &input_args_id, input_args);
+    for id in [
+        &ids.directory_object_id,
+        &ids.start_signing_request_id,
+        &ids.start_new_key_pair_request_id,
+        &ids.finish_request_id,
+        &ids.get_certificate_groups_id,
+        &ids.get_trust_list_id,
+        &ids.get_certificate_status_id,
+        &ids.default_application_group_id,
+        &ids.default_application_group_trust_list_id,
+    ] {
+        if address_space.find(id).is_none() {
+            warn!(
+                "Expected node {id} not found in the imported GDS companion NodeSet -- \
+                 Pull-model Certificate Directory will not be wired"
+            );
+            return None;
+        }
     }
-    if !output_args.is_empty() {
-        builder = builder.output_args(address_space, &output_args_id, output_args);
-    }
-    builder.insert(address_space);
 
-    method_id
-}
-
-fn argument(name: &str, data_type: DataTypeId) -> Argument {
-    Argument {
-        name: name.into(),
-        data_type: data_type.into(),
-        value_rank: -1,
-        array_dimensions: None,
-        description: LocalizedText::null(),
-    }
-}
-
-fn array_argument(name: &str, data_type: DataTypeId) -> Argument {
-    Argument {
-        name: name.into(),
-        data_type: data_type.into(),
-        value_rank: 1,
-        array_dimensions: Some(vec![0]),
-        description: LocalizedText::null(),
-    }
+    Some(ids)
 }
 
 #[cfg(test)]
@@ -276,7 +149,7 @@ mod tests {
     }
 
     #[test]
-    fn instantiates_a_real_directory_object_when_companion_xml_is_present() {
+    fn resolves_the_real_directory_object_when_companion_xml_is_present() {
         if !xml_present() {
             eprintln!(
                 "skipping: schemas/companion/GDS/Opc.Ua.Gds.NodeSet2.xml not present locally"
@@ -292,9 +165,31 @@ mod tests {
             let guard = rw.read();
             instantiate_certificate_directory(&guard)
         };
-        let ids = ids.expect("companion XML is present, instantiation should succeed");
+        let ids = ids.expect("companion XML is present, resolution should succeed");
 
         let guard = rw.read();
+        let gds_ns = resolve_gds_namespace(&guard).expect("gds namespace should resolve");
+
+        // Resolves the real, companion-shipped object -- not a hand-built stand-in.
+        assert_eq!(ids.directory_object_id, NodeId::new(gds_ns, 141u32));
+        assert_eq!(ids.start_signing_request_id, NodeId::new(gds_ns, 157u32));
+        assert_eq!(
+            ids.start_new_key_pair_request_id,
+            NodeId::new(gds_ns, 154u32)
+        );
+        assert_eq!(ids.finish_request_id, NodeId::new(gds_ns, 163u32));
+        assert_eq!(ids.get_certificate_groups_id, NodeId::new(gds_ns, 508u32));
+        assert_eq!(ids.get_trust_list_id, NodeId::new(gds_ns, 204u32));
+        assert_eq!(ids.get_certificate_status_id, NodeId::new(gds_ns, 225u32));
+        assert_eq!(
+            ids.default_application_group_id,
+            NodeId::new(gds_ns, 615u32)
+        );
+        assert_eq!(
+            ids.default_application_group_trust_list_id,
+            NodeId::new(gds_ns, 616u32)
+        );
+
         assert!(guard.find(&ids.directory_object_id).is_some());
         assert!(guard.find(&ids.start_signing_request_id).is_some());
         assert!(guard.find(&ids.start_new_key_pair_request_id).is_some());
@@ -306,6 +201,40 @@ mod tests {
         assert!(guard
             .find(&ids.default_application_group_trust_list_id)
             .is_some());
+    }
+
+    /// Regression guard for the exact bug this feature fixes: feature 103 built a *second*,
+    /// hand-constructed "Directory" object at `NodeId::new(gds_ns, "Directory")` alongside the
+    /// real one at `NodeId::new(gds_ns, 141)`. Confirms only the real object exists now -- no
+    /// code path in this module constructs a node at the old fabricated string identifier.
+    #[test]
+    fn does_not_construct_a_duplicate_directory_object() {
+        if !xml_present() {
+            eprintln!(
+                "skipping: schemas/companion/GDS/Opc.Ua.Gds.NodeSet2.xml not present locally"
+            );
+            return;
+        }
+
+        let address_space = AddressSpace::new();
+        let rw = parking_lot::RwLock::new(address_space);
+        crate::companion::import_gds(&rw);
+
+        {
+            let guard = rw.read();
+            instantiate_certificate_directory(&guard)
+                .expect("companion XML is present, resolution should succeed");
+        }
+
+        let guard = rw.read();
+        let gds_ns = resolve_gds_namespace(&guard).expect("gds namespace should resolve");
+
+        assert!(
+            guard.find(&NodeId::new(gds_ns, "Directory")).is_none(),
+            "no node should exist at the old fabricated string-identifier NodeId this feature \
+             removed the construction of"
+        );
+        assert!(guard.find(&NodeId::new(gds_ns, 141u32)).is_some());
     }
 
     #[test]

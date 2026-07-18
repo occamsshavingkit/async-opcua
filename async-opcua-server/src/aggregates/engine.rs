@@ -1363,7 +1363,11 @@ fn agg_interpolative(input: &AggregateInput<'_>) -> DataValue {
 /// Linear interpolation of the value at `boundary` between the raw point before it and the one after.
 /// Returns `(value, is_interpolated)`. With only `before`, returns a stepped hold; sloped
 /// extrapolation using two prior values is refined later.
-fn interpolated_bound_at(
+///
+/// `pub(crate)` so `history::backend`'s `read_at_time` can reuse this same ratio-interpolation
+/// math for OPC-10000-11 §6.5.5.2's ReadAtTimeDetails, per Part 13's own direction to follow the
+/// Interpolated Aggregate's rules.
+pub(crate) fn interpolated_bound_at(
     boundary: DateTime,
     before: Option<&DataValue>,
     after: Option<&DataValue>,

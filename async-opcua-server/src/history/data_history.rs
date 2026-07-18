@@ -179,6 +179,26 @@ impl HistoryStorageBackend for InMemoryDataHistory {
         Ok((values, Vec::new(), next_token))
     }
 
+    async fn read_raw_reverse(
+        &self,
+        node_id: &NodeId,
+        at_or_before: DateTime,
+        num_values_per_node: u32,
+    ) -> Result<Vec<DataValue>, StatusCode> {
+        let Some(node_values) = self.raw_values.read().get(node_id).cloned() else {
+            return Ok(Vec::new());
+        };
+
+        let limit = (num_values_per_node > 0).then_some(num_values_per_node as usize);
+        let iter = node_values.range(..=at_or_before.ticks()).rev();
+        let values = match limit {
+            Some(limit) => iter.take(limit).map(|(_, value)| value.clone()).collect(),
+            None => iter.map(|(_, value)| value.clone()).collect(),
+        };
+
+        Ok(values)
+    }
+
     async fn read_annotations(
         &self,
         node_id: &NodeId,
@@ -555,6 +575,106 @@ mod tests {
         let _history = InMemoryDataHistory::default();
     }
 
+    fn dv_at(ticks: i64, value: i32) -> DataValue {
+        DataValue {
+            value: Some(Variant::Int32(value)),
+            status: Some(StatusCode::Good),
+            source_timestamp: Some(DateTime::from(ticks)),
+            server_timestamp: Some(DateTime::from(ticks)),
+            ..Default::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn read_raw_reverse_returns_nearest_values_descending() {
+        let history = InMemoryDataHistory::new();
+        let node_id = NodeId::new(2, "reverse-test");
+        history
+            .update_data(
+                &node_id,
+                PerformUpdateType::Insert,
+                vec![dv_at(10, 1), dv_at(20, 2), dv_at(30, 3)],
+            )
+            .await
+            .expect("insert should succeed");
+
+        let values = history
+            .read_raw_reverse(&node_id, DateTime::from(25), 10)
+            .await
+            .expect("read_raw_reverse should succeed");
+        assert_eq!(
+            values.iter().map(|v| v.value.clone()).collect::<Vec<_>>(),
+            vec![Some(Variant::Int32(2)), Some(Variant::Int32(1))],
+            "should return values at or before the timestamp, closest first"
+        );
+    }
+
+    #[tokio::test]
+    async fn read_raw_reverse_includes_exact_match_at_boundary() {
+        let history = InMemoryDataHistory::new();
+        let node_id = NodeId::new(2, "reverse-exact");
+        history
+            .update_data(&node_id, PerformUpdateType::Insert, vec![dv_at(20, 2)])
+            .await
+            .expect("insert should succeed");
+
+        let values = history
+            .read_raw_reverse(&node_id, DateTime::from(20), 10)
+            .await
+            .expect("read_raw_reverse should succeed");
+        assert_eq!(values.len(), 1);
+        assert_eq!(values[0].value, Some(Variant::Int32(2)));
+    }
+
+    #[tokio::test]
+    async fn read_raw_reverse_truncates_at_num_values_per_node() {
+        let history = InMemoryDataHistory::new();
+        let node_id = NodeId::new(2, "reverse-truncate");
+        history
+            .update_data(
+                &node_id,
+                PerformUpdateType::Insert,
+                vec![dv_at(10, 1), dv_at(20, 2), dv_at(30, 3)],
+            )
+            .await
+            .expect("insert should succeed");
+
+        let values = history
+            .read_raw_reverse(&node_id, DateTime::from(30), 2)
+            .await
+            .expect("read_raw_reverse should succeed");
+        assert_eq!(
+            values.iter().map(|v| v.value.clone()).collect::<Vec<_>>(),
+            vec![Some(Variant::Int32(3)), Some(Variant::Int32(2))]
+        );
+    }
+
+    #[tokio::test]
+    async fn read_raw_reverse_returns_empty_when_nothing_at_or_before() {
+        let history = InMemoryDataHistory::new();
+        let node_id = NodeId::new(2, "reverse-empty");
+        history
+            .update_data(&node_id, PerformUpdateType::Insert, vec![dv_at(20, 2)])
+            .await
+            .expect("insert should succeed");
+
+        let values = history
+            .read_raw_reverse(&node_id, DateTime::from(10), 10)
+            .await
+            .expect("read_raw_reverse should succeed");
+        assert!(values.is_empty());
+    }
+
+    #[tokio::test]
+    async fn read_raw_reverse_returns_empty_for_unknown_node() {
+        let history = InMemoryDataHistory::new();
+        let values = history
+            .read_raw_reverse(&NodeId::new(2, "never-seen"), DateTime::from(100), 10)
+            .await
+            .expect("read_raw_reverse should succeed");
+        assert!(values.is_empty());
+    }
+
     // Feature 035 / FR-007: a backend that does not support annotations (uses the default
     // `read_annotations`, which returns Bad_HistoryOperationUnsupported) must make AnnotationCount
     // return 0, never propagate the error.
@@ -606,5 +726,253 @@ mod tests {
         assert!(vals
             .iter()
             .all(|v| v.value == Some(Variant::Int32(0)) && v.status == Some(StatusCode::Good)));
+    }
+
+    // Feature 107 / OPC-10000-11 §6.5.5.2: `read_at_time`'s default impl, exercised through a
+    // real `InMemoryDataHistory` backend (it doesn't override the default, so this is the real
+    // implementation, not a mock).
+
+    fn dv_bad_at(ticks: i64, value: i32) -> DataValue {
+        DataValue {
+            value: Some(Variant::Int32(value)),
+            status: Some(StatusCode::BadNoData),
+            source_timestamp: Some(DateTime::from(ticks)),
+            server_timestamp: Some(DateTime::from(ticks)),
+            ..Default::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn read_at_time_exact_match_is_marked_raw() {
+        let history = InMemoryDataHistory::new();
+        let node_id = NodeId::new(2, "at-time-exact");
+        history
+            .update_data(&node_id, PerformUpdateType::Insert, vec![dv_at(20, 2)])
+            .await
+            .unwrap();
+
+        let (values, next) = history
+            .read_at_time(&node_id, &[DateTime::from(20)], false, false, None)
+            .await
+            .expect("read_at_time should succeed");
+        assert!(next.is_none());
+        assert_eq!(values.len(), 1);
+        assert_eq!(values[0].value, Some(Variant::Int32(2)));
+        assert_eq!(
+            values[0].status.map(|s| s.value_type()),
+            Some(opcua_types::StatusCodeValueType::Raw)
+        );
+    }
+
+    #[tokio::test]
+    async fn read_at_time_interpolates_between_bounds_when_not_stepped() {
+        let history = InMemoryDataHistory::new();
+        let node_id = NodeId::new(2, "at-time-interp");
+        history
+            .update_data(
+                &node_id,
+                PerformUpdateType::Insert,
+                vec![dv_at(0, 10), dv_at(10, 20)],
+            )
+            .await
+            .unwrap();
+
+        let (values, _next) = history
+            .read_at_time(&node_id, &[DateTime::from(5)], false, false, None)
+            .await
+            .expect("read_at_time should succeed");
+        assert_eq!(values.len(), 1);
+        assert_eq!(values[0].value, Some(Variant::Int32(15)));
+        assert_eq!(
+            values[0].status.map(|s| s.value_type()),
+            Some(opcua_types::StatusCodeValueType::Interpolated)
+        );
+    }
+
+    #[tokio::test]
+    async fn read_at_time_simple_bounds_uses_immediate_neighbor_even_if_bad() {
+        let history = InMemoryDataHistory::new();
+        let node_id = NodeId::new(2, "at-time-simple-bad");
+        history
+            .update_data(
+                &node_id,
+                PerformUpdateType::Insert,
+                vec![dv_at(0, 10), dv_bad_at(5, 999), dv_at(10, 20)],
+            )
+            .await
+            .unwrap();
+
+        // use_simple_bounds = true: the immediately-adjacent sample at 5 is itself Bad, so no
+        // substitution further afield -- Bad_NoData for a request between 5 and 10.
+        let (values, _next) = history
+            .read_at_time(&node_id, &[DateTime::from(7)], true, false, None)
+            .await
+            .expect("read_at_time should succeed");
+        assert_eq!(values[0].status, Some(StatusCode::BadNoData));
+    }
+
+    #[tokio::test]
+    async fn read_at_time_interpolated_bounds_search_past_bad_quality() {
+        let history = InMemoryDataHistory::new();
+        let node_id = NodeId::new(2, "at-time-search-past-bad");
+        history
+            .update_data(
+                &node_id,
+                PerformUpdateType::Insert,
+                vec![dv_at(0, 10), dv_bad_at(5, 999), dv_at(10, 20)],
+            )
+            .await
+            .unwrap();
+
+        // use_simple_bounds = false, requesting T=6 (not T=5, which would be an exact match
+        // against the Bad sample itself -- a value found exactly at the requested timestamp is
+        // Raw regardless of its own quality, per spec; that's a different case, covered above).
+        // The Bad sample at 5 is skipped, searching outward to the Good samples at 0 and 10 --
+        // interpolating to 16 at T=6.
+        let (values, _next) = history
+            .read_at_time(&node_id, &[DateTime::from(6)], false, false, None)
+            .await
+            .expect("read_at_time should succeed");
+        assert_eq!(values[0].value, Some(Variant::Int32(16)));
+        assert_eq!(
+            values[0].status.map(|s| s.value_type()),
+            Some(opcua_types::StatusCodeValueType::Interpolated)
+        );
+    }
+
+    #[tokio::test]
+    async fn read_at_time_returns_bad_no_data_outside_recorded_range() {
+        let history = InMemoryDataHistory::new();
+        let node_id = NodeId::new(2, "at-time-out-of-range");
+        history
+            .update_data(&node_id, PerformUpdateType::Insert, vec![dv_at(10, 1)])
+            .await
+            .unwrap();
+
+        let (values, _next) = history
+            .read_at_time(
+                &node_id,
+                &[DateTime::from(0), DateTime::from(1000)],
+                false,
+                false,
+                None,
+            )
+            .await
+            .expect("read_at_time should succeed");
+        assert_eq!(values.len(), 2);
+        assert_eq!(values[0].status, Some(StatusCode::BadNoData));
+        assert_eq!(values[1].status, Some(StatusCode::BadNoData));
+    }
+
+    #[tokio::test]
+    async fn read_at_time_resolves_multiple_timestamps_independently_in_request_order() {
+        let history = InMemoryDataHistory::new();
+        let node_id = NodeId::new(2, "at-time-multi");
+        history
+            .update_data(
+                &node_id,
+                PerformUpdateType::Insert,
+                vec![dv_at(0, 10), dv_at(10, 20)],
+            )
+            .await
+            .unwrap();
+
+        // Duplicate + out-of-order requested timestamps: 5 (interpolated), 0 (exact),
+        // -100 (out of range), 5 again (interpolated, repeated).
+        let req_times = vec![
+            DateTime::from(5),
+            DateTime::from(0),
+            DateTime::from(-100),
+            DateTime::from(5),
+        ];
+        let (values, _next) = history
+            .read_at_time(&node_id, &req_times, false, false, None)
+            .await
+            .expect("read_at_time should succeed");
+        assert_eq!(values.len(), 4);
+        assert_eq!(values[0].value, Some(Variant::Int32(15)));
+        assert_eq!(values[1].value, Some(Variant::Int32(10)));
+        assert_eq!(values[2].status, Some(StatusCode::BadNoData));
+        assert_eq!(values[3].value, Some(Variant::Int32(15)));
+    }
+
+    #[tokio::test]
+    async fn read_at_time_stepped_node_step_holds_any_variant_type() {
+        // CU 2991: a structured/non-numeric historized value resolves via the Stepped path,
+        // which never touches numeric interpolation at all.
+        let history = InMemoryDataHistory::new();
+        let node_id = NodeId::new(2, "at-time-stepped-structured");
+        let structured = DataValue {
+            value: Some(Variant::from(UAString::from("log entry"))),
+            status: Some(StatusCode::Good),
+            source_timestamp: Some(DateTime::from(0)),
+            server_timestamp: Some(DateTime::from(0)),
+            ..Default::default()
+        };
+        history
+            .update_data(&node_id, PerformUpdateType::Insert, vec![structured])
+            .await
+            .unwrap();
+
+        let (values, _next) = history
+            .read_at_time(&node_id, &[DateTime::from(50)], false, true, None)
+            .await
+            .expect("read_at_time should succeed");
+        assert_eq!(
+            values[0].value,
+            Some(Variant::from(UAString::from("log entry")))
+        );
+        assert_eq!(
+            values[0].status.map(|s| s.value_type()),
+            Some(opcua_types::StatusCodeValueType::Interpolated)
+        );
+    }
+
+    #[tokio::test]
+    async fn read_at_time_rejects_invalid_continuation_point() {
+        let history = InMemoryDataHistory::new();
+        let node_id = NodeId::new(2, "at-time-bad-cp");
+
+        let err = history
+            .read_at_time(
+                &node_id,
+                &[DateTime::from(0)],
+                false,
+                false,
+                Some(vec![1, 2, 3]), // not a valid 8-byte resume index
+            )
+            .await
+            .expect_err("a malformed continuation point must be rejected");
+        assert_eq!(err, StatusCode::BadContinuationPointInvalid);
+    }
+
+    #[tokio::test]
+    async fn read_at_time_pages_across_multiple_calls_via_continuation_point() {
+        let history = InMemoryDataHistory::new();
+        let node_id = NodeId::new(2, "at-time-paged");
+        history
+            .update_data(&node_id, PerformUpdateType::Insert, vec![dv_at(0, 42)])
+            .await
+            .unwrap();
+
+        // More requested timestamps than one batch (BATCH_LIMIT = 1_000) -- every one resolves
+        // the same way (out of range), so only the *count* and continuation-token chaining are
+        // under test here, not per-value correctness (already covered by the tests above).
+        let req_times: Vec<DateTime> = (0..1_500i64).map(DateTime::from).collect();
+
+        let (first_batch, cp) = history
+            .read_at_time(&node_id, &req_times, false, false, None)
+            .await
+            .expect("first batch should succeed");
+        assert_eq!(first_batch.len(), 1_000);
+        let cp =
+            cp.expect("more than one batch worth of timestamps must yield a continuation token");
+
+        let (second_batch, cp2) = history
+            .read_at_time(&node_id, &req_times, false, false, Some(cp))
+            .await
+            .expect("second batch should succeed");
+        assert_eq!(second_batch.len(), 500);
+        assert!(cp2.is_none(), "no further batches remain");
     }
 }

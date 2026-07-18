@@ -720,6 +720,100 @@ impl InMemoryNodeManagerImpl for SimpleNodeManagerImpl {
     }
 
     #[cfg(feature = "history")]
+    async fn history_read_at_time(
+        &self,
+        #[cfg_attr(not(feature = "history-aggregates"), allow(unused_variables))]
+        _context: &RequestContext,
+        #[cfg_attr(not(feature = "history-aggregates"), allow(unused_variables))]
+        address_space: &RwLock<AddressSpace>,
+        #[cfg_attr(not(feature = "history-aggregates"), allow(unused_variables))]
+        details: &opcua_types::ReadAtTimeDetails,
+        nodes: &mut [&mut &mut crate::node_manager::history::HistoryNode],
+        _timestamps_to_return: TimestampsToReturn,
+    ) -> Result<(), StatusCode> {
+        let backend = {
+            let guard = self.history_backend.read();
+            guard.clone()
+        };
+        if let Some(backend) = backend {
+            #[cfg(not(feature = "history-aggregates"))]
+            {
+                let _ = (backend, address_space, details);
+                for node in nodes {
+                    node.set_status(StatusCode::BadHistoryOperationUnsupported);
+                }
+                Ok(())
+            }
+            #[cfg(feature = "history-aggregates")]
+            {
+                let req_times = details.req_times.as_deref().unwrap_or(&[]);
+                for hn in nodes {
+                    let node_id = hn.node_id();
+                    let stepped = {
+                        let space = trace_read_lock!(address_space);
+                        crate::aggregates::resolve_stepped(&space, node_id)
+                    };
+                    let backend_token = hn
+                        .continuation_point()
+                        .and_then(|cp| cp.get::<crate::history::HistoryContinuationPoint>())
+                        .and_then(|hcp| hcp.backend_token.clone());
+
+                    match backend
+                        .read_at_time(
+                            node_id,
+                            req_times,
+                            details.use_simple_bounds,
+                            stepped,
+                            backend_token,
+                        )
+                        .await
+                    {
+                        Ok((data_values, next_token)) => {
+                            // §6.3's ContinuationPoint rules apply generically; this operation
+                            // pages over `req_times` by index (research.md R9), not over a time
+                            // range, so start_time/end_time here are unused by `read_at_time`
+                            // itself -- carried only because `HistoryContinuationPoint` is the
+                            // shared payload type every history-read operation reuses (see
+                            // `history_read_annotations`'s identical repurposing of these fields
+                            // for its own reqTimes[] shape).
+                            let start_time = req_times
+                                .first()
+                                .copied()
+                                .unwrap_or_else(opcua_types::DateTime::null);
+                            let end_time = req_times
+                                .last()
+                                .copied()
+                                .unwrap_or_else(opcua_types::DateTime::null);
+                            let next_cp = next_token.map(|tok| {
+                                crate::session::continuation_points::ContinuationPoint::new(
+                                    Box::new(crate::history::HistoryContinuationPoint::new(
+                                        node_id.clone(),
+                                        start_time,
+                                        end_time,
+                                        req_times.len() as u32,
+                                        false,
+                                        Some(tok),
+                                    )),
+                                )
+                            });
+
+                            hn.set_next_continuation_point(next_cp);
+                            hn.set_result(opcua_types::HistoryData {
+                                data_values: Some(data_values),
+                            });
+                            hn.set_status(StatusCode::Good);
+                        }
+                        Err(status) => hn.set_status(status),
+                    }
+                }
+                Ok(())
+            }
+        } else {
+            Err(StatusCode::BadHistoryOperationUnsupported)
+        }
+    }
+
+    #[cfg(feature = "history")]
     async fn history_release_continuation_point(
         &self,
         _context: &RequestContext,

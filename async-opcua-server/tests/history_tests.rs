@@ -26,8 +26,8 @@ use opcua_server::{
 use opcua_types::{
     AggregateConfiguration, ByteString, DataTypeId, DataValue, DateTime, EventFilter, HistoryData,
     HistoryEvent, HistoryReadValueId, MessageSecurityMode, NodeId, NumericRange, PerformUpdateType,
-    QualifiedName, ReadAnnotationDataDetails, ReadEventDetails, ReadProcessedDetails, StatusCode,
-    TimestampsToReturn, Variant,
+    QualifiedName, ReadAnnotationDataDetails, ReadAtTimeDetails, ReadEventDetails,
+    ReadProcessedDetails, StatusCode, StatusCodeValueType, TimestampsToReturn, Variant,
 };
 use tokio::net::TcpListener;
 
@@ -463,4 +463,75 @@ async fn test_history_read_annotations_empty_result() {
         .into_inner_as::<HistoryData>()
         .expect("HistoryData");
     assert!(history_data.data_values.unwrap_or_default().is_empty());
+}
+
+/// Feature 107 / OPC-10000-11 §6.5.5.2: a real client `HistoryRead(ReadAtTimeDetails)` round
+/// trip through the real Call-service-equivalent HistoryRead dispatch (not a backend-direct
+/// unit test), proving the wire path -- client -> network -> server -> `SimpleNodeManager` ->
+/// `HistoryStorageBackend::read_at_time` -- against real recorded history.
+#[tokio::test]
+async fn test_history_read_at_time_round_trip() {
+    let server = setup_history_server("read-at-time").await;
+    let node_id = NodeId::new(server.namespace_index, "ReadAtTimeValue");
+    add_historical_variable(&server.node_manager, &node_id);
+
+    let base_time = DateTime::from((2026, 6, 6, 6, 0, 0));
+    let sample_at =
+        |offset_seconds: i64| DateTime::from(base_time.ticks() + offset_seconds * 10_000_000);
+    server
+        .backend
+        .update_data(
+            &node_id,
+            PerformUpdateType::Insert,
+            vec![
+                data_value(10.0, sample_at(0)),
+                data_value(20.0, sample_at(10)),
+            ],
+        )
+        .await
+        .expect("insert history values");
+
+    // One exact match (offset 10) and one requiring interpolation (offset 5, midway between
+    // the two recorded samples). `add_historical_variable` sets up no
+    // `HistoricalDataConfigurationType`, so `resolve_stepped` defaults to `true` -- the server
+    // correctly step-holds (10.0, the prior sample) rather than sloped-interpolating (15.0);
+    // both the stepped and non-stepped numeric paths are already covered more thoroughly at the
+    // unit level in `history/data_history.rs`'s `read_at_time_*` tests -- this integration test's
+    // job is proving the real wire dispatch, not re-proving that business logic.
+    let req_times = vec![sample_at(10), sample_at(5)];
+    let results = server
+        .session
+        .history_read(
+            HistoryReadAction::ReadAtTimeDetails(ReadAtTimeDetails {
+                req_times: Some(req_times),
+                use_simple_bounds: false,
+            }),
+            TimestampsToReturn::Both,
+            false,
+            &[history_read_value_id(node_id, None)],
+        )
+        .await
+        .expect("read-at-time history read");
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].status_code, StatusCode::Good);
+    let history_data = results[0]
+        .history_data
+        .clone()
+        .into_inner_as::<HistoryData>()
+        .expect("HistoryData");
+    let values = history_data.data_values.unwrap_or_default();
+    assert_eq!(values.len(), 2);
+
+    assert_eq!(double_value(&values[0]), 20.0);
+    assert_eq!(
+        values[0].status.map(|s| s.value_type()),
+        Some(StatusCodeValueType::Raw)
+    );
+
+    assert_eq!(double_value(&values[1]), 10.0);
+    assert_eq!(
+        values[1].status.map(|s| s.value_type()),
+        Some(StatusCodeValueType::Interpolated)
+    );
 }

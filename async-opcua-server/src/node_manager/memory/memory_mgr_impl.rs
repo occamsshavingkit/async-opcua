@@ -1759,6 +1759,7 @@ pub trait InMemoryNodeManagerImpl: Send + Sync + 'static {
     async fn history_read_at_time(
         &self,
         context: &RequestContext,
+        address_space: &RwLock<AddressSpace>,
         details: &ReadAtTimeDetails,
         nodes: &mut [&mut &mut HistoryNode],
         timestamps_to_return: TimestampsToReturn,

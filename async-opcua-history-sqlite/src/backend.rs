@@ -665,6 +665,35 @@ impl HistoryStorageBackend for SqliteHistoryBackend {
         }
     }
 
+    async fn read_raw_reverse(
+        &self,
+        node_id: &NodeId,
+        at_or_before: DateTime,
+        num_values_per_node: u32,
+    ) -> Result<Vec<DataValue>, StatusCode> {
+        let pool = self.pool.clone();
+        let node_id = node_id.clone();
+        let page_size = Self::page_size(num_values_per_node);
+        let at_or_before_ticks = at_or_before.ticks();
+
+        let result: Result<Vec<DataValue>, SqliteError> = tokio::task::spawn_blocking(move || {
+            let conn = pool.get().expect("get connection from pool");
+            query::fetch_interval(
+                &conn,
+                &node_id.to_string(),
+                at_or_before_ticks,
+                i64::MIN,
+                /* chronological = */ false,
+                None,
+                page_size,
+            )
+        })
+        .await
+        .map_err(|_| StatusCode::BadInternalError)?;
+
+        result.map_err(|err| map_history_read_sqlite_error("read_raw_reverse", err))
+    }
+
     #[allow(clippy::too_many_arguments)]
     async fn read_processed(
         &self,

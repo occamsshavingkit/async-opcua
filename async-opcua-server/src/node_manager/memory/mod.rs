@@ -1271,7 +1271,13 @@ impl<TImpl: InMemoryNodeManagerImpl> HistoryProvider for InMemoryNodeManager<TIm
     ) -> Result<(), StatusCode> {
         let mut nodes = self.validate_history_read_nodes(context, nodes, false);
         self.inner
-            .history_read_at_time(context, details, &mut nodes, timestamps_to_return)
+            .history_read_at_time(
+                context,
+                &self.address_space,
+                details,
+                &mut nodes,
+                timestamps_to_return,
+            )
             .await
     }
 

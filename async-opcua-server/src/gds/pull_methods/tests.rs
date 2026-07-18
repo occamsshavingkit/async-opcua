@@ -1,6 +1,8 @@
 use opcua_core::sync::RwLock;
 use opcua_crypto::SecurityPolicy;
-use opcua_types::{AnonymousIdentityToken, ApplicationDescription, MessageSecurityMode, UAString};
+use opcua_types::{
+    AnonymousIdentityToken, ApplicationDescription, ExtensionObject, MessageSecurityMode, UAString,
+};
 
 use crate::{
     address_space::AddressSpace, authenticator::UserToken,
@@ -378,4 +380,517 @@ async fn get_certificate_status_reports_update_not_required() {
         .expect("get certificate status should succeed");
 
     assert_eq!(outputs[0], Variant::from(false));
+}
+
+fn no_role_request_context() -> (RequestContext, crate::ServerHandle) {
+    request_context(MessageSecurityMode::None, vec![])
+}
+
+#[allow(clippy::too_many_arguments)]
+fn application_record(
+    application_id: NodeId,
+    uri: &str,
+    name: &str,
+    product_uri: &str,
+    discovery_urls: &[&str],
+    capabilities: &[&str],
+    application_type: ApplicationType,
+) -> ApplicationRecordDataType {
+    ApplicationRecordDataType {
+        application_id,
+        application_uri: UAString::from(uri),
+        application_type,
+        application_names: Some(vec![LocalizedText::from(name)]),
+        product_uri: UAString::from(product_uri),
+        discovery_urls: (!discovery_urls.is_empty())
+            .then(|| discovery_urls.iter().map(|u| UAString::from(*u)).collect()),
+        server_capabilities: (!capabilities.is_empty())
+            .then(|| capabilities.iter().map(|c| UAString::from(*c)).collect()),
+    }
+}
+
+fn record_arg(record: ApplicationRecordDataType) -> Variant {
+    Variant::from(ExtensionObject::new(record))
+}
+
+fn query_applications_args(
+    starting_record_id: u32,
+    max_records_to_return: u32,
+    application_name: &str,
+    application_uri: &str,
+    application_type_mask: u32,
+    product_uri: &str,
+    capabilities: &[&str],
+) -> Vec<Variant> {
+    vec![
+        Variant::from(starting_record_id),
+        Variant::from(max_records_to_return),
+        Variant::from(application_name),
+        Variant::from(application_uri),
+        Variant::from(application_type_mask),
+        Variant::from(product_uri),
+        string_array_variant(capabilities),
+    ]
+}
+
+fn string_array_variant(values: &[&str]) -> Variant {
+    let array = Array::new(
+        opcua_types::VariantScalarTypeId::String,
+        values.iter().map(|v| Variant::from(*v)).collect::<Vec<_>>(),
+    )
+    .expect("string array should construct");
+    Variant::Array(Box::new(array))
+}
+
+#[tokio::test]
+async fn register_application_assigns_id_and_is_retrievable() {
+    let Some((handler, _directory)) = handler_with_directory() else {
+        return;
+    };
+    let (context, _handle) = security_admin_request_context(MessageSecurityMode::SignAndEncrypt);
+
+    let record = application_record(
+        NodeId::null(),
+        "urn:test:register-app",
+        "Register App",
+        "urn:test:products:register-app",
+        &["opc.tcp://localhost:4840"],
+        &["DA"],
+        ApplicationType::Server,
+    );
+    let outputs = handler
+        .handle_register_application(&context, &[record_arg(record)])
+        .expect("register application should succeed");
+    let Variant::NodeId(application_id) = &outputs[0] else {
+        panic!("expected NodeId output");
+    };
+    assert!(!application_id.is_null());
+
+    let (read_context, _handle2) = no_role_request_context();
+    let get_outputs = handler
+        .handle_get_application(
+            &read_context,
+            &[Variant::from(application_id.as_ref().clone())],
+        )
+        .expect("get application should succeed");
+    let Variant::ExtensionObject(obj) = &get_outputs[0] else {
+        panic!("expected ExtensionObject output");
+    };
+    let decoded = obj
+        .clone()
+        .into_inner_as::<ApplicationRecordDataType>()
+        .expect("should decode as ApplicationRecordDataType");
+    assert_eq!(
+        decoded.application_uri,
+        UAString::from("urn:test:register-app")
+    );
+}
+
+#[tokio::test]
+async fn register_application_rejects_duplicate_uri() {
+    let Some((handler, _directory)) = handler_with_directory() else {
+        return;
+    };
+    let (context, _handle) = security_admin_request_context(MessageSecurityMode::SignAndEncrypt);
+
+    let first = application_record(
+        NodeId::null(),
+        "urn:test:duplicate-app",
+        "First",
+        "urn:test:products:first",
+        &[],
+        &[],
+        ApplicationType::Server,
+    );
+    handler
+        .handle_register_application(&context, &[record_arg(first)])
+        .expect("first registration should succeed");
+
+    let second = application_record(
+        NodeId::null(),
+        "urn:test:duplicate-app",
+        "Second",
+        "urn:test:products:second",
+        &[],
+        &[],
+        ApplicationType::Server,
+    );
+    assert_eq!(
+        handler.handle_register_application(&context, &[record_arg(second)]),
+        Err(StatusCode::BadEntryExists)
+    );
+}
+
+#[tokio::test]
+async fn register_application_requires_security_admin() {
+    let Some((handler, _directory)) = handler_with_directory() else {
+        return;
+    };
+    let (context, _handle) = request_context(
+        MessageSecurityMode::SignAndEncrypt,
+        vec![WellKnownRole::AuthenticatedUser.node_id()],
+    );
+
+    let record = application_record(
+        NodeId::null(),
+        "urn:test:denied-app",
+        "Denied",
+        "urn:test:products:denied",
+        &[],
+        &[],
+        ApplicationType::Server,
+    );
+    assert_eq!(
+        handler.handle_register_application(&context, &[record_arg(record)]),
+        Err(StatusCode::BadUserAccessDenied)
+    );
+}
+
+#[tokio::test]
+async fn update_application_changes_fields_but_rejects_uri_change() {
+    let Some((handler, _directory)) = handler_with_directory() else {
+        return;
+    };
+    let (context, _handle) = security_admin_request_context(MessageSecurityMode::SignAndEncrypt);
+
+    let record = application_record(
+        NodeId::null(),
+        "urn:test:update-app",
+        "Before",
+        "urn:test:products:update-app",
+        &[],
+        &[],
+        ApplicationType::Server,
+    );
+    let outputs = handler
+        .handle_register_application(&context, &[record_arg(record)])
+        .expect("register application should succeed");
+    let Variant::NodeId(application_id) = &outputs[0] else {
+        panic!("expected NodeId output");
+    };
+
+    let updated = application_record(
+        application_id.as_ref().clone(),
+        "urn:test:update-app",
+        "After",
+        "urn:test:products:update-app",
+        &["opc.tcp://localhost:4840"],
+        &[],
+        ApplicationType::Server,
+    );
+    handler
+        .handle_update_application(&context, &[record_arg(updated)])
+        .expect("update with unchanged uri should succeed");
+
+    let (read_context, _handle2) = no_role_request_context();
+    let get_outputs = handler
+        .handle_get_application(
+            &read_context,
+            &[Variant::from(application_id.as_ref().clone())],
+        )
+        .expect("get application should succeed");
+    let Variant::ExtensionObject(obj) = &get_outputs[0] else {
+        panic!("expected ExtensionObject output");
+    };
+    let decoded = obj
+        .clone()
+        .into_inner_as::<ApplicationRecordDataType>()
+        .expect("should decode as ApplicationRecordDataType");
+    assert_eq!(
+        decoded.application_names.unwrap()[0].text,
+        UAString::from("After")
+    );
+
+    let changed_uri = application_record(
+        application_id.as_ref().clone(),
+        "urn:test:update-app-changed",
+        "After",
+        "urn:test:products:update-app",
+        &[],
+        &[],
+        ApplicationType::Server,
+    );
+    assert_eq!(
+        handler.handle_update_application(&context, &[record_arg(changed_uri)]),
+        Err(StatusCode::BadWriteNotSupported)
+    );
+}
+
+#[tokio::test]
+async fn update_application_unknown_id_reports_not_found() {
+    let Some((handler, _directory)) = handler_with_directory() else {
+        return;
+    };
+    let (context, _handle) = security_admin_request_context(MessageSecurityMode::SignAndEncrypt);
+
+    let record = application_record(
+        NodeId::new(1, "does-not-exist"),
+        "urn:test:missing-update",
+        "Missing",
+        "urn:test:products:missing",
+        &[],
+        &[],
+        ApplicationType::Server,
+    );
+    assert_eq!(
+        handler.handle_update_application(&context, &[record_arg(record)]),
+        Err(StatusCode::BadNotFound)
+    );
+}
+
+#[tokio::test]
+async fn unregister_application_removes_record() {
+    let Some((handler, _directory)) = handler_with_directory() else {
+        return;
+    };
+    let (context, _handle) = security_admin_request_context(MessageSecurityMode::SignAndEncrypt);
+
+    let record = application_record(
+        NodeId::null(),
+        "urn:test:unregister-app",
+        "Unregister",
+        "urn:test:products:unregister-app",
+        &[],
+        &[],
+        ApplicationType::Server,
+    );
+    let outputs = handler
+        .handle_register_application(&context, &[record_arg(record)])
+        .expect("register application should succeed");
+    let Variant::NodeId(application_id) = &outputs[0] else {
+        panic!("expected NodeId output");
+    };
+
+    handler
+        .handle_unregister_application(&context, &[Variant::from(application_id.as_ref().clone())])
+        .expect("unregister should succeed");
+
+    let (read_context, _handle2) = no_role_request_context();
+    assert_eq!(
+        handler.handle_get_application(
+            &read_context,
+            &[Variant::from(application_id.as_ref().clone())]
+        ),
+        Err(StatusCode::BadNotFound)
+    );
+}
+
+#[tokio::test]
+async fn unregister_application_unknown_id_reports_not_found() {
+    let Some((handler, _directory)) = handler_with_directory() else {
+        return;
+    };
+    let (context, _handle) = security_admin_request_context(MessageSecurityMode::SignAndEncrypt);
+
+    assert_eq!(
+        handler.handle_unregister_application(
+            &context,
+            &[Variant::from(NodeId::new(1, "does-not-exist"))]
+        ),
+        Err(StatusCode::BadNotFound)
+    );
+}
+
+#[tokio::test]
+async fn get_application_unknown_id_reports_not_found() {
+    let Some((handler, _directory)) = handler_with_directory() else {
+        return;
+    };
+    let (context, _handle) = no_role_request_context();
+
+    assert_eq!(
+        handler
+            .handle_get_application(&context, &[Variant::from(NodeId::new(1, "does-not-exist"))]),
+        Err(StatusCode::BadNotFound)
+    );
+}
+
+#[tokio::test]
+async fn find_applications_exact_match_returns_single_result() {
+    let Some((handler, _directory)) = handler_with_directory() else {
+        return;
+    };
+    let (context, _handle) = security_admin_request_context(MessageSecurityMode::SignAndEncrypt);
+
+    let record = application_record(
+        NodeId::null(),
+        "urn:test:find-app",
+        "Find",
+        "urn:test:products:find-app",
+        &[],
+        &[],
+        ApplicationType::Server,
+    );
+    handler
+        .handle_register_application(&context, &[record_arg(record)])
+        .expect("register application should succeed");
+
+    let (read_context, _handle2) = no_role_request_context();
+    let found = handler
+        .handle_find_applications(&read_context, &[Variant::from("urn:test:find-app")])
+        .expect("find applications should succeed");
+    let Variant::Array(array) = &found[0] else {
+        panic!("expected array output");
+    };
+    assert_eq!(array.values.len(), 1);
+
+    // FindApplications does exact matching, unlike QueryApplications' LIKE-based filters.
+    let not_found = handler
+        .handle_find_applications(&read_context, &[Variant::from("urn:test:find-a")])
+        .expect("find applications should succeed even with no match");
+    let Variant::Array(empty_array) = &not_found[0] else {
+        panic!("expected array output");
+    };
+    assert_eq!(empty_array.values.len(), 0);
+}
+
+#[tokio::test]
+async fn query_applications_filters_by_name_uri_type_and_excludes_na_capability() {
+    let Some((handler, _directory)) = handler_with_directory() else {
+        return;
+    };
+    let (context, _handle) = security_admin_request_context(MessageSecurityMode::SignAndEncrypt);
+
+    for (uri, name, app_type, capabilities) in [
+        (
+            "urn:test:query-server",
+            "QueryServerApp",
+            ApplicationType::Server,
+            &["DA"][..],
+        ),
+        (
+            "urn:test:query-client",
+            "QueryClientApp",
+            ApplicationType::Client,
+            &[][..],
+        ),
+        (
+            "urn:test:query-na",
+            "QueryNaApp",
+            ApplicationType::Server,
+            &["NA"][..],
+        ),
+    ] {
+        let record = application_record(
+            NodeId::null(),
+            uri,
+            name,
+            "urn:test:products:query",
+            &[],
+            capabilities,
+            app_type,
+        );
+        handler
+            .handle_register_application(&context, &[record_arg(record)])
+            .expect("register application should succeed");
+    }
+
+    let (read_context, _handle2) = no_role_request_context();
+    let outputs = handler
+        .handle_query_applications(
+            &read_context,
+            &query_applications_args(0, 0, "Query%", "", QUERY_APPLICATION_TYPE_SERVERS, "", &[]),
+        )
+        .expect("query applications should succeed");
+    let Variant::Array(array) = &outputs[2] else {
+        panic!("expected array output");
+    };
+    // Only "QueryServerApp" should match: NA-tagged records are always excluded, and the
+    // ApplicationType mask excludes the Client record.
+    assert_eq!(array.values.len(), 1);
+}
+
+#[tokio::test]
+async fn query_applications_paginates_with_starting_record_id_and_max_records() {
+    let Some((handler, _directory)) = handler_with_directory() else {
+        return;
+    };
+    let (context, _handle) = security_admin_request_context(MessageSecurityMode::SignAndEncrypt);
+
+    for i in 0..3 {
+        let record = application_record(
+            NodeId::null(),
+            &format!("urn:test:page-app-{i}"),
+            &format!("PageApp{i}"),
+            "urn:test:products:page",
+            &[],
+            &[],
+            ApplicationType::Server,
+        );
+        handler
+            .handle_register_application(&context, &[record_arg(record)])
+            .expect("register application should succeed");
+    }
+
+    let (read_context, _handle2) = no_role_request_context();
+    let first_page = handler
+        .handle_query_applications(
+            &read_context,
+            &query_applications_args(0, 2, "", "", 0, "", &[]),
+        )
+        .expect("query applications should succeed");
+    let Variant::Array(first_array) = &first_page[2] else {
+        panic!("expected array output");
+    };
+    assert_eq!(first_array.values.len(), 2);
+    let Variant::UInt32(next_record_id) = &first_page[1] else {
+        panic!("expected UInt32 NextRecordId output");
+    };
+    let next_record_id = *next_record_id;
+    assert_ne!(next_record_id, 0, "a further page should be signalled");
+
+    let second_page = handler
+        .handle_query_applications(
+            &read_context,
+            &query_applications_args(next_record_id, 0, "", "", 0, "", &[]),
+        )
+        .expect("query applications should succeed");
+    let Variant::Array(second_array) = &second_page[2] else {
+        panic!("expected array output");
+    };
+    assert_eq!(second_array.values.len(), 1);
+}
+
+#[tokio::test]
+async fn query_servers_emits_one_row_per_discovery_url() {
+    let Some((handler, _directory)) = handler_with_directory() else {
+        return;
+    };
+    let (context, _handle) = security_admin_request_context(MessageSecurityMode::SignAndEncrypt);
+
+    let record = application_record(
+        NodeId::null(),
+        "urn:test:multi-url-app",
+        "MultiUrl",
+        "urn:test:products:multi-url",
+        &["opc.tcp://host-a:4840", "opc.tcp://host-b:4840"],
+        &[],
+        ApplicationType::Server,
+    );
+    handler
+        .handle_register_application(&context, &[record_arg(record)])
+        .expect("register application should succeed");
+
+    let (read_context, _handle2) = no_role_request_context();
+    let outputs = handler
+        .handle_query_servers(
+            &read_context,
+            &[
+                Variant::from(0u32),
+                Variant::from(0u32),
+                Variant::from(""),
+                Variant::from(""),
+                Variant::from(""),
+                string_array_variant(&[]),
+            ],
+        )
+        .expect("query servers should succeed");
+    let Variant::Array(array) = &outputs[1] else {
+        panic!("expected array output");
+    };
+    assert_eq!(
+        array.values.len(),
+        2,
+        "one ServerOnNetwork row per discovery URL"
+    );
 }

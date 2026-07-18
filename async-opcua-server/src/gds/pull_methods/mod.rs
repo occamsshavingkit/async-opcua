@@ -24,13 +24,11 @@ use opcua_types::{
     MessageSecurityMode, NodeId, ServerOnNetwork, StatusCode, UAString, Variant,
 };
 
+#[cfg(feature = "companion-gds")]
+use crate::gds::application_record::ApplicationRecordDataType;
 #[cfg(all(feature = "generated-address-space", feature = "companion-gds"))]
 use crate::node_manager::memory::CoreNodeManager;
-use crate::{
-    gds::{application_record::ApplicationRecordDataType, like_match::like_match},
-    node_manager::RequestContext,
-    rbac::WellKnownRole,
-};
+use crate::{gds::like_match::like_match, node_manager::RequestContext, rbac::WellKnownRole};
 
 use super::directory_instance::DirectoryInstanceNodeIds;
 
@@ -113,6 +111,7 @@ impl GdsApplicationRecord {
             .collect()
     }
 
+    #[cfg(feature = "companion-gds")]
     fn to_wire_type(&self, application_id: NodeId) -> ApplicationRecordDataType {
         ApplicationRecordDataType {
             application_id,
@@ -149,6 +148,7 @@ fn uastring_array(values: &[String]) -> Option<Vec<UAString>> {
     (!values.is_empty()).then(|| values.iter().map(|v| UAString::from(v.as_str())).collect())
 }
 
+#[cfg(feature = "companion-gds")]
 fn strings_from(values: Option<Vec<UAString>>) -> Vec<String> {
     values
         .unwrap_or_default()
@@ -247,11 +247,16 @@ impl GdsPullMethodRegistry {
 
     /// The real `RegisterApplication` Method (Part 12 §6.5.6): rejects a duplicate
     /// `ApplicationUri` with `Bad_EntryExists` (FR-002), otherwise assigns a fresh `ApplicationId`
-    /// and `record_id` and stores the full record.
+    /// and `record_id` and stores the full record. `default_application_group_id` is seeded onto
+    /// the new record the same way the Pull-model's own internal `register_application` does, so
+    /// an application registered through this Method can immediately use
+    /// `GetCertificateGroups`/`GetTrustList` against the real `DefaultApplicationGroup`.
+    #[cfg(feature = "companion-gds")]
     fn register_full(
         &self,
         ns: u16,
         record: ApplicationRecordDataType,
+        default_application_group_id: NodeId,
     ) -> Result<NodeId, StatusCode> {
         if record.application_uri.is_empty() {
             return Err(StatusCode::BadInvalidArgument);
@@ -266,7 +271,7 @@ impl GdsPullMethodRegistry {
             application_id.clone(),
             GdsApplicationRecord {
                 record_id: self.next_record_id(),
-                certificate_group_ids: Vec::new(),
+                certificate_group_ids: vec![default_application_group_id],
                 application_uri,
                 application_type: record.application_type,
                 application_names: record.application_names.unwrap_or_default(),
@@ -280,6 +285,7 @@ impl GdsPullMethodRegistry {
 
     /// The real `UpdateApplication` Method (Part 12 §6.5.7): `Bad_NotFound` if `ApplicationId`
     /// is unknown, `Bad_WriteNotSupported` if `ApplicationUri` was changed.
+    #[cfg(feature = "companion-gds")]
     fn update_full(&self, record: ApplicationRecordDataType) -> Result<(), StatusCode> {
         let existing = self
             .application(&record.application_id)
@@ -319,6 +325,7 @@ impl GdsPullMethodRegistry {
 
     /// The real `FindApplications` Method (Part 12 §6.5.4): exact (not LIKE-pattern) match on
     /// `ApplicationUri`, distinct from `QueryApplications`' own LIKE-based URI filter.
+    #[cfg(feature = "companion-gds")]
     fn find_by_uri(&self, application_uri: &str) -> Option<(NodeId, GdsApplicationRecord)> {
         self.inner
             .applications
@@ -765,6 +772,7 @@ impl GdsPullMethodHandler {
     }
 
     /// Handles `RegisterApplication` (Part 12 §6.5.6). Requires `SecurityAdmin` (research.md R4).
+    #[cfg(feature = "companion-gds")]
     pub fn handle_register_application(
         &self,
         context: &RequestContext,
@@ -777,11 +785,16 @@ impl GdsPullMethodHandler {
         }
         let record = application_record_arg(args, 0)?;
         let ns = self.directory.directory_object_id.namespace;
-        let application_id = self.registry.register_full(ns, record)?;
+        let application_id = self.registry.register_full(
+            ns,
+            record,
+            self.directory.default_application_group_id.clone(),
+        )?;
         Ok(vec![Variant::from(application_id)])
     }
 
     /// Handles `UpdateApplication` (Part 12 §6.5.7). Requires `SecurityAdmin` (research.md R4).
+    #[cfg(feature = "companion-gds")]
     pub fn handle_update_application(
         &self,
         context: &RequestContext,
@@ -817,6 +830,7 @@ impl GdsPullMethodHandler {
 
     /// Handles `GetApplication` (Part 12 §6.5.9). No role restriction (research.md R2/R4 -- the
     /// spec text names no specific Role for this read, unlike the three write methods above).
+    #[cfg(feature = "companion-gds")]
     pub fn handle_get_application(
         &self,
         _context: &RequestContext,
@@ -838,6 +852,7 @@ impl GdsPullMethodHandler {
     /// Handles `FindApplications` (Part 12 §6.5.4). No role restriction ("can be called by any
     /// Client"). Exact match on `ApplicationUri`, NOT the LIKE-pattern matching
     /// `QueryApplications`/`QueryServers` use for the same field.
+    #[cfg(feature = "companion-gds")]
     pub fn handle_find_applications(
         &self,
         _context: &RequestContext,
@@ -961,18 +976,22 @@ impl GdsPullMethodHandler {
         );
         records.retain(|(_, record)| record.record_id > starting_record_id);
 
-        let limit = if max_records_to_return == 0 {
-            records.len()
-        } else {
-            max_records_to_return as usize
-        };
-        records.truncate(limit);
-
-        let rows: Vec<Variant> = records
+        // Expand to `ServerOnNetwork` rows (one per discovery URL, Part 12 Table 15) BEFORE
+        // truncating: `MaxRecordsToReturn` bounds the number of *rows* in the response, not the
+        // number of underlying application records, so truncating records first could still
+        // return more rows than requested whenever a record has multiple discovery URLs.
+        let mut rows: Vec<Variant> = records
             .iter()
             .flat_map(|(_, record)| record.to_server_on_network_rows())
             .map(Variant::from)
             .collect();
+        let limit = if max_records_to_return == 0 {
+            rows.len()
+        } else {
+            max_records_to_return as usize
+        };
+        rows.truncate(limit);
+
         let array = Array::new(opcua_types::VariantScalarTypeId::ExtensionObject, rows)
             .map_err(|_| StatusCode::BadUnexpectedError)?;
 
@@ -1059,14 +1078,17 @@ fn u32_arg(args: &[Variant], index: usize) -> Result<u32, StatusCode> {
 
 fn string_array_arg(args: &[Variant], index: usize) -> Result<Vec<String>, StatusCode> {
     match args.get(index) {
-        Some(Variant::Array(array)) => Ok(array
+        Some(Variant::Array(array)) => array
             .values
             .iter()
-            .filter_map(|v| match v {
-                Variant::String(s) => s.value().clone(),
-                _ => None,
+            .map(|v| match v {
+                // A null String *entry* (distinct from a non-String element) legitimately means
+                // "no capability at this position" and is dropped, not rejected.
+                Variant::String(s) => Ok(s.value().clone()),
+                _ => Err(StatusCode::BadTypeMismatch),
             })
-            .collect()),
+            .collect::<Result<Vec<Option<String>>, StatusCode>>()
+            .map(|values| values.into_iter().flatten().collect()),
         Some(Variant::String(s)) if s.is_null() => Ok(Vec::new()),
         Some(Variant::Empty) => Ok(Vec::new()),
         None => Err(StatusCode::BadArgumentsMissing),
@@ -1077,6 +1099,7 @@ fn string_array_arg(args: &[Variant], index: usize) -> Result<Vec<String>, Statu
 /// Decodes an `ApplicationRecordDataType` argument. Requires the caller (both server and, for
 /// the round-trip test, client) to have registered `application_record::
 /// GdsApplicationRecordTypeLoader` -- see that module's docs.
+#[cfg(feature = "companion-gds")]
 fn application_record_arg(
     args: &[Variant],
     index: usize,
@@ -1104,7 +1127,7 @@ pub(super) fn register_pull_method_callbacks(
 ) {
     type Handle =
         fn(&GdsPullMethodHandler, &RequestContext, &[Variant]) -> Result<Vec<Variant>, StatusCode>;
-    let bindings: [(NodeId, Handle); 13] = [
+    let mut bindings: Vec<(NodeId, Handle)> = vec![
         (
             handler.directory.start_signing_request_id.clone(),
             GdsPullMethodHandler::handle_start_signing_request,
@@ -1130,24 +1153,8 @@ pub(super) fn register_pull_method_callbacks(
             GdsPullMethodHandler::handle_get_certificate_status,
         ),
         (
-            handler.directory.register_application_id.clone(),
-            GdsPullMethodHandler::handle_register_application,
-        ),
-        (
-            handler.directory.update_application_id.clone(),
-            GdsPullMethodHandler::handle_update_application,
-        ),
-        (
             handler.directory.unregister_application_id.clone(),
             GdsPullMethodHandler::handle_unregister_application,
-        ),
-        (
-            handler.directory.get_application_id.clone(),
-            GdsPullMethodHandler::handle_get_application,
-        ),
-        (
-            handler.directory.find_applications_id.clone(),
-            GdsPullMethodHandler::handle_find_applications,
         ),
         (
             handler.directory.query_applications_id.clone(),
@@ -1158,6 +1165,30 @@ pub(super) fn register_pull_method_callbacks(
             GdsPullMethodHandler::handle_query_servers,
         ),
     ];
+
+    // `ApplicationRecordDataType` (the wire type these four methods traffic in) only exists
+    // under `companion-gds` -- see `application_record.rs`'s module doc and research.md R8's
+    // note that this type has no generated binding, requiring a hand-authored `DynEncodable`
+    // impl that Cargo's cross-crate feature unification can't safely gate any other way.
+    #[cfg(feature = "companion-gds")]
+    bindings.extend([
+        (
+            handler.directory.register_application_id.clone(),
+            GdsPullMethodHandler::handle_register_application as Handle,
+        ),
+        (
+            handler.directory.update_application_id.clone(),
+            GdsPullMethodHandler::handle_update_application as Handle,
+        ),
+        (
+            handler.directory.get_application_id.clone(),
+            GdsPullMethodHandler::handle_get_application as Handle,
+        ),
+        (
+            handler.directory.find_applications_id.clone(),
+            GdsPullMethodHandler::handle_find_applications as Handle,
+        ),
+    ]);
 
     for (method_id, invoke) in bindings {
         let h = handler.clone();

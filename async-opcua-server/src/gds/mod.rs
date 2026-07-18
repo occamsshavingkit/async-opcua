@@ -40,8 +40,17 @@ pub(crate) const GDS_REGISTRY_CAPACITY: usize = 1024;
 
 /// Hand-authored `ApplicationRecordDataType` (Part 12 §6.5.5) and its `TypeLoader` -- the vendored
 /// companion NodeSet doesn't ship a generated binding for it (see `specs/108-gds-directory-app-
-/// registry/research.md` R8).
-#[cfg(feature = "method-call")]
+/// registry/research.md` R8). Gated on `companion-gds` specifically (not just `method-call`):
+/// its `DynEncodable` impl requires `JsonEncodable`/`XmlEncodable` whenever `async-opcua-types`
+/// itself is compiled with those features -- which, under Cargo's cross-crate feature
+/// unification, can happen regardless of this crate's own feature flags (e.g. `cargo build
+/// --workspace` unifying in a sibling sample crate's `json`/`xml` defaults). Scoping this module
+/// (and its handful of consumers in `pull_methods`) to `companion-gds` avoids the mismatch
+/// entirely, since nothing here is reachable without it anyway (`register_gds_pull_methods_from_
+/// companion` is itself `companion-gds`-gated). Not additionally gated on `method-call`: nothing
+/// in this module needs it, and `pull_methods` (its only consumer) isn't gated on `method-call`
+/// either -- only the actual wiring call site, `register_gds_pull_methods_from_companion`, is.
+#[cfg(feature = "companion-gds")]
 pub mod application_record;
 /// Filesystem cache for GDS certificate credentials.
 pub mod cache;

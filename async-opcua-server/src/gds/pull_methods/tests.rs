@@ -894,3 +894,79 @@ async fn query_servers_emits_one_row_per_discovery_url() {
         "one ServerOnNetwork row per discovery URL"
     );
 }
+
+#[tokio::test]
+async fn query_servers_caps_rows_after_expanding_discovery_urls_not_before() {
+    let Some((handler, _directory)) = handler_with_directory() else {
+        return;
+    };
+    let (context, _handle) = security_admin_request_context(MessageSecurityMode::SignAndEncrypt);
+
+    // A single application with 2 discovery URLs expands to 2 ServerOnNetwork rows -- if
+    // MaxRecordsToReturn=1 truncated the *application* list before expansion (the bug), this
+    // would still return 2 rows instead of 1.
+    let record = application_record(
+        NodeId::null(),
+        "urn:test:cap-after-expand-app",
+        "CapAfterExpand",
+        "urn:test:products:cap-after-expand",
+        &["opc.tcp://host-a:4840", "opc.tcp://host-b:4840"],
+        &[],
+        ApplicationType::Server,
+    );
+    handler
+        .handle_register_application(&context, &[record_arg(record)])
+        .expect("register application should succeed");
+
+    let (read_context, _handle2) = no_role_request_context();
+    let outputs = handler
+        .handle_query_servers(
+            &read_context,
+            &[
+                Variant::from(0u32),
+                Variant::from(1u32),
+                Variant::from(""),
+                Variant::from(""),
+                Variant::from(""),
+                string_array_variant(&[]),
+            ],
+        )
+        .expect("query servers should succeed");
+    let Variant::Array(array) = &outputs[1] else {
+        panic!("expected array output");
+    };
+    assert_eq!(
+        array.values.len(),
+        1,
+        "MaxRecordsToReturn=1 must cap the row count, not the underlying record count"
+    );
+}
+
+#[tokio::test]
+async fn query_applications_rejects_non_string_capability_array_elements() {
+    let Some((handler, _directory)) = handler_with_directory() else {
+        return;
+    };
+    let (context, _handle) = security_admin_request_context(MessageSecurityMode::SignAndEncrypt);
+
+    let malformed_capabilities = Variant::Array(Box::new(
+        Array::new(
+            opcua_types::VariantScalarTypeId::UInt32,
+            vec![Variant::from(1u32)],
+        )
+        .expect("array should construct"),
+    ));
+    let args = vec![
+        Variant::from(0u32),
+        Variant::from(0u32),
+        Variant::from(""),
+        Variant::from(""),
+        Variant::from(0u32),
+        Variant::from(""),
+        malformed_capabilities,
+    ];
+    assert_eq!(
+        handler.handle_query_applications(&context, &args),
+        Err(StatusCode::BadTypeMismatch)
+    );
+}

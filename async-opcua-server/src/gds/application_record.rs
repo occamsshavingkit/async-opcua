@@ -42,20 +42,25 @@ const APPLICATION_RECORD_DATA_TYPE_ID: u32 = 1;
 /// `RegisterApplication`/`UpdateApplication`'s input argument and `GetApplication`/
 /// `FindApplications`' output argument.
 ///
-/// XML support is unconditionally derived here since this crate always pulls in
-/// `async-opcua-types/xml` transitively via `async-opcua-nodes` (there is no `xml` Cargo feature
-/// on this crate itself to gate on, unlike `json`, which genuinely is optional here).
+/// XML and JSON support are both derived unconditionally here: this whole module is gated on
+/// `companion-gds` (see `gds/mod.rs`'s module doc), which forwards both `async-opcua-nodes/xml`
+/// and `async-opcua-types/json` unconditionally -- there is no *local* Cargo feature to gate on
+/// that would reliably track whether `async-opcua-types` itself has `json`/`xml` compiled in
+/// under Cargo's cross-crate feature unification (a downstream `#[cfg(feature = "json")]` here
+/// checks this crate's own flag, not whatever a sibling crate in the same build unified onto
+/// `async-opcua-types` -- see `specs/108-gds-directory-app-registry/research.md`).
 #[derive(
     opcua_types::UaNullable,
     opcua_types::XmlEncodable,
     opcua_types::XmlDecodable,
     opcua_types::XmlType,
+    opcua_types::JsonEncodable,
+    opcua_types::JsonDecodable,
+    Debug,
+    Clone,
+    PartialEq,
+    Default,
 )]
-#[cfg_attr(
-    feature = "json",
-    derive(opcua_types::JsonEncodable, opcua_types::JsonDecodable)
-)]
-#[derive(Debug, Clone, PartialEq, Default)]
 pub struct ApplicationRecordDataType {
     /// The unique identifier assigned by the GDS to the record. Null on a fresh registration
     /// (the server assigns it); populated on every subsequent Get/Find/Update.
@@ -148,7 +153,6 @@ fn types() -> TypeLoaderInstance {
         APPLICATION_RECORD_DATA_TYPE_ID,
         opcua_types::xml_decode_to_enc::<ApplicationRecordDataType>,
     );
-    #[cfg(feature = "json")]
     inst.add_json_type(
         APPLICATION_RECORD_DATA_TYPE_ID,
         APPLICATION_RECORD_DATA_TYPE_ID,
@@ -188,7 +192,6 @@ impl TypeLoader for GdsApplicationRecordTypeLoader {
         types().decode_xml(num_id, stream, ctx)
     }
 
-    #[cfg(feature = "json")]
     fn load_from_json(
         &self,
         node_id: &NodeId,

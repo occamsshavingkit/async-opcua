@@ -17,7 +17,7 @@ use opcua_types::NodeId;
 use crate::address_space::AddressSpace;
 
 /// The GDS companion namespace URI (declared in the NodeSet2.xml's own `<NamespaceUris>`).
-const GDS_NAMESPACE_URI: &str = "http://opcfoundation.org/UA/GDS/";
+pub(crate) const GDS_NAMESPACE_URI: &str = "http://opcfoundation.org/UA/GDS/";
 
 /// `CertificateDirectoryType`'s identifier in the GDS companion NodeSet2.xml. Namespace-index
 /// remapping during import preserves this identifier unchanged (verified: `NodeSetNamespaceMapper`
@@ -36,6 +36,18 @@ const GET_CERTIFICATE_STATUS_ID: u32 = 225;
 /// Real `CertificateGroups`/`DefaultApplicationGroup`/`TrustList` subtree identifiers (§7.8).
 const DEFAULT_APPLICATION_GROUP_ID: u32 = 615;
 const DEFAULT_APPLICATION_GROUP_TRUST_LIST_ID: u32 = 616;
+/// Real `DirectoryType`-inherited application-registry method/folder identifiers (feature 108,
+/// Part 12 §6.5.4/§6.5.6-§6.5.11), re-verified directly against the real
+/// `schemas/companion/GDS/Opc.Ua.Gds.NodeSet2.xml` -- see `specs/108-gds-directory-app-registry/
+/// research.md` R1.
+const REGISTER_APPLICATION_ID: u32 = 146;
+const QUERY_SERVERS_ID: u32 = 151;
+const QUERY_APPLICATIONS_ID: u32 = 992;
+const FIND_APPLICATIONS_ID: u32 = 143;
+const UPDATE_APPLICATION_ID: u32 = 200;
+const UNREGISTER_APPLICATION_ID: u32 = 149;
+const GET_APPLICATION_ID: u32 = 216;
+const APPLICATIONS_FOLDER_ID: u32 = 142;
 
 /// Real NodeIds of the Directory object and its methods/subtree, resolved once at server-startup
 /// wiring time.
@@ -59,6 +71,22 @@ pub struct DirectoryInstanceNodeIds {
     pub default_application_group_id: NodeId,
     /// The real TrustList object under `DefaultApplicationGroup` -- what `GetTrustList` returns.
     pub default_application_group_trust_list_id: NodeId,
+    /// Instance method NodeId (feature 108).
+    pub register_application_id: NodeId,
+    /// Instance method NodeId (feature 108, deprecated per Part 12 §6.5.11).
+    pub query_servers_id: NodeId,
+    /// Instance method NodeId (feature 108).
+    pub query_applications_id: NodeId,
+    /// Instance method NodeId (feature 108).
+    pub find_applications_id: NodeId,
+    /// Instance method NodeId (feature 108).
+    pub update_application_id: NodeId,
+    /// Instance method NodeId (feature 108).
+    pub unregister_application_id: NodeId,
+    /// Instance method NodeId (feature 108).
+    pub get_application_id: NodeId,
+    /// The real `Applications` folder under the Directory object (feature 108).
+    pub applications_folder_id: NodeId,
 }
 
 /// Resolves the namespace index the GDS companion import assigned to its own namespace URI, by
@@ -111,6 +139,14 @@ pub fn instantiate_certificate_directory(
             gds_ns,
             DEFAULT_APPLICATION_GROUP_TRUST_LIST_ID,
         ),
+        register_application_id: NodeId::new(gds_ns, REGISTER_APPLICATION_ID),
+        query_servers_id: NodeId::new(gds_ns, QUERY_SERVERS_ID),
+        query_applications_id: NodeId::new(gds_ns, QUERY_APPLICATIONS_ID),
+        find_applications_id: NodeId::new(gds_ns, FIND_APPLICATIONS_ID),
+        update_application_id: NodeId::new(gds_ns, UPDATE_APPLICATION_ID),
+        unregister_application_id: NodeId::new(gds_ns, UNREGISTER_APPLICATION_ID),
+        get_application_id: NodeId::new(gds_ns, GET_APPLICATION_ID),
+        applications_folder_id: NodeId::new(gds_ns, APPLICATIONS_FOLDER_ID),
     };
 
     for id in [
@@ -123,6 +159,14 @@ pub fn instantiate_certificate_directory(
         &ids.get_certificate_status_id,
         &ids.default_application_group_id,
         &ids.default_application_group_trust_list_id,
+        &ids.register_application_id,
+        &ids.query_servers_id,
+        &ids.query_applications_id,
+        &ids.find_applications_id,
+        &ids.update_application_id,
+        &ids.unregister_application_id,
+        &ids.get_application_id,
+        &ids.applications_folder_id,
     ] {
         if address_space.find(id).is_none() {
             warn!(
@@ -189,6 +233,14 @@ mod tests {
             ids.default_application_group_trust_list_id,
             NodeId::new(gds_ns, 616u32)
         );
+        assert_eq!(ids.register_application_id, NodeId::new(gds_ns, 146u32));
+        assert_eq!(ids.query_servers_id, NodeId::new(gds_ns, 151u32));
+        assert_eq!(ids.query_applications_id, NodeId::new(gds_ns, 992u32));
+        assert_eq!(ids.find_applications_id, NodeId::new(gds_ns, 143u32));
+        assert_eq!(ids.update_application_id, NodeId::new(gds_ns, 200u32));
+        assert_eq!(ids.unregister_application_id, NodeId::new(gds_ns, 149u32));
+        assert_eq!(ids.get_application_id, NodeId::new(gds_ns, 216u32));
+        assert_eq!(ids.applications_folder_id, NodeId::new(gds_ns, 142u32));
 
         assert!(guard.find(&ids.directory_object_id).is_some());
         assert!(guard.find(&ids.start_signing_request_id).is_some());
@@ -201,6 +253,14 @@ mod tests {
         assert!(guard
             .find(&ids.default_application_group_trust_list_id)
             .is_some());
+        assert!(guard.find(&ids.register_application_id).is_some());
+        assert!(guard.find(&ids.query_servers_id).is_some());
+        assert!(guard.find(&ids.query_applications_id).is_some());
+        assert!(guard.find(&ids.find_applications_id).is_some());
+        assert!(guard.find(&ids.update_application_id).is_some());
+        assert!(guard.find(&ids.unregister_application_id).is_some());
+        assert!(guard.find(&ids.get_application_id).is_some());
+        assert!(guard.find(&ids.applications_folder_id).is_some());
     }
 
     /// Regression guard for the exact bug this feature fixes: feature 103 built a *second*,

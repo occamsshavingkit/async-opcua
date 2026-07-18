@@ -38,11 +38,28 @@ use self::pull_methods::GdsPullMethodHandler;
 /// sustained authorized GDS traffic from growing registry memory without bound.
 pub(crate) const GDS_REGISTRY_CAPACITY: usize = 1024;
 
+/// Hand-authored `ApplicationRecordDataType` (Part 12 §6.5.5) and its `TypeLoader` -- the vendored
+/// companion NodeSet doesn't ship a generated binding for it (see `specs/108-gds-directory-app-
+/// registry/research.md` R8). Gated on `companion-gds` specifically (not just `method-call`):
+/// its `DynEncodable` impl requires `JsonEncodable`/`XmlEncodable` whenever `async-opcua-types`
+/// itself is compiled with those features -- which, under Cargo's cross-crate feature
+/// unification, can happen regardless of this crate's own feature flags (e.g. `cargo build
+/// --workspace` unifying in a sibling sample crate's `json`/`xml` defaults). Scoping this module
+/// (and its handful of consumers in `pull_methods`) to `companion-gds` avoids the mismatch
+/// entirely, since nothing here is reachable without it anyway (`register_gds_pull_methods_from_
+/// companion` is itself `companion-gds`-gated). Not additionally gated on `method-call`: nothing
+/// in this module needs it, and `pull_methods` (its only consumer) isn't gated on `method-call`
+/// either -- only the actual wiring call site, `register_gds_pull_methods_from_companion`, is.
+#[cfg(feature = "companion-gds")]
+pub mod application_record;
 /// Filesystem cache for GDS certificate credentials.
 pub mod cache;
 /// Instantiates a real `CertificateDirectoryType` object from the GDS companion NodeSet import.
 #[cfg(feature = "method-call")]
 pub mod directory_instance;
+/// Part 4 §Table 120 LIKE-operator matcher, used by the Directory application-registry query
+/// methods (`QueryApplications`/`QueryServers`) -- no existing server-side evaluator to reuse.
+pub(crate) mod like_match;
 /// Pull model method callbacks for certificate management (`CertificateDirectoryType`, Part 12
 /// §7.9). Requires the `companion-gds` feature (see [`register_gds_pull_methods_from_companion`])
 /// to have any real AddressSpace nodes to dispatch against.

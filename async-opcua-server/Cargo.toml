@@ -132,7 +132,11 @@ wss = [
 # Kerberos/GSSAPI single sign-on via IssuedToken (OPC 10000-6 §6.4).
 kerberos = ["async-opcua-crypto/kerberos"]
 
-# Companion specification NodeSet imports (OPC 10000-1 Annex A).
+# Companion specification NodeSet imports (OPC 10000-1 Annex A). xml itself is always pulled in
+# unconditionally via the async-opcua-nodes dependency below (NOT scoped per companion-* feature):
+# `nodeset_loader.rs`'s public `NodeSetLoader` API also needs `NodeSet2Import` unconditionally,
+# regardless of any companion-* feature, so narrowing xml here would break that unrelated,
+# always-available API for existing callers.
 companion-adi = []
 companion-amb = []
 companion-aml = []
@@ -149,7 +153,12 @@ companion-di = []
 companion-ecm = []
 companion-fdi = []
 companion-fdt = []
-companion-gds = []
+# Also forwards json (unlike every other companion-* feature above): ApplicationRecordDataType's
+# hand-authored DynEncodable impl (feature 108, gds/application_record.rs) unconditionally derives
+# JsonEncodable, since Cargo's cross-crate feature unification means a local
+# #[cfg(feature = "json")] can't reliably track whether async-opcua-types itself was compiled
+# with json -- see that module's doc comment.
+companion-gds = ["async-opcua-nodes/json"]
 companion-gms = []
 companion-gpos = []
 companion-i4aas = []

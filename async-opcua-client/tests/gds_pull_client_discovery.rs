@@ -164,10 +164,15 @@ async fn discover_resolves_real_dynamic_node_ids_and_dispatches_against_them() {
     assert_eq!(gds_client.registration().directory_object_id, directory_id);
     assert_eq!(gds_client.csr().directory_object_id, directory_id);
 
-    // RegisterApplication has no server-side callback registered (tracked separately, out of
-    // scope for this fix) -- BadNotSupported proves the Call reached real dispatch against the
-    // real object/method pair, not BadNodeIdUnknown/BadMethodInvalid (which would mean discovery
-    // resolved to nothing real).
+    // RegisterApplication now has a real server-side callback (feature 108) requiring an
+    // encrypted channel + SecurityAdmin (Part 12 §6.5.6) -- this anonymous/None-security session
+    // gets rejected for that reason, which is itself proof the Call reached the real registered
+    // handler (a NodeId-resolution failure would instead produce BadNodeIdUnknown/BadMethodInvalid).
+    // Note this client helper sends an `ApplicationDescription`, not the real
+    // `ApplicationRecordDataType` RegisterApplication's input argument actually is (see
+    // `specs/108-gds-directory-app-registry/research.md`) -- that mismatch is masked here since
+    // the security-mode check now runs before argument decoding; tracked as a separate, pre-
+    // existing client-side gap, not something feature 108's own scope covers.
     let register_result = gds_client
         .register_application(
             &session,
@@ -179,7 +184,10 @@ async fn discover_resolves_real_dynamic_node_ids_and_dispatches_against_them() {
             },
         )
         .await;
-    assert_eq!(register_result, Err(StatusCode::BadNotSupported));
+    assert_eq!(
+        register_result,
+        Err(StatusCode::BadSecurityModeInsufficient)
+    );
 
     // StartSigningRequest *is* implemented server-side (feature 103) and requires an encrypted
     // channel + SecurityAdmin (Part 12 §7.9.3) -- this anonymous/None-security session gets

@@ -345,6 +345,18 @@ fn add_identity(
     }
 
     resolver.add_mapping(object_id.clone(), rule);
+
+    #[cfg(all(feature = "events", feature = "subscriptions"))]
+    {
+        let session = context.session.read();
+        crate::session::audit::dispatch_role_mapping_rule_changed_audit(
+            &context.subscriptions,
+            &context.info,
+            Some(session.session_id().clone()),
+            StatusCode::Good,
+        );
+    }
+
     Ok(Vec::new())
 }
 
@@ -366,6 +378,16 @@ fn remove_identity(
     }
 
     if resolver.remove_mapping(object_id, &rule) {
+        #[cfg(all(feature = "events", feature = "subscriptions"))]
+        {
+            let session = context.session.read();
+            crate::session::audit::dispatch_role_mapping_rule_changed_audit(
+                &context.subscriptions,
+                &context.info,
+                Some(session.session_id().clone()),
+                StatusCode::Good,
+            );
+        }
         Ok(Vec::new())
     } else {
         Err(StatusCode::BadNotFound)

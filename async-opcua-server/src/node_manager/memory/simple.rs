@@ -479,7 +479,7 @@ impl InMemoryNodeManagerImpl for SimpleNodeManagerImpl {
         _context: &RequestContext,
         details: &opcua_types::ReadRawModifiedDetails,
         nodes: &mut [&mut &mut crate::node_manager::history::HistoryNode],
-        _timestamps_to_return: TimestampsToReturn,
+        timestamps_to_return: TimestampsToReturn,
     ) -> Result<(), StatusCode> {
         let backend = {
             let guard = self.history_backend.read();
@@ -506,7 +506,8 @@ impl InMemoryNodeManagerImpl for SimpleNodeManagerImpl {
                     .await;
 
                 match res {
-                    Ok((values, modification_infos, next_token)) => {
+                    Ok((mut values, modification_infos, next_token)) => {
+                        apply_timestamps_to_return(&mut values, timestamps_to_return);
                         let next_cp = next_token.map(|tok| {
                             crate::session::continuation_points::ContinuationPoint::new(Box::new(
                                 crate::history::HistoryContinuationPoint::new(
@@ -663,7 +664,7 @@ impl InMemoryNodeManagerImpl for SimpleNodeManagerImpl {
         _context: &RequestContext,
         details: &opcua_types::ReadAnnotationDataDetails,
         nodes: &mut [&mut &mut crate::node_manager::history::HistoryNode],
-        _timestamps_to_return: TimestampsToReturn,
+        timestamps_to_return: TimestampsToReturn,
     ) -> Result<(), StatusCode> {
         let backend = {
             let guard = self.history_backend.read();
@@ -682,7 +683,8 @@ impl InMemoryNodeManagerImpl for SimpleNodeManagerImpl {
                     .read_annotations(node_id, req_times, backend_token)
                     .await
                 {
-                    Ok((data_values, next_token)) => {
+                    Ok((mut data_values, next_token)) => {
+                        apply_timestamps_to_return(&mut data_values, timestamps_to_return);
                         let start_time = req_times
                             .first()
                             .copied()
@@ -729,7 +731,7 @@ impl InMemoryNodeManagerImpl for SimpleNodeManagerImpl {
         #[cfg_attr(not(feature = "history-aggregates"), allow(unused_variables))]
         details: &opcua_types::ReadAtTimeDetails,
         nodes: &mut [&mut &mut crate::node_manager::history::HistoryNode],
-        _timestamps_to_return: TimestampsToReturn,
+        timestamps_to_return: TimestampsToReturn,
     ) -> Result<(), StatusCode> {
         let backend = {
             let guard = self.history_backend.read();
@@ -738,7 +740,7 @@ impl InMemoryNodeManagerImpl for SimpleNodeManagerImpl {
         if let Some(backend) = backend {
             #[cfg(not(feature = "history-aggregates"))]
             {
-                let _ = (backend, address_space, details);
+                let _ = (backend, address_space, details, timestamps_to_return);
                 for node in nodes {
                     node.set_status(StatusCode::BadHistoryOperationUnsupported);
                 }
@@ -768,7 +770,8 @@ impl InMemoryNodeManagerImpl for SimpleNodeManagerImpl {
                         )
                         .await
                     {
-                        Ok((data_values, next_token)) => {
+                        Ok((mut data_values, next_token)) => {
+                            apply_timestamps_to_return(&mut data_values, timestamps_to_return);
                             // §6.3's ContinuationPoint rules apply generically; this operation
                             // pages over `req_times` by index (research.md R9), not over a time
                             // range, so start_time/end_time here are unused by `read_at_time`
@@ -958,6 +961,33 @@ impl InMemoryNodeManagerImpl for SimpleNodeManagerImpl {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(feature = "history")]
+fn apply_timestamps_to_return(values: &mut [DataValue], timestamps_to_return: TimestampsToReturn) {
+    match timestamps_to_return {
+        TimestampsToReturn::Neither | TimestampsToReturn::Invalid => {
+            for dv in values.iter_mut() {
+                dv.source_timestamp = None;
+                dv.source_picoseconds = None;
+                dv.server_timestamp = None;
+                dv.server_picoseconds = None;
+            }
+        }
+        TimestampsToReturn::Server => {
+            for dv in values.iter_mut() {
+                dv.source_timestamp = None;
+                dv.source_picoseconds = None;
+            }
+        }
+        TimestampsToReturn::Source => {
+            for dv in values.iter_mut() {
+                dv.server_timestamp = None;
+                dv.server_picoseconds = None;
+            }
+        }
+        TimestampsToReturn::Both => {}
     }
 }
 
@@ -1463,10 +1493,10 @@ impl InMemoryNodeManager<SimpleNodeManagerImpl> {
 mod tests {
     use async_trait::async_trait;
     use opcua_types::{
-        ApplicationDescription, ByteString, DateTime, DeleteAtTimeDetails, DeleteEventDetails,
-        DeleteRawModifiedDetails, DiagnosticBits, EventFilter, HistoryEventFieldList,
-        PerformUpdateType, UAString, UpdateDataDetails, UpdateEventDetails,
-        UpdateStructureDataDetails,
+        ApplicationDescription, ByteString, DataValue, DateTime, DeleteAtTimeDetails,
+        DeleteEventDetails, DeleteRawModifiedDetails, DiagnosticBits, EventFilter,
+        HistoryEventFieldList, PerformUpdateType, StatusCode, TimestampsToReturn, UAString,
+        UpdateDataDetails, UpdateEventDetails, UpdateStructureDataDetails, Variant,
     };
 
     use crate::{
@@ -1992,6 +2022,83 @@ mod tests {
         assert_eq!(
             delete_event.operation_results,
             Some(vec![StatusCode::BadEventIdUnknown])
+        );
+    }
+
+    // ---- CU 2950: apply_timestamps_to_return unit tests ----
+
+    fn dv_both(ts: i64, st: i64) -> DataValue {
+        DataValue {
+            value: Some(Variant::from(1.0)),
+            status: Some(StatusCode::Good),
+            source_timestamp: Some(DateTime::from(ts)),
+            source_picoseconds: Some(0),
+            server_timestamp: Some(DateTime::from(st)),
+            server_picoseconds: Some(0),
+        }
+    }
+
+    #[test]
+    fn apply_timestamps_to_return_both_keeps_all() {
+        let mut values = vec![dv_both(100, 200)];
+        super::apply_timestamps_to_return(&mut values, TimestampsToReturn::Both);
+        assert!(values[0].source_timestamp.is_some(), "source survives Both");
+        assert!(values[0].server_timestamp.is_some(), "server survives Both");
+    }
+
+    #[test]
+    fn apply_timestamps_to_return_source_clears_server() {
+        let mut values = vec![dv_both(100, 200)];
+        super::apply_timestamps_to_return(&mut values, TimestampsToReturn::Source);
+        assert!(
+            values[0].source_timestamp.is_some(),
+            "source survives Source"
+        );
+        assert!(
+            values[0].server_timestamp.is_none(),
+            "server cleared by Source"
+        );
+    }
+
+    #[test]
+    fn apply_timestamps_to_return_server_clears_source() {
+        let mut values = vec![dv_both(100, 200)];
+        super::apply_timestamps_to_return(&mut values, TimestampsToReturn::Server);
+        assert!(
+            values[0].source_timestamp.is_none(),
+            "source cleared by Server"
+        );
+        assert!(
+            values[0].server_timestamp.is_some(),
+            "server survives Server"
+        );
+    }
+
+    #[test]
+    fn apply_timestamps_to_return_neither_clears_all() {
+        let mut values = vec![dv_both(100, 200)];
+        super::apply_timestamps_to_return(&mut values, TimestampsToReturn::Neither);
+        assert!(
+            values[0].source_timestamp.is_none(),
+            "source cleared by Neither"
+        );
+        assert!(
+            values[0].server_timestamp.is_none(),
+            "server cleared by Neither"
+        );
+    }
+
+    #[test]
+    fn apply_timestamps_to_return_invalid_clears_all() {
+        let mut values = vec![dv_both(100, 200)];
+        super::apply_timestamps_to_return(&mut values, TimestampsToReturn::Invalid);
+        assert!(
+            values[0].source_timestamp.is_none(),
+            "source cleared by Invalid"
+        );
+        assert!(
+            values[0].server_timestamp.is_none(),
+            "server cleared by Invalid"
         );
     }
 }

@@ -480,3 +480,47 @@ async fn annotation_count_aggregate_over_in_memory_annotations() {
         "all intervals Good"
     );
 }
+
+// ---- CU 2950: timestamps_to_return (distinct source/server timestamps) ----
+
+fn dv_with_distinct_timestamps(v: f64, source_ticks: i64, server_ticks: i64) -> DataValue {
+    DataValue {
+        value: Some(Variant::from(v)),
+        status: Some(StatusCode::Good),
+        source_timestamp: Some(DateTime::from(source_ticks)),
+        source_picoseconds: Some(0),
+        server_timestamp: Some(DateTime::from(server_ticks)),
+        server_picoseconds: Some(0),
+    }
+}
+
+#[tokio::test]
+async fn distinct_source_server_timestamps_survive_round_trip() {
+    let b = InMemoryDataHistory::new();
+    let n = node();
+    b.update_data(
+        &n,
+        PerformUpdateType::Insert,
+        vec![dv_with_distinct_timestamps(42.0, 100, 200)],
+    )
+    .await
+    .unwrap();
+    let vals = read_all(&b, &n).await;
+    assert_eq!(vals.len(), 1);
+    let dv = &vals[0];
+    assert_eq!(
+        dv.source_timestamp,
+        Some(DateTime::from(100)),
+        "source_timestamp preserved"
+    );
+    assert_eq!(
+        dv.server_timestamp,
+        Some(DateTime::from(200)),
+        "server_timestamp preserved"
+    );
+    assert_ne!(
+        dv.source_timestamp, dv.server_timestamp,
+        "source and server timestamps differ"
+    );
+    assert_eq!(double(dv), 42.0);
+}

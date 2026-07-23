@@ -20,7 +20,7 @@ use crate::{
 use opcua_types::{
     ByteString, DeleteAtTimeDetails, DiagnosticInfo, ExtensionObject, HistoryReadRequest,
     HistoryReadResponse, HistoryReadResult, HistoryUpdateRequest, HistoryUpdateResponse,
-    HistoryUpdateResult, NodeId, ObjectId,
+    HistoryUpdateResult, NodeId, ObjectId, UAString,
 };
 use opcua_types::{ReadRequest, ReadResponse, ResponseHeader, StatusCode, TimestampsToReturn};
 #[cfg_attr(not(feature = "subscriptions-standard"), allow(dead_code))]
@@ -360,9 +360,31 @@ pub(crate) async fn history_update(
     )
     .await;
 
+    let audit_ctx = {
+        let session = request.session.read();
+        crate::session::audit::AuditEventContext::new(
+            "HistoryUpdate",
+            &request.request.request_header,
+            session
+                .user_token()
+                .map(|user_token| UAString::from(user_token.0.as_str())),
+            Some(session.session_id().clone()),
+        )
+    };
+
     let pairs: Vec<(HistoryUpdateResult, Option<DiagnosticInfo>)> = nodes
         .into_iter()
         .map(|mut node| {
+            let event_type = crate::session::audit::history_update_event_type(node.details());
+            crate::session::audit::dispatch_history_update_audit(
+                #[cfg(feature = "events")]
+                &request.subscriptions,
+                &request.info,
+                &audit_ctx,
+                node.details().node_id(),
+                node.status(),
+                event_type,
+            );
             let diagnostic_info = node.take_diagnostic_info();
             let result = node.into_result();
             (result, diagnostic_info)

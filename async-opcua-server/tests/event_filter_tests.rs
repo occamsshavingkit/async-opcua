@@ -14,14 +14,17 @@ use opcua_core::ResponseMessage;
 use opcua_crypto::SecurityPolicy;
 use opcua_nodes::{BaseEventType, DefaultTypeTree, Event};
 use opcua_server::{
-    services::subscription::filter::ParsedEventFilter, ServerBuilder, ServerEndpoint, ServerHandle,
-    ServerUserToken, ANONYMOUS_USER_TOKEN_ID,
+    services::subscription::filter::ParsedEventFilter, IdentityMappingRule, ServerBuilder,
+    ServerEndpoint, ServerHandle, ServerUserToken, WellKnownRole, ANONYMOUS_USER_TOKEN_ID,
 };
+use opcua_types::CallMethodRequest;
 use opcua_types::{
-    AttributeId, ByteString, ContentFilter, ContentFilterBuilder, ContentFilterElement,
-    EventFilter, ExtensionObject, FilterOperator, MessageSecurityMode, MonitoredItemCreateRequest,
+    match_extension_object, AttributeId, ByteString, ContentFilter, ContentFilterBuilder,
+    ContentFilterElement, EventFilter, ExtensionObject, FilterOperator, IdentityCriteriaType,
+    IdentityMappingRuleType, MessageSecurityMode, MethodId, MonitoredItemCreateRequest,
     MonitoringMode, MonitoringParameters, NodeId, NumericRange, ObjectId, ObjectTypeId, Operand,
-    ReadRequest, ReadValueId, SimpleAttributeOperand, StatusCode, TimestampsToReturn, Variant,
+    ReadRequest, ReadValueId, SimpleAttributeOperand, StatusCode, TimeZoneDataType,
+    TimestampsToReturn, UAString, Variant,
 };
 use tokio::{net::TcpListener, sync::mpsc};
 
@@ -563,4 +566,318 @@ fn localized_text(value: &Variant) -> Option<&str> {
         return None;
     };
     Some(text.text.as_ref())
+}
+
+/// CU 3546 — BaseEventType.local_time MUST be populated when an event is emitted.
+/// OPC-10000-5 §6.4.2 BaseEventType.
+#[tokio::test]
+async fn emitted_event_has_populated_local_time() {
+    let server = EventFilterServer::start("local-time").await;
+    let (event_tx, mut event_rx) = mpsc::unbounded_channel();
+    let subscription_id = server
+        .session
+        .create_subscription(
+            Duration::from_millis(100),
+            30,
+            10,
+            0,
+            0,
+            true,
+            EventCallback::new(move |event_fields, _| {
+                let _ = event_tx.send(event_fields.unwrap_or_default());
+            }),
+        )
+        .await
+        .expect("local-time subscription should be created");
+
+    let base_event_type = NodeId::from(ObjectTypeId::BaseEventType);
+    let filter = EventFilter {
+        select_clauses: Some(vec![
+            SimpleAttributeOperand::new_value(base_event_type.clone(), "Message"),
+            SimpleAttributeOperand::new_value(base_event_type.clone(), "LocalTime"),
+        ]),
+        where_clause: ContentFilter { elements: None },
+    };
+    let create_results = server
+        .session
+        .create_monitored_items(
+            subscription_id,
+            TimestampsToReturn::Both,
+            vec![event_monitored_item(filter)],
+        )
+        .await
+        .expect("local-time monitored item request should complete");
+    assert_eq!(create_results.len(), 1);
+    assert_eq!(create_results[0].result.status_code, StatusCode::Good);
+
+    let server_node = NodeId::from(ObjectId::Server);
+    let event = base_event("local-time-test", 500);
+    server
+        .handle
+        .subscriptions()
+        .notify_events(std::iter::once((&event as &dyn Event, &server_node)));
+    server.session.trigger_publish_now();
+
+    let fields = tokio::time::timeout(Duration::from_secs(5), event_rx.recv())
+        .await
+        .expect("event with local time should be published")
+        .expect("event fields should be received");
+
+    assert_eq!(fields.len(), 2);
+    assert_eq!(localized_text(&fields[0]), Some("local-time-test"));
+
+    let local_time_var = &fields[1];
+    let Variant::ExtensionObject(ref obj) = local_time_var else {
+        panic!(
+            "LocalTime should be an ExtensionObject, got {:?}",
+            local_time_var
+        );
+    };
+    assert!(
+        !obj.is_null(),
+        "LocalTime ExtensionObject should not be null"
+    );
+    let obj_id = obj
+        .object_id()
+        .expect("LocalTime ExtensionObject should have an object ID");
+    assert_eq!(
+        obj_id,
+        opcua_types::ObjectId::TimeZoneDataType_Encoding_DefaultBinary,
+        "LocalTime should be encoded as TimeZoneDataType_Encoding_DefaultBinary"
+    );
+
+    match_extension_object!(obj,
+        tz: TimeZoneDataType => {
+            assert!(
+                (-720..=840).contains(&tz.offset),
+                "TimeZoneDataType.offset ({}) should be in plausible range [-720, +840]",
+                tz.offset
+            );
+        },
+        _ => panic!(
+            "LocalTime ExtensionObject should contain TimeZoneDataType, got {:?}",
+            obj.type_name()
+        ),
+    );
+}
+
+/// CU 3194 — MaxSelectClauseParameters / MaxWhereClauseParameters ServerCapabilities
+/// MUST be populated from server limits.
+/// OPC-10000-4 §7.7 (event filter) + OPC-10000-5 §6.3.2 (ServerCapabilities).
+#[tokio::test]
+async fn max_select_where_clause_parameters_are_populated() {
+    let server = EventFilterServer::start("max-clause-params").await;
+
+    let result = server
+        .session
+        .read(
+            &[
+                ReadValueId::new(
+                    NodeId::from(
+                        opcua_types::VariableId::Server_ServerCapabilities_MaxSelectClauseParameters,
+                    ),
+                    AttributeId::Value,
+                ),
+                ReadValueId::new(
+                    NodeId::from(
+                        opcua_types::VariableId::Server_ServerCapabilities_MaxWhereClauseParameters,
+                    ),
+                    AttributeId::Value,
+                ),
+            ],
+            TimestampsToReturn::Neither,
+            0.0,
+        )
+        .await
+        .expect("read MaxSelect/MaxWhereClauseParameters should succeed");
+
+    assert_eq!(result.len(), 2);
+
+    let dv_select = &result[0];
+    let status = dv_select
+        .status
+        .expect("MaxSelectClauseParameters should have status");
+    assert!(
+        status.is_good(),
+        "MaxSelectClauseParameters status should be good, got {status:?}"
+    );
+    let value = dv_select
+        .value
+        .as_ref()
+        .expect("MaxSelectClauseParameters should have a value");
+    let Variant::UInt32(select_val) = value else {
+        panic!(
+            "MaxSelectClauseParameters should be UInt32, got {:?}",
+            value
+        );
+    };
+    assert!(
+        *select_val > 0,
+        "MaxSelectClauseParameters should be non-zero, got {select_val}"
+    );
+
+    let dv_where = &result[1];
+    let status = dv_where
+        .status
+        .expect("MaxWhereClauseParameters should have status");
+    assert!(
+        status.is_good(),
+        "MaxWhereClauseParameters status should be good, got {status:?}"
+    );
+    let value = dv_where
+        .value
+        .as_ref()
+        .expect("MaxWhereClauseParameters should have a value");
+    let Variant::UInt32(where_val) = value else {
+        panic!("MaxWhereClauseParameters should be UInt32, got {:?}", value);
+    };
+    assert!(
+        *where_val > 0,
+        "MaxWhereClauseParameters should be non-zero, got {where_val}"
+    );
+}
+
+#[tokio::test]
+async fn add_identity_dispatches_role_mapping_rule_changed_audit_event() {
+    let temp_dir = TempDir::new("role-mapping-audit");
+    let server_pki = temp_dir.path.join("server-pki");
+    let client_pki = temp_dir.path.join("client-pki");
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("role mapping audit listener should bind");
+    let addr = listener
+        .local_addr()
+        .expect("role mapping audit listener should have addr");
+    let endpoint = format!("opc.tcp://127.0.0.1:{}/", addr.port());
+    let user_token_ids = ["password-user"];
+
+    let (server, handle) = ServerBuilder::new()
+        .application_name("role-mapping-audit-test")
+        .application_uri("urn:role-mapping-audit-test")
+        .product_uri("urn:role-mapping-audit-test")
+        .host("127.0.0.1")
+        .pki_dir(&server_pki)
+        .create_sample_keypair(true)
+        .discovery_urls(vec![endpoint.clone()])
+        .add_user_token(
+            "password-user",
+            ServerUserToken::user_pass("admin", "admin-pass"),
+        )
+        .add_endpoint(
+            "none",
+            ServerEndpoint::new_none("/", &user_token_ids.map(str::to_string)),
+        )
+        .identity_mapping_rule(
+            WellKnownRole::SecurityAdmin.node_id(),
+            IdentityMappingRule::UserName("admin".into()),
+        )
+        .build()
+        .expect("role mapping audit test server should build");
+    let server_task = tokio::spawn(async move {
+        server
+            .run_with(listener)
+            .await
+            .expect("role mapping audit test server should run");
+    });
+
+    let mut client = ClientBuilder::new()
+        .application_name("role-mapping-audit-client")
+        .application_uri("urn:role-mapping-audit-client")
+        .product_uri("urn:role-mapping-audit-client")
+        .pki_dir(&client_pki)
+        .create_sample_keypair(true)
+        .trust_server_certs(true)
+        .session_retry_initial(Duration::from_millis(100))
+        .client()
+        .expect("role mapping audit client should build");
+
+    let (session, event_loop) = client
+        .connect_to_matching_endpoint(
+            (
+                endpoint.as_str(),
+                SecurityPolicy::None.to_str(),
+                MessageSecurityMode::None,
+            ),
+            IdentityToken::new_user_name("admin", "admin-pass"),
+        )
+        .await
+        .expect("role mapping audit client should connect");
+    let event_loop_task = event_loop.spawn();
+
+    tokio::time::timeout(Duration::from_secs(5), session.wait_for_connection())
+        .await
+        .expect("role mapping audit client should become connected");
+
+    let (event_tx, mut event_rx) = mpsc::unbounded_channel();
+    let subscription_id = session
+        .create_subscription(
+            Duration::from_millis(100),
+            30,
+            10,
+            0,
+            0,
+            true,
+            EventCallback::new(move |event_fields, _| {
+                let _ = event_tx.send(event_fields.unwrap_or_default());
+            }),
+        )
+        .await
+        .expect("audit subscription should be created");
+
+    let create_results = session
+        .create_monitored_items(
+            subscription_id,
+            TimestampsToReturn::Both,
+            vec![event_monitored_item(audit_failure_filter())],
+        )
+        .await
+        .expect("audit monitored item request should complete");
+    assert_eq!(create_results[0].result.status_code, StatusCode::Good);
+
+    let rule = IdentityMappingRuleType {
+        criteria_type: IdentityCriteriaType::UserName,
+        criteria: UAString::from("operator"),
+    };
+    let object_id = NodeId::from(ObjectId::WellKnownRole_Operator);
+    let method_id = NodeId::from(MethodId::WellKnownRole_Operator_AddIdentity);
+    let result = session
+        .call_one((object_id, method_id, Some(vec![Variant::from(rule)])))
+        .await
+        .expect("AddIdentity call should succeed");
+    assert!(
+        result.status_code.is_good(),
+        "AddIdentity should succeed; got {:?}",
+        result.status_code
+    );
+
+    session.trigger_publish_now();
+
+    let expected_event_type = Variant::from(NodeId::from(
+        ObjectTypeId::RoleMappingRuleChangedAuditEventType,
+    ));
+    let mut got_event = false;
+    for _ in 0..10 {
+        let Ok(Some(received)) =
+            tokio::time::timeout(Duration::from_secs(5), event_rx.recv()).await
+        else {
+            break;
+        };
+        if received.first() == Some(&expected_event_type) {
+            got_event = true;
+            break;
+        }
+        session.trigger_publish_now();
+    }
+
+    assert!(
+        got_event,
+        "RoleMappingRuleChangedAuditEventType should be emitted after AddIdentity"
+    );
+
+    handle.cancel();
+    event_loop_task.abort();
+    server_task.abort();
+    drop(server_pki);
+    drop(client_pki);
+    drop(temp_dir);
 }

@@ -1374,6 +1374,121 @@ async fn write_emits_audit_event() {
     );
 }
 
+/// Part 11 §5.8.3 auditing: a HistoryUpdate emits an AuditHistoryValueUpdateEventType (i=3006)
+/// from the Server node.
+#[tokio::test]
+async fn history_update_emits_audit_event() {
+    use crate::utils::ChannelNotifications;
+    use opcua::types::{
+        EventFilter, ExtensionObject, MonitoredItemCreateRequest, MonitoringMode,
+        MonitoringParameters, PerformUpdateType, ReadValueId, SimpleAttributeOperand,
+    };
+    use std::time::Duration;
+
+    let (tester, nm, session) = setup().await;
+
+    let id = nm.inner().next_node_id();
+    nm.inner().add_node(
+        nm.address_space(),
+        tester.handle.type_tree(),
+        VariableBuilder::new(&id, "AuditedHistVar", "AuditedHistVar")
+            .data_type(DataTypeId::String)
+            .historizing(true)
+            .value("initial")
+            .access_level(
+                AccessLevel::CURRENT_READ
+                    | AccessLevel::CURRENT_WRITE
+                    | AccessLevel::HISTORY_READ
+                    | AccessLevel::HISTORY_WRITE,
+            )
+            .user_access_level(
+                AccessLevel::CURRENT_READ
+                    | AccessLevel::CURRENT_WRITE
+                    | AccessLevel::HISTORY_READ
+                    | AccessLevel::HISTORY_WRITE,
+            )
+            .build()
+            .into(),
+        &ObjectId::ObjectsFolder.into(),
+        &ReferenceTypeId::Organizes.into(),
+        Some(&VariableTypeId::BaseDataVariableType.into()),
+        Vec::new(),
+    );
+
+    let (notifs, _, mut events) = ChannelNotifications::new();
+    let sub_id = session
+        .create_subscription(Duration::from_millis(100), 100, 20, 1000, 0, true, notifs)
+        .await
+        .unwrap();
+    let select = vec![SimpleAttributeOperand {
+        type_definition_id: NodeId::new(0, 2041), // BaseEventType
+        browse_path: Some(vec![QualifiedName::new(0, "EventType")]),
+        attribute_id: AttributeId::Value as u32,
+        index_range: NumericRange::None,
+    }];
+    let res = session
+        .create_monitored_items(
+            sub_id,
+            TimestampsToReturn::Both,
+            vec![MonitoredItemCreateRequest {
+                item_to_monitor: ReadValueId {
+                    node_id: ObjectId::Server.into(),
+                    attribute_id: AttributeId::EventNotifier as u32,
+                    ..Default::default()
+                },
+                monitoring_mode: MonitoringMode::Reporting,
+                requested_parameters: MonitoringParameters {
+                    sampling_interval: 0.0,
+                    queue_size: 10,
+                    discard_oldest: true,
+                    filter: ExtensionObject::new(EventFilter {
+                        select_clauses: Some(select),
+                        where_clause: Default::default(),
+                    }),
+                    ..Default::default()
+                },
+            }],
+        )
+        .await
+        .unwrap();
+    assert_eq!(res[0].result.status_code, StatusCode::Good);
+
+    let now = DateTime::now();
+    let dv = DataValue {
+        value: Some(Variant::from("historical_data")),
+        status: Some(StatusCode::Good),
+        source_timestamp: Some(now),
+        server_timestamp: Some(now),
+        ..Default::default()
+    };
+    let r = session
+        .history_update_data(id.clone(), PerformUpdateType::Insert, vec![dv])
+        .await
+        .unwrap();
+    assert!(r[0].is_good() || r[0] == StatusCode::GoodEntryInserted);
+
+    // Give the server a moment to publish the audit event
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let audit_type = Variant::from(NodeId::new(0, 3006u32));
+    let mut found = false;
+    for _ in 0..5 {
+        let Ok(Some((_h, v))) = tokio::time::timeout(Duration::from_secs(3), events.recv()).await
+        else {
+            break;
+        };
+        let fields = v.unwrap();
+        if fields[0] == audit_type {
+            found = true;
+            break;
+        }
+    }
+    assert!(
+        found,
+        "an AuditHistoryValueUpdateEventType must be delivered after a HistoryUpdate"
+    );
+}
+
 #[tokio::test]
 async fn server_diagnostics_enabled_flag_write_requires_privilege() {
     // Feature 053 US1 (P5-04) — OPC UA Part 5 §6.3.3: EnabledFlag toggles diagnostics

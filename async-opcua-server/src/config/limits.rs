@@ -65,6 +65,12 @@ pub struct Limits {
     /// Controls crypto offloading capacity (FR-001, FR-027).
     #[serde(default)]
     pub max_blocking_threads: Option<usize>,
+    /// Max number of select clause parameters for event filters (Part 5 §6.3.2).
+    #[serde(default = "defaults::max_select_clause_parameters")]
+    pub max_select_clause_parameters: u32,
+    /// Max number of where clause parameters for event filters (Part 5 §6.3.2).
+    #[serde(default = "defaults::max_where_clause_parameters")]
+    pub max_where_clause_parameters: u32,
 }
 
 impl Default for Limits {
@@ -90,6 +96,8 @@ impl Default for Limits {
             clients_can_modify_address_space: defaults::clients_can_modify_address_space(),
             enforce_role_based_access: defaults::enforce_role_based_access(),
             max_blocking_threads: None,
+            max_select_clause_parameters: defaults::max_select_clause_parameters(),
+            max_where_clause_parameters: defaults::max_where_clause_parameters(),
         }
     }
 }
@@ -291,6 +299,12 @@ mod defaults {
     pub(super) fn enforce_role_based_access() -> bool {
         false
     }
+    pub(crate) fn max_select_clause_parameters() -> u32 {
+        100
+    }
+    pub(crate) fn max_where_clause_parameters() -> u32 {
+        100
+    }
 
     pub(super) fn max_subscriptions_per_session() -> usize {
         constants::MAX_SUBSCRIPTIONS_PER_SESSION
@@ -421,6 +435,8 @@ mod tests {
                 clients_can_modify_address_space: false,
                 enforce_role_based_access: false,
                 max_blocking_threads: None,
+                max_select_clause_parameters: 100,
+                max_where_clause_parameters: 100,
                 subscriptions: SubscriptionLimits {
                     max_subscriptions_per_session: 100,
                     max_pending_publish_requests: 20,

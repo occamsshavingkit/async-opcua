@@ -1317,7 +1317,7 @@ pub(super) mod tests {
     };
     use opcua_types::{
         AttributeId, DataChangeFilter, DataChangeTrigger, DataValue, DateTime, DeadbandType,
-        ExtensionObject, EUInformation, LocalizedText, MonitoringMode, NodeId, NumericRange,
+        EUInformation, ExtensionObject, LocalizedText, MonitoringMode, NodeId, NumericRange,
         ReadValueId, StatusCode, UAString, Variant,
     };
 

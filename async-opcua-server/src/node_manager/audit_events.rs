@@ -288,8 +288,6 @@ mod tests {
         ExtensionObject, NodeClass, NodeId, ObjectTypeId, QualifiedName, UAString,
     };
 
-
-
     #[test]
     fn add_nodes_event_type_id_returns_correct_type() {
         assert_eq!(
@@ -395,8 +393,7 @@ mod tests {
             target_node_id: target.clone(),
             delete_bidirectional: false,
         };
-        let del_item =
-            DeleteReferenceItem::new(item, opcua_types::DiagnosticBits::default());
+        let del_item = DeleteReferenceItem::new(item, opcua_types::DiagnosticBits::default());
         let result = delete_references_item(&del_item);
         assert_eq!(result.source_node_id, source);
         assert_eq!(result.reference_type_id, ref_type);
@@ -414,8 +411,7 @@ mod tests {
             target_node_id: ExpandedNodeId::new(NodeId::new(1, 800)),
             delete_bidirectional: true,
         };
-        let del_item =
-            DeleteReferenceItem::new(item, opcua_types::DiagnosticBits::default());
+        let del_item = DeleteReferenceItem::new(item, opcua_types::DiagnosticBits::default());
         let result = delete_references_item(&del_item);
         assert!(!result.is_forward);
         assert!(result.delete_bidirectional);

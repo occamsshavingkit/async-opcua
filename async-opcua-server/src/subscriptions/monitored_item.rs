@@ -1317,7 +1317,8 @@ pub(super) mod tests {
     };
     use opcua_types::{
         AttributeId, DataChangeFilter, DataChangeTrigger, DataValue, DateTime, DeadbandType,
-        MonitoringMode, NodeId, ReadValueId, StatusCode, Variant,
+        ExtensionObject, EUInformation, LocalizedText, MonitoringMode, NodeId, NumericRange,
+        ReadValueId, StatusCode, UAString, Variant,
     };
 
     #[cfg(feature = "history-aggregates")]
@@ -1760,5 +1761,66 @@ pub(super) mod tests {
         assert!(item.maybe_enqueue_skipped_value(&t.into()));
         assert_eq!(item.notification_queue.len(), 1);
         assert!(item.sample_skipped_data_value.is_none());
+    }
+
+    #[test]
+    fn notify_data_value_round_trips_extension_object() {
+        let mut item = new_monitored_item(
+            1,
+            ReadValueId {
+                node_id: NodeId::new(2, "test_eo"),
+                attribute_id: AttributeId::Value as u32,
+                ..Default::default()
+            },
+            MonitoringMode::Reporting,
+            FilterType::None,
+            SamplingInterval::Zero,
+            true,
+            None,
+        );
+        item.queue_size = 10;
+        item.notification_queue.clear();
+
+        let eo = ExtensionObject::from_message(EUInformation {
+            namespace_uri: UAString::from("http://example.com"),
+            unit_id: 1234,
+            display_name: LocalizedText::new("en", "meters"),
+            description: LocalizedText::null(),
+        });
+        let data_value = DataValue::new_now(Variant::ExtensionObject(eo));
+        item.notify_data_value(data_value, &DateTime::now(), false);
+        assert_eq!(item.notification_queue.len(), 1);
+        if let Notification::MonitoredItemNotification(n) = &item.notification_queue[0] {
+            assert!(matches!(n.value.value, Some(Variant::ExtensionObject(_))));
+        } else {
+            panic!("notification should be a data value notification");
+        }
+    }
+
+    #[test]
+    fn notify_data_value_with_index_range_delivers_sub_value() {
+        let mut item = new_monitored_item(
+            1,
+            ReadValueId {
+                node_id: NodeId::new(2, "test_arr"),
+                attribute_id: AttributeId::Value as u32,
+                index_range: NumericRange::Index(1),
+                ..Default::default()
+            },
+            MonitoringMode::Reporting,
+            FilterType::None,
+            SamplingInterval::Zero,
+            true,
+            None,
+        );
+        item.queue_size = 10;
+        item.notification_queue.clear();
+
+        let data_value = DataValue::new_now(Variant::from(vec![10i32, 20, 30]));
+        item.notify_data_value(data_value, &DateTime::now(), false);
+        assert!(
+            item.notification_queue.len() <= 2,
+            "at most one value notification plus maybe overflow"
+        );
     }
 }

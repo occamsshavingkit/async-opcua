@@ -3,7 +3,7 @@ use crate::node_manager::{
 };
 use opcua_types::{
     AddNodeAttributes, AddNodesItem, AddReferencesItem, DeleteNodesItem, DeleteReferencesItem,
-    ExpandedNodeId, ExtensionObject,
+    ExpandedNodeId, ExtensionObject, ObjectTypeId,
 };
 
 #[cfg(all(feature = "generated-address-space", feature = "events"))]
@@ -229,4 +229,223 @@ pub(crate) fn notify_delete_references(
     _context: &RequestContext,
     _references_to_delete: Vec<DeleteReferencesItem>,
 ) {
+}
+
+#[allow(dead_code)]
+#[cfg(all(feature = "generated-address-space", feature = "events"))]
+pub(crate) fn add_nodes_event_type_id() -> ObjectTypeId {
+    ObjectTypeId::AuditAddNodesEventType
+}
+
+#[allow(dead_code)]
+#[cfg(all(feature = "generated-address-space", feature = "events"))]
+pub(crate) fn delete_nodes_event_type_id() -> ObjectTypeId {
+    ObjectTypeId::AuditDeleteNodesEventType
+}
+
+#[allow(dead_code)]
+#[cfg(all(feature = "generated-address-space", feature = "events"))]
+pub(crate) fn add_references_event_type_id() -> ObjectTypeId {
+    ObjectTypeId::AuditAddReferencesEventType
+}
+
+#[allow(dead_code)]
+#[cfg(all(feature = "generated-address-space", feature = "events"))]
+pub(crate) fn delete_references_event_type_id() -> ObjectTypeId {
+    ObjectTypeId::AuditDeleteReferencesEventType
+}
+
+#[allow(dead_code)]
+#[cfg(not(all(feature = "generated-address-space", feature = "events")))]
+pub(crate) fn add_nodes_event_type_id() -> ObjectTypeId {
+    ObjectTypeId::AuditAddNodesEventType
+}
+
+#[allow(dead_code)]
+#[cfg(not(all(feature = "generated-address-space", feature = "events")))]
+pub(crate) fn delete_nodes_event_type_id() -> ObjectTypeId {
+    ObjectTypeId::AuditDeleteNodesEventType
+}
+
+#[allow(dead_code)]
+#[cfg(not(all(feature = "generated-address-space", feature = "events")))]
+pub(crate) fn add_references_event_type_id() -> ObjectTypeId {
+    ObjectTypeId::AuditAddReferencesEventType
+}
+
+#[allow(dead_code)]
+#[cfg(not(all(feature = "generated-address-space", feature = "events")))]
+pub(crate) fn delete_references_event_type_id() -> ObjectTypeId {
+    ObjectTypeId::AuditDeleteReferencesEventType
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::node_manager::{AddNodeItem, AddReferenceItem, DeleteNodeItem, DeleteReferenceItem};
+    use opcua_types::{
+        AddNodesItem, AddReferencesItem, DeleteNodesItem, DeleteReferencesItem, ExpandedNodeId,
+        ExtensionObject, NodeClass, NodeId, ObjectTypeId, QualifiedName, UAString,
+    };
+
+
+
+    #[test]
+    fn add_nodes_event_type_id_returns_correct_type() {
+        assert_eq!(
+            super::add_nodes_event_type_id(),
+            ObjectTypeId::AuditAddNodesEventType
+        );
+    }
+
+    #[test]
+    fn delete_nodes_event_type_id_returns_correct_type() {
+        assert_eq!(
+            super::delete_nodes_event_type_id(),
+            ObjectTypeId::AuditDeleteNodesEventType
+        );
+    }
+
+    #[test]
+    fn add_references_event_type_id_returns_correct_type() {
+        assert_eq!(
+            super::add_references_event_type_id(),
+            ObjectTypeId::AuditAddReferencesEventType
+        );
+    }
+
+    #[test]
+    fn delete_references_event_type_id_returns_correct_type() {
+        assert_eq!(
+            super::delete_references_event_type_id(),
+            ObjectTypeId::AuditDeleteReferencesEventType
+        );
+    }
+
+    #[test]
+    fn delete_nodes_item_converts_correctly() {
+        let node_id = NodeId::new(1, 42);
+        let item = DeleteNodesItem {
+            node_id: node_id.clone(),
+            delete_target_references: true,
+        };
+        let delete_item = DeleteNodeItem::new(item.clone(), opcua_types::DiagnosticBits::default());
+        let result = delete_nodes_item(&delete_item);
+        assert_eq!(result.node_id, node_id);
+        assert!(result.delete_target_references);
+    }
+
+    #[test]
+    fn delete_nodes_item_without_target_references() {
+        let item = DeleteNodesItem {
+            node_id: NodeId::new(1, 99),
+            delete_target_references: false,
+        };
+        let delete_item = DeleteNodeItem::new(item, opcua_types::DiagnosticBits::default());
+        let result = delete_nodes_item(&delete_item);
+        assert!(!result.delete_target_references);
+    }
+
+    #[test]
+    fn add_references_item_converts_correctly() {
+        let source = NodeId::new(1, 100);
+        let ref_type = NodeId::new(0, 35);
+        let target = ExpandedNodeId::new(NodeId::new(1, 200));
+        let item = AddReferencesItem {
+            source_node_id: source.clone(),
+            reference_type_id: ref_type.clone(),
+            is_forward: true,
+            target_server_uri: UAString::null(),
+            target_node_id: target.clone(),
+            target_node_class: NodeClass::Object,
+        };
+        let ref_item = AddReferenceItem::new(item.clone(), opcua_types::DiagnosticBits::default());
+        let result = add_references_item(&ref_item);
+        assert_eq!(result.source_node_id, source);
+        assert_eq!(result.reference_type_id, ref_type);
+        assert!(result.is_forward);
+        assert_eq!(result.target_node_id, target);
+        assert_eq!(result.target_node_class, NodeClass::Object);
+    }
+
+    #[test]
+    fn add_references_item_inverse_direction() {
+        let item = AddReferencesItem {
+            source_node_id: NodeId::new(1, 300),
+            reference_type_id: NodeId::new(0, 45),
+            is_forward: false,
+            target_server_uri: UAString::null(),
+            target_node_id: ExpandedNodeId::new(NodeId::new(1, 400)),
+            target_node_class: NodeClass::Variable,
+        };
+        let ref_item = AddReferenceItem::new(item, opcua_types::DiagnosticBits::default());
+        let result = add_references_item(&ref_item);
+        assert!(!result.is_forward);
+    }
+
+    #[test]
+    fn delete_references_item_converts_correctly() {
+        let source = NodeId::new(1, 500);
+        let ref_type = NodeId::new(0, 47);
+        let target = ExpandedNodeId::new(NodeId::new(1, 600));
+        let item = DeleteReferencesItem {
+            source_node_id: source.clone(),
+            reference_type_id: ref_type.clone(),
+            is_forward: true,
+            target_node_id: target.clone(),
+            delete_bidirectional: false,
+        };
+        let del_item =
+            DeleteReferenceItem::new(item, opcua_types::DiagnosticBits::default());
+        let result = delete_references_item(&del_item);
+        assert_eq!(result.source_node_id, source);
+        assert_eq!(result.reference_type_id, ref_type);
+        assert!(result.is_forward);
+        assert_eq!(result.target_node_id, target);
+        assert!(!result.delete_bidirectional);
+    }
+
+    #[test]
+    fn delete_references_item_bidirectional() {
+        let item = DeleteReferencesItem {
+            source_node_id: NodeId::new(1, 700),
+            reference_type_id: NodeId::new(0, 49),
+            is_forward: false,
+            target_node_id: ExpandedNodeId::new(NodeId::new(1, 800)),
+            delete_bidirectional: true,
+        };
+        let del_item =
+            DeleteReferenceItem::new(item, opcua_types::DiagnosticBits::default());
+        let result = delete_references_item(&del_item);
+        assert!(!result.is_forward);
+        assert!(result.delete_bidirectional);
+    }
+
+    #[test]
+    fn add_nodes_item_converts_correctly() {
+        let parent = ExpandedNodeId::new(NodeId::new(0, 85));
+        let ref_type = NodeId::new(0, 35);
+        let browse_name = QualifiedName::new(0, "TestNode");
+        let type_def = ExpandedNodeId::new(NodeId::new(0, 58));
+        let item = AddNodesItem {
+            parent_node_id: parent.clone(),
+            reference_type_id: ref_type.clone(),
+            requested_new_node_id: ExpandedNodeId::new(NodeId::new(1, 42)),
+            browse_name: browse_name.clone(),
+            node_class: NodeClass::Object,
+            node_attributes: ExtensionObject::null(),
+            type_definition: type_def.clone(),
+        };
+        let add_item = AddNodeItem::new(item, opcua_types::DiagnosticBits::default());
+        let result = add_nodes_item(&add_item);
+        assert_eq!(result.parent_node_id, parent);
+        assert_eq!(result.reference_type_id, ref_type);
+        assert_eq!(
+            result.requested_new_node_id,
+            ExpandedNodeId::new(add_item.added_node_id().clone())
+        );
+        assert_eq!(result.browse_name, browse_name);
+        assert_eq!(result.node_class, NodeClass::Object);
+        assert_eq!(result.type_definition, type_def);
+    }
 }

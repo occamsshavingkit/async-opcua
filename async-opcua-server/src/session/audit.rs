@@ -261,6 +261,7 @@ impl ServerAuditEvent {
     }
 
     #[allow(clippy::too_many_arguments)]
+    #[cfg(feature = "history")]
     fn history_update(
         event_type: ObjectTypeId,
         server_id: UAString,
@@ -847,6 +848,7 @@ pub(crate) fn dispatch_service_failure(
     dispatch_audit_event_if_enabled!(subscriptions, &event);
 }
 
+#[cfg(all(feature = "events", feature = "subscriptions"))]
 pub(crate) fn dispatch_role_mapping_rule_changed_audit(
     #[cfg(feature = "events")] subscriptions: &Arc<SubscriptionCache>,
     info: &ServerInfo,
@@ -906,6 +908,7 @@ pub(crate) fn dispatch_write_audit(
     dispatch_audit_event_if_enabled!(subscriptions, &event);
 }
 
+#[cfg(feature = "history")]
 pub(crate) fn dispatch_history_update_audit(
     #[cfg(feature = "events")] subscriptions: &Arc<SubscriptionCache>,
     info: &ServerInfo,

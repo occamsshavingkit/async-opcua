@@ -570,3 +570,109 @@ pub fn register_program(
 
     engine
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::address_space::NodeType;
+    use crate::node_manager::memory::InMemoryNodeManager;
+    use crate::node_manager::memory::SimpleNodeManagerImpl;
+    use crate::node_manager::NodeManagersRef;
+    use opcua_core::sync::RwLock;
+    use opcua_nodes::DefaultTypeTree;
+    use opcua_types::{BrowseDirection, ObjectTypeId};
+
+    /// CU 2811: ProgramStateMachine must expose a forward GeneratesEvent reference to
+    /// ProgramTransitionEventType (i=2378).
+    #[test]
+    fn program_state_machine_exposes_generates_event_reference_to_program_transition_event_type() {
+        let address_space = AddressSpace::new();
+        address_space.add_namespace("http://opcfoundation.org/UA/", 0);
+        address_space.add_namespace("urn:test", 2);
+        let address_space = Arc::new(RwLock::new(address_space));
+
+        let inner = SimpleNodeManagerImpl::new(Vec::new(), "test", NodeManagersRef::new_empty());
+        let node_manager = InMemoryNodeManager::new(inner, AddressSpace::new());
+
+        let _engine = register_program(&address_space, &node_manager, "Dev", "TestProgram");
+
+        let space = address_space.read();
+        let parent_id = NodeId::new(2, "Program_Dev_TestProgram");
+        let tree = DefaultTypeTree::default();
+        let refs = space.find_references(
+            &parent_id,
+            Some((NodeId::from(ReferenceTypeId::GeneratesEvent), false)),
+            &tree,
+            BrowseDirection::Forward,
+        );
+        assert!(
+            refs.iter()
+                .any(|r| r.target_id == ObjectTypeId::ProgramTransitionEventType),
+            "Program must have a GeneratesEvent reference to ProgramTransitionEventType"
+        );
+    }
+
+    /// CU 2814: ProgramStateMachine must populate AvailableStates and AvailableTransitions
+    /// Property variables with the valid state and transition NodeIds.
+    #[test]
+    fn program_state_machine_available_states_and_transitions_are_populated() {
+        let address_space = AddressSpace::new();
+        address_space.add_namespace("http://opcfoundation.org/UA/", 0);
+        address_space.add_namespace("urn:test", 2);
+        let address_space = Arc::new(RwLock::new(address_space));
+
+        let inner = SimpleNodeManagerImpl::new(Vec::new(), "test", NodeManagersRef::new_empty());
+        let node_manager = InMemoryNodeManager::new(inner, AddressSpace::new());
+
+        let _engine = register_program(&address_space, &node_manager, "Dev", "TestProgram");
+
+        let space = address_space.read();
+        let as_id = NodeId::new(2, "Program_Dev_TestProgram_AvailableStates");
+        let at_id = NodeId::new(2, "Program_Dev_TestProgram_AvailableTransitions");
+
+        let as_val = space
+            .find(&as_id)
+            .and_then(|n| {
+                if let NodeType::Variable(ref v) = *n {
+                    v.value(
+                        opcua_types::TimestampsToReturn::Neither,
+                        &opcua_types::NumericRange::None,
+                        &opcua_types::DataEncoding::Binary,
+                        0.0,
+                    )
+                    .value
+                    .clone()
+                } else {
+                    None
+                }
+            })
+            .unwrap_or(Variant::Empty);
+
+        let at_val = space
+            .find(&at_id)
+            .and_then(|n| {
+                if let NodeType::Variable(ref v) = *n {
+                    v.value(
+                        opcua_types::TimestampsToReturn::Neither,
+                        &opcua_types::NumericRange::None,
+                        &opcua_types::DataEncoding::Binary,
+                        0.0,
+                    )
+                    .value
+                    .clone()
+                } else {
+                    None
+                }
+            })
+            .unwrap_or(Variant::Empty);
+
+        assert!(
+            !matches!(as_val, Variant::Empty),
+            "AvailableStates should be populated"
+        );
+        assert!(
+            !matches!(at_val, Variant::Empty),
+            "AvailableTransitions should be populated"
+        );
+    }
+}

@@ -390,6 +390,33 @@ fn add_i32_property(
         .insert(address_space);
 }
 
+fn read_bool_value(address_space: &AddressSpace, id: &NodeId) -> bool {
+    if let Some(node) = address_space.find(id) {
+        if let NodeType::Variable(ref var) = *node {
+            if let Some(Variant::Boolean(value)) = var
+                .value(
+                    opcua_types::TimestampsToReturn::Neither,
+                    &opcua_types::NumericRange::None,
+                    &opcua_types::DataEncoding::Binary,
+                    0.0,
+                )
+                .value
+            {
+                return value;
+            }
+        }
+    };
+    false
+}
+
+fn set_variable_value(address_space: &AddressSpace, id: &NodeId, value: Variant) {
+    if let Some(mut node) = address_space.find_mut(id) {
+        if let NodeType::Variable(ref mut var) = &mut *node {
+            let _ = var.set_value(&opcua_types::NumericRange::None, value);
+        }
+    };
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -449,31 +476,4 @@ mod tests {
         let result = dialog.respond2(&address_space, 99, LocalizedText::null());
         assert_eq!(result, Err(StatusCode::BadDialogResponseInvalid));
     }
-}
-
-fn read_bool_value(address_space: &AddressSpace, id: &NodeId) -> bool {
-    if let Some(node) = address_space.find(id) {
-        if let NodeType::Variable(ref var) = *node {
-            if let Some(Variant::Boolean(value)) = var
-                .value(
-                    opcua_types::TimestampsToReturn::Neither,
-                    &opcua_types::NumericRange::None,
-                    &opcua_types::DataEncoding::Binary,
-                    0.0,
-                )
-                .value
-            {
-                return value;
-            }
-        }
-    };
-    false
-}
-
-fn set_variable_value(address_space: &AddressSpace, id: &NodeId, value: Variant) {
-    if let Some(mut node) = address_space.find_mut(id) {
-        if let NodeType::Variable(ref mut var) = &mut *node {
-            let _ = var.set_value(&opcua_types::NumericRange::None, value);
-        }
-    };
 }

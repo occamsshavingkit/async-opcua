@@ -1309,21 +1309,49 @@ impl MonitoredItem {
 
 #[cfg(test)]
 pub(super) mod tests {
+    use std::time::{Duration as StdDuration, Instant};
+
     use chrono::{Duration, TimeDelta, Utc};
+    use opcua_nodes::Variable;
 
     use crate::{
         node_manager::ParsedReadValueId,
-        subscriptions::monitored_item::{Notification, SamplingInterval},
+        subscriptions::{
+            monitored_item::{Notification, SamplingInterval},
+            pool::NotificationBuffer,
+            subscription::{DataChangeNotificationVecPool, TickReason},
+            Subscription,
+        },
+        ServerBuilder,
     };
     use opcua_types::{
-        AttributeId, DataChangeFilter, DataChangeTrigger, DataValue, DateTime, DeadbandType,
-        EUInformation, ExtensionObject, LocalizedText, MonitoringMode, NodeId, NumericRange,
-        ReadValueId, StatusCode, UAString, Variant,
+        AttributeId, DataChangeFilter, DataChangeNotification, DataChangeTrigger, DataEncoding,
+        DataTypeId, DataValue, DateTime, DateTimeUtc, DeadbandType, EUInformation, ExtensionObject,
+        LocalizedText, MonitoringMode, NodeId, NumericRange, ReadValueId, StatusCode,
+        TimestampsToReturn, UAString, Variant,
     };
 
     #[cfg(feature = "history-aggregates")]
     use super::ParsedAggregateFilter;
-    use super::{FilterType, MonitoredItem, ParsedDataChangeFilter};
+    use super::{sanitize_queue_size, FilterType, MonitoredItem, ParsedDataChangeFilter};
+
+    #[tokio::test]
+    async fn sanitize_queue_size_clamps_to_server_maximum() {
+        let (_server, handle) = ServerBuilder::new_anonymous("queue size clamp test")
+            .without_node_managers()
+            .build()
+            .expect("test server should build");
+        let info = handle.info();
+        let maximum = info
+            .config
+            .limits
+            .subscriptions
+            .max_monitored_item_queue_size;
+        assert!(maximum > 2, "test requires a queue maximum above two");
+
+        assert_eq!(sanitize_queue_size(info, maximum + 1), maximum);
+        assert_eq!(sanitize_queue_size(info, maximum - 1), maximum - 1);
+    }
 
     #[test]
     #[cfg(feature = "history-aggregates")]
@@ -1795,6 +1823,91 @@ pub(super) mod tests {
         } else {
             panic!("notification should be a data value notification");
         }
+    }
+
+    #[test]
+    fn sampled_extension_object_reaches_subscription_notification() {
+        let node_id = NodeId::new(2, "sampled_eo");
+        let structured_value = ExtensionObject::from_message(EUInformation {
+            namespace_uri: UAString::from("http://example.com/sampled"),
+            unit_id: 5678,
+            display_name: LocalizedText::new("en", "sampled meters"),
+            description: LocalizedText::null(),
+        });
+        let node = Variable::new_data_value(
+            &node_id,
+            "SampledExtensionObject",
+            "SampledExtensionObject",
+            DataTypeId::Structure,
+            None,
+            None,
+            structured_value.clone(),
+        );
+        let mut item = new_monitored_item(
+            1,
+            ReadValueId {
+                node_id,
+                attribute_id: AttributeId::Value as u32,
+                ..Default::default()
+            },
+            MonitoringMode::Reporting,
+            FilterType::None,
+            SamplingInterval::Zero,
+            true,
+            None,
+        );
+        item.notification_queue.clear();
+
+        let sampled_value = node.value(
+            TimestampsToReturn::Both,
+            &NumericRange::None,
+            &DataEncoding::Binary,
+            0.0,
+        );
+        let now = DateTime::now();
+        let mut subscription =
+            Subscription::new(1, true, StdDuration::from_millis(100), 30, 10, 0, 10, 10);
+        subscription.insert(1, item);
+        let mut buffer = NotificationBuffer::new();
+        let mut notification_pool = DataChangeNotificationVecPool::default();
+        let tick_start = Instant::now();
+        subscription.tick(
+            &DateTimeUtc::from(Utc::now()),
+            tick_start,
+            TickReason::TickTimerFired,
+            false,
+            &mut buffer,
+            &mut notification_pool,
+        );
+        subscription.notify_data_value(&1, sampled_value, &now);
+        subscription.tick(
+            &DateTimeUtc::from(Utc::now()),
+            tick_start + StdDuration::from_millis(100),
+            TickReason::TickTimerFired,
+            true,
+            &mut buffer,
+            &mut notification_pool,
+        );
+        let message = subscription
+            .take_notification()
+            .expect("sampling should enqueue a subscription notification");
+        let data_change = message
+            .notification_data
+            .into_iter()
+            .flatten()
+            .find_map(|notification| notification.into_inner_as::<DataChangeNotification>())
+            .expect("notification should contain data changes");
+        let notification = data_change
+            .monitored_items
+            .into_iter()
+            .flatten()
+            .next()
+            .expect("data change should contain the sampled monitored item");
+
+        assert_eq!(
+            notification.value.value,
+            Some(Variant::ExtensionObject(structured_value))
+        );
     }
 
     #[test]

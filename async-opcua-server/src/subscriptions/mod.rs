@@ -1305,7 +1305,10 @@ impl SubscriptionCache {
         let mut owned_events: Vec<Box<dyn Event + Send>> = Vec::new();
         let mut node_ids: Vec<NodeId> = Vec::new();
         for (evt, id) in items {
+            #[cfg(feature = "generated-address-space")]
             let tz = crate::node_manager::memory::core::current_timezone_data();
+            #[cfg(not(feature = "generated-address-space"))]
+            let tz = opcua_types::TimeZoneDataType::default();
             let mut cloned = evt.clone_box();
             cloned.set_local_time(tz);
             owned_events.push(cloned);

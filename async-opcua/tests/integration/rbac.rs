@@ -315,6 +315,101 @@ async fn roleset_exposes_well_known_roles() {
     }
 }
 
+/// CU 3539 / Part 3 §4.9.2, Table 2: ConfigureAdmin has the suggested permissions for changing
+/// non-security-related configuration.
+#[test]
+fn configure_admin_permissions_match_well_known_role_definition() {
+    let role_id = NodeId::new(0, 15716);
+    let permissions = secure_well_known_permissions()
+        .into_iter()
+        .find(|role_permission| role_permission.role_id == role_id)
+        .expect("secure preset must define ConfigureAdmin")
+        .permissions;
+
+    assert_eq!(
+        permissions,
+        PermissionType::Browse
+            | PermissionType::Read
+            | PermissionType::Write
+            | PermissionType::WriteAttribute
+            | PermissionType::AddNode
+            | PermissionType::DeleteNode
+            | PermissionType::AddReference
+            | PermissionType::RemoveReference
+    );
+}
+
+/// CU 3540 / Part 3 §4.9.2, Table 2: AuthenticatedUser has the suggested non-security read
+/// permissions.
+#[test]
+fn authenticated_user_permissions_match_well_known_role_definition() {
+    let role_id = NodeId::new(0, 15656);
+    let permissions = secure_well_known_permissions()
+        .into_iter()
+        .find(|role_permission| role_permission.role_id == role_id)
+        .expect("secure preset must define AuthenticatedUser")
+        .permissions;
+
+    assert_eq!(
+        permissions,
+        PermissionType::Browse | PermissionType::Read | PermissionType::ReadRolePermissions
+    );
+}
+
+/// CU 3541 / Part 3 §4.9.2, Table 2: Observer, Engineer, and Supervisor have their suggested
+/// operational permission sets.
+#[test]
+fn observer_engineer_supervisor_permissions_match_well_known_role_definitions() {
+    let permissions = secure_well_known_permissions();
+    let expected = [
+        (
+            "Observer",
+            NodeId::new(0, 15668),
+            PermissionType::Browse
+                | PermissionType::Read
+                | PermissionType::ReadHistory
+                | PermissionType::ReceiveEvents,
+        ),
+        (
+            "Engineer",
+            NodeId::new(0, 16036),
+            PermissionType::Browse
+                | PermissionType::Read
+                | PermissionType::ReadHistory
+                | PermissionType::ReceiveEvents
+                | PermissionType::Write
+                | PermissionType::Call
+                | PermissionType::WriteAttribute
+                | PermissionType::WriteHistorizing
+                | PermissionType::InsertHistory
+                | PermissionType::ModifyHistory
+                | PermissionType::DeleteHistory,
+        ),
+        (
+            "Supervisor",
+            NodeId::new(0, 15692),
+            PermissionType::Browse
+                | PermissionType::Read
+                | PermissionType::ReadHistory
+                | PermissionType::ReceiveEvents
+                | PermissionType::Write
+                | PermissionType::Call,
+        ),
+    ];
+
+    for (role, role_id, expected_permissions) in expected {
+        let actual_permissions = permissions
+            .iter()
+            .find(|role_permission| role_permission.role_id == role_id)
+            .unwrap_or_else(|| panic!("secure preset must define {role}"))
+            .permissions;
+        assert_eq!(
+            actual_permissions, expected_permissions,
+            "{role} permissions must match Part 3 §4.9.2, Table 2"
+        );
+    }
+}
+
 /// US3 / Part 3 §8.55 Read: a node whose RolePermissions grant Read only to a role the session lacks
 /// is denied (Bad_UserAccessDenied) — the list excludes the session's roles (fail-closed).
 #[tokio::test]

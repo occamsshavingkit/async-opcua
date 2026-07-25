@@ -372,7 +372,7 @@ static AUDIT_TABLE: &[(u32, EvidenceStatus, &str)] = &[
     (2194, EvidenceStatus::Implemented, "agg_delta_bounds engine.rs:1329 (11507); test phase_c_start_end_delta_bounds aggregates_tests.rs:486-503"),
     (2201, EvidenceStatus::Implemented, "agg_worst_quality engine.rs:1247 (2364); test aggregates_tests.rs:401, worst_quality_is_value_type_independent:1141"),
     (2202, EvidenceStatus::Implemented, "ConditionType_Enable/Disable Methods registered (methods.rs register_condition_methods); handle_condition_enable/disable call set_enabled; test alarms.rs::enable_disable_methods_toggle_enabled_state"),
-    (2203, EvidenceStatus::Partial, "write_node_value accepts any Variant (address_space/utils.rs:473) but no test writes a structured/ExtensionObject value; only Read tested."),
+    (2203, EvidenceStatus::Implemented, "tests/integration/write_service.rs write_extension_object_round_trips_through_read_service"),
     (2207, EvidenceStatus::Implemented, "agg_end_bound engine.rs:1321 (11506); test phase_c_start_end_delta_bounds aggregates_tests.rs:486-503"),
     (2210, EvidenceStatus::Implemented, "engine.rs dispatch AGG_TOTAL2=11304 (engine.rs:1486); test aggregates_tests.rs:621 phase_d_time_average2_total2_match_stepped_area"),
     (2220, EvidenceStatus::Implemented, "engine.rs dispatch AGG_DURATION_IN_STATE_ZERO=11307 (engine.rs:1504-1506); test aggregates_tests.rs:1169 duration_in_state_boolean_splits_false_and_true"),
@@ -390,7 +390,7 @@ static AUDIT_TABLE: &[(u32, EvidenceStatus, &str)] = &[
     (2267, EvidenceStatus::Implemented, "engine.rs dispatch AGG_START_BOUND=11505 (engine.rs:1510); test aggregates_tests.rs:486 part13_start_end_and_delta_bounds_use_simple_bounds"),
     (2271, EvidenceStatus::Implemented, "Client::register_server (async-opcua-client/src/session/client.rs:818) + server-side periodic_discovery_server_registration (discovery.rs:86-117) calling it over a client-selected highest-security endpoint; test discovery.rs uses secured_endpoint() (SignAndEncrypt) throughout, e.g. discovery.rs:114"),
     (2273, EvidenceStatus::Implemented, "engine.rs dispatch AGG_TIME_AVERAGE2=11285 (engine.rs:1481); test aggregates_tests.rs:621 phase_d_time_average2_total2_match_stepped_area"),
-    (2275, EvidenceStatus::Partial, "discrete.rs:22,182-186 implements Trip via DiscreteAlarmKind::Trip; grep shows Trip kind never used in any test (only OffNormal is)"),
+    (2275, EvidenceStatus::Implemented, "alarms/discrete.rs:199 trip_alarm_activates_returns_to_normal_and_has_trip_alarm_type_definition"),
     (2276, EvidenceStatus::Implemented, "annotations.rs attach_annotations_property + data_history.rs update_structure_data/read_annotations; simple.rs:658-718 history_read_annotations; test history_data_inmemory.rs:368 round-trip insert/replace/remove/read. Uses ReadAnnotationDataDetails not ReadRawModifiedDetails, but OPC-10000-11 5.1.2 confirms both are spec-valid"),
     (2281, EvidenceStatus::Implemented, "agg_variance_sample engine.rs:1021 (11428); test phase_b_variance_and_stddev aggregates_tests.rs:369-393"),
     (2282, EvidenceStatus::Implemented, "engine.rs dispatch AGG_END_BOUND=11506 (engine.rs:1511); test aggregates_tests.rs:486 part13_start_end_and_delta_bounds_use_simple_bounds"),
@@ -403,7 +403,7 @@ static AUDIT_TABLE: &[(u32, EvidenceStatus, &str)] = &[
     (2314, EvidenceStatus::Implemented, "engine.rs dispatch AGG_DURATION_BAD=2361 (engine.rs:1500); test aggregates_tests.rs:694 phase_e_duration_and_percent_good_bad"),
     (2315, EvidenceStatus::Implemented, "handle_condition_refresh2 methods.rs:369-382; tested alarms.rs:584 condition_refresh2_targets_a_single_monitored_item"),
     (2317, EvidenceStatus::Implemented, "TranslateBrowsePathsToNodeIds handler async-opcua-server/src/session/services/view.rs:388; test async-opcua/tests/integration/tier_a.rs:141"),
-    (2318, EvidenceStatus::Partial, "Clamp (monitored_item.rs:314-336 sanitize_queue_size) caps queuesize to max but 0 dedicated test; comment admits event handling is \"Future\""),
+    (2318, EvidenceStatus::Implemented, "subscriptions/monitored_item.rs sanitize_queue_size_clamps_to_server_maximum"),
     (2319, EvidenceStatus::Implemented, "ServerBuilder certificate_path/private_key_path (builder.rs:359-366), pki_dir (builder.rs:494-495); tested security_tests.rs:421-568."),
     (2323, EvidenceStatus::Implemented, "RateOfChangeAlarm (alarms/rate_of_change.rs) reuses LimitAlarm evaluator against a computed per-second rate, register_rate_of_change_alarm; test alarms.rs::rate_of_change_alarm_reports_type_definition_and_activates_on_fast_change"),
     (2328, EvidenceStatus::Implemented, "get_endpoints_with_filters incl profile-uri filter info.rs:342-378; tests core_tests.rs:100,358,366"),
@@ -440,12 +440,12 @@ static AUDIT_TABLE: &[(u32, EvidenceStatus, &str)] = &[
     (2400, EvidenceStatus::Implemented, "ActivateSession identity-change + revalidate_monitored_items_for_user manager.rs:1565,1591-1598; test manager.rs:2234-2253"),
     (2407, EvidenceStatus::Implemented, "builder.rs: add_user_token:567, SecurityPolicy::None/Sign/SignAndEncrypt:140-195, trust_client_certs:397-398, pki_dir:494; tested security_tests.rs."),
     (2408, EvidenceStatus::Implemented, "agg_worst_quality2 engine.rs:1266 (11292); test worst_quality_is_value_type_independent aggregates_tests.rs:1153-1156"),
-    (2422, EvidenceStatus::Partial, "Audit events ride negotiated SecureChannel (Sign/SignAndEncrypt supported) but nothing specifically enforces/verifies encrypted delivery"),
+    (2422, EvidenceStatus::Implemented, "tests/security_tests.rs audit_over_encrypted_channel"),
     (2423, EvidenceStatus::Implemented, "RationalNumberType present schemas/1.05/Opc.Ua.NodeSet2.xml, generated types/rational_number.rs; exposed via CoreNamespace import."),
     (2426, EvidenceStatus::Implemented, "DiscreteItemType is abstract (OPC-10000-8 §5.3.3.1, 'no instances of this type can exist'); satisfied by any concrete subtype -- TwoStateDiscreteType/MultiStateDiscreteType/MultiStateValueDiscreteType (data_access.rs), tested in data_access.rs"),
     (2446, EvidenceStatus::Implemented, "HasAddIn ReferenceType via generated core nodeset nodeset_19.rs:822, loaded by default address_space/mod.rs:11"),
     (2447, EvidenceStatus::Implemented, "DefaultInstanceBrowseName Property via generated nodeset_21.rs:2832, loaded by default node_manager/memory/core.rs:172"),
-    (2454, EvidenceStatus::Partial, "Call passes arbitrary Vec<Variant> incl ExtensionObject generically (node_manager/method.rs) but no test uses a Structure argument."),
+    (2454, EvidenceStatus::Implemented, "tests/method_call_tests.rs custom_in_memory_node_manager_default_method_call_round_trips_extension_object_argument"),
     (2474, EvidenceStatus::Gap, "Investigated (feature 100): type exists in generated nodeset (nodeset_51.rs, ns=0;i=19077, from current schema snapshot) but is undocumented in both the local OPC-10000-8 v1.05.07 PDF and reference.opcfoundation.org -- deferred rather than implemented against unverifiable semantics, per spec.md Assumptions"),
     (2476, EvidenceStatus::Implemented, "Feature 109 CU 2476: node_manager/memory/core.rs:989-997 computes real TimeZoneDataType via chrono; test async-opcua-server/tests/server_local_time.rs test_server_local_time_returns_plausible_timezone"),
     (2478, EvidenceStatus::Implemented, "OsClockSource default TimeSyncSource impl async-opcua-server/src/time_sync.rs:112-124; unit test time_sync.rs:130-137"),
@@ -497,11 +497,11 @@ static AUDIT_TABLE: &[(u32, EvidenceStatus, &str)] = &[
     (2806, EvidenceStatus::Gap, "No runtime Write path sets RolePermissions: SimpleNodeManager::write rejects non-Value attrs (simple.rs:1178); only set at node-creation."),
     (2808, EvidenceStatus::Implemented, "Opt-in RBAC enforcement async-opcua-server/src/rbac/decision.rs:46-81; dedicated suite async-opcua/tests/integration/rbac.rs"),
     (2809, EvidenceStatus::Implemented, "AccessLevelExType NonatomicRead/Write async-opcua-nodes/src/variable.rs:62,827-837; unit test variable.rs:990-997"),
-    (2811, EvidenceStatus::Partial, "ProgramStateMachine (programs/state.rs) + ShelvingStateMachine (alarms/state_machine.rs) real+tested, but no GeneratesEvent wiring found."),
+    (2811, EvidenceStatus::Implemented, "alarms/state_machine.rs:537-541 GeneratesEvent→TransitionEventType + test L1564; programs/methods.rs:332-336 GeneratesEvent→ProgramTransitionEventType + test L588"),
     (2813, EvidenceStatus::Gap, "Searched 'AvailableStates'/'AvailableTransitions' - zero hits outside generated type def."),
-    (2814, EvidenceStatus::Partial, "ProgramStateMachine/ShelvingStateMachine real instances w/ tests, but AvailableStates/AvailableTransitions not populated."),
+    (2814, EvidenceStatus::Implemented, "alarms/state_machine.rs:262-308 AvailableStates/Transitions + test L1589; programs/methods.rs:262-308 + test L622"),
     (2817, EvidenceStatus::Gap, "UserTokenPolicy.issuer_endpoint_url hardcoded UAString::null() (authenticator.rs:327,341,353; session/manager.rs:2742) — never set."),
-    (2818, EvidenceStatus::Partial, "Monitored-item sampling reuses Read's Variant pipeline (subscriptions/mod.rs:1230) but no test monitors a structured value."),
+    (2818, EvidenceStatus::Implemented, "subscriptions/monitored_item.rs sampled_extension_object_reaches_subscription_notification"),
     (2820, EvidenceStatus::Implemented, "validate_node_write_inner (address_space/write_validation.rs) rejects an IndexRange Write to AttributeId::Value with Bad_WriteNotSupported when AccessLevelExType::WriteFullArrayOnly is set; test write.rs::write_index_range_rejected_when_write_full_array_only"),
     (2822, EvidenceStatus::Gap, "DeviceFailureEventType only structural (nodeset_19.rs); no server code constructs/fires it (grep across async-opcua-server/src empty)"),
     (2823, EvidenceStatus::Implemented, "Feature 109 CU 2823: Fixed 100ms tarpit on auth failure (session/negotiate.rs:16,28-40); test async-opcua-server/tests/security_tests.rs invalid_oauth2_jwt_validation_failure_is_tarpitted + username_password_auth_failure_is_tarpitted"),
@@ -522,7 +522,7 @@ static AUDIT_TABLE: &[(u32, EvidenceStatus, &str)] = &[
     (2896, EvidenceStatus::Implemented, "SilenceState variable added (state_machine.rs) + AlarmConditionType_Silence Method registered; handle_condition_silence calls set_silenced; test alarms.rs::silence_method_toggles_silence_state_and_is_idempotent"),
     (2897, EvidenceStatus::Implemented, "SuppressedState var+get/set_suppressed wired to SuppressedOrShelved (state_machine.rs), now tested via alarms.rs::suppress_unsuppress_methods_toggle_suppressed_state"),
     (2902, EvidenceStatus::Gap, "Server validates OAuth2 JWTs (crypto/identity/jwt_validator.rs) but no HTTPS token-fetch flow to an OAuth2 authority exists."),
-    (2918, EvidenceStatus::Partial, "ObjectBuilder::has_event_source exists (async-opcua-nodes/src/object.rs:49-56) but zero call sites building a hierarchy; alarms wire HasCondition only (alarms/limit.rs:351), not HasEventSource."),
+    (2918, EvidenceStatus::Implemented, "alarms/limit.rs:467-468 HasEventSource + test L1487"),
     (2921, EvidenceStatus::Implemented, "Active/Acked/Confirmed/Retain/Severity/Message/branch mechanics (state_machine.rs, transitions.rs); test alarms.rs:64"),
     (2927, EvidenceStatus::Implemented, "handle_ack_method methods.rs:65-150 + AcknowledgeableConditionType_Acknowledge registered methods.rs:654-658; tested alarms.rs:64,706"),
     (2928, EvidenceStatus::Implemented, "Absolute DataChangeFilter deadband subscriptions/monitored_item/filters.rs:128-137; unit test filters.rs:175"),
@@ -634,7 +634,7 @@ static AUDIT_TABLE: &[(u32, EvidenceStatus, &str)] = &[
     (3211, EvidenceStatus::Gap, "FileDirectoryType only as generated NodeId consts/abstract type (node_ids.rs:10624, nodeset_16.rs); no instance created anywhere in server/samples."),
     (3213, EvidenceStatus::Implemented, "Feature 106: closes the base FileType surface (OPC-10000-20 section 4.2, grounded against the local Part 20 PDF -- FileType is defined there, not Part 5 as its name might suggest). fota/file_access.rs implements real Open (mode-byte decode, exact spec open-conflict rules -- a write-open refused while open in any mode, a read-open refused only while open for write, EraseExisting rejected without Write, Read+Write combined-mode handles supported, Append applies to the initial position regardless of read/write, writable-flag enforcement), Close, Read (EOF-is-empty-not-error, buffer bounded by both MaxByteStringLength and remaining file size), Write (empty-data-is-noop, MaxByteStringLength-rejected, live Size-property update), GetPosition/SetPosition (EOF-clamping), all against a real std::fs::File per session-scoped handle (moka::sync::Cache, modeled on gds/trust_list's TrustListHandleRegistry but disk- not memory-backed, appropriate for large files). Status codes independently re-verified against the real spec text, not assumed (e.g. Bad_InvalidArgument for any bad/foreign-session handle, corrected from TrustList's own Bad_InvalidState convention which is Part-12-specific, not base FileType). OpenCount/Size live-tracked; open-mode counters reconciled via a Drop impl on the handle state so both explicit Close and moka idle-timeout eviction release the same way (an Arc<Mutex<()>> serializes the Open conflict-check-then-increment sequence against concurrent Opens). e2e-proven via fota_file_access_integration.rs plus 18 unit tests. FileDirectoryType (CU 3211) and TemporaryFileTransferType (CUs 3810-3813/5791) are explicit, separately-scoped follow-ups -- see TODO.md."),
     (3214, EvidenceStatus::Implemented, "Range in nodeset + generated types/range.rs; used as EURange in datachange_overflow.rs, alarms.rs."),
-    (3224, EvidenceStatus::Partial, "Fires for AddNodes/DeleteNodes/AddRef/DeleteRef memory_mgr_impl.rs:324,409,699,878 -> audit_events.rs:24-97; only AddNodes tested"),
+    (3224, EvidenceStatus::Implemented, "tests/integration/node_management.rs add_nodes_emits_audit_event, delete_nodes_emits_audit_event, add_references_emits_audit_event, delete_references_emits_audit_event"),
     (3226, EvidenceStatus::Gap, "HistoryUpdate handler attribute.rs:286-386 has no audit dispatch; AuditHistoryUpdateEventType only generated, never constructed, no test"),
     (3228, EvidenceStatus::Implemented, "dispatch_write_audit (audit.rs:818, message_handler.rs:899) emits AuditWriteUpdateEventType; e2e write.rs:1063."),
     (3230, EvidenceStatus::Implemented, "dispatch_method_audit (audit.rs:799, method.rs:107) emits AuditUpdateMethodEventType; e2e methods.rs:608."),
@@ -652,11 +652,11 @@ static AUDIT_TABLE: &[(u32, EvidenceStatus, &str)] = &[
     (3535, EvidenceStatus::Implemented, "RetransmissionQueue (retransmission_queue.rs, sized session_subscriptions.rs:1100) + Republish; test subscriptions.rs:1229"),
     (3536, EvidenceStatus::Implemented, "Username/Password encrypted per policy (negotiate.rs:94-207 decrypt_identity_token_secret); tests negotiate.rs:259-330."),
     (3538, EvidenceStatus::Implemented, "RolePermissions/UserRolePermissions/AccessRestrictions enforced (decision.rs:168-195); nodeset types present; tests rbac.rs:106,146,176."),
-    (3539, EvidenceStatus::Partial, "SecurityAdmin perms tested (rbac.rs:991); ConfigureAdmin defined (preset.rs:66-76) but no test asserts its perm bits (only :308)."),
-    (3540, EvidenceStatus::Partial, "Anonymous perms tested (rbac.rs:977); AuthenticatedUser granted (resolver.rs:502) but perm bitset (preset.rs:34) never asserted."),
-    (3541, EvidenceStatus::Partial, "Operator fully tested (rbac.rs:396-498,986); Observer/Engineer/Supervisor exist (preset.rs:39-64) but only node-existence tested."),
+    (3539, EvidenceStatus::Implemented, "tests/integration/rbac.rs configure_admin_permissions_match_well_known_role_definition"),
+    (3540, EvidenceStatus::Implemented, "tests/integration/rbac.rs authenticated_user_permissions_match_well_known_role_definition"),
+    (3541, EvidenceStatus::Implemented, "tests/integration/rbac.rs observer_engineer_supervisor_permissions_match_well_known_role_definitions"),
     (3542, EvidenceStatus::Implemented, "Feature 109 CU 3542: RoleMappingRuleChangedAuditEventType emitted on identity mutation (session/audit.rs dispatch_role_mapping_rule_changed_audit); test async-opcua-server/tests/event_filter_tests.rs add_identity_dispatches_role_mapping_rule_changed_audit_event"),
-    (3544, EvidenceStatus::Partial, "ResendData method core.rs:1209-1220, wired subscription.rs:341-342,757; no test found (searched methods.rs, subscriptions.rs)"),
+    (3544, EvidenceStatus::Implemented, "tests/resend_data.rs"),
     (3545, EvidenceStatus::Implemented, "Dynamic per-namespace NamespaceMetaData objects diagnostics/node_manager.rs:583-650; e2e test browse.rs:942-967"),
     (3546, EvidenceStatus::Implemented, "Feature 109 CU 3546: BaseEventType.local_time now populated from Server_LocalTime source (events/event.rs set_local_time, node_manager/memory/core.rs current_timezone_data); test async-opcua-server/tests/event_filter_tests.rs emitted_event_has_populated_local_time"),
     (3547, EvidenceStatus::Implemented, "UABinaryFileDataType + Description types present in schemas/1.05; type-level exposure via CoreNamespace import."),
@@ -751,7 +751,7 @@ static AUDIT_TABLE: &[(u32, EvidenceStatus, &str)] = &[
     (4463, EvidenceStatus::Implemented, "AlarmConditionType_Suppress2/Unsuppress2 Methods registered (methods.rs), routed through the same handlers as Suppress/Unsuppress with apply_optional_comment; test alarms.rs::suppress2_and_place_in_service2_apply_optional_comment"),
     (4464, EvidenceStatus::Implemented, "AlarmConditionType_RemoveFromService2/PlaceInService2 Methods registered (methods.rs) with apply_optional_comment; test alarms.rs::suppress2_and_place_in_service2_apply_optional_comment"),
     (4465, EvidenceStatus::Gap, "no TimedShelve2/OneShotShelve2/Unshelve2 MethodId anywhere; only non-\"2\" shelve methods exist (methods.rs:674-693)"),
-    (4466, EvidenceStatus::Partial, "Respond2 impl dialog.rs:200-209 + methods.rs:319-336,711-714 registered, but 0 test coverage (grep \"Respond2\" in test file: 0 hits)"),
+    (4466, EvidenceStatus::Implemented, "alarms/dialog.rs:201 respond2() + tests L424-L445"),
     (4467, EvidenceStatus::Implemented, "OutOfServiceState var+get/set_out_of_service (state_machine.rs) exposed via AlarmConditionType_RemoveFromService/PlaceInService Methods (methods.rs); test alarms.rs::remove_from_service_place_in_service_toggle_out_of_service_state"),
     (4500, EvidenceStatus::Gap, "Searched \"ScheduleType\"/\"CalendarEntryType\"/\"DailyScheduleType\" across all *.rs — no matches; only unrelated Part-10 ProgramState (programs/state.rs) exists."),
     (4501, EvidenceStatus::Gap, "Searched \"CalendarType\"/\"DateRangeType\" — no matches anywhere in codebase."),
@@ -760,7 +760,7 @@ static AUDIT_TABLE: &[(u32, EvidenceStatus, &str)] = &[
     (4505, EvidenceStatus::Gap, "Searched \"UserManagement\" — only unused generated UserManagementType defs (nodeset_18.rs:2083); no instantiated Object/Methods."),
     (4957, EvidenceStatus::Implemented, "Per-endpoint user_token_ids admin-selects enabled token types (authenticator.rs:318-366, builder.rs:567); broad test coverage."),
     (5207, EvidenceStatus::Implemented, "No per-subscription item cap below 2 found (server/src/config/limits.rs); 2+ Double items trivially exercised in subscriptions.rs."),
-    (5208, EvidenceStatus::Partial, "IndexRange applied to sample monitored_item.rs:931-940 (Variant::range_of); logic tested via read.rs:794-827, no MonitoredItem-level test"),
+    (5208, EvidenceStatus::Implemented, "subscriptions/monitored_item.rs:1801 notify_data_value_with_index_range_delivers_sub_value"),
     (5213, EvidenceStatus::Implemented, "audit.rs:736 AuditOpenSecureChannelEventType, :763 AuditChannelEventType, :928/:442 Create/ActivateSession; test session_audit.rs:18"),
     (5240, EvidenceStatus::Implemented, "base_info::create_currency_variable attaches a CurrencyUnit property (CurrencyUnitType) to a monetary DataVariable; test base_info.rs::currency_unit_property_reports_iso4217_fields"),
     (5274, EvidenceStatus::Implemented, "AddIdentity/RemoveIdentity (role_management.rs:330-373), wired for 7 well-known roles; unit tests :682,721,913."),
@@ -861,7 +861,7 @@ static AUDIT_TABLE: &[(u32, EvidenceStatus, &str)] = &[
 
 #[cfg(test)]
 mod tests {
-    use super::{generate_markdown_report, parse_snapshot};
+    use super::{generate_markdown_report, parse_snapshot, EvidenceStatus, AUDIT_TABLE};
 
     const FIXTURE: &str = r#"
 {
@@ -998,5 +998,79 @@ mod tests {
             ids, deduped,
             "AUDIT_TABLE must not contain duplicate CU ids"
         );
+    }
+
+    #[test]
+    fn closed_conformance_units_are_implemented_with_current_evidence() {
+        let expected = [
+            (
+                2203,
+                "tests/integration/write_service.rs write_extension_object_round_trips_through_read_service",
+            ),
+            (
+                2275,
+                "alarms/discrete.rs:199 trip_alarm_activates_returns_to_normal_and_has_trip_alarm_type_definition",
+            ),
+            (
+                2318,
+                "subscriptions/monitored_item.rs sanitize_queue_size_clamps_to_server_maximum",
+            ),
+            (2422, "tests/security_tests.rs audit_over_encrypted_channel"),
+            (
+                2454,
+                "tests/method_call_tests.rs custom_in_memory_node_manager_default_method_call_round_trips_extension_object_argument",
+            ),
+            (
+                2811,
+                "alarms/state_machine.rs:537-541 GeneratesEvent→TransitionEventType + test L1564; programs/methods.rs:332-336 GeneratesEvent→ProgramTransitionEventType + test L588",
+            ),
+            (
+                2814,
+                "alarms/state_machine.rs:262-308 AvailableStates/Transitions + test L1589; programs/methods.rs:262-308 + test L622",
+            ),
+            (
+                2818,
+                "subscriptions/monitored_item.rs sampled_extension_object_reaches_subscription_notification",
+            ),
+            (
+                2918,
+                "alarms/limit.rs:467-468 HasEventSource + test L1487",
+            ),
+            (
+                3224,
+                "tests/integration/node_management.rs add_nodes_emits_audit_event, delete_nodes_emits_audit_event, add_references_emits_audit_event, delete_references_emits_audit_event",
+            ),
+            (
+                3539,
+                "tests/integration/rbac.rs configure_admin_permissions_match_well_known_role_definition",
+            ),
+            (
+                3540,
+                "tests/integration/rbac.rs authenticated_user_permissions_match_well_known_role_definition",
+            ),
+            (
+                3541,
+                "tests/integration/rbac.rs observer_engineer_supervisor_permissions_match_well_known_role_definitions",
+            ),
+            (3544, "tests/resend_data.rs"),
+            (
+                4466,
+                "alarms/dialog.rs:201 respond2() + tests L424-L445",
+            ),
+            (
+                5208,
+                "subscriptions/monitored_item.rs:1801 notify_data_value_with_index_range_delivers_sub_value",
+            ),
+        ];
+
+        for (cu_id, expected_evidence) in expected {
+            let index = AUDIT_TABLE
+                .binary_search_by_key(&cu_id, |(id, _, _)| *id)
+                .expect("closed CU must remain in AUDIT_TABLE");
+            let (_, status, evidence) = AUDIT_TABLE[index];
+
+            assert_eq!(status, EvidenceStatus::Implemented, "CU {cu_id}");
+            assert_eq!(evidence, expected_evidence, "CU {cu_id}");
+        }
     }
 }

@@ -17,7 +17,6 @@ use opcua_server::{
     services::subscription::filter::ParsedEventFilter, IdentityMappingRule, ServerBuilder,
     ServerEndpoint, ServerHandle, ServerUserToken, WellKnownRole, ANONYMOUS_USER_TOKEN_ID,
 };
-use opcua_types::CallMethodRequest;
 use opcua_types::{
     match_extension_object, AttributeId, ByteString, ContentFilter, ContentFilterBuilder,
     ContentFilterElement, EventFilter, ExtensionObject, FilterOperator, IdentityCriteriaType,

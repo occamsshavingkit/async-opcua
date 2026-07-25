@@ -1582,7 +1582,7 @@ mod tests {
         );
         assert!(refs
             .iter()
-            .any(|r| r.target_id == NodeId::from(ObjectTypeId::TransitionEventType)));
+            .any(|r| r.target_id == ObjectTypeId::TransitionEventType));
     }
 
     #[test]

@@ -178,7 +178,7 @@ async fn register_program_adds_generates_event_reference_to_program_transition_e
     );
     assert!(
         refs.iter()
-            .any(|r| r.target_id == NodeId::from(ObjectTypeId::ProgramTransitionEventType)),
+            .any(|r| r.target_id == ObjectTypeId::ProgramTransitionEventType),
         "register_program must add GeneratesEvent reference to ProgramTransitionEventType"
     );
 }

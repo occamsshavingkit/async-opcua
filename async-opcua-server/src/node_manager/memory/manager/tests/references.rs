@@ -1,4 +1,5 @@
 use super::*;
+use crate::node_manager::memory::manager::references::reference_type_is_abstract;
 
 #[tokio::test]
 async fn abstract_reference_type_returns_operation_level_bad_reference_type_id_invalid() {

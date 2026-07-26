@@ -1,4 +1,16 @@
-use super::*;
+use super::{
+    authorize_node_management_permission, clients_can_modify_address_space, model_change,
+    notify_model_changes, MODEL_CHANGE_REFERENCE_ADDED, MODEL_CHANGE_REFERENCE_DELETED,
+};
+use crate::{
+    address_space::{AddressSpace, NodeType},
+    node_manager::{audit_events, AddReferenceItem, DeleteReferenceItem, RequestContext},
+};
+use opcua_core::sync::RwLock;
+use opcua_nodes::TypeTree;
+use opcua_types::{
+    BrowseDirection, NodeClass, NodeId, PermissionType, ReferenceTypeId, StatusCode,
+};
 
 #[cfg(feature = "node-management")]
 pub(super) fn add_references_impl(

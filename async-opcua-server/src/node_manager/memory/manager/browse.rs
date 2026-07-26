@@ -1,9 +1,27 @@
-use super::super::*;
+use super::{super::InMemoryNodeManager, InMemoryNodeManagerImpl};
+use crate::{
+    address_space::{AddressSpace, NodeType, ReferenceDirection},
+    node_manager::{
+        view::{AddReferenceResult, ExternalReference, ExternalReferenceRequest, NodeMetadata},
+        BrowseNode, BrowsePathItem, DefaultTypeTree, RegisterNodeItem, RequestContext,
+        ViewProvider,
+    },
+    rbac,
+};
 use async_trait::async_trait;
+use opcua_core::{trace_read_lock, trace_write_lock};
+use opcua_types::{
+    AccessRestrictionType, BrowseDescriptionResultMask, BrowseDirection, ExpandedNodeId, NodeClass,
+    NodeId, PermissionType, QualifiedName, ReferenceDescription, ReferenceTypeId, StatusCode,
+};
 use std::{
     collections::{HashSet, VecDeque},
     ops::Deref,
 };
+use tracing::warn;
+
+#[cfg(feature = "query")]
+use crate::node_manager::QueryRequest;
 
 #[derive(Default)]
 struct BrowseContinuationPoint {

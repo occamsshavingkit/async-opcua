@@ -1,19 +1,26 @@
+use std::sync::Arc;
+
 use super::super::InMemoryNodeManager;
-use super::crud::*;
-use super::references::*;
-use super::*;
+use super::InMemoryNodeManagerImpl;
 use crate::{
+    address_space::{AddressSpace, EventNotifier, ReferenceDirection},
     authenticator::UserToken,
     builder::ServerBuilder,
     identity_token::IdentityToken,
-    node_manager::{NodeMutator, RequestContextInner},
+    node_manager::{
+        AddNodeItem, AddReferenceItem, DeleteNodeItem, NamespaceMetadata, NodeMutator,
+        RequestContext, RequestContextInner, ServerContext,
+    },
     session::instance::Session,
 };
 use async_trait::async_trait;
+use opcua_core::sync::RwLock;
+use opcua_nodes::{Object, ObjectType, ReferenceType, TypeTree, VariableType};
 use opcua_types::{
-    AddNodesItem, AddReferencesItem, AnonymousIdentityToken, ApplicationDescription, ByteString,
-    DeleteNodesItem, DiagnosticBits, MessageSecurityMode, ObjectAttributes, ObjectTypeId,
-    QualifiedName, UAString,
+    AddNodeAttributes, AddNodesItem, AddReferencesItem, AnonymousIdentityToken,
+    ApplicationDescription, AttributesMask, ByteString, DataTypeId, DeleteNodesItem,
+    DiagnosticBits, ExpandedNodeId, LocalizedText, MessageSecurityMode, NodeClass, NodeId,
+    ObjectAttributes, ObjectTypeId, QualifiedName, ReferenceTypeId, StatusCode, UAString,
 };
 
 struct TestImpl;

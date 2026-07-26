@@ -15,10 +15,7 @@ use crate::{
 };
 #[cfg(feature = "node-management")]
 use crate::{
-    address_space::{AccessLevel, EventNotifier, NodeType, ReferenceDirection},
-    node_manager::{
-        audit_events, AddNodeItem, AddReferenceItem, DeleteNodeItem, DeleteReferenceItem,
-    },
+    node_manager::{AddNodeItem, AddReferenceItem, DeleteNodeItem, DeleteReferenceItem},
     rbac,
 };
 #[cfg(feature = "history")]
@@ -34,23 +31,15 @@ use crate::{
 use opcua_core::sync::RwLock;
 #[cfg(all(feature = "node-management", feature = "events"))]
 use opcua_nodes::Event;
-#[cfg(feature = "node-management")]
-use opcua_nodes::{
-    DataType, Method, NodeBase, Object, ObjectType, ReferenceType, TypeTree, Variable,
-    VariableType, View,
-};
 #[cfg(feature = "subscriptions")]
 use opcua_types::MonitoringMode;
 #[cfg(all(feature = "node-management", feature = "events"))]
 use opcua_types::ObjectId;
 #[cfg(any(feature = "method-call", feature = "node-management"))]
 use opcua_types::Variant;
-#[cfg(feature = "node-management")]
-use opcua_types::{
-    AddNodeAttributes, AttributesMask, BrowseDirection, DataTypeId, ExpandedNodeId, LocalizedText,
-    ModelChangeStructureDataType, NodeClass, PermissionType, ReferenceTypeId, WriteMask,
-};
 use opcua_types::{DataValue, NodeId, StatusCode, TimestampsToReturn};
+#[cfg(feature = "node-management")]
+use opcua_types::{ExpandedNodeId, ModelChangeStructureDataType, PermissionType};
 #[cfg(feature = "history")]
 use opcua_types::{
     ReadAnnotationDataDetails, ReadAtTimeDetails, ReadEventDetails, ReadProcessedDetails,
@@ -58,13 +47,17 @@ use opcua_types::{
 };
 
 mod browse;
+#[cfg(feature = "node-management")]
 mod crud;
+#[cfg(feature = "node-management")]
 mod references;
 
-#[cfg(test)]
+#[cfg(all(test, feature = "node-management"))]
 mod tests;
 
+#[cfg(feature = "node-management")]
 use crud::{add_nodes_impl, delete_nodes_impl};
+#[cfg(feature = "node-management")]
 use references::{add_references_impl, delete_references_impl};
 
 #[cfg(feature = "node-management")]

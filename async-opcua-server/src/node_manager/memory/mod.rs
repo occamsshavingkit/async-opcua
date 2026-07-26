@@ -14,9 +14,12 @@ pub use core::{CoreNodeManager, CoreNodeManagerBuilder, CoreNodeManagerImpl};
 pub use manager::*;
 use opcua_core::{trace_read_lock, trace_write_lock};
 pub use simple::*;
+#[cfg(feature = "method-call")]
 use tracing::warn;
 
-use std::{ops::Deref, sync::Arc};
+#[cfg(feature = "method-call")]
+use std::ops::Deref;
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use hashbrown::HashMap;
@@ -25,14 +28,18 @@ use hashbrown::HashMap;
 use crate::address_space::read_node_value;
 #[cfg(any(feature = "history", feature = "events"))]
 use crate::address_space::EventNotifier;
+#[cfg(any(
+    feature = "subscriptions",
+    feature = "history",
+    feature = "method-call"
+))]
+use crate::address_space::NodeType;
+#[cfg(any(feature = "history", feature = "method-call"))]
+use crate::rbac;
 #[cfg(feature = "history")]
 use crate::{
     address_space::{user_access_level, AccessLevel},
     session::continuation_points::ContinuationPoint,
-};
-use crate::{
-    address_space::{NodeType, ReferenceDirection},
-    rbac,
 };
 #[cfg(feature = "subscriptions")]
 use crate::{subscriptions::CreateMonitoredItem, SubscriptionCache};
@@ -41,11 +48,13 @@ use opcua_core::sync::RwLock;
 use opcua_types::argument::Argument;
 #[cfg(feature = "method-call")]
 use opcua_types::DataEncoding;
-use opcua_types::{
-    AccessRestrictionType, AttributeId, BrowseDescriptionResultMask, BrowseDirection,
-    ExpandedNodeId, NodeClass, NodeId, PermissionType, QualifiedName, ReferenceDescription,
-    ReferenceTypeId, RolePermissionType, StatusCode, TimestampsToReturn,
-};
+#[cfg(feature = "node-management")]
+use opcua_types::ExpandedNodeId;
+#[cfg(any(feature = "history", feature = "method-call"))]
+use opcua_types::PermissionType;
+use opcua_types::{AttributeId, NodeId, RolePermissionType, StatusCode, TimestampsToReturn};
+#[cfg(feature = "method-call")]
+use opcua_types::{BrowseDirection, ReferenceTypeId};
 #[cfg(feature = "subscriptions")]
 use opcua_types::{DataValue, DateTime, MonitoringMode};
 #[cfg(any(feature = "subscriptions", feature = "method-call"))]
@@ -56,14 +65,10 @@ use opcua_types::{
     ReadRawModifiedDetails,
 };
 
-#[cfg(feature = "query")]
-use super::QueryRequest;
 use super::{
-    build::NodeManagerBuilder,
-    view::{AddReferenceResult, ExternalReference, ExternalReferenceRequest, NodeMetadata},
-    AttributeProvider, BrowseNode, BrowsePathItem, DefaultTypeTree, DynNodeManager,
-    NamespaceMetadata, NodeManagerCore, NodeMutator, ReadNode, RegisterNodeItem, RequestContext,
-    ServerContext, ViewProvider, WriteNode,
+    build::NodeManagerBuilder, AttributeProvider, DefaultTypeTree, DynNodeManager,
+    NamespaceMetadata, NodeManagerCore, NodeMutator, ReadNode, RequestContext, ServerContext,
+    WriteNode,
 };
 #[cfg(feature = "node-management")]
 use super::{AddNodeItem, AddReferenceItem, DeleteNodeItem, DeleteReferenceItem};
@@ -1065,18 +1070,21 @@ mod tests {
     use opcua_nodes::{Method, NodeBase, Object, Variable};
     use opcua_types::{
         AccessRestrictionType, AddNodeAttributes, AddNodesItem, AddReferencesItem,
-        AnonymousIdentityToken, ApplicationDescription, BrowseDescription, BrowseResult,
-        ByteString, CallMethodRequest, DateTime, DeleteAtTimeDetails, DeleteEventDetails,
-        DeleteNodesItem, DeleteReferencesItem, DiagnosticBits, EventFilter, ExpandedNodeId,
-        HistoryReadValueId, LocalizedText, MessageSecurityMode, NodeClass, NodeClassMask,
-        ObjectAttributes, ObjectTypeId, PerformUpdateType, PermissionType, QualifiedName,
-        RolePermissionType, UAString, UpdateDataDetails, UpdateEventDetails,
-        UpdateStructureDataDetails,
+        AnonymousIdentityToken, ApplicationDescription, BrowseDescription,
+        BrowseDescriptionResultMask, BrowseResult, ByteString, CallMethodRequest, DateTime,
+        DeleteAtTimeDetails, DeleteEventDetails, DeleteNodesItem, DeleteReferencesItem,
+        DiagnosticBits, EventFilter, ExpandedNodeId, HistoryReadValueId, LocalizedText,
+        MessageSecurityMode, NodeClass, NodeClassMask, ObjectAttributes, ObjectTypeId,
+        PerformUpdateType, PermissionType, QualifiedName, RolePermissionType, UAString,
+        UpdateDataDetails, UpdateEventDetails, UpdateStructureDataDetails,
     };
 
     use crate::{
-        authenticator::UserToken, identity_token::IdentityToken, node_manager::RequestContextInner,
-        session::instance::Session, ServerBuilder,
+        authenticator::UserToken,
+        identity_token::IdentityToken,
+        node_manager::{BrowseNode, RequestContextInner, ViewProvider},
+        session::instance::Session,
+        ServerBuilder,
     };
 
     use super::*;

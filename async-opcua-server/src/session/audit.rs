@@ -848,7 +848,7 @@ pub(crate) fn dispatch_service_failure(
     dispatch_audit_event_if_enabled!(subscriptions, &event);
 }
 
-#[cfg(all(feature = "events", feature = "subscriptions"))]
+#[cfg(all(feature = "events", feature = "subscriptions", feature = "rbac"))]
 pub(crate) fn dispatch_role_mapping_rule_changed_audit(
     #[cfg(feature = "events")] subscriptions: &Arc<SubscriptionCache>,
     info: &ServerInfo,

@@ -24,11 +24,11 @@ use opcua_types::{
     MessageSecurityMode, NodeId, ServerOnNetwork, StatusCode, UAString, Variant,
 };
 
-#[cfg(feature = "companion-gds")]
-use crate::gds::application_record::ApplicationRecordDataType;
 #[cfg(all(feature = "generated-address-space", feature = "companion-gds"))]
 use crate::node_manager::memory::CoreNodeManager;
 use crate::{gds::like_match::like_match, node_manager::RequestContext, rbac::WellKnownRole};
+#[cfg(feature = "companion-gds")]
+use opcua_types::ApplicationRecordDataType;
 
 use super::directory_instance::DirectoryInstanceNodeIds;
 

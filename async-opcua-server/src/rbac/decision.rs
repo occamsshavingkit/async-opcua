@@ -120,6 +120,14 @@ pub(crate) fn event_receive_allowed_with_enforcement(
 }
 
 /// Validate a node's AccessRestrictions against the channel message security mode.
+///
+/// SPEC KIT TASK: Enforce SessionRequired for sessionless service invocation
+/// OPC UA Part 3 §5.2.11 and §8.56, plus Part 4 §6.3.1 — a Node carrying the
+/// SessionRequired AccessRestriction is inaccessible through SessionlessInvoke.
+///
+/// Carry invocation mode/session presence into this decision path and reject sessionless access
+/// before permission evaluation while leaving Session-backed calls unchanged. Cover both effective
+/// namespace defaults and per-Node overrides in sessionless service tests.
 pub(crate) fn access_restrictions_ok(
     restrictions: Option<AccessRestrictionType>,
     security_mode: MessageSecurityMode,

@@ -650,6 +650,14 @@ impl Server {
         let node_managers = NodeManagers::new(final_node_managers);
         node_managers_ref.init_from_node_managers(node_managers.clone());
 
+        #[cfg(all(feature = "generated-address-space", feature = "companion"))]
+        if let Some(core_node_manager) =
+            node_managers.get_of_type::<crate::node_manager::memory::CoreNodeManager>()
+        {
+            crate::companion::import_all_companions(core_node_manager.address_space());
+            core_node_manager.refresh_namespaces();
+        }
+
         #[cfg(all(
             feature = "generated-address-space",
             feature = "method-call",

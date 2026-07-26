@@ -10,14 +10,27 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 EXIT=0
 
-# Extract companion features from Cargo.toml
+# Extract companion features from standalone declarations and the aggregate
+# `companion = [...]` feature in Cargo.toml.
 cargo_features=$(
-  perl -ne 'print "$1\n" if /^\s*(companion[-_][a-z0-9_]+)\s*=\s*\[/' "$ROOT/async-opcua-server/Cargo.toml" | sort -u
+  perl -0777 -ne '
+    my ($features) = /^\[features\]\s*(.*?)(?=^\[[^]]+\]\s*$|\z)/ms;
+    next unless defined $features;
+    while ($features =~ /^\s*(companion[-_][a-z0-9_]+)\s*=/mg) {
+      print "$1\n";
+    }
+    while ($features =~ /^\s*companion\s*=\s*\[(.*?)\]/msg) {
+      my $members = $1;
+      while ($members =~ /"(companion[-_][a-z0-9_]+)"/g) {
+        print "$1\n";
+      }
+    }
+  ' "$ROOT/async-opcua-server/Cargo.toml" | sort -u
 )
 
 # Extract companion feature strings from companion!(...) macro invocations
 code_features=$(
-  perl -ne 'print "$1\n" if /companion!\("([^"]+)"/' "$ROOT/async-opcua-server/src/companion/mod.rs" | sort -u
+  perl -0777 -ne 'while (/companion!\s*\(\s*"(companion[-_][a-z0-9_]+)"/g) { print "$1\n" }' "$ROOT/async-opcua-server/src/companion/mod.rs" | sort -u
 )
 
 # Check: features in code but missing from Cargo

@@ -12,6 +12,13 @@ use opcua_types::{
     QueryFirstResponse, QueryNextRequest, QueryNextResponse, ResponseHeader, StatusCode,
 };
 
+/// SPEC KIT TASK: Aggregate QueryFirst results across node managers
+/// OPC UA Part 4 Annex B §B.2.3 — QueryFirst returns one AddressSpace-wide result set,
+/// bounded by the requested data-set/reference limits and continued with a continuation point.
+///
+/// Move cross-manager query aggregation into the core node-manager coordinator so successful
+/// data sets survive a later manager failure, limits apply globally, and continuation state records
+/// the manager/cursor needed to resume without duplicates or omissions.
 pub(crate) async fn query_first(
     node_managers: NodeManagers,
     request: Request<QueryFirstRequest>,

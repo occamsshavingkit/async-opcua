@@ -9,10 +9,11 @@ use crate::Session;
 use opcua_core::sync::RwLock;
 use opcua_crypto::{gds_reload, CertificateStore};
 use opcua_types::{
-    ApplicationDescription, BrowsePath, BrowsePathResult, Error, NodeId, ObjectId, QualifiedName,
-    ReferenceTypeId, RelativePath, RelativePathElement, StatusCode,
+    ApplicationRecordDataType, BrowsePath, BrowsePathResult, Error, GdsApplicationRecordTypeLoader,
+    NodeId, ObjectId, QualifiedName, ReferenceTypeId, RelativePath, RelativePathElement,
+    StatusCode,
 };
-use std::fs;
+use std::{fs, sync::Arc};
 
 /// The GDS companion namespace URI (OPC-10000-12), declared in the companion NodeSet's own
 /// `<NamespaceUris>`.
@@ -40,6 +41,7 @@ impl GdsClient {
     /// again (e.g. after reconnecting to a different server) if you need a fresh resolution.
     pub async fn discover(session: &Session) -> Result<Self, Error> {
         let gds_ns = session.get_namespace_index(GDS_NAMESPACE_URI).await?;
+        session.add_type_loader(Arc::new(GdsApplicationRecordTypeLoader));
 
         let browse_paths = vec![
             directory_browse_path(gds_ns, &["Directory"]),
@@ -89,10 +91,10 @@ impl GdsClient {
     pub async fn register_application(
         &self,
         session: &Session,
-        application_description: ApplicationDescription,
+        application_record: ApplicationRecordDataType,
     ) -> Result<NodeId, StatusCode> {
         self.registration
-            .register_application(session, application_description)
+            .register_application(session, application_record)
             .await
     }
 

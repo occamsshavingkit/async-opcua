@@ -6,7 +6,9 @@
 //! Provides mechanisms to register client or server applications with a GDS directory.
 
 use crate::Session;
-use opcua_types::{ApplicationDescription, CallMethodRequest, NodeId, StatusCode, Variant};
+use opcua_types::{
+    ApplicationRecordDataType, CallMethodRequest, ExtensionObject, NodeId, StatusCode, Variant,
+};
 use tracing::{error, info};
 
 /// Client helper for interacting with the GDS registration and directory services.
@@ -36,12 +38,14 @@ impl GdsRegistrationClient {
     pub async fn register_application(
         &self,
         session: &Session,
-        application_description: ApplicationDescription,
+        application_record: ApplicationRecordDataType,
     ) -> Result<NodeId, StatusCode> {
         let request = CallMethodRequest {
             object_id: self.directory_object_id.clone(),
             method_id: self.register_method_id.clone(),
-            input_arguments: Some(vec![Variant::from(application_description)]),
+            input_arguments: Some(vec![Variant::from(ExtensionObject::new(
+                application_record,
+            ))]),
         };
 
         match session.call_one(request).await {

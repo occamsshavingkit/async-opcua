@@ -16,13 +16,16 @@ use std::time::Duration;
 use tokio::net::TcpListener;
 
 use opcua_client::{gds::GdsClient, ClientBuilder, IdentityToken};
+use opcua_crypto::SecurityPolicy;
 use opcua_server::{
     gds::register_gds_pull_methods_from_companion, node_manager::memory::CoreNodeManager,
-    ServerBuilder, ServerConfig, ServerEndpoint, ANONYMOUS_USER_TOKEN_ID,
+    IdentityMappingRule, ServerBuilder, ServerConfig, ServerEndpoint, ServerUserToken,
+    WellKnownRole, ANONYMOUS_USER_TOKEN_ID,
 };
 use opcua_types::{
-    ApplicationDescription, ApplicationType, EndpointDescription, MessageSecurityMode, NodeId,
-    StatusCode, UAString, UserTokenPolicy,
+    ApplicationRecordDataType, ApplicationType, EndpointDescription,
+    GdsApplicationRecordTypeLoader, LocalizedText, MessageSecurityMode, NodeId, StatusCode,
+    UAString, UserTokenPolicy,
 };
 
 fn xml_present() -> bool {
@@ -36,6 +39,7 @@ fn xml_present() -> bool {
 /// The old, fabricated NodeIds this fix removes -- discovery must never coincidentally produce
 /// any of these.
 const FABRICATED_IDENTIFIERS: [u32; 5] = [22384, 22385, 22388, 22400, 22402];
+const SECURITY_ADMIN_USER: &str = "security-admin";
 
 struct RunningServer {
     test_dir: std::path::PathBuf,
@@ -55,22 +59,39 @@ async fn start_server_with_gds() -> RunningServer {
     let _ = std::fs::remove_dir_all(&test_dir);
     let server_pki_dir = test_dir.join("server_pki");
 
-    let mut server_config = ServerConfig {
-        pki_dir: server_pki_dir.clone(),
-        create_sample_keypair: true,
-        certificate_path: Some(server_pki_dir.join("own/cert.der")),
-        private_key_path: Some(server_pki_dir.join("private/private.pem")),
-        discovery_urls: vec!["opc.tcp://127.0.0.1:0/".to_string()],
-        ..Default::default()
-    };
-    server_config.tcp_config.host = "127.0.0.1".to_string();
-    server_config.tcp_config.port = 0;
-    server_config.add_endpoint(
-        "none",
-        ServerEndpoint::new_none("/", &[ANONYMOUS_USER_TOKEN_ID.to_string()]),
-    );
-
-    let (server, server_handle) = ServerBuilder::from_config(server_config).build().unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let endpoint_url = format!("opc.tcp://127.0.0.1:{}/", addr.port());
+    let (server, server_handle) = ServerBuilder::new()
+        .application_name("GDS Pull Client Discovery Test Server")
+        .application_uri("urn:gds_pull_client_discovery_test_server")
+        .product_uri("urn:gds_pull_client_discovery_test_server")
+        .host("127.0.0.1")
+        .port(addr.port())
+        .pki_dir(&server_pki_dir)
+        .create_sample_keypair(true)
+        .trust_client_certs(true)
+        .discovery_urls(vec![endpoint_url])
+        .add_user_token(
+            SECURITY_ADMIN_USER,
+            ServerUserToken::user_pass(SECURITY_ADMIN_USER, "correct-password"),
+        )
+        .add_endpoint(
+            "basic256sha256-sign-encrypt",
+            (
+                "/",
+                SecurityPolicy::Basic256Sha256,
+                MessageSecurityMode::SignAndEncrypt,
+                &[SECURITY_ADMIN_USER] as &[&str],
+            ),
+        )
+        .identity_mapping_rule(
+            WellKnownRole::SecurityAdmin.node_id(),
+            IdentityMappingRule::UserName(SECURITY_ADMIN_USER.into()),
+        )
+        .with_type_loader(std::sync::Arc::new(GdsApplicationRecordTypeLoader))
+        .build()
+        .unwrap();
 
     let core_node_manager = server_handle
         .node_managers()
@@ -79,8 +100,6 @@ async fn start_server_with_gds() -> RunningServer {
     register_gds_pull_methods_from_companion(&core_node_manager, &server_handle.type_tree().read())
         .expect("companion XML is present, Pull-model wiring should succeed");
 
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
     let server_task = tokio::spawn(async move {
         server.run_with(listener).await.unwrap();
     });
@@ -117,20 +136,20 @@ async fn discover_resolves_real_dynamic_node_ids_and_dispatches_against_them() {
         .application_uri("urn:gds_pull_client_discovery_test")
         .pki_dir(client_pki_dir)
         .create_sample_keypair(true)
+        .trust_server_certs(true)
         .client()
         .unwrap();
 
     let endpoint_url = format!("opc.tcp://127.0.0.1:{}/", server.addr.port());
-    let endpoint: EndpointDescription = (
-        endpoint_url.as_str(),
-        "None",
-        MessageSecurityMode::None,
-        UserTokenPolicy::anonymous(),
-    )
-        .into();
-
     let (session, event_loop) = client
-        .connect_to_matching_endpoint(endpoint, IdentityToken::Anonymous)
+        .connect_to_matching_endpoint(
+            (
+                endpoint_url.as_str(),
+                SecurityPolicy::Basic256Sha256.to_str(),
+                MessageSecurityMode::SignAndEncrypt,
+            ),
+            IdentityToken::new_user_name(SECURITY_ADMIN_USER, "correct-password"),
+        )
         .await
         .unwrap();
     let client_handle = event_loop.spawn();
@@ -164,61 +183,50 @@ async fn discover_resolves_real_dynamic_node_ids_and_dispatches_against_them() {
     assert_eq!(gds_client.registration().directory_object_id, directory_id);
     assert_eq!(gds_client.csr().directory_object_id, directory_id);
 
-    // RegisterApplication now has a real server-side callback (feature 108) requiring an
-    // encrypted channel + SecurityAdmin (Part 12 §6.5.6) -- this anonymous/None-security session
-    // gets rejected for that reason, which is itself proof the Call reached the real registered
-    // handler (a NodeId-resolution failure would instead produce BadNodeIdUnknown/BadMethodInvalid).
-    // Note this client helper sends an `ApplicationDescription`, not the real
-    // `ApplicationRecordDataType` RegisterApplication's input argument actually is (see
-    // `specs/108-gds-directory-app-registry/research.md`) -- that mismatch is masked here since
-    // the security-mode check now runs before argument decoding; tracked as a separate, pre-
-    // existing client-side gap, not something feature 108's own scope covers.
-    let register_result = gds_client
+    // An encrypted SecurityAdmin session reaches argument decoding, so this succeeds only when the
+    // client sends Part 12 §6.5.5 ApplicationRecordDataType rather than ApplicationDescription.
+    let application_id = gds_client
         .register_application(
             &session,
-            ApplicationDescription {
+            ApplicationRecordDataType {
+                application_id: NodeId::null(),
                 application_uri: UAString::from("urn:gds_pull_client_discovery_test"),
-                application_name: "Test Application".into(),
+                application_names: Some(vec![LocalizedText::from("Test Application")]),
                 application_type: ApplicationType::Client,
-                ..Default::default()
+                product_uri: UAString::from("urn:gds_pull_client_discovery_test:product"),
+                discovery_urls: None,
+                server_capabilities: None,
             },
         )
-        .await;
-    assert_eq!(
-        register_result,
-        Err(StatusCode::BadSecurityModeInsufficient)
-    );
+        .await
+        .expect("RegisterApplication should decode the shared application record wire type");
+    assert!(!application_id.is_null());
 
-    // StartSigningRequest *is* implemented server-side (feature 103) and requires an encrypted
-    // channel + SecurityAdmin (Part 12 §7.9.3) -- this anonymous/None-security session gets
-    // rejected for that reason, which is itself proof the Call reached the real registered
-    // handler (a NodeId-resolution failure would instead produce BadNodeIdUnknown/BadMethodInvalid).
+    // The same authorized session reaches StartSigningRequest argument validation; an empty CSR is
+    // rejected after dispatch rather than by the security gate.
     let csr_result = gds_client
         .request_signing_csr(
             &session,
-            NodeId::null(),
+            application_id.clone(),
             NodeId::null(),
             NodeId::null(),
             &[],
         )
         .await;
-    assert_eq!(csr_result, Err(StatusCode::BadSecurityModeInsufficient));
+    assert_eq!(csr_result, Err(StatusCode::BadInvalidArgument));
 
     // T009a: discovery is one-shot -- calling again on the same already-discovered client reuses
     // the resolved NodeIds (no second discover() call), and dispatches identically.
     let csr_result_again = gds_client
         .request_signing_csr(
             &session,
-            NodeId::null(),
+            application_id,
             NodeId::null(),
             NodeId::null(),
             &[],
         )
         .await;
-    assert_eq!(
-        csr_result_again,
-        Err(StatusCode::BadSecurityModeInsufficient)
-    );
+    assert_eq!(csr_result_again, Err(StatusCode::BadInvalidArgument));
     assert_eq!(gds_client.csr().directory_object_id, directory_id);
 
     let _ = session.disconnect().await;

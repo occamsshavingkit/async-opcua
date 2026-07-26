@@ -1638,6 +1638,14 @@ impl Variant {
     }
 
     /// Set a range of values in this variant using a different variant.
+    ///
+    /// SPEC KIT TASK: Complete NumericRange replacement for every supported Variant shape
+    /// OPC UA Part 4 §7.27 and §5.11.4.2 — NumericRange writes cover arrays, Strings,
+    /// ByteStrings, and the final substring dimension of String/ByteString arrays.
+    ///
+    /// Implement exact-size replacement for one- and multi-dimensional selections without
+    /// truncation, including scalar and array String/ByteString cases. Validate source shape and
+    /// map malformed, out-of-bounds, mismatched, and unsupported writes to the specified StatusCodes.
     pub fn set_range_of(
         &mut self,
         range: &NumericRange,

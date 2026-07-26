@@ -20,14 +20,13 @@ use tokio::net::TcpListener;
 
 use opcua_client::{ClientBuilder, IdentityToken};
 use opcua_server::{
-    gds::{
-        application_record::{ApplicationRecordDataType, GdsApplicationRecordTypeLoader},
-        register_gds_pull_methods_from_companion,
-    },
-    node_manager::memory::CoreNodeManager,
+    gds::register_gds_pull_methods_from_companion, node_manager::memory::CoreNodeManager,
     ServerBuilder, ServerConfig, ServerEndpoint, ANONYMOUS_USER_TOKEN_ID,
 };
-use opcua_types::{EndpointDescription, MessageSecurityMode, StatusCode, UserTokenPolicy};
+use opcua_types::{
+    ApplicationRecordDataType, EndpointDescription, GdsApplicationRecordTypeLoader,
+    MessageSecurityMode, StatusCode, UserTokenPolicy,
+};
 
 fn xml_present() -> bool {
     std::path::Path::new(concat!(

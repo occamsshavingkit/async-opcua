@@ -8,10 +8,10 @@ use opcua_server::{
     history::{AnnotationContinuationPoint, HistoryRawModifiedResult, HistoryStorageBackend},
 };
 use opcua_types::{
-    AggregateConfiguration, Annotation, BinaryDecodable, BinaryEncodable, ByteString, ContextOwned,
-    DataValue, DateTime, EventFilter, HistoryEventFieldList, HistoryUpdateType, ModificationInfo,
-    NodeId, ObjectTypeId, PerformUpdateType, QualifiedName, SimpleAttributeOperand, StatusCode,
-    UAString, Variant,
+    AggregateConfiguration, BinaryDecodable, BinaryEncodable, ByteString, ContextOwned, DataValue,
+    DateTime, EventFilter, HistoryEventFieldList, HistoryUpdateType, ModificationInfo, NodeId,
+    ObjectTypeId, PerformUpdateType, QualifiedName, SimpleAttributeOperand, StatusCode, UAString,
+    Variant,
 };
 use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
@@ -122,13 +122,6 @@ fn insert_modified_historical_data(
         ],
     )?;
     Ok(())
-}
-
-fn is_annotation_data_value(value: &DataValue) -> bool {
-    matches!(
-        value.value.as_ref(),
-        Some(Variant::ExtensionObject(object)) if object.inner_as::<Annotation>().is_some()
-    )
 }
 
 fn event_id_select_clause_index(filter: &EventFilter) -> Option<usize> {
@@ -1066,11 +1059,6 @@ impl HistoryStorageBackend for SqliteHistoryBackend {
                 let mut status_codes = Vec::with_capacity(values.len());
 
                 for value in values {
-                    if !is_annotation_data_value(&value) {
-                        status_codes.push(StatusCode::BadTypeMismatch);
-                        continue;
-                    }
-
                     let source_ticks = value.source_timestamp.unwrap_or_else(DateTime::now).ticks();
                     let server_ticks = value.server_timestamp.unwrap_or_else(DateTime::now).ticks();
                     let status_val = value.status.map(|status| status.bits() as i64).unwrap_or(0);

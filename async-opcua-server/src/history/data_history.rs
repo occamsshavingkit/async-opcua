@@ -4,9 +4,11 @@ use std::collections::{BTreeMap, HashMap};
 
 use async_trait::async_trait;
 use opcua_core::sync::RwLock;
+#[cfg(test)]
+use opcua_types::{Annotation, Variant};
 use opcua_types::{
-    Annotation, DataValue, DateTime, HistoryUpdateType, ModificationInfo, NodeId,
-    PerformUpdateType, StatusCode, UAString, Variant,
+    DataValue, DateTime, HistoryUpdateType, ModificationInfo, NodeId, PerformUpdateType,
+    StatusCode, UAString,
 };
 
 use crate::history::{
@@ -335,11 +337,6 @@ impl HistoryStorageBackend for InMemoryDataHistory {
         let node_values = annotation_values.entry(node_id.clone()).or_default();
 
         for value in values {
-            if !is_annotation_data_value(&value) {
-                results.push(StatusCode::BadTypeMismatch);
-                continue;
-            }
-
             let source_ticks = source_ticks(&value);
             let status = match perform {
                 PerformUpdateType::Insert => {
@@ -501,13 +498,6 @@ impl HistoryStorageBackend for InMemoryDataHistory {
 
 fn source_ticks(value: &DataValue) -> i64 {
     value.source_timestamp.unwrap_or_else(DateTime::now).ticks()
-}
-
-fn is_annotation_data_value(value: &DataValue) -> bool {
-    matches!(
-        value.value.as_ref(),
-        Some(Variant::ExtensionObject(object)) if object.inner_as::<Annotation>().is_some()
-    )
 }
 
 fn delete_modification_info() -> ModificationInfo {

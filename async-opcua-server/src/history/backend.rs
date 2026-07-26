@@ -279,7 +279,7 @@ pub trait HistoryStorageBackend: Send + Sync {
         values: Vec<DataValue>,
     ) -> Result<Vec<StatusCode>, StatusCode>;
 
-    /// Updates annotation history data values.
+    /// Updates structured history data values, including annotations.
     async fn update_structure_data(
         &self,
         _node_id: &NodeId,

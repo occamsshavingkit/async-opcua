@@ -472,17 +472,22 @@ async fn annotation_read_resumes_from_continuation_point() {
 }
 
 #[tokio::test]
-async fn non_annotation_value_is_rejected_not_panicked() {
+async fn non_annotation_structure_data_update_is_readable() {
+    // Given: a structured-history node with no value at the target timestamp.
     let b = SqliteHistoryBackend::new_in_memory().unwrap();
     let n = node();
-    // A plain Double is not an Annotation → BadTypeMismatch, nothing stored.
+
+    // When: UpdateStructureData receives a non-Annotation DataValue.
     let r = b
-        .update_structure_data(&n, PerformUpdateType::Insert, vec![at(100, 1.0)])
+        .update_structure_data(&n, PerformUpdateType::Update, vec![at(100, 1.0)])
         .await
         .unwrap();
-    assert_eq!(r, vec![StatusCode::BadTypeMismatch]);
-    let (anns, _cp) = b.read_annotations(&n, &[], None).await.unwrap();
-    assert!(anns.is_empty());
+    assert_eq!(r, vec![StatusCode::GoodEntryInserted]);
+
+    // Then: SQLite decodes and returns the same structured-history value.
+    let (values, _cp) = b.read_annotations(&n, &[], None).await.unwrap();
+    assert_eq!(values.len(), 1);
+    assert_eq!(double(&values[0]), 1.0);
 }
 
 // ---- Feature 035: AnnotationCount aggregate parity with the in-memory backend ----

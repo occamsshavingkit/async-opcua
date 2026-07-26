@@ -436,6 +436,42 @@ async fn annotation_insert_replace_remove_and_read() {
 }
 
 #[tokio::test]
+async fn annotation_read_resumes_from_continuation_point() {
+    // Given: more requested annotation timestamps than one server batch.
+    let b = SqliteHistoryBackend::new_in_memory().unwrap();
+    let n = node();
+    let req_times = (0..1_001i64).map(DateTime::from).collect::<Vec<_>>();
+    b.update_structure_data(
+        &n,
+        PerformUpdateType::Insert,
+        (0..1_001i64)
+            .map(|ticks| annotation_at(ticks, &format!("annotation-{ticks}")))
+            .collect(),
+    )
+    .await
+    .expect("insert annotations");
+
+    // When: the first page is read and its continuation point is resumed.
+    let (first_page, continuation_point) = b
+        .read_annotations(&n, &req_times, None)
+        .await
+        .expect("read first annotation page");
+    let continuation_point = continuation_point.expect("first page continuation point");
+    let (second_page, final_continuation_point) = b
+        .read_annotations(&n, &req_times, Some(continuation_point))
+        .await
+        .expect("resume annotation read");
+
+    // Then: pagination returns every requested annotation exactly once.
+    assert_eq!(first_page.len(), 1_000);
+    assert_eq!(second_page.len(), 1);
+    assert_eq!(first_page[0].source_timestamp, Some(DateTime::from(0)));
+    assert_eq!(first_page[999].source_timestamp, Some(DateTime::from(999)));
+    assert_eq!(second_page[0].source_timestamp, Some(DateTime::from(1_000)));
+    assert!(final_continuation_point.is_none());
+}
+
+#[tokio::test]
 async fn non_annotation_value_is_rejected_not_panicked() {
     let b = SqliteHistoryBackend::new_in_memory().unwrap();
     let n = node();

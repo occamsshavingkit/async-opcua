@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use dashmap::DashMap;
 use opcua_server::{
     aggregates::{compute_processed_intervals, engine::get_value_timestamp},
-    history::{HistoryRawModifiedResult, HistoryStorageBackend},
+    history::{AnnotationContinuationPoint, HistoryRawModifiedResult, HistoryStorageBackend},
 };
 use opcua_types::{
     AggregateConfiguration, Annotation, BinaryDecodable, BinaryEncodable, ByteString, ContextOwned,
@@ -812,21 +812,31 @@ impl HistoryStorageBackend for SqliteHistoryBackend {
         req_times: &[DateTime],
         continuation_point: Option<Vec<u8>>,
     ) -> Result<(Vec<DataValue>, Option<Vec<u8>>), StatusCode> {
-        if continuation_point.is_some() {
-            return Err(StatusCode::BadContinuationPointInvalid);
-        }
-
-        let pool = self.pool.clone();
+        let read_all = req_times.is_empty();
         let node_id_str = node_id.to_string();
-        let req_ticks = req_times
-            .iter()
-            .map(|timestamp| timestamp.ticks())
-            .collect::<Vec<_>>();
+        let (req_ticks, next_token) = if read_all {
+            if continuation_point.is_some() {
+                return Err(StatusCode::BadContinuationPointInvalid);
+            }
+            (Vec::new(), None)
+        } else {
+            let resume = AnnotationContinuationPoint::decode(
+                continuation_point.as_deref(),
+                req_times.len(),
+            )?;
+            let (page_range, next_token) = resume.page(req_times.len());
+            let req_ticks = req_times[page_range]
+                .iter()
+                .map(|timestamp| timestamp.ticks())
+                .collect::<Vec<_>>();
+            (req_ticks, next_token)
+        };
+        let pool = self.pool.clone();
 
         let values: Result<Vec<DataValue>, SqliteError> = tokio::task::spawn_blocking(move || {
             let conn = pool.get().expect("get connection from pool");
 
-            if req_ticks.is_empty() {
+            if read_all {
                 let mut stmt = conn.prepare(
                     "SELECT source_timestamp, server_timestamp, value_blob, status_code
                          FROM historical_annotations
@@ -857,7 +867,7 @@ impl HistoryStorageBackend for SqliteHistoryBackend {
         .map_err(|_| StatusCode::BadInternalError)?;
 
         values
-            .map(|values| (values, None))
+            .map(|values| (values, next_token))
             .map_err(|err| map_history_read_sqlite_error("read_annotations", err))
     }
 

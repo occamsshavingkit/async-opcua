@@ -9,7 +9,9 @@ use opcua_types::{
     PerformUpdateType, StatusCode, UAString, Variant,
 };
 
-use crate::history::{HistoryRawModifiedResult, HistoryStorageBackend};
+use crate::history::{
+    AnnotationContinuationPoint, HistoryRawModifiedResult, HistoryStorageBackend,
+};
 
 const DEFAULT_MAX_VALUES_PER_NODE: usize = 10_000;
 
@@ -205,27 +207,38 @@ impl HistoryStorageBackend for InMemoryDataHistory {
         req_times: &[DateTime],
         continuation_point: Option<Vec<u8>>,
     ) -> Result<(Vec<DataValue>, Option<Vec<u8>>), StatusCode> {
-        if continuation_point.is_some() {
-            return Err(StatusCode::BadContinuationPointInvalid);
+        let annotation_values = self.annotation_values.read();
+        let node_values = annotation_values.get(node_id);
+        if req_times.is_empty() {
+            if continuation_point.is_some() {
+                return Err(StatusCode::BadContinuationPointInvalid);
+            }
+            return Ok((
+                node_values
+                    .into_iter()
+                    .flat_map(BTreeMap::values)
+                    .cloned()
+                    .collect(),
+                None,
+            ));
         }
 
-        let annotation_values = self.annotation_values.read();
-        let Some(node_values) = annotation_values.get(node_id) else {
-            return Ok((Vec::new(), None));
+        let resume =
+            AnnotationContinuationPoint::decode(continuation_point.as_deref(), req_times.len())?;
+        let (page_range, next_token) = resume.page(req_times.len());
+
+        let Some(node_values) = node_values else {
+            return Ok((Vec::new(), next_token));
         };
 
-        if req_times.is_empty() {
-            return Ok((node_values.values().cloned().collect(), None));
-        }
-
-        let mut values = Vec::with_capacity(req_times.len());
-        for req_time in req_times {
+        let mut values = Vec::with_capacity(page_range.len());
+        for req_time in &req_times[page_range] {
             if let Some(value) = node_values.get(&req_time.ticks()) {
                 values.push(value.clone());
             }
         }
 
-        Ok((values, None))
+        Ok((values, next_token))
     }
 
     async fn update_data(
@@ -583,6 +596,53 @@ mod tests {
             server_timestamp: Some(DateTime::from(ticks)),
             ..Default::default()
         }
+    }
+
+    fn annotation_at(ticks: i64) -> DataValue {
+        let annotation = Annotation {
+            message: format!("annotation-{ticks}").into(),
+            user_name: "tester".into(),
+            annotation_time: DateTime::from(ticks),
+        };
+        DataValue::new_at(
+            opcua_types::ExtensionObject::from_message(annotation),
+            DateTime::from(ticks),
+        )
+    }
+
+    #[tokio::test]
+    async fn read_annotations_resumes_from_continuation_point() {
+        // Given: more requested annotation timestamps than one server batch.
+        let history = InMemoryDataHistory::new();
+        let node_id = NodeId::new(2, "annotation-paged");
+        let req_times = (0..1_001i64).map(DateTime::from).collect::<Vec<_>>();
+        history
+            .update_structure_data(
+                &node_id,
+                PerformUpdateType::Insert,
+                (0..1_001i64).map(annotation_at).collect(),
+            )
+            .await
+            .expect("insert annotations");
+
+        // When: the first page is read and its continuation point is resumed.
+        let (first_page, continuation_point) = history
+            .read_annotations(&node_id, &req_times, None)
+            .await
+            .expect("read first annotation page");
+        let continuation_point = continuation_point.expect("first page continuation point");
+        let (second_page, final_continuation_point) = history
+            .read_annotations(&node_id, &req_times, Some(continuation_point))
+            .await
+            .expect("resume annotation read");
+
+        // Then: pagination returns every requested annotation exactly once.
+        assert_eq!(first_page.len(), 1_000);
+        assert_eq!(second_page.len(), 1);
+        assert_eq!(source_ticks(&first_page[0]), 0);
+        assert_eq!(source_ticks(&first_page[999]), 999);
+        assert_eq!(source_ticks(&second_page[0]), 1_000);
+        assert!(final_continuation_point.is_none());
     }
 
     #[tokio::test]

@@ -260,7 +260,8 @@ pub trait HistoryStorageBackend: Send + Sync {
         Err(StatusCode::BadHistoryOperationUnsupported)
     }
 
-    /// Reads annotation data values from the history backend.
+    /// Reads annotation data values, applying the standard continuation-point rules from
+    /// OPC-10000-11 §6.5.6.2/§6.3 by paginating requested timestamps by index.
     async fn read_annotations(
         &self,
         _node_id: &NodeId,

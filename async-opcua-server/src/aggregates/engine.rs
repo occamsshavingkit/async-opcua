@@ -156,6 +156,14 @@ pub fn get_value_timestamp(value: &DataValue) -> DateTime {
         .unwrap_or_else(DateTime::now)
 }
 
+pub(crate) fn nearest_good_value<'a>(
+    values: impl IntoIterator<Item = &'a DataValue>,
+) -> Option<&'a DataValue> {
+    values
+        .into_iter()
+        .find(|value| value.status.is_none_or(|status| status.is_good()))
+}
+
 /// Partitions a time range into discrete processing intervals.
 pub fn partition_intervals(
     start_time: DateTime,
@@ -1342,16 +1350,19 @@ fn agg_delta_bounds(input: &AggregateInput<'_>) -> DataValue {
 }
 
 fn agg_interpolative(input: &AggregateInput<'_>) -> DataValue {
-    let after = input
-        .values
-        .iter()
-        .find(|value| value.value.as_ref().and_then(variant_to_f64).is_some())
-        .copied()
-        .or(input.next);
+    let before = nearest_good_value(input.prior);
+    let after = nearest_good_value(
+        input
+            .values
+            .iter()
+            .copied()
+            .filter(|value| value.value.as_ref().and_then(variant_to_f64).is_some()),
+    )
+    .or_else(|| nearest_good_value(input.next));
 
     let value = interpolated_bound_at(
         input.interval_start,
-        input.prior,
+        before,
         after,
         input.config.use_sloped_extrapolation,
     )
@@ -1562,13 +1573,34 @@ pub fn compute_processed_intervals(
                 .filter(|timestamp| *timestamp >= min_t && *timestamp < max_t)
                 .collect();
 
-            let prior = raw_values
-                .iter()
-                .rev()
-                .find(|value| get_value_timestamp(value) <= min_t);
-            let next = raw_values
-                .iter()
-                .find(|value| get_value_timestamp(value) > max_t);
+            let uses_interpolated_bounds = matches!(
+                aggregate_type.identifier,
+                opcua_types::Identifier::Numeric(AGG_INTERPOLATIVE)
+            );
+            let prior = if uses_interpolated_bounds {
+                nearest_good_value(
+                    raw_values
+                        .iter()
+                        .rev()
+                        .filter(|value| get_value_timestamp(value) <= min_t),
+                )
+            } else {
+                raw_values
+                    .iter()
+                    .rev()
+                    .find(|value| get_value_timestamp(value) <= min_t)
+            };
+            let next = if uses_interpolated_bounds {
+                nearest_good_value(
+                    raw_values
+                        .iter()
+                        .filter(|value| get_value_timestamp(value) > max_t),
+                )
+            } else {
+                raw_values
+                    .iter()
+                    .find(|value| get_value_timestamp(value) > max_t)
+            };
 
             let input = AggregateInput {
                 values: &values_in_interval,

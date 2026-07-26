@@ -16,9 +16,9 @@ use opcua::{
         secure_well_known_permissions, IdentityMappingRule, ServerBuilder, WellKnownRole,
     },
     types::{
-        AccessRestrictionType, AttributeId, CallMethodRequest, DataTypeId, NodeId, ObjectId,
-        PermissionType, ReferenceTypeId, RolePermissionType, StatusCode, TimestampsToReturn,
-        VariableTypeId, Variant, WriteValue,
+        AccessRestrictionType, AttributeId, CallMethodRequest, DataTypeId, ExtensionObject, NodeId,
+        ObjectId, PermissionType, ReferenceTypeId, RolePermissionType, StatusCode,
+        TimestampsToReturn, VariableTypeId, Variant, WriteMask, WriteValue,
     },
 };
 
@@ -82,7 +82,8 @@ fn add_permissioned_var(
         .value(0.0f64)
         .data_type(DataTypeId::Double)
         .access_level(AccessLevel::CURRENT_READ)
-        .user_access_level(AccessLevel::CURRENT_READ);
+        .user_access_level(AccessLevel::CURRENT_READ)
+        .write_mask(WriteMask::ROLE_PERMISSIONS);
     if !role_permissions.is_empty() {
         builder = builder.role_permissions(role_permissions);
     }
@@ -137,6 +138,56 @@ async fn reads_role_permissions_attribute() {
         .expect("RolePermissionType");
     assert_eq!(rp.role_id, role);
     assert_eq!(rp.permissions, PermissionType::Read | PermissionType::Write);
+}
+
+/// CUs 2806/2873/2163/3026: the Write service accepts a RolePermissionType array for the
+/// RolePermissions attribute and exposes the replacement list on a subsequent Read.
+#[tokio::test]
+async fn rbac_write_service_round_trips_role_permissions() {
+    let (tester, nm, session) = setup().await;
+    let id = add_permissioned_var(
+        &tester,
+        &nm,
+        "WritableRolePermissions",
+        vec![rp(ANONYMOUS_ROLE, PermissionType::Read)],
+        None,
+    );
+    let expected = rp(
+        OPERATOR_ROLE,
+        PermissionType::Read | PermissionType::WriteRolePermissions,
+    );
+    let encoded: Variant = vec![ExtensionObject::from_message(expected.clone())].into();
+
+    let result = session
+        .write(&[WriteValue {
+            node_id: id.clone(),
+            attribute_id: AttributeId::RolePermissions as u32,
+            index_range: Default::default(),
+            value: opcua::types::DataValue::new_now(encoded),
+        }])
+        .await
+        .expect("Write service request should complete");
+
+    assert_eq!(result, vec![StatusCode::Good]);
+    let values = session
+        .read(
+            &[read_value_id(AttributeId::RolePermissions, id)],
+            TimestampsToReturn::Neither,
+            0.0,
+        )
+        .await
+        .expect("Read service request should complete");
+    let Some(Variant::Array(role_permissions)) = &values[0].value else {
+        panic!("RolePermissions must be returned as an array");
+    };
+    assert_eq!(role_permissions.values.len(), 1);
+    let Variant::ExtensionObject(role_permission) = &role_permissions.values[0] else {
+        panic!("RolePermissions entries must be ExtensionObjects");
+    };
+    assert_eq!(
+        role_permission.inner_as::<RolePermissionType>(),
+        Some(&expected)
+    );
 }
 
 /// US1 / Part 3 §8.56: the AccessRestrictions attribute (26) returns the configured bitmask.

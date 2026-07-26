@@ -127,6 +127,13 @@ impl ParsedContentFilter {
         )
     }
 
+    /// SPEC KIT TASK: Evaluate the RelatedTo content-filter operator
+    /// OPC UA Part 4 §7.7.3, Table 123 — RelatedTo evaluates six operands covering endpoint
+    /// types, ReferenceType, hop count, type-subtype matching, and reference-subtype matching.
+    ///
+    /// Add reference traversal to the evaluation context, implement finite and zero-hop-to-end
+    /// searches, and support nested RelatedTo elements that return NodeId lists. Invalid operands
+    /// or unreachable paths must evaluate to false, or an empty NodeId list when nested.
     fn evulate_element(
         &self,
         item: impl AttributeQueryable,

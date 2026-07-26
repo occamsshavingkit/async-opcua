@@ -11,12 +11,12 @@
 
 - [x] T003 Create `companion` meta-feature that enables all specs
 - [x] T004 Define `import_all_companions()` function that calls each spec importer
-- [ ] T005 Wire `import_all_companions` into `ServerBuilder` during address-space initialization
+- [x] T005 Wire `import_all_companions` into `ServerBuilder` during address-space initialization
 
 ## Phase 3: Polish
 
 - [ ] T006 Build and test `cargo test --all-features`
 - [ ] T007 Run `cargo clippy --workspace --all-targets --all-features -- -D warnings`
 - [ ] T008 Run `tools/ci-playbook.sh --ci`
-- [ ] T009 Verify companion features match importer gates (see `tools/check-companion-features.sh`)
-- [ ] T010 Update TODO.md
+- [x] T009 Verify companion features match importer gates (see `tools/check-companion-features.sh`)
+- [x] T010 Update TODO.md

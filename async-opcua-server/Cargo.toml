@@ -153,11 +153,7 @@ companion-di = []
 companion-ecm = []
 companion-fdi = []
 companion-fdt = []
-# Also forwards json (unlike every other companion-* feature above): ApplicationRecordDataType's
-# hand-authored DynEncodable impl (feature 108, gds/application_record.rs) unconditionally derives
-# JsonEncodable, since Cargo's cross-crate feature unification means a local
-# #[cfg(feature = "json")] can't reliably track whether async-opcua-types itself was compiled
-# with json -- see that module's doc comment.
+# Also forwards JSON support for the GDS companion structures loaded from the NodeSet.
 companion-gds = ["async-opcua-nodes/json"]
 companion-gms = []
 companion-gpos = []

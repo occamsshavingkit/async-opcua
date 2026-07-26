@@ -1,8 +1,8 @@
 use opcua_core::sync::RwLock;
 use opcua_crypto::SecurityPolicy;
-use opcua_types::{
-    AnonymousIdentityToken, ApplicationDescription, ExtensionObject, MessageSecurityMode, UAString,
-};
+#[cfg(feature = "companion-gds")]
+use opcua_types::ExtensionObject;
+use opcua_types::{AnonymousIdentityToken, ApplicationDescription, MessageSecurityMode, UAString};
 
 use crate::{
     address_space::AddressSpace, authenticator::UserToken,
@@ -382,10 +382,12 @@ async fn get_certificate_status_reports_update_not_required() {
     assert_eq!(outputs[0], Variant::from(false));
 }
 
+#[cfg(feature = "companion-gds")]
 fn no_role_request_context() -> (RequestContext, crate::ServerHandle) {
     request_context(MessageSecurityMode::None, vec![])
 }
 
+#[cfg(feature = "companion-gds")]
 #[allow(clippy::too_many_arguments)]
 fn application_record(
     application_id: NodeId,
@@ -409,10 +411,12 @@ fn application_record(
     }
 }
 
+#[cfg(feature = "companion-gds")]
 fn record_arg(record: ApplicationRecordDataType) -> Variant {
     Variant::from(ExtensionObject::new(record))
 }
 
+#[cfg(feature = "companion-gds")]
 fn query_applications_args(
     starting_record_id: u32,
     max_records_to_return: u32,
@@ -433,6 +437,7 @@ fn query_applications_args(
     ]
 }
 
+#[cfg(feature = "companion-gds")]
 fn string_array_variant(values: &[&str]) -> Variant {
     let array = Array::new(
         opcua_types::VariantScalarTypeId::String,
@@ -442,6 +447,7 @@ fn string_array_variant(values: &[&str]) -> Variant {
     Variant::Array(Box::new(array))
 }
 
+#[cfg(feature = "companion-gds")]
 #[tokio::test]
 async fn register_application_assigns_id_and_is_retrievable() {
     let Some((handler, _directory)) = handler_with_directory() else {
@@ -486,6 +492,7 @@ async fn register_application_assigns_id_and_is_retrievable() {
     );
 }
 
+#[cfg(feature = "companion-gds")]
 #[tokio::test]
 async fn register_application_rejects_duplicate_uri() {
     let Some((handler, _directory)) = handler_with_directory() else {
@@ -521,6 +528,7 @@ async fn register_application_rejects_duplicate_uri() {
     );
 }
 
+#[cfg(feature = "companion-gds")]
 #[tokio::test]
 async fn register_application_requires_security_admin() {
     let Some((handler, _directory)) = handler_with_directory() else {
@@ -546,6 +554,7 @@ async fn register_application_requires_security_admin() {
     );
 }
 
+#[cfg(feature = "companion-gds")]
 #[tokio::test]
 async fn update_application_changes_fields_but_rejects_uri_change() {
     let Some((handler, _directory)) = handler_with_directory() else {
@@ -616,6 +625,7 @@ async fn update_application_changes_fields_but_rejects_uri_change() {
     );
 }
 
+#[cfg(feature = "companion-gds")]
 #[tokio::test]
 async fn update_application_unknown_id_reports_not_found() {
     let Some((handler, _directory)) = handler_with_directory() else {
@@ -638,6 +648,7 @@ async fn update_application_unknown_id_reports_not_found() {
     );
 }
 
+#[cfg(feature = "companion-gds")]
 #[tokio::test]
 async fn unregister_application_removes_record() {
     let Some((handler, _directory)) = handler_with_directory() else {
@@ -675,6 +686,7 @@ async fn unregister_application_removes_record() {
     );
 }
 
+#[cfg(feature = "companion-gds")]
 #[tokio::test]
 async fn unregister_application_unknown_id_reports_not_found() {
     let Some((handler, _directory)) = handler_with_directory() else {
@@ -691,6 +703,7 @@ async fn unregister_application_unknown_id_reports_not_found() {
     );
 }
 
+#[cfg(feature = "companion-gds")]
 #[tokio::test]
 async fn get_application_unknown_id_reports_not_found() {
     let Some((handler, _directory)) = handler_with_directory() else {
@@ -705,6 +718,7 @@ async fn get_application_unknown_id_reports_not_found() {
     );
 }
 
+#[cfg(feature = "companion-gds")]
 #[tokio::test]
 async fn find_applications_exact_match_returns_single_result() {
     let Some((handler, _directory)) = handler_with_directory() else {
@@ -744,6 +758,7 @@ async fn find_applications_exact_match_returns_single_result() {
     assert_eq!(empty_array.values.len(), 0);
 }
 
+#[cfg(feature = "companion-gds")]
 #[tokio::test]
 async fn query_applications_filters_by_name_uri_type_and_excludes_na_capability() {
     let Some((handler, _directory)) = handler_with_directory() else {
@@ -800,6 +815,7 @@ async fn query_applications_filters_by_name_uri_type_and_excludes_na_capability(
     assert_eq!(array.values.len(), 1);
 }
 
+#[cfg(feature = "companion-gds")]
 #[tokio::test]
 async fn query_applications_paginates_with_starting_record_id_and_max_records() {
     let Some((handler, _directory)) = handler_with_directory() else {
@@ -851,6 +867,7 @@ async fn query_applications_paginates_with_starting_record_id_and_max_records() 
     assert_eq!(second_array.values.len(), 1);
 }
 
+#[cfg(feature = "companion-gds")]
 #[tokio::test]
 async fn query_servers_emits_one_row_per_discovery_url() {
     let Some((handler, _directory)) = handler_with_directory() else {
@@ -895,6 +912,7 @@ async fn query_servers_emits_one_row_per_discovery_url() {
     );
 }
 
+#[cfg(feature = "companion-gds")]
 #[tokio::test]
 async fn query_servers_caps_rows_after_expanding_discovery_urls_not_before() {
     let Some((handler, _directory)) = handler_with_directory() else {
@@ -942,6 +960,7 @@ async fn query_servers_caps_rows_after_expanding_discovery_urls_not_before() {
     );
 }
 
+#[cfg(feature = "companion-gds")]
 #[tokio::test]
 async fn query_applications_rejects_non_string_capability_array_elements() {
     let Some((handler, _directory)) = handler_with_directory() else {

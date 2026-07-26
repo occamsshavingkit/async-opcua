@@ -296,6 +296,7 @@ bitflags! {
 pub mod generated;
 
 mod add_node_attributes;
+pub mod application_record;
 pub mod argument;
 pub mod array;
 pub mod attribute;
@@ -351,6 +352,7 @@ mod ua_enum;
 
 pub use self::{
     add_node_attributes::AddNodeAttributes,
+    application_record::*,
     argument::*,
     array::*,
     attribute::*,

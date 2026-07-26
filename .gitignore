@@ -56,3 +56,4 @@ Thumbs.db
 persistent-store.json
 ci-logs/
 samples/*/pki-*/
+.worktrees/

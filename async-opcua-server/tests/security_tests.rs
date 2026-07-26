@@ -27,7 +27,7 @@ use opcua_crypto::{
     Thumbprint, X509Data, X509,
 };
 use opcua_server::{
-    address_space::VariableBuilder,
+    address_space::{AccessLevel, VariableBuilder},
     authenticator::{
         issued_token_security_policy, user_pass_security_policy_id, user_pass_security_policy_uri,
         AuthManager, Password, UserToken,
@@ -43,11 +43,11 @@ use opcua_server::{
 };
 use opcua_types::{
     issued_token_types, ActivateSessionRequest, ApplicationDescription, ApplicationType,
-    AttributeId, ByteString, ContentFilter, DataTypeId, Error, EventFilter, ExtensionObject,
-    IssuedIdentityToken, MessageSecurityMode, MonitoredItemCreateRequest, MonitoringMode,
-    MonitoringParameters, NodeId, ObjectId, ObjectTypeId, ReadValueId, SignatureData,
-    SimpleAttributeOperand, StatusCode, TimestampsToReturn, UAString, UserNameIdentityToken,
-    UserTokenPolicy, UserTokenType, Variant, X509IdentityToken,
+    AttributeId, ByteString, ContentFilter, DataTypeId, DataValue, Error, EventFilter,
+    ExtensionObject, IssuedIdentityToken, MessageSecurityMode, MonitoredItemCreateRequest,
+    MonitoringMode, MonitoringParameters, NodeId, NumericRange, ObjectId, ObjectTypeId,
+    ReadValueId, SignatureData, SimpleAttributeOperand, StatusCode, TimestampsToReturn, UAString,
+    UserNameIdentityToken, UserTokenPolicy, UserTokenType, Variant, WriteValue, X509IdentityToken,
 };
 use rsa::{
     pkcs1v15::{Signature as RsaSignature, SigningKey},
@@ -838,6 +838,194 @@ async fn max_response_message_size_rejects_serialized_read_response_body_above_c
         Some(StatusCode::BadResponseTooLarge),
         "oversized Read response with maxResponseMessageSize={CLIENT_RESPONSE_BODY_LIMIT} \
          should fail with BadResponseTooLarge; got {actual_status:?}, success={read_succeeded}"
+    );
+}
+
+#[tokio::test]
+async fn audit_over_encrypted_channel() {
+    let temp = TempPath::new("audit-over-encrypted-channel");
+    let server_pki = temp.path().join("server-pki");
+    let client_pki = temp.path().join("client-pki");
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("encrypted audit test listener should bind");
+    let port = listener
+        .local_addr()
+        .expect("encrypted audit test listener should have address")
+        .port();
+    let endpoint_url = format!("opc.tcp://127.0.0.1:{port}/");
+    let audited_node_id = NodeId::new(2, "AuditEncryptedValue");
+
+    let (server, handle) = ServerBuilder::new()
+        .application_name("Encrypted Audit Test Server")
+        .application_uri("urn:encrypted-audit-test-server")
+        .product_uri("urn:encrypted-audit-test-server")
+        .host("127.0.0.1")
+        .port(port)
+        .pki_dir(&server_pki)
+        .create_sample_keypair(true)
+        .trust_client_certs(true)
+        .discovery_urls(vec![endpoint_url.clone()])
+        .add_endpoint(
+            "basic256sha256-sign-encrypt",
+            (
+                "/",
+                SecurityPolicy::Basic256Sha256,
+                MessageSecurityMode::SignAndEncrypt,
+                &[ANONYMOUS_USER_TOKEN_ID] as &[&str],
+            ),
+        )
+        .with_node_manager(simple_node_manager(
+            NamespaceMetadata {
+                namespace_uri: "urn:encrypted-audit-test".to_string(),
+                namespace_index: 2,
+                ..Default::default()
+            },
+            "encrypted-audit-test",
+        ))
+        .build()
+        .expect("encrypted audit test server should build");
+    handle.info().port.store(port, Ordering::Relaxed);
+
+    let node_manager = handle
+        .node_managers()
+        .get_of_type::<SimpleNodeManager>()
+        .expect("encrypted audit test should have a SimpleNodeManager");
+    {
+        let address_space = node_manager.address_space().write();
+        VariableBuilder::new(
+            &audited_node_id,
+            "AuditEncryptedValue",
+            "AuditEncryptedValue",
+        )
+        .data_type(DataTypeId::String)
+        .value("initial")
+        .access_level(AccessLevel::CURRENT_READ | AccessLevel::CURRENT_WRITE)
+        .user_access_level(AccessLevel::CURRENT_READ | AccessLevel::CURRENT_WRITE)
+        .insert(&*address_space);
+    }
+
+    let endpoint = handle
+        .info()
+        .endpoints(&UAString::from(endpoint_url.as_str()), &None)
+        .expect("encrypted audit endpoint should be described")
+        .into_iter()
+        .find(|endpoint| {
+            endpoint.security_policy_uri.as_ref() == SecurityPolicy::Basic256Sha256.to_uri()
+                && endpoint.security_mode == MessageSecurityMode::SignAndEncrypt
+        })
+        .expect("Basic256Sha256 SignAndEncrypt endpoint should be advertised");
+    assert_eq!(
+        endpoint.security_mode,
+        MessageSecurityMode::SignAndEncrypt,
+        "audit observer must use an encrypted SecureChannel"
+    );
+
+    let server_task = tokio::spawn(async move {
+        let _ = server.run_with(listener).await;
+    });
+    let mut client = ClientBuilder::new()
+        .application_name("Encrypted Audit Test Client")
+        .application_uri("urn:encrypted-audit-test-client")
+        .product_uri("urn:encrypted-audit-test-client")
+        .pki_dir(&client_pki)
+        .create_sample_keypair(true)
+        .trust_server_certs(true)
+        .session_retry_limit(0)
+        .client()
+        .expect("encrypted audit test client should build");
+    let (session, event_loop) = client
+        .connect_to_endpoint_directly(endpoint, IdentityToken::Anonymous)
+        .expect("encrypted audit session should be constructed");
+    let event_loop_task = event_loop.spawn();
+    tokio::time::timeout(Duration::from_secs(5), session.wait_for_connection())
+        .await
+        .expect("encrypted audit session should connect");
+
+    let (event_tx, mut event_rx) = mpsc::unbounded_channel();
+    let subscription_id = session
+        .create_subscription(
+            Duration::from_millis(100),
+            30,
+            10,
+            0,
+            0,
+            true,
+            EventCallback::new(move |event_fields, _| {
+                let _ = event_tx.send(event_fields.unwrap_or_default());
+            }),
+        )
+        .await
+        .expect("encrypted audit subscription should be created");
+    let create_results = session
+        .create_monitored_items(
+            subscription_id,
+            TimestampsToReturn::Both,
+            vec![MonitoredItemCreateRequest::new(
+                ReadValueId::new(ObjectId::Server.into(), AttributeId::EventNotifier),
+                MonitoringMode::Reporting,
+                MonitoringParameters {
+                    client_handle: 1,
+                    sampling_interval: 0.0,
+                    filter: ExtensionObject::from_message(EventFilter {
+                        select_clauses: Some(vec![
+                            SimpleAttributeOperand::new_value(
+                                ObjectTypeId::BaseEventType,
+                                "EventType",
+                            ),
+                            SimpleAttributeOperand::new_value(
+                                ObjectTypeId::AuditWriteUpdateEventType,
+                                "AttributeId",
+                            ),
+                        ]),
+                        where_clause: ContentFilter::default(),
+                    }),
+                    queue_size: 10,
+                    discard_oldest: true,
+                },
+            )],
+        )
+        .await
+        .expect("encrypted audit monitored item request should complete");
+    assert_eq!(create_results[0].result.status_code, StatusCode::Good);
+
+    let write_results = session
+        .write(&[WriteValue {
+            node_id: audited_node_id,
+            attribute_id: AttributeId::Value as u32,
+            index_range: NumericRange::None,
+            value: DataValue::new_now(Variant::from("audited")),
+        }])
+        .await
+        .expect("audited write should complete");
+    assert_eq!(write_results, vec![StatusCode::Good]);
+
+    session.trigger_publish_now();
+    let expected_event_type = Variant::from(NodeId::from(ObjectTypeId::AuditWriteUpdateEventType));
+    let mut audit_fields = None;
+    for _ in 0..5 {
+        let Ok(Some(fields)) = tokio::time::timeout(Duration::from_secs(3), event_rx.recv()).await
+        else {
+            break;
+        };
+        if fields.first() == Some(&expected_event_type) {
+            audit_fields = Some(fields);
+            break;
+        }
+        session.trigger_publish_now();
+    }
+    let audit_fields = audit_fields
+        .expect("AuditWriteUpdateEventType should be delivered over the encrypted session");
+
+    handle.cancel();
+    event_loop_task.abort();
+    server_task.abort();
+
+    assert_eq!(audit_fields[0], expected_event_type);
+    assert_eq!(
+        audit_fields[1],
+        Variant::from(AttributeId::Value as u32),
+        "encrypted audit event should identify the written attribute"
     );
 }
 

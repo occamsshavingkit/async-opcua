@@ -27,6 +27,10 @@ pub trait Event: EventField {
 
     /// Get the event type ID of this event.
     fn event_type_id(&self) -> &NodeId;
+
+    /// Set the local time zone data on this event.
+    /// Default is a no-op; override to store timezone info.
+    fn set_local_time(&mut self, _tz: TimeZoneDataType) {}
 }
 
 #[derive(Clone, Debug, Default)]
@@ -100,6 +104,10 @@ impl Event for BaseEventType {
 
     fn event_type_id(&self) -> &NodeId {
         &self.event_type
+    }
+
+    fn set_local_time(&mut self, tz: TimeZoneDataType) {
+        self.local_time = Some(tz);
     }
 }
 
@@ -208,6 +216,12 @@ impl BaseEventType {
     /// Set the event severity.
     pub fn set_severity(mut self, severity: u16) -> Self {
         self.severity = severity;
+        self
+    }
+
+    /// Set the event local time.
+    pub fn set_local_time(&mut self, tz: TimeZoneDataType) -> &mut Self {
+        self.local_time = Some(tz);
         self
     }
 }
@@ -550,6 +564,33 @@ mod tests {
                 &["Var".into(), "Magic".into()],
             ),
             Variant::from(15)
+        );
+    }
+
+    #[test]
+    fn test_set_local_time_on_trait_object() {
+        use opcua_types::TimeZoneDataType;
+        let evt = BaseEventType::new(
+            ObjectTypeId::BaseEventType,
+            ByteString::from(b"test"),
+            "test",
+            opcua_types::DateTime::now(),
+        );
+        assert!(evt.local_time.is_none());
+        let mut boxed: Box<dyn Event + Send> = Box::new(evt.clone());
+        boxed.set_local_time(TimeZoneDataType {
+            offset: 300,
+            daylight_saving_in_offset: false,
+        });
+        let field = boxed.get_field(
+            &ObjectTypeId::BaseEventType.into(),
+            AttributeId::Value,
+            &NumericRange::None,
+            &[QualifiedName::new(0, "LocalTime")],
+        );
+        assert!(
+            !matches!(field, Variant::Empty),
+            "LocalTime should not be empty after set_local_time"
         );
     }
 }

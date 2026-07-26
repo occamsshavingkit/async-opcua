@@ -9,8 +9,8 @@ use opcua_core::events::AlarmEvent;
 use opcua_nodes::{DefaultTypeTree, NodeType};
 use opcua_types::{
     AttributeId, BrowseDirection, DataEncoding, DataTypeId, DataValue, DateTime, Identifier,
-    LocalizedText, NodeId, NumericRange, ObjectTypeId, QualifiedName, Range, ReferenceTypeId,
-    StatusCode, TimestampsToReturn, VariableTypeId, Variant,
+    LocalizedText, NodeId, NumericRange, ObjectId, ObjectTypeId, QualifiedName, Range,
+    ReferenceTypeId, StatusCode, TimestampsToReturn, VariableTypeId, Variant,
 };
 use std::sync::Mutex;
 
@@ -462,6 +462,10 @@ impl LimitAlarm {
         let condition_id = &self.condition.condition_id;
         if !address_space.has_reference(source, condition_id, ReferenceTypeId::HasCondition) {
             address_space.insert_reference(source, condition_id, ReferenceTypeId::HasCondition);
+        }
+        let server_id = NodeId::from(ObjectId::Server);
+        if !address_space.has_reference(&server_id, source, ReferenceTypeId::HasEventSource) {
+            address_space.insert_reference(&server_id, source, ReferenceTypeId::HasEventSource);
         }
     }
 
@@ -1477,6 +1481,36 @@ mod tests {
             .count();
 
         assert_eq!(reference_count, 1);
+    }
+
+    #[test]
+    fn write_has_condition_adds_has_event_source_from_server_to_source() {
+        let address_space = test_address_space();
+        let cfg = LimitConfig::new(LimitMode::Exclusive)
+            .with_high(LimitDef {
+                value: 100.0,
+                deadband: 1.0,
+                severity: 700,
+            })
+            .build()
+            .expect("limit config should be valid");
+        let alarm = LimitAlarm::create_exclusive_in_address_space(
+            &address_space,
+            2,
+            "DeviceB",
+            "Pressure",
+            NodeId::new(2, "InitialSrc"),
+            cfg,
+            LimitAlarmKind::Limit,
+        );
+        let source = NodeId::new(2, "DeviceB.Pressure");
+        alarm.write_has_condition_reference(&address_space, &source);
+
+        let server_id = NodeId::from(ObjectId::Server);
+        assert!(
+            address_space.has_reference(&server_id, &source, ReferenceTypeId::HasEventSource),
+            "HasEventSource must be added from Server to the bound source"
+        );
     }
 
     fn on_off_delay_cfg() -> LimitConfig {

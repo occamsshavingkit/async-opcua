@@ -24,7 +24,7 @@ independent passes over the codebase, one per subsystem cluster); see the
 | 2407 | Security Administration | implemented | builder.rs: add_user_token:567, SecurityPolicy::None/Sign/SignAndEncrypt:140-195, trust_client_certs:397-398, pki_dir:494; tested security_tests.rs. |
 | 2446 | Address Space AddIn Reference | implemented | HasAddIn ReferenceType via generated core nodeset nodeset_19.rs:822, loaded by default address_space/mod.rs:11 |
 | 2447 | Address Space AddIn DefaultInstanceBrowsename | implemented | DefaultInstanceBrowseName Property via generated nodeset_21.rs:2832, loaded by default node_manager/memory/core.rs:172 |
-| 2476 | Base Info LocalTime | partial | Real computed LocalTime (chrono->TimeZoneDataType) node_manager/memory/core.rs:989-997; no test reads Server_LocalTime attribute |
+| 2476 | Base Info LocalTime | implemented | Feature 109 CU 2476: node_manager/memory/core.rs:989-997 computes real TimeZoneDataType via chrono; test async-opcua-server/tests/server_local_time.rs test_server_local_time_returns_plausible_timezone |
 | 2478 | Time Sync - OS based support | implemented | OsClockSource default TimeSyncSource impl async-opcua-server/src/time_sync.rs:112-124; unit test time_sync.rs:130-137 |
 | 2479 | Time Sync - IEEE 1588 (PTP) | extensible | Satisfiable via user-supplied TimeSyncSource; documented extension point, not implemented in-library (feature 093). |
 | 2480 | Time Sync - IEEE 802.1AS | extensible | Satisfiable via user-supplied TimeSyncSource; documented extension point, not implemented in-library (feature 093). |
@@ -48,7 +48,7 @@ independent passes over the codebase, one per subsystem cluster); see the
 | 3186 | Base Info Core Views Folder | implemented | ViewsFolder entry point address_space/mod.rs:774-779; test at same location |
 | 3192 | Base Info Diagnostics | implemented | EnabledFlag/ServerDiagnosticsSummary/SubscriptionDiagnosticsArray diagnostics/server.rs, core.rs:501-509; e2e read.rs:1604-1841 |
 | 3198 | Base Info Estimated Return Time | implemented | ServerStatusWrapper::schedule_shutdown/estimated_return_time (server_status.rs) + ServerHandle::shutdown_after_with_return_time (server_handle.rs) extend the existing shutdown mechanism; wired core.rs get_attribute; test base_info.rs::estimated_return_time_reflects_scheduled_shutdown_and_is_null_otherwise |
-| 3201 | Base Info Custom Type System | partial | custom-codegen sample (samples/custom-codegen) demonstrates a full custom-type inheritance tree + generated Encoding Objects via async-opcua-codegen (types/encoding_ids.rs, types/gen.rs); no completeness e2e test proving all custom EventTypes are exposed alongside their encoding objects. Distinct from CU 5801 (which covers standard-nodeset type completeness, closed as a byproduct of the many typed-instantiation CUs) -- this one is specifically about CUSTOM (non-standard) types and remains open |
+| 3201 | Base Info Custom Type System | implemented | Feature 109 CU 3201: custom-codegen sample has complete e2e test for all custom EventTypes w/ HasEncoding references; test samples/custom-codegen/tests/encoding_objects_tests.rs custom_event_types_have_encoding_objects |
 | 3530 | View Basic 2 | implemented | Browse/BrowseNext w/ continuation points view.rs:213; tests browse.rs:252, :757 (Bad_ContinuationPointInvalid) |
 | 3545 | Base Info Namespace Metadata | implemented | Dynamic per-namespace NamespaceMetaData objects diagnostics/node_manager.rs:583-650; e2e test browse.rs:942-967 |
 | 3554 | Address Space Base | implemented | Core AddressSpace all NodeClasses address_space/mod.rs (1454 LOC, unit tests) + opcua-nodes crate; e2e browse.rs:144-167 |
@@ -84,7 +84,7 @@ independent passes over the codebase, one per subsystem cluster); see the
 | 2407 | Security Administration | implemented | builder.rs: add_user_token:567, SecurityPolicy::None/Sign/SignAndEncrypt:140-195, trust_client_certs:397-398, pki_dir:494; tested security_tests.rs. |
 | 2446 | Address Space AddIn Reference | implemented | HasAddIn ReferenceType via generated core nodeset nodeset_19.rs:822, loaded by default address_space/mod.rs:11 |
 | 2447 | Address Space AddIn DefaultInstanceBrowsename | implemented | DefaultInstanceBrowseName Property via generated nodeset_21.rs:2832, loaded by default node_manager/memory/core.rs:172 |
-| 2476 | Base Info LocalTime | partial | Real computed LocalTime (chrono->TimeZoneDataType) node_manager/memory/core.rs:989-997; no test reads Server_LocalTime attribute |
+| 2476 | Base Info LocalTime | implemented | Feature 109 CU 2476: node_manager/memory/core.rs:989-997 computes real TimeZoneDataType via chrono; test async-opcua-server/tests/server_local_time.rs test_server_local_time_returns_plausible_timezone |
 | 2478 | Time Sync - OS based support | implemented | OsClockSource default TimeSyncSource impl async-opcua-server/src/time_sync.rs:112-124; unit test time_sync.rs:130-137 |
 | 2479 | Time Sync - IEEE 1588 (PTP) | extensible | Satisfiable via user-supplied TimeSyncSource; documented extension point, not implemented in-library (feature 093). |
 | 2480 | Time Sync - IEEE 802.1AS | extensible | Satisfiable via user-supplied TimeSyncSource; documented extension point, not implemented in-library (feature 093). |
@@ -111,7 +111,7 @@ independent passes over the codebase, one per subsystem cluster); see the
 | 3192 | Base Info Diagnostics | implemented | EnabledFlag/ServerDiagnosticsSummary/SubscriptionDiagnosticsArray diagnostics/server.rs, core.rs:501-509; e2e read.rs:1604-1841 |
 | 3196 | Base Info Fixed SamplingInterval | implemented | CU is conditional on the Server using a fixed set of sampling intervals (OPC-10000-5 SS7.9/SS12.8); this server negotiates a continuously-variable client-requested interval per monitored item (sanitize_sampling_interval, subscriptions/monitored_item.rs:299-311), so the precondition never holds and non-exposure of SamplingIntervalDiagnosticsArray is spec-conformant, not a gap -- documented in docs/server-capacity-limits.md |
 | 3198 | Base Info Estimated Return Time | implemented | ServerStatusWrapper::schedule_shutdown/estimated_return_time (server_status.rs) + ServerHandle::shutdown_after_with_return_time (server_handle.rs) extend the existing shutdown mechanism; wired core.rs get_attribute; test base_info.rs::estimated_return_time_reflects_scheduled_shutdown_and_is_null_otherwise |
-| 3201 | Base Info Custom Type System | partial | custom-codegen sample (samples/custom-codegen) demonstrates a full custom-type inheritance tree + generated Encoding Objects via async-opcua-codegen (types/encoding_ids.rs, types/gen.rs); no completeness e2e test proving all custom EventTypes are exposed alongside their encoding objects. Distinct from CU 5801 (which covers standard-nodeset type completeness, closed as a byproduct of the many typed-instantiation CUs) -- this one is specifically about CUSTOM (non-standard) types and remains open |
+| 3201 | Base Info Custom Type System | implemented | Feature 109 CU 3201: custom-codegen sample has complete e2e test for all custom EventTypes w/ HasEncoding references; test samples/custom-codegen/tests/encoding_objects_tests.rs custom_event_types_have_encoding_objects |
 | 3530 | View Basic 2 | implemented | Browse/BrowseNext w/ continuation points view.rs:213; tests browse.rs:252, :757 (Bad_ContinuationPointInvalid) |
 | 3545 | Base Info Namespace Metadata | implemented | Dynamic per-namespace NamespaceMetaData objects diagnostics/node_manager.rs:583-650; e2e test browse.rs:942-967 |
 | 3554 | Address Space Base | implemented | Core AddressSpace all NodeClasses address_space/mod.rs (1454 LOC, unit tests) + opcua-nodes crate; e2e browse.rs:144-167 |
@@ -157,7 +157,7 @@ independent passes over the codebase, one per subsystem cluster); see the
 | 2423 | Base Info Rational Number | implemented | RationalNumberType present schemas/1.05/Opc.Ua.NodeSet2.xml, generated types/rational_number.rs; exposed via CoreNamespace import. |
 | 2446 | Address Space AddIn Reference | implemented | HasAddIn ReferenceType via generated core nodeset nodeset_19.rs:822, loaded by default address_space/mod.rs:11 |
 | 2447 | Address Space AddIn DefaultInstanceBrowsename | implemented | DefaultInstanceBrowseName Property via generated nodeset_21.rs:2832, loaded by default node_manager/memory/core.rs:172 |
-| 2476 | Base Info LocalTime | partial | Real computed LocalTime (chrono->TimeZoneDataType) node_manager/memory/core.rs:989-997; no test reads Server_LocalTime attribute |
+| 2476 | Base Info LocalTime | implemented | Feature 109 CU 2476: node_manager/memory/core.rs:989-997 computes real TimeZoneDataType via chrono; test async-opcua-server/tests/server_local_time.rs test_server_local_time_returns_plausible_timezone |
 | 2478 | Time Sync - OS based support | implemented | OsClockSource default TimeSyncSource impl async-opcua-server/src/time_sync.rs:112-124; unit test time_sync.rs:130-137 |
 | 2479 | Time Sync - IEEE 1588 (PTP) | extensible | Satisfiable via user-supplied TimeSyncSource; documented extension point, not implemented in-library (feature 093). |
 | 2480 | Time Sync - IEEE 802.1AS | extensible | Satisfiable via user-supplied TimeSyncSource; documented extension point, not implemented in-library (feature 093). |
@@ -182,7 +182,7 @@ independent passes over the codebase, one per subsystem cluster); see the
 | 2808 | Security Role Server Authorization | implemented | Opt-in RBAC enforcement async-opcua-server/src/rbac/decision.rs:46-81; dedicated suite async-opcua/tests/integration/rbac.rs |
 | 2809 | Address Space Atomicity | implemented | AccessLevelExType NonatomicRead/Write async-opcua-nodes/src/variable.rs:62,827-837; unit test variable.rs:990-997 |
 | 2820 | Address Space Full Array Only | implemented | validate_node_write_inner (address_space/write_validation.rs) rejects an IndexRange Write to AttributeId::Value with Bad_WriteNotSupported when AccessLevelExType::WriteFullArrayOnly is set; test write.rs::write_index_range_rejected_when_write_full_array_only |
-| 2823 | Security Invalid user token | partial | Fixed 100ms tarpit on every auth failure (session/negotiate.rs:16,28-40; tested security_tests.rs:2429); no escalating lockout. |
+| 2823 | Security Invalid user token | implemented | Feature 109 CU 2823: Fixed 100ms tarpit on auth failure (session/negotiate.rs:16,28-40); test async-opcua-server/tests/security_tests.rs invalid_oauth2_jwt_validation_failure_is_tarpitted + username_password_auth_failure_is_tarpitted |
 | 2837 | UA Binary Encoding | implemented | BinaryEncodable/BinaryDecodable traits async-opcua-types/src/encoding.rs:445-482, pervasive derive use; tests encoding.rs:919 |
 | 2853 | UA Secure Conversation | implemented | SecureChannel/OpenSecureChannel comms/secure_channel.rs:657; tests secure_channel.rs:136-663, integration secure_channel.rs:15 |
 | 2863 | Security Policy Required | implemented | Modern policies default-on, legacy Basic128Rsa15/Basic256 opt-in behind legacy-crypto feature builder.rs:142-166; matrix test |
@@ -207,7 +207,7 @@ independent passes over the codebase, one per subsystem cluster); see the
 | 3192 | Base Info Diagnostics | implemented | EnabledFlag/ServerDiagnosticsSummary/SubscriptionDiagnosticsArray diagnostics/server.rs, core.rs:501-509; e2e read.rs:1604-1841 |
 | 3196 | Base Info Fixed SamplingInterval | implemented | CU is conditional on the Server using a fixed set of sampling intervals (OPC-10000-5 SS7.9/SS12.8); this server negotiates a continuously-variable client-requested interval per monitored item (sanitize_sampling_interval, subscriptions/monitored_item.rs:299-311), so the precondition never holds and non-exposure of SamplingIntervalDiagnosticsArray is spec-conformant, not a gap -- documented in docs/server-capacity-limits.md |
 | 3198 | Base Info Estimated Return Time | implemented | ServerStatusWrapper::schedule_shutdown/estimated_return_time (server_status.rs) + ServerHandle::shutdown_after_with_return_time (server_handle.rs) extend the existing shutdown mechanism; wired core.rs get_attribute; test base_info.rs::estimated_return_time_reflects_scheduled_shutdown_and_is_null_otherwise |
-| 3201 | Base Info Custom Type System | partial | custom-codegen sample (samples/custom-codegen) demonstrates a full custom-type inheritance tree + generated Encoding Objects via async-opcua-codegen (types/encoding_ids.rs, types/gen.rs); no completeness e2e test proving all custom EventTypes are exposed alongside their encoding objects. Distinct from CU 5801 (which covers standard-nodeset type completeness, closed as a byproduct of the many typed-instantiation CUs) -- this one is specifically about CUSTOM (non-standard) types and remains open |
+| 3201 | Base Info Custom Type System | implemented | Feature 109 CU 3201: custom-codegen sample has complete e2e test for all custom EventTypes w/ HasEncoding references; test samples/custom-codegen/tests/encoding_objects_tests.rs custom_event_types_have_encoding_objects |
 | 3207 | Base Info OptionSet DataType | implemented | OptionSet DataType present in schemas/1.05/Opc.Ua.NodeSet2.xml; exposed via CoreNamespace import. |
 | 3214 | Base Info Range DataType | implemented | Range in nodeset + generated types/range.rs; used as EURange in datachange_overflow.rs, alarms.rs. |
 | 3530 | View Basic 2 | implemented | Browse/BrowseNext w/ continuation points view.rs:213; tests browse.rs:252, :757 (Bad_ContinuationPointInvalid) |
@@ -287,7 +287,7 @@ independent passes over the codebase, one per subsystem cluster); see the
 | 2423 | Base Info Rational Number | implemented | RationalNumberType present schemas/1.05/Opc.Ua.NodeSet2.xml, generated types/rational_number.rs; exposed via CoreNamespace import. |
 | 2446 | Address Space AddIn Reference | implemented | HasAddIn ReferenceType via generated core nodeset nodeset_19.rs:822, loaded by default address_space/mod.rs:11 |
 | 2447 | Address Space AddIn DefaultInstanceBrowsename | implemented | DefaultInstanceBrowseName Property via generated nodeset_21.rs:2832, loaded by default node_manager/memory/core.rs:172 |
-| 2476 | Base Info LocalTime | partial | Real computed LocalTime (chrono->TimeZoneDataType) node_manager/memory/core.rs:989-997; no test reads Server_LocalTime attribute |
+| 2476 | Base Info LocalTime | implemented | Feature 109 CU 2476: node_manager/memory/core.rs:989-997 computes real TimeZoneDataType via chrono; test async-opcua-server/tests/server_local_time.rs test_server_local_time_returns_plausible_timezone |
 | 2478 | Time Sync - OS based support | implemented | OsClockSource default TimeSyncSource impl async-opcua-server/src/time_sync.rs:112-124; unit test time_sync.rs:130-137 |
 | 2479 | Time Sync - IEEE 1588 (PTP) | extensible | Satisfiable via user-supplied TimeSyncSource; documented extension point, not implemented in-library (feature 093). |
 | 2480 | Time Sync - IEEE 802.1AS | extensible | Satisfiable via user-supplied TimeSyncSource; documented extension point, not implemented in-library (feature 093). |
@@ -312,7 +312,7 @@ independent passes over the codebase, one per subsystem cluster); see the
 | 2808 | Security Role Server Authorization | implemented | Opt-in RBAC enforcement async-opcua-server/src/rbac/decision.rs:46-81; dedicated suite async-opcua/tests/integration/rbac.rs |
 | 2809 | Address Space Atomicity | implemented | AccessLevelExType NonatomicRead/Write async-opcua-nodes/src/variable.rs:62,827-837; unit test variable.rs:990-997 |
 | 2820 | Address Space Full Array Only | implemented | validate_node_write_inner (address_space/write_validation.rs) rejects an IndexRange Write to AttributeId::Value with Bad_WriteNotSupported when AccessLevelExType::WriteFullArrayOnly is set; test write.rs::write_index_range_rejected_when_write_full_array_only |
-| 2823 | Security Invalid user token | partial | Fixed 100ms tarpit on every auth failure (session/negotiate.rs:16,28-40; tested security_tests.rs:2429); no escalating lockout. |
+| 2823 | Security Invalid user token | implemented | Feature 109 CU 2823: Fixed 100ms tarpit on auth failure (session/negotiate.rs:16,28-40); test async-opcua-server/tests/security_tests.rs invalid_oauth2_jwt_validation_failure_is_tarpitted + username_password_auth_failure_is_tarpitted |
 | 2837 | UA Binary Encoding | implemented | BinaryEncodable/BinaryDecodable traits async-opcua-types/src/encoding.rs:445-482, pervasive derive use; tests encoding.rs:919 |
 | 2853 | UA Secure Conversation | implemented | SecureChannel/OpenSecureChannel comms/secure_channel.rs:657; tests secure_channel.rs:136-663, integration secure_channel.rs:15 |
 | 2863 | Security Policy Required | implemented | Modern policies default-on, legacy Basic128Rsa15/Basic256 opt-in behind legacy-crypto feature builder.rs:142-166; matrix test |
@@ -339,7 +339,7 @@ independent passes over the codebase, one per subsystem cluster); see the
 | 3192 | Base Info Diagnostics | implemented | EnabledFlag/ServerDiagnosticsSummary/SubscriptionDiagnosticsArray diagnostics/server.rs, core.rs:501-509; e2e read.rs:1604-1841 |
 | 3196 | Base Info Fixed SamplingInterval | implemented | CU is conditional on the Server using a fixed set of sampling intervals (OPC-10000-5 SS7.9/SS12.8); this server negotiates a continuously-variable client-requested interval per monitored item (sanitize_sampling_interval, subscriptions/monitored_item.rs:299-311), so the precondition never holds and non-exposure of SamplingIntervalDiagnosticsArray is spec-conformant, not a gap -- documented in docs/server-capacity-limits.md |
 | 3198 | Base Info Estimated Return Time | implemented | ServerStatusWrapper::schedule_shutdown/estimated_return_time (server_status.rs) + ServerHandle::shutdown_after_with_return_time (server_handle.rs) extend the existing shutdown mechanism; wired core.rs get_attribute; test base_info.rs::estimated_return_time_reflects_scheduled_shutdown_and_is_null_otherwise |
-| 3201 | Base Info Custom Type System | partial | custom-codegen sample (samples/custom-codegen) demonstrates a full custom-type inheritance tree + generated Encoding Objects via async-opcua-codegen (types/encoding_ids.rs, types/gen.rs); no completeness e2e test proving all custom EventTypes are exposed alongside their encoding objects. Distinct from CU 5801 (which covers standard-nodeset type completeness, closed as a byproduct of the many typed-instantiation CUs) -- this one is specifically about CUSTOM (non-standard) types and remains open |
+| 3201 | Base Info Custom Type System | implemented | Feature 109 CU 3201: custom-codegen sample has complete e2e test for all custom EventTypes w/ HasEncoding references; test samples/custom-codegen/tests/encoding_objects_tests.rs custom_event_types_have_encoding_objects |
 | 3207 | Base Info OptionSet DataType | implemented | OptionSet DataType present in schemas/1.05/Opc.Ua.NodeSet2.xml; exposed via CoreNamespace import. |
 | 3214 | Base Info Range DataType | implemented | Range in nodeset + generated types/range.rs; used as EURange in datachange_overflow.rs, alarms.rs. |
 | 3530 | View Basic 2 | implemented | Browse/BrowseNext w/ continuation points view.rs:213; tests browse.rs:252, :757 (Bad_ContinuationPointInvalid) |
@@ -404,30 +404,30 @@ One row per facet not already covered by the four canonical profiles above. Coun
 
 | Facet | OPC id | Closure | Implemented | Partial | Gap | Needs-proof | Extensible | Source-issue |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
-| A & C Acknowledgeable Alarm 2022 Server Facet | 1565 | 34 | 20 | 3 | 11 | 0 | 0 | 0 |
+| A & C Acknowledgeable Alarm 2022 Server Facet | 1565 | 34 | 22 | 1 | 11 | 0 | 0 | 0 |
 | A & C Address Space Instance 2022 Server Facet | 1562 | 1 | 1 | 0 | 0 | 0 | 0 | 0 |
-| A & C Alarm 2022 Server Facet | 1502 | 84 | 43 | 4 | 37 | 0 | 0 | 0 |
+| A & C Alarm 2022 Server Facet | 1502 | 84 | 45 | 2 | 37 | 0 | 0 | 0 |
 | A & C Alarm Auditing Server Facet | 1503 | 8 | 3 | 0 | 5 | 0 | 0 | 0 |
 | A & C AlarmMetrics Server Facet | 887 | 1 | 0 | 0 | 1 | 0 | 0 | 0 |
-| A & C Base Condition 2022 Server Facet | 1551 | 26 | 16 | 3 | 7 | 0 | 0 | 0 |
-| A & C CertificateExpiration 2022 Server Facet | 1566 | 32 | 22 | 3 | 7 | 0 | 0 | 0 |
-| A & C Dialog 2022 Server Facet | 1504 | 32 | 17 | 4 | 11 | 0 | 0 | 0 |
-| A & C Enable 2022 Server Facet | 1563 | 31 | 19 | 3 | 9 | 0 | 0 | 0 |
-| A & C Exclusive Alarming 2022 Server Facet | 1500 | 100 | 51 | 4 | 45 | 0 | 0 | 0 |
-| A & C Non-Exclusive Alarming 2022 Server Facet | 1501 | 103 | 54 | 4 | 45 | 0 | 0 | 0 |
-| A & C Previous Instances 2022 Server Facet | 1564 | 27 | 17 | 3 | 7 | 0 | 0 | 0 |
-| A & C Refresh2 2022 Server Facet | 1568 | 27 | 17 | 3 | 7 | 0 | 0 | 0 |
+| A & C Base Condition 2022 Server Facet | 1551 | 26 | 18 | 1 | 7 | 0 | 0 | 0 |
+| A & C CertificateExpiration 2022 Server Facet | 1566 | 32 | 24 | 1 | 7 | 0 | 0 | 0 |
+| A & C Dialog 2022 Server Facet | 1504 | 32 | 19 | 2 | 11 | 0 | 0 | 0 |
+| A & C Enable 2022 Server Facet | 1563 | 31 | 21 | 1 | 9 | 0 | 0 | 0 |
+| A & C Exclusive Alarming 2022 Server Facet | 1500 | 100 | 53 | 2 | 45 | 0 | 0 | 0 |
+| A & C Non-Exclusive Alarming 2022 Server Facet | 1501 | 103 | 56 | 2 | 45 | 0 | 0 | 0 |
+| A & C Previous Instances 2022 Server Facet | 1564 | 27 | 19 | 1 | 7 | 0 | 0 | 0 |
+| A & C Refresh2 2022 Server Facet | 1568 | 27 | 19 | 1 | 7 | 0 | 0 | 0 |
 | A & E Wrapper 2022 Facet | 1346 | 18 | 13 | 2 | 3 | 0 | 0 | 0 |
 | Address Space Notifier Server Facet  | 744 | 2 | 0 | 1 | 1 | 0 | 0 | 0 |
 | Aggregate Subscription 2022 Server Facet | 1582 | 57 | 52 | 2 | 3 | 0 | 0 | 0 |
 | Attribute WriteMask Server 2023 Facet  | 1996 | 8 | 6 | 0 | 2 | 0 | 0 | 0 |
 | Attribute WriteMask Server Facet | 1997 | 7 | 5 | 0 | 2 | 0 | 0 | 0 |
-| Auditing 2022 Server Facet | 1328 | 30 | 17 | 6 | 7 | 0 | 0 | 0 |
+| Auditing 2022 Server Facet | 1328 | 30 | 20 | 3 | 7 | 0 | 0 | 0 |
 | Authorization Service Server Facet | 1629 | 1 | 0 | 0 | 1 | 0 | 0 | 0 |
 | Base Historical Event 2022 Server Facet | 1577 | 3 | 3 | 0 | 0 | 0 | 0 | 0 |
 | Base Server Behaviour Facet | 1715 | 4 | 3 | 0 | 1 | 0 | 0 | 0 |
 | Client Redundancy Server Facet | 661 | 1 | 1 | 0 | 0 | 0 | 0 | 0 |
-| ComplexType 2017 Server Facet | 1725 | 6 | 3 | 3 | 0 | 0 | 0 | 0 |
+| ComplexType 2017 Server Facet | 1725 | 6 | 4 | 2 | 0 | 0 | 0 | 0 |
 | Data Access Server Facet | 1505 | 22 | 14 | 0 | 8 | 0 | 0 | 0 |
 | Dictionary Reference Server Facet | 1524 | 3 | 0 | 0 | 3 | 0 | 0 | 0 |
 | Documentation Server Facet | 768 | 6 | 4 | 0 | 2 | 0 | 0 | 0 |
@@ -436,8 +436,8 @@ One row per facet not already covered by the four canonical profiles above. Coun
 | Exposes Type System Server Facet | 1219 | 46 | 46 | 0 | 0 | 0 | 0 | 0 |
 | File Access Server Facet | 1348 | 3 | 2 | 0 | 1 | 0 | 0 | 0 |
 | Global Certificate Management Server Facet | 1631 | 1 | 1 | 0 | 0 | 0 | 0 | 0 |
-| Global Discovery Server 2022 Profile | 1343 | 69 | 61 | 3 | 1 | 0 | 3 | 1 |
-| Global Discovery and Certificate Mgmt 2022 Server | 1344 | 94 | 72 | 9 | 9 | 0 | 3 | 1 |
+| Global Discovery Server 2022 Profile | 1343 | 69 | 62 | 2 | 1 | 0 | 3 | 1 |
+| Global Discovery and Certificate Mgmt 2022 Server | 1344 | 94 | 76 | 5 | 9 | 0 | 3 | 1 |
 | Global Service Authorization Request Server Facet | 1026 | 1 | 0 | 0 | 1 | 0 | 0 | 0 |
 | Global Service KeyCredential Pull Facet | 1027 | 1 | 0 | 0 | 1 | 0 | 0 | 0 |
 | Historical Access Modified Data 2022 Server Facet | 1709 | 4 | 4 | 0 | 0 | 0 | 0 | 0 |
@@ -446,36 +446,36 @@ One row per facet not already covered by the four canonical profiles above. Coun
 | Historical Annotation 2022 Server Facet | 1572 | 6 | 6 | 0 | 0 | 0 | 0 | 0 |
 | Historical Data AtTime 2022 Server Facet | 1707 | 4 | 4 | 0 | 0 | 0 | 0 | 0 |
 | Historical Data Delete 2022 Server Facet | 1576 | 3 | 3 | 0 | 0 | 0 | 0 | 0 |
-| Historical Data Insert 2022 Server Facet | 1574 | 4 | 3 | 1 | 0 | 0 | 0 | 0 |
-| Historical Data Replace 2022 Server Facet | 1575 | 4 | 3 | 1 | 0 | 0 | 0 | 0 |
-| Historical Data Update 2022 Server Facet | 1573 | 4 | 3 | 1 | 0 | 0 | 0 | 0 |
+| Historical Data Insert 2022 Server Facet | 1574 | 4 | 4 | 0 | 0 | 0 | 0 | 0 |
+| Historical Data Replace 2022 Server Facet | 1575 | 4 | 4 | 0 | 0 | 0 | 0 | 0 |
+| Historical Data Update 2022 Server Facet | 1573 | 4 | 4 | 0 | 0 | 0 | 0 | 0 |
 | Historical Event Delete 2022 Server Facet | 1581 | 3 | 3 | 0 | 0 | 0 | 0 | 0 |
 | Historical Event Insert 2022 Server Facet | 1579 | 3 | 3 | 0 | 0 | 0 | 0 | 0 |
 | Historical Event Replace 2022 Server Facet | 1580 | 3 | 3 | 0 | 0 | 0 | 0 | 0 |
-| Historical Event Update 2022 Server Facet | 1578 | 3 | 2 | 1 | 0 | 0 | 0 | 0 |
-| Historical Raw Data 2022 Server Facet | 1571 | 5 | 4 | 1 | 0 | 0 | 0 | 0 |
+| Historical Event Update 2022 Server Facet | 1578 | 3 | 3 | 0 | 0 | 0 | 0 | 0 |
+| Historical Raw Data 2022 Server Facet | 1571 | 5 | 5 | 0 | 0 | 0 | 0 | 0 |
 | KeyCredential Service Server Facet | 2113 | 5 | 0 | 0 | 5 | 0 | 0 | 0 |
-| Method 2022 Server Facet | 1639 | 6 | 3 | 2 | 1 | 0 | 0 | 0 |
+| Method 2022 Server Facet | 1639 | 6 | 4 | 1 | 1 | 0 | 0 | 0 |
 | Model Change Event Server Facet | 1733 | 3 | 1 | 0 | 2 | 0 | 0 | 0 |
 | Node Management 2022 Server Facet | 1329 | 54 | 52 | 0 | 2 | 0 | 0 | 0 |
 | Redundancy Transparent Server Facet | 2249 | 1 | 0 | 0 | 1 | 0 | 0 | 0 |
 | Redundancy Visible Server Facet | 2252 | 1 | 0 | 0 | 1 | 0 | 0 | 0 |
 | Request State Change Server Facet | 1633 | 1 | 0 | 0 | 1 | 0 | 0 | 0 |
 | Reverse Connect Server Facet | 1632 | 1 | 1 | 0 | 0 | 0 | 0 | 0 |
-| Scheduler Base Server Facet | 1875 | 8 | 3 | 2 | 3 | 0 | 0 | 0 |
-| Scheduler Configuration Server Facet | 1876 | 10 | 3 | 2 | 5 | 0 | 0 | 0 |
+| Scheduler Base Server Facet | 1875 | 8 | 4 | 1 | 3 | 0 | 0 | 0 |
+| Scheduler Configuration Server Facet | 1876 | 10 | 4 | 1 | 5 | 0 | 0 | 0 |
 | Sessionless Server Facet | 1630 | 2 | 0 | 0 | 2 | 0 | 0 | 0 |
 | Standard DataChange Subscription 2022 Server Facet | 1324 | 17 | 15 | 2 | 0 | 0 | 0 | 0 |
-| Standard Event Subscription 2022 Server Facet | 2085 | 22 | 14 | 3 | 5 | 0 | 0 | 0 |
-| State Machine 2022 Server Facet | 1638 | 30 | 14 | 5 | 11 | 0 | 0 | 0 |
+| Standard Event Subscription 2022 Server Facet | 2085 | 22 | 16 | 1 | 5 | 0 | 0 | 0 |
+| State Machine 2022 Server Facet | 1638 | 30 | 16 | 3 | 11 | 0 | 0 | 0 |
 | Subnet Discovery Server Facet | 2069 | 1 | 1 | 0 | 0 | 0 | 0 | 0 |
 | Temporary File Access Server Facet | 1525 | 5 | 0 | 0 | 5 | 0 | 0 | 0 |
-| User Role Base 2022 Server Facet | 1351 | 3 | 2 | 1 | 0 | 0 | 0 | 0 |
-| User Role Management 2022 Server Facet | 2080 | 14 | 6 | 4 | 4 | 0 | 0 | 0 |
+| User Role Base 2022 Server Facet | 1351 | 3 | 3 | 0 | 0 | 0 | 0 | 0 |
+| User Role Management 2022 Server Facet | 2080 | 14 | 7 | 3 | 4 | 0 | 0 | 0 |
 | User Token - Anonymous Server Facet | 1691 | 1 | 1 | 0 | 0 | 0 | 0 | 0 |
-| User Token - JWT Server Facet | 1697 | 7 | 2 | 1 | 4 | 0 | 0 | 0 |
-| User Token - User Name Password Server Facet | 1695 | 3 | 2 | 1 | 0 | 0 | 0 | 0 |
-| User Token - X509 Certificate Server Facet | 1696 | 2 | 1 | 1 | 0 | 0 | 0 | 0 |
+| User Token - JWT Server Facet | 1697 | 7 | 3 | 0 | 4 | 0 | 0 | 0 |
+| User Token - User Name Password Server Facet | 1695 | 3 | 3 | 0 | 0 | 0 | 0 | 0 |
+| User Token - X509 Certificate Server Facet | 1696 | 2 | 2 | 0 | 0 | 0 | 0 | 0 |
 
 ## Full CU Ledger
 
@@ -519,7 +519,7 @@ One row per facet not already covered by the four canonical profiles above. Coun
 | 2276 | Historical Access Annotations | implemented | annotations.rs attach_annotations_property + data_history.rs update_structure_data/read_annotations; simple.rs:658-718 history_read_annotations; test history_data_inmemory.rs:368 round-trip insert/replace/remove/read. Uses ReadAnnotationDataDetails not ReadRawModifiedDetails, but OPC-10000-11 5.1.2 confirms both are spec-valid |
 | 2281 | Aggregate Subscription - VarianceSample | implemented | agg_variance_sample engine.rs:1021 (11428); test phase_b_variance_and_stddev aggregates_tests.rs:369-393 |
 | 2282 | Aggregate - EndBound | implemented | engine.rs dispatch AGG_END_BOUND=11506 (engine.rs:1511); test aggregates_tests.rs:486 part13_start_end_and_delta_bounds_use_simple_bounds |
-| 2289 | Historical Access Update Event | partial | event_history.rs:202-211 implements PerformUpdateType::Update (upsert) match arm; no dedicated test exercises Update mode for events (history_events_inmemory.rs + sqlite history_events.rs only test Insert/Replace) |
+| 2289 | Historical Access Update Event | implemented | Feature 109 CU 2289: event_history.rs:202-211 UpdateEvent upsert; tests history_events_inmemory.rs update_event_insert_and_read_back + sqlite history_events.rs update_event_insert_replace_and_read |
 | 2291 | Attribute Read Complex | implemented | custom_types.rs test_data_type_tree_builder reads a DynamicStructure e2e (tests/integration/custom_types.rs:61). |
 | 2302 | Aggregate Subscription - Minimum2 | implemented | agg_minimum2 engine.rs:809 (11286); test phase_d_minimum2_includes_simple_bound aggregates_tests.rs:580 |
 | 2303 | Aggregate - PercentGood | implemented | engine.rs dispatch AGG_PERCENT_GOOD=2362 (engine.rs:1501); test aggregates_tests.rs:694 phase_e_duration_and_percent_good_bad |
@@ -572,7 +572,7 @@ One row per facet not already covered by the four canonical profiles above. Coun
 | 2447 | Address Space AddIn DefaultInstanceBrowsename | implemented | DefaultInstanceBrowseName Property via generated nodeset_21.rs:2832, loaded by default node_manager/memory/core.rs:172 |
 | 2454 | Method Call Complex | partial | Call passes arbitrary Vec<Variant> incl ExtensionObject generically (node_manager/method.rs) but no test uses a Structure argument. |
 | 2474 | Data Access MultiStateDictionaryEntryDBT | gap | Investigated (feature 100): type exists in generated nodeset (nodeset_51.rs, ns=0;i=19077, from current schema snapshot) but is undocumented in both the local OPC-10000-8 v1.05.07 PDF and reference.opcfoundation.org -- deferred rather than implemented against unverifiable semantics, per spec.md Assumptions |
-| 2476 | Base Info LocalTime | partial | Real computed LocalTime (chrono->TimeZoneDataType) node_manager/memory/core.rs:989-997; no test reads Server_LocalTime attribute |
+| 2476 | Base Info LocalTime | implemented | Feature 109 CU 2476: node_manager/memory/core.rs:989-997 computes real TimeZoneDataType via chrono; test async-opcua-server/tests/server_local_time.rs test_server_local_time_returns_plausible_timezone |
 | 2478 | Time Sync - OS based support | implemented | OsClockSource default TimeSyncSource impl async-opcua-server/src/time_sync.rs:112-124; unit test time_sync.rs:130-137 |
 | 2479 | Time Sync - IEEE 1588 (PTP) | extensible | Satisfiable via user-supplied TimeSyncSource; documented extension point, not implemented in-library (feature 093). |
 | 2480 | Time Sync - IEEE 802.1AS | extensible | Satisfiable via user-supplied TimeSyncSource; documented extension point, not implemented in-library (feature 093). |
@@ -629,7 +629,7 @@ One row per facet not already covered by the four canonical profiles above. Coun
 | 2818 | Monitor Complex Value | partial | Monitored-item sampling reuses Read's Variant pipeline (subscriptions/mod.rs:1230) but no test monitors a structured value. |
 | 2820 | Address Space Full Array Only | implemented | validate_node_write_inner (address_space/write_validation.rs) rejects an IndexRange Write to AttributeId::Value with Bad_WriteNotSupported when AccessLevelExType::WriteFullArrayOnly is set; test write.rs::write_index_range_rejected_when_write_full_array_only |
 | 2822 | Base Info Device Failure | gap | DeviceFailureEventType only structural (nodeset_19.rs); no server code constructs/fires it (grep across async-opcua-server/src empty) |
-| 2823 | Security Invalid user token | partial | Fixed 100ms tarpit on every auth failure (session/negotiate.rs:16,28-40; tested security_tests.rs:2429); no escalating lockout. |
+| 2823 | Security Invalid user token | implemented | Feature 109 CU 2823: Fixed 100ms tarpit on auth failure (session/negotiate.rs:16,28-40); test async-opcua-server/tests/security_tests.rs invalid_oauth2_jwt_validation_failure_is_tarpitted + username_password_auth_failure_is_tarpitted |
 | 2831 | Data Access MultiStateValueDiscrete | implemented | create_multi_state_value_discrete_variable (data_access.rs) instantiates MultiStateValueDiscreteType with mandatory EnumValues/ValueAsText (non-contiguous codes); test data_access.rs::multi_state_value_discrete_tracks_non_contiguous_enum_values |
 | 2837 | UA Binary Encoding | implemented | BinaryEncodable/BinaryDecodable traits async-opcua-types/src/encoding.rs:445-482, pervasive derive use; tests encoding.rs:919 |
 | 2845 | Base Info RequestServerStateChange Method | gap | Only generated NodeId constants (ServerType_RequestServerStateChange, node_ids.rs:1103-1105); no add_method_cb handler found anywhere. |
@@ -661,7 +661,7 @@ One row per facet not already covered by the four canonical profiles above. Coun
 | 2946 | A & C Non-Exclusive RateOfChange | implemented | RateOfChangeAlarm (alarms/rate_of_change.rs) non-exclusive path via create_non_exclusive_in_address_space + LimitAlarmKind::RateOfChange; test alarms.rs::rate_of_change_alarm_reports_type_definition_and_activates_on_fast_change |
 | 2947 | Historical Access Events | implemented | event_history.rs:68-138 read_events using ParsedEventFilter; test history_tests.rs:407 test_history_read_events_empty_result |
 | 2948 | Aggregate - VariancePopulation | implemented | engine.rs dispatch AGG_VARIANCE_POPULATION=11429 (engine.rs:1520); test aggregates_tests.rs:369 phase_b_variance_and_stddev |
-| 2950 | Historical Access ServerTimestamp | partial | both backends persist a distinct server_timestamp (sqlite backend.rs:105/417/854 dedicated column, query.rs:93 populates on read; in-memory stores full DataValue); config flag capabilities.rs:34 defaults false; no test asserts server_timestamp survives distinct from source_timestamp on read, and simple.rs history_read_raw_modified ignores timestamps_to_return (unused param) |
+| 2950 | Historical Access ServerTimestamp | implemented | Feature 109 CU 2950: simple.rs history_read_raw_modified now honors timestamps_to_return; tests history_data_inmemory.rs distinct_source_server_timestamps_survive_round_trip + sqlite history_update_data.rs distinct_source_server_timestamps_survive_round_trip |
 | 2951 | A & C Exclusive Deviation | implemented | DeviationAlarm (alarms/deviation.rs) exclusive path via create_exclusive_in_address_space + LimitAlarmKind::Deviation; test alarms.rs::deviation_alarm_reports_deviation_type_definition_and_activates_on_setpoint_deviation |
 | 2952 | Aggregate Subscription - MinimumActualTime2 | implemented | agg_minimum_actual_time2 engine.rs:863 (11305); test phase_d_min_actual_time2_uses_bound_timestamp aggregates_tests.rs:603 |
 | 2954 | Aggregate Subscription - DurationBad | implemented | agg_duration_bad engine.rs:1162 (2361); test phase_e_duration_and_percent_good_bad aggregates_tests.rs:694 |
@@ -726,7 +726,7 @@ One row per facet not already covered by the four canonical profiles above. Coun
 | 3127 | Base Info OptionSet | implemented | base_info::create_option_set_variable instantiates OptionSetType with OptionSetValues/BitMask; test base_info.rs::option_set_exposes_per_bit_values_and_bitmask |
 | 3130 | Aggregate Subscription - MaximumActualTime | implemented | agg_maximum_actual_time engine.rs:922 (2349); test phase_b_actual_time_returns_value_timestamp aggregates_tests.rs:345 |
 | 3137 | Aggregate Subscription - Custom | gap | No custom aggregate extensibility; dispatch_aggregate engine.rs:1466 is a fixed closed match, unknown ids -> BadAggregateNotSupported |
-| 3142 | Monitor Alternate Encoding | partial | sample() passes data_encoding through same pipeline as Read (subscriptions/mod.rs:1230), no monitored-item XML/JSON test found. |
+| 3142 | Monitor Alternate Encoding | implemented | Feature 109 CU 3142: sample() passes data_encoding through pipeline (subscriptions/mod.rs:1230); test async-opcua-server/tests/monitored_item_data_encoding.rs monitored_item_data_encoding_xml_passed_to_sample_closure |
 | 3143 | Subscription PublishRequest Queue Overflow | implemented | enqueue_publish_request pops oldest on overflow, returns BadTooManyPublishRequests (session_subscriptions.rs:767); test :1581. |
 | 3144 | Aggregate Subscription - DurationInStateNonZero | implemented | agg_duration_in_state_non_zero engine.rs:1201 (11308); test duration_in_state_boolean_splits aggregates_tests.rs:1169 |
 | 3146 | Monitor Triggering | implemented | SetTriggering handler message_handler.rs:676, actor.rs:104/392/704; e2e tests triggering.rs:43,160 |
@@ -746,12 +746,12 @@ One row per facet not already covered by the four canonical profiles above. Coun
 | 3188 | Base Info Base Types | implemented | Base built-in types present in schemas/1.05; imported via core.rs:147, exercised by address_space/mod.rs test suite. |
 | 3189 | Base Info ServerType | implemented | ServerType is the root of the default AddressSpace; exercised across suite e.g. tests/integration/browse.rs. |
 | 3192 | Base Info Diagnostics | implemented | EnabledFlag/ServerDiagnosticsSummary/SubscriptionDiagnosticsArray diagnostics/server.rs, core.rs:501-509; e2e read.rs:1604-1841 |
-| 3194 | Base Info Events Capabilities | partial | MaxSelectClauseParameters/MaxWhereClauseParameters nodes exist (nodeset_28.rs:4158) but Value is DataValue::null(), not live-wired. |
+| 3194 | Base Info Events Capabilities | implemented | Feature 109 CU 3194: MaxSelectClauseParameters/MaxWhereClauseParameters live-wired from config (node_manager/memory/core.rs, config/limits.rs); test async-opcua-server/tests/event_filter_tests.rs max_select_where_clause_parameters_are_populated |
 | 3196 | Base Info Fixed SamplingInterval | implemented | CU is conditional on the Server using a fixed set of sampling intervals (OPC-10000-5 SS7.9/SS12.8); this server negotiates a continuously-variable client-requested interval per monitored item (sanitize_sampling_interval, subscriptions/monitored_item.rs:299-311), so the precondition never holds and non-exposure of SamplingIntervalDiagnosticsArray is spec-conformant, not a gap -- documented in docs/server-capacity-limits.md |
 | 3197 | Base Info Security Role Capabilities | implemented | RoleSet on ServerCapabilities (role_management.rs:479-481); test rbac.rs:287-316 verifies i=15606 + 8 role nodes. |
 | 3198 | Base Info Estimated Return Time | implemented | ServerStatusWrapper::schedule_shutdown/estimated_return_time (server_status.rs) + ServerHandle::shutdown_after_with_return_time (server_handle.rs) extend the existing shutdown mechanism; wired core.rs get_attribute; test base_info.rs::estimated_return_time_reflects_scheduled_shutdown_and_is_null_otherwise |
 | 3199 | Base Info System Status | gap | SystemStatusChangeEventType has no server-side emission on shutdown; server_status.rs/server_handle.rs never calls notify_event/raise_event |
-| 3201 | Base Info Custom Type System | partial | custom-codegen sample (samples/custom-codegen) demonstrates a full custom-type inheritance tree + generated Encoding Objects via async-opcua-codegen (types/encoding_ids.rs, types/gen.rs); no completeness e2e test proving all custom EventTypes are exposed alongside their encoding objects. Distinct from CU 5801 (which covers standard-nodeset type completeness, closed as a byproduct of the many typed-instantiation CUs) -- this one is specifically about CUSTOM (non-standard) types and remains open |
+| 3201 | Base Info Custom Type System | implemented | Feature 109 CU 3201: custom-codegen sample has complete e2e test for all custom EventTypes w/ HasEncoding references; test samples/custom-codegen/tests/encoding_objects_tests.rs custom_event_types_have_encoding_objects |
 | 3203 | Base Info Model Change General | implemented | GeneralModelChangeEvent fired on add/delete_nodes/refs (model_change.rs, memory_mgr_impl.rs:325); e2e test node_management.rs:1437. |
 | 3206 | Base Info EventQueueOverflow EventType | implemented | monitored_item.rs:1052-1085 notify_event inserts EventQueueOverflowEventType on overflow; tested subscriptions.rs:1697-1779 |
 | 3207 | Base Info OptionSet DataType | implemented | OptionSet DataType present in schemas/1.05/Opc.Ua.NodeSet2.xml; exposed via CoreNamespace import. |
@@ -780,10 +780,10 @@ One row per facet not already covered by the four canonical profiles above. Coun
 | 3539 | Security Role Well Known | partial | SecurityAdmin perms tested (rbac.rs:991); ConfigureAdmin defined (preset.rs:66-76) but no test asserts its perm bits (only :308). |
 | 3540 | Security Role Well Known Group 2 | partial | Anonymous perms tested (rbac.rs:977); AuthenticatedUser granted (resolver.rs:502) but perm bitset (preset.rs:34) never asserted. |
 | 3541 | Security Role Well Known Group 3 | partial | Operator fully tested (rbac.rs:396-498,986); Observer/Engineer/Supervisor exist (preset.rs:39-64) but only node-existence tested. |
-| 3542 | Security Role Server Base Eventing | partial | RoleMappingRuleChangedAuditEventType present in generated nodeset (nodeset_16.rs, i=17641); no code ever raises it, untested. |
+| 3542 | Security Role Server Base Eventing | implemented | Feature 109 CU 3542: RoleMappingRuleChangedAuditEventType emitted on identity mutation (session/audit.rs dispatch_role_mapping_rule_changed_audit); test async-opcua-server/tests/event_filter_tests.rs add_identity_dispatches_role_mapping_rule_changed_audit_event |
 | 3544 | Base Info ResendData Method | partial | ResendData method core.rs:1209-1220, wired subscription.rs:341-342,757; no test found (searched methods.rs, subscriptions.rs) |
 | 3545 | Base Info Namespace Metadata | implemented | Dynamic per-namespace NamespaceMetaData objects diagnostics/node_manager.rs:583-650; e2e test browse.rs:942-967 |
-| 3546 | Base Info LocalTime Events | partial | BaseEventType.local_time field (events/event.rs:52) read by get_value(128) but never assigned anywhere in async-opcua-server/src |
+| 3546 | Base Info LocalTime Events | implemented | Feature 109 CU 3546: BaseEventType.local_time now populated from Server_LocalTime source (events/event.rs set_local_time, node_manager/memory/core.rs current_timezone_data); test async-opcua-server/tests/event_filter_tests.rs emitted_event_has_populated_local_time |
 | 3547 | Base Info UaBinary File | implemented | UABinaryFileDataType + Description types present in schemas/1.05; type-level exposure via CoreNamespace import. |
 | 3549 | Base Info OrderedList Change Notification | gap | Depends on OrderedListType (gap) and NodeVersion Property (gap); both searched, zero server-side hits. |
 | 3550 | Base Info StatusResult DataType | implemented | StatusResult in nodeset + generated types/status_result.rs; exposed via CoreNamespace import. |
@@ -805,7 +805,7 @@ One row per facet not already covered by the four canonical profiles above. Coun
 | 3582 | GDS Certificate Manager Pull Model | implemented | Feature 103 (Run 1): fixed the CertificateDirectoryType Pull-model implementation in gds/pull_methods.rs, which previously implemented the wrong (Push-model) methods (GetRejectedList/UpdateCertificate) against fabricated NodeIds -- the same defect class as pre-fix push_methods.rs. Made async-opcua-server::companion pub and wired its import_gds() into a new opt-in gds::register_gds_pull_methods_from_companion(), gated on the (pre-existing, previously dormant) companion-gds feature. Rewrote gds/pull_methods.rs entirely: StartSigningRequest/StartNewKeyPairRequest (new X509::issue_certificate_for_public_key CA-issuance primitive, non-self-signed, for a caller-supplied or freshly generated public key)/FinishRequest/GetCertificateGroups/GetTrustList/GetCertificateStatus, all against dynamically-resolved NodeIds (no hardcoded namespace index). e2e-proven via gds_pull_companion_integration.rs (real client -> Call service -> registered handler dispatch) plus unit tests. This investigation also found and fixed three independent, previously-undiscovered bugs in shared node-manager infrastructure that any companion-spec runtime import would have hit: import_companion_xml seeded a disconnected NamespaceMap::default() instead of the address space's real registered namespaces (risking namespace-index collisions); InMemoryNodeManager::owns_node checked a namespace-set snapshot frozen at construction time, never refreshed for namespaces added by a later runtime import (now RwLock-backed with a refresh_namespaces() call site); and CoreNodeManagerImpl::call_builtin_method, which under the default-on subscriptions-standard feature unconditionally short-circuited before consulting the generic method-callback registry for any method outside the core namespace-0 MethodId set -- silently swallowing any custom method callback registered for a companion-spec or other custom-namespace method. Feature 104 (correction): Run 1's research wrongly concluded CertificateDirectoryType ships no pre-instantiated singleton, and built ~250 lines of custom object-instantiation logic (gds/directory_instance.rs, ObjectBuilder/MethodBuilder) to hand-construct a parallel 'Directory' object with fabricated string NodeIds. The real NodeSet2.xml actually ships a fully pre-instantiated 'Directory' object (source ns=1;i=141, HasTypeDefinition -> CertificateDirectoryType) with real integer NodeIds for every Mandatory method and the CertificateGroups/DefaultApplicationGroup/TrustList subtree -- independently re-verified against the real XML. directory_instance.rs now simply resolves these real NodeIds (mirroring push_methods.rs's fixed-NodeId pattern) instead of constructing a duplicate object; a regression test (does_not_construct_a_duplicate_directory_object) guards against reintroducing the duplicate. RevokeCertificate/GetCertificates/CheckRevocationStatus (Optional) remain unregistered -- their real NodeIds now resolve too, but real semantics (an issuance ledger, real CRL mutation, a revocation-status lookup) are still separate, undone business-logic infrastructure (corrected reason; previously mis-stated as 'no real object to hang callbacks off of'). Feature 105 (Run 2, client-side): async-opcua-client/src/gds/ had the same fabricated-NodeId defect -- fixed via real dynamic discovery, GdsClient::discover(session) resolving the Directory object and RegisterApplication/StartSigningRequest/FinishRequest via the target server's namespace array plus TranslateBrowsePathsToNodeIds (Part 4 section 5.8.4), since every real external GDS deployment assigns its own namespace index. Also corrected GdsCsrClient::certificate_manager_id -> directory_object_id (no separate CertificateManager object exists) and removed a bogus 5th argument start_signing_request sent that isn't part of the real StartSigningRequest signature. Proven end-to-end against this SDK's own server with the GDS namespace at a non-default index; found and fixed two more server-side infrastructure bugs along the way (Server_NamespaceArray never reflecting a runtime-imported namespace, and AddressSpace/type_tree namespace-table divergence causing index collisions) -- see specs/105-gds-pull-client-fix/. |
 | 3584 | GDS Key Credential Service Pull Model | gap | Zero non-generated source hits for "KeyCredential" anywhere in repo (grep across all *.rs excluding generated) |
 | 3586 | GDS Authorization Service Server | gap | AuthorizationServiceType not implemented; same search as 3182, zero non-generated hits |
-| 3605 | Base Info Method Capabilities | partial | MaxNodesPerMethodCall wired node_manager/memory/core.rs:888-892 (const->config->response) but no dedicated test found in tests/*.rs referencing it. |
+| 3605 | Base Info Method Capabilities | implemented | Feature 109 CU 3605: MaxNodesPerMethodCall live-wired (node_manager/memory/core.rs:888-892); test async-opcua/tests/integration/methods.rs call_limits |
 | 3641 | Base Info Method Argument DataType | implemented | DataTypeId::Argument used building Method args async-opcua-nodes/src/method.rs:92; asserted in address_space/mod.rs:1320. |
 | 3642 | Subscription Durable | gap | No "durable" references in async-opcua-server/src; SetSubscriptionDurable NodeId (12749) is a bare generated node, no callback registered |
 | 3644 | Base Info SemanticVersionString | implemented | SemanticVersionString present in schemas/1.05/Opc.Ua.NodeSet2.xml; exposed via CoreNamespace import. |
@@ -859,7 +859,7 @@ One row per facet not already covered by the four canonical profiles above. Coun
 | 3928 | Security User Anonymous Server | implemented | Anonymous gated by endpoint.user_token_ids (authenticator.rs:227-238,322-330); e2e session/manager.rs:2289, rbac.rs:238. |
 | 3941 | Address Space DataTypeDefinition Attribute | implemented | DataTypeDefinition wired via DataTypeBuilder.data_type_definition; e2e-tested by custom_types.rs test_data_type_tree_builder. |
 | 3965 | Address Space User Access Level Base | implemented | user_access_level() computed via RBAC (utils.rs:131-152); 2-role tests utils.rs:1020-1083 show differing AccessLevel per role. |
-| 3968 | Auditing Services | partial | audit.rs dispatch_* covers Session/Channel/Cert/Cancel/Write/Method+AddNodes/DeleteNodes; no HistoryUpdate audit despite type existing |
+| 3968 | Auditing Services | implemented | Feature 109 CU 3968: dispatch_history_update_audit in session/audit.rs wired at HistoryUpdate handler (session/services/attribute.rs); test async-opcua/tests/integration/write.rs history_update_emits_audit_event |
 | 3969 | Base Info Model Change | gap | Searched 'BaseModelChangeEventType'/'NodeVersion' - zero server-side hits (only GeneralModelChangeEventType is implemented). |
 | 3979 | Auditing UpdateStates | gap | Searched 'AuditUpdateStateEventType' - only generated struct exists; no state machine emits it. |
 | 3983 | Base Services Diagnostics | implemented | result.rs:17-58 filter_diagnostic_info masks diag bits; wired attribute.rs/node_management.rs; test per_op_diagnostics.rs |

@@ -6,7 +6,7 @@ mod memory_mgr_impl;
 mod simple;
 
 #[cfg(feature = "generated-address-space")]
-mod core;
+pub(crate) mod core;
 
 #[cfg(feature = "generated-address-space")]
 pub use core::{CoreNodeManager, CoreNodeManagerBuilder, CoreNodeManagerImpl};

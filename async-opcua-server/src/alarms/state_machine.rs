@@ -4,7 +4,8 @@
 use crate::address_space::{AddressSpace, ObjectBuilder, VariableBuilder};
 use opcua_nodes::NodeType;
 use opcua_types::{
-    DataTypeId, DateTime, LocalizedText, NodeId, StatusCode, VariableTypeId, Variant,
+    DataTypeId, DateTime, LocalizedText, NodeId, ObjectTypeId, ReferenceTypeId, StatusCode,
+    VariableTypeId, Variant, VariantScalarTypeId,
 };
 use std::sync::{Arc, Mutex};
 
@@ -533,6 +534,12 @@ impl ConditionStateMachine {
             )]),
         );
 
+        address_space.insert_reference(
+            &shelving_state_id,
+            &NodeId::from(ObjectTypeId::TransitionEventType),
+            ReferenceTypeId::GeneratesEvent,
+        );
+
         let shelving_current_state_var =
             VariableBuilder::new(&shelving_current_state_id, "CurrentState", "CurrentState")
                 .data_type(DataTypeId::LocalizedText)
@@ -566,6 +573,231 @@ impl ConditionStateMachine {
                 .build();
         address_space.insert(
             unshelve_time_var,
+            Some(&[(
+                &shelving_state_id,
+                &NodeId::new(0, 46),
+                opcua_nodes::ReferenceDirection::Inverse,
+            )]),
+        );
+
+        // Shelving state sub-objects
+        let unshelved_state_id = NodeId::new(ns_idx, format!("{}_ShelvingState_Unshelved", base_s));
+        let timed_shelved_state_id =
+            NodeId::new(ns_idx, format!("{}_ShelvingState_TimedShelved", base_s));
+        let one_shot_shelved_state_id =
+            NodeId::new(ns_idx, format!("{}_ShelvingState_OneShotShelved", base_s));
+
+        let unshelved_obj = ObjectBuilder::new(&unshelved_state_id, "Unshelved", "Unshelved")
+            .has_type_definition(NodeId::from(ObjectTypeId::StateType))
+            .build();
+        address_space.insert(
+            unshelved_obj,
+            Some(&[(
+                &shelving_state_id,
+                &NodeId::new(0, 47),
+                opcua_nodes::ReferenceDirection::Inverse,
+            )]),
+        );
+
+        let timed_shelved_obj =
+            ObjectBuilder::new(&timed_shelved_state_id, "TimedShelved", "TimedShelved")
+                .has_type_definition(NodeId::from(ObjectTypeId::StateType))
+                .build();
+        address_space.insert(
+            timed_shelved_obj,
+            Some(&[(
+                &shelving_state_id,
+                &NodeId::new(0, 47),
+                opcua_nodes::ReferenceDirection::Inverse,
+            )]),
+        );
+
+        let one_shot_shelved_obj = ObjectBuilder::new(
+            &one_shot_shelved_state_id,
+            "OneShotShelved",
+            "OneShotShelved",
+        )
+        .has_type_definition(NodeId::from(ObjectTypeId::StateType))
+        .build();
+        address_space.insert(
+            one_shot_shelved_obj,
+            Some(&[(
+                &shelving_state_id,
+                &NodeId::new(0, 47),
+                opcua_nodes::ReferenceDirection::Inverse,
+            )]),
+        );
+
+        // Shelving transition sub-objects
+        let utots_id = NodeId::new(
+            ns_idx,
+            format!("{}_ShelvingState_UnshelvedToTimedShelved", base_s),
+        );
+        let utoos_id = NodeId::new(
+            ns_idx,
+            format!("{}_ShelvingState_UnshelvedToOneShotShelved", base_s),
+        );
+        let ttou_id = NodeId::new(
+            ns_idx,
+            format!("{}_ShelvingState_TimedShelvedToUnshelved", base_s),
+        );
+        let ttoos_id = NodeId::new(
+            ns_idx,
+            format!("{}_ShelvingState_TimedShelvedToOneShotShelved", base_s),
+        );
+        let ostou_id = NodeId::new(
+            ns_idx,
+            format!("{}_ShelvingState_OneShotShelvedToUnshelved", base_s),
+        );
+        let ostots_id = NodeId::new(
+            ns_idx,
+            format!("{}_ShelvingState_OneShotShelvedToTimedShelved", base_s),
+        );
+
+        let utots_obj = ObjectBuilder::new(
+            &utots_id,
+            "UnshelvedToTimedShelved",
+            "UnshelvedToTimedShelved",
+        )
+        .has_type_definition(NodeId::from(ObjectTypeId::TransitionType))
+        .build();
+        address_space.insert(
+            utots_obj,
+            Some(&[(
+                &shelving_state_id,
+                &NodeId::new(0, 47),
+                opcua_nodes::ReferenceDirection::Inverse,
+            )]),
+        );
+
+        let utoos_obj = ObjectBuilder::new(
+            &utoos_id,
+            "UnshelvedToOneShotShelved",
+            "UnshelvedToOneShotShelved",
+        )
+        .has_type_definition(NodeId::from(ObjectTypeId::TransitionType))
+        .build();
+        address_space.insert(
+            utoos_obj,
+            Some(&[(
+                &shelving_state_id,
+                &NodeId::new(0, 47),
+                opcua_nodes::ReferenceDirection::Inverse,
+            )]),
+        );
+
+        let ttou_obj = ObjectBuilder::new(
+            &ttou_id,
+            "TimedShelvedToUnshelved",
+            "TimedShelvedToUnshelved",
+        )
+        .has_type_definition(NodeId::from(ObjectTypeId::TransitionType))
+        .build();
+        address_space.insert(
+            ttou_obj,
+            Some(&[(
+                &shelving_state_id,
+                &NodeId::new(0, 47),
+                opcua_nodes::ReferenceDirection::Inverse,
+            )]),
+        );
+
+        let ttoos_obj = ObjectBuilder::new(
+            &ttoos_id,
+            "TimedShelvedToOneShotShelved",
+            "TimedShelvedToOneShotShelved",
+        )
+        .has_type_definition(NodeId::from(ObjectTypeId::TransitionType))
+        .build();
+        address_space.insert(
+            ttoos_obj,
+            Some(&[(
+                &shelving_state_id,
+                &NodeId::new(0, 47),
+                opcua_nodes::ReferenceDirection::Inverse,
+            )]),
+        );
+
+        let ostou_obj = ObjectBuilder::new(
+            &ostou_id,
+            "OneShotShelvedToUnshelved",
+            "OneShotShelvedToUnshelved",
+        )
+        .has_type_definition(NodeId::from(ObjectTypeId::TransitionType))
+        .build();
+        address_space.insert(
+            ostou_obj,
+            Some(&[(
+                &shelving_state_id,
+                &NodeId::new(0, 47),
+                opcua_nodes::ReferenceDirection::Inverse,
+            )]),
+        );
+
+        let ostots_obj = ObjectBuilder::new(
+            &ostots_id,
+            "OneShotShelvedToTimedShelved",
+            "OneShotShelvedToTimedShelved",
+        )
+        .has_type_definition(NodeId::from(ObjectTypeId::TransitionType))
+        .build();
+        address_space.insert(
+            ostots_obj,
+            Some(&[(
+                &shelving_state_id,
+                &NodeId::new(0, 47),
+                opcua_nodes::ReferenceDirection::Inverse,
+            )]),
+        );
+
+        // AvailableStates Property
+        let shelving_available_states_id =
+            NodeId::new(ns_idx, format!("{}_Shelving_AvailableStates", base_s));
+        let shelving_state_ids: Vec<NodeId> = vec![
+            unshelved_state_id,
+            timed_shelved_state_id,
+            one_shot_shelved_state_id,
+        ];
+        let shelving_as_var = VariableBuilder::new(
+            &shelving_available_states_id,
+            "AvailableStates",
+            "AvailableStates",
+        )
+        .data_type(DataTypeId::NodeId)
+        .has_type_definition(VariableTypeId::PropertyType)
+        .value(Variant::from((
+            VariantScalarTypeId::NodeId,
+            shelving_state_ids,
+        )))
+        .build();
+        address_space.insert(
+            shelving_as_var,
+            Some(&[(
+                &shelving_state_id,
+                &NodeId::new(0, 46),
+                opcua_nodes::ReferenceDirection::Inverse,
+            )]),
+        );
+
+        // AvailableTransitions Property
+        let shelving_available_transitions_id =
+            NodeId::new(ns_idx, format!("{}_Shelving_AvailableTransitions", base_s));
+        let shelving_transition_ids: Vec<NodeId> =
+            vec![utots_id, utoos_id, ttou_id, ttoos_id, ostou_id, ostots_id];
+        let shelving_at_var = VariableBuilder::new(
+            &shelving_available_transitions_id,
+            "AvailableTransitions",
+            "AvailableTransitions",
+        )
+        .data_type(DataTypeId::NodeId)
+        .has_type_definition(VariableTypeId::PropertyType)
+        .value(Variant::from((
+            VariantScalarTypeId::NodeId,
+            shelving_transition_ids,
+        )))
+        .build();
+        address_space.insert(
+            shelving_at_var,
             Some(&[(
                 &shelving_state_id,
                 &NodeId::new(0, 46),
@@ -1319,5 +1551,95 @@ impl ConditionStateMachine {
             branches.remove(index);
         }
         true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use opcua_nodes::DefaultTypeTree;
+    use opcua_types::{BrowseDirection, ObjectTypeId, ReferenceTypeId};
+
+    #[test]
+    fn shelving_state_machine_exposes_generates_event_reference_to_transition_event_type() {
+        let address_space = AddressSpace::new();
+        address_space.add_namespace("http://opcfoundation.org/UA/", 0);
+        address_space.add_namespace("urn:test", 2);
+        let _condition = ConditionStateMachine::create_in_address_space(
+            &address_space,
+            "Dev",
+            "TestAlarm",
+            NodeId::new(2, "Source"),
+            "TestAlarm",
+        );
+        let shelving_state_id = NodeId::new(2, "Alarm_Dev_TestAlarm_ShelvingState");
+        let tree = DefaultTypeTree::default();
+        let refs = address_space.find_references(
+            &shelving_state_id,
+            Some((NodeId::from(ReferenceTypeId::GeneratesEvent), false)),
+            &tree,
+            BrowseDirection::Forward,
+        );
+        assert!(refs
+            .iter()
+            .any(|r| r.target_id == ObjectTypeId::TransitionEventType));
+    }
+
+    #[test]
+    fn shelving_state_machine_available_states_and_transitions_are_populated() {
+        let address_space = AddressSpace::new();
+        address_space.add_namespace("http://opcfoundation.org/UA/", 0);
+        address_space.add_namespace("urn:test", 2);
+        let _condition = ConditionStateMachine::create_in_address_space(
+            &address_space,
+            "Dev",
+            "TestAlarm",
+            NodeId::new(2, "Source"),
+            "TestAlarm",
+        );
+        let as_id = NodeId::new(2, "Alarm_Dev_TestAlarm_Shelving_AvailableStates");
+        let at_id = NodeId::new(2, "Alarm_Dev_TestAlarm_Shelving_AvailableTransitions");
+        let as_val = address_space
+            .find(&as_id)
+            .and_then(|n| {
+                if let NodeType::Variable(ref v) = *n {
+                    v.value(
+                        opcua_types::TimestampsToReturn::Neither,
+                        &opcua_types::NumericRange::None,
+                        &opcua_types::DataEncoding::Binary,
+                        0.0,
+                    )
+                    .value
+                    .clone()
+                } else {
+                    None
+                }
+            })
+            .unwrap_or(Variant::Empty);
+        let at_val = address_space
+            .find(&at_id)
+            .and_then(|n| {
+                if let NodeType::Variable(ref v) = *n {
+                    v.value(
+                        opcua_types::TimestampsToReturn::Neither,
+                        &opcua_types::NumericRange::None,
+                        &opcua_types::DataEncoding::Binary,
+                        0.0,
+                    )
+                    .value
+                    .clone()
+                } else {
+                    None
+                }
+            })
+            .unwrap_or(Variant::Empty);
+        assert!(
+            !matches!(as_val, Variant::Empty),
+            "AvailableStates should be populated"
+        );
+        assert!(
+            !matches!(at_val, Variant::Empty),
+            "AvailableTransitions should be populated"
+        );
     }
 }

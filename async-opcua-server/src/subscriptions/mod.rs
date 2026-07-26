@@ -1298,13 +1298,27 @@ impl SubscriptionCache {
         push_pending_range_notifications(by_range_subscription);
     }
 
-    /// Notify listening clients to events. Without a custom node manager implementing
-    /// event history, this is the only way to report events in the server.
+    /// Notify listening clients to events. Sets local_time on each event from the
+    /// server's current timezone before dispatching.
     #[cfg(feature = "events")]
     pub fn notify_events<'a>(&self, items: impl Iterator<Item = (&'a dyn Event, &'a NodeId)>) {
-        let mut notif = self.event_notifier();
+        let mut owned_events: Vec<Box<dyn Event + Send>> = Vec::new();
+        let mut node_ids: Vec<NodeId> = Vec::new();
         for (evt, id) in items {
-            notif.notify(id, evt);
+            #[cfg(feature = "generated-address-space")]
+            let tz = crate::node_manager::memory::core::current_timezone_data();
+            #[cfg(not(feature = "generated-address-space"))]
+            let tz = opcua_types::TimeZoneDataType::default();
+            let mut cloned = evt.clone_box();
+            cloned.set_local_time(tz);
+            owned_events.push(cloned);
+            node_ids.push(id.clone());
+        }
+        {
+            let mut notif = self.event_notifier();
+            for i in 0..owned_events.len() {
+                notif.notify(&node_ids[i], owned_events[i].as_ref());
+            }
         }
     }
 

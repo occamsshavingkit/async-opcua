@@ -26,12 +26,16 @@ use opcua_server::{
     },
     ServerBuilder, ServerHandle, ANONYMOUS_USER_TOKEN_ID,
 };
-use opcua_types::{DataTypeId, IdType, MessageSecurityMode, NodeId, ObjectId, StatusCode, Variant};
+use opcua_types::{
+    DataTypeId, EUInformation, ExtensionObject, IdType, LocalizedText, MessageSecurityMode, NodeId,
+    ObjectId, StatusCode, UAString, Variant,
+};
 use tokio::net::TcpListener;
 
 const METHOD_NAMESPACE_URI: &str = "urn:async-opcua:method-call-tests:nodes";
 const OBJECT_ID: &str = "CallbackObject";
 const METHOD_ID: &str = "Echo";
+const STRUCTURED_METHOD_ID: &str = "EchoStructure";
 
 static NEXT_TEST_ID: AtomicUsize = AtomicUsize::new(0);
 
@@ -54,6 +58,38 @@ async fn custom_in_memory_node_manager_default_call_executes_registered_method_c
         result.output_arguments,
         Some(vec![Variant::from("echo: wort")])
     );
+}
+
+#[tokio::test]
+async fn custom_in_memory_node_manager_default_method_call_round_trips_extension_object_argument() {
+    let server = MethodServer::start("custom-default-structured-call").await;
+    let expected = EUInformation {
+        namespace_uri: UAString::from("http://example.com"),
+        unit_id: 12345,
+        display_name: LocalizedText::new("en", "meters"),
+        description: LocalizedText::null(),
+    };
+
+    let result = server
+        .session
+        .call_one((
+            NodeId::new(server.namespace_index, OBJECT_ID),
+            NodeId::new(server.namespace_index, STRUCTURED_METHOD_ID),
+            Some(vec![Variant::ExtensionObject(
+                ExtensionObject::from_message(expected.clone()),
+            )]),
+        ))
+        .await
+        .expect("Call service should return a structured method result");
+
+    assert_eq!(result.status_code, StatusCode::Good);
+    let Some(output_arguments) = result.output_arguments else {
+        panic!("structured method should return an output argument");
+    };
+    let Some(Variant::ExtensionObject(output)) = output_arguments.first() else {
+        panic!("structured method output should be an ExtensionObject");
+    };
+    assert_eq!(output.inner_as::<EUInformation>(), Some(&expected));
 }
 
 type CallbackRegistry = Arc<RwLock<HashMap<NodeId, InMemoryMethodCallback>>>;
@@ -91,6 +127,21 @@ impl InMemoryNodeManagerImplBuilder for CallbackNodeManagerBuilder {
                 };
 
                 Ok(vec![Variant::from(format!("echo: {}", value.as_ref()))])
+            }),
+        );
+        self.callbacks.write().insert(
+            NodeId::new(namespace_index, STRUCTURED_METHOD_ID),
+            Arc::new(|_context: &RequestContext, args: &[Variant]| {
+                let Some(Variant::ExtensionObject(value)) = args.first() else {
+                    return Err(StatusCode::BadInvalidArgument);
+                };
+                let Some(value) = value.inner_as::<EUInformation>() else {
+                    return Err(StatusCode::BadInvalidArgument);
+                };
+
+                Ok(vec![Variant::ExtensionObject(
+                    ExtensionObject::from_message(value.clone()),
+                )])
             }),
         );
 
@@ -138,6 +189,24 @@ impl InMemoryNodeManagerImpl for CallbackNodeManager {
                 &[("Value", DataTypeId::String).into()],
             )
             .insert(address_space);
+
+        MethodBuilder::new(
+            &self.node_id(STRUCTURED_METHOD_ID),
+            "EchoStructure",
+            "EchoStructure",
+        )
+        .component_of(self.node_id(OBJECT_ID))
+        .input_args(
+            address_space,
+            &self.node_id("EchoStructureInputArguments"),
+            &[("Value", DataTypeId::EUInformation).into()],
+        )
+        .output_args(
+            address_space,
+            &self.node_id("EchoStructureOutputArguments"),
+            &[("Value", DataTypeId::EUInformation).into()],
+        )
+        .insert(address_space);
     }
 
     fn name(&self) -> &str {

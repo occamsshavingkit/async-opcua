@@ -196,6 +196,47 @@ mod tests {
     }
 
     #[test]
+    fn trip_alarm_activates_returns_to_normal_and_has_trip_alarm_type_definition() {
+        let address_space = test_address_space();
+        let alarm = DiscreteAlarm::create_in_address_space(
+            &address_space,
+            2,
+            "DeviceA",
+            "TripAlarm",
+            NodeId::new(2, "DeviceA.TripSensor"),
+            DiscreteAlarmKind::Trip,
+            Variant::from(false),
+        );
+
+        assert_eq!(
+            alarm.type_id,
+            NodeId::from(ObjectTypeId::TripAlarmType),
+            "Trip-kind alarm must have TripAlarmType as its concrete type"
+        );
+
+        let active_event = SourceMonitoredAlarm::re_evaluate(
+            &alarm,
+            &address_space,
+            &DataValue::from((Variant::from(true), StatusCode::Good)),
+        )
+        .expect("trip value should activate the discrete alarm");
+        assert!(active_event.active_state);
+        assert_eq!(
+            active_event.event_type,
+            NodeId::from(ObjectTypeId::TripAlarmType),
+            "trip alarm event must carry TripAlarmType"
+        );
+
+        let clear_event = SourceMonitoredAlarm::re_evaluate(
+            &alarm,
+            &address_space,
+            &DataValue::from((Variant::from(false), StatusCode::Good)),
+        )
+        .expect("return-to-normal should clear the trip alarm");
+        assert!(!clear_event.active_state);
+    }
+
+    #[test]
     fn source_monitor_re_evaluate_delegates_raw_discrete_variant_and_skips_bad_status() {
         let address_space = test_address_space();
         let alarm = DiscreteAlarm::create_in_address_space(

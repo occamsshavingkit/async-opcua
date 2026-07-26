@@ -27,8 +27,8 @@ use opcua_server::{
     ServerBuilder, ANONYMOUS_USER_TOKEN_ID,
 };
 use opcua_types::{
-    DataEncoding, LocalizedText, MessageSecurityMode, NodeId, NumericRange, StatusCode,
-    TimestampsToReturn, Variant,
+    BrowseDirection, DataEncoding, LocalizedText, MessageSecurityMode, NodeId, NumericRange,
+    ObjectTypeId, ReferenceTypeId, StatusCode, TimestampsToReturn, Variant,
 };
 
 static TEST_COUNTER: AtomicU16 = AtomicU16::new(0);
@@ -156,6 +156,55 @@ async fn program_control_methods_update_state_and_progress_variables() {
     engine.halt().expect("halt should transition to Halted");
     assert_eq!(engine.state(), ProgramState::Halted);
     assert_eq!(string_variable(&fixture, "CurrentState"), "Halted");
+}
+
+#[tokio::test]
+async fn register_program_adds_generates_event_reference_to_program_transition_event_type() {
+    let fixture = ProgramFixture::new("program_generates_event");
+    let _engine = register_program(
+        fixture.node_manager.address_space(),
+        &fixture.node_manager,
+        "Cell1",
+        "Batch",
+    );
+    let address_space = fixture.node_manager.address_space().read();
+    let tree = opcua_nodes::DefaultTypeTree::default();
+    let program_id = NodeId::new(2, "Program_Cell1_Batch");
+    let refs = address_space.find_references(
+        &program_id,
+        Some((NodeId::from(ReferenceTypeId::GeneratesEvent), false)),
+        &tree,
+        BrowseDirection::Forward,
+    );
+    assert!(
+        refs.iter()
+            .any(|r| r.target_id == ObjectTypeId::ProgramTransitionEventType),
+        "register_program must add GeneratesEvent reference to ProgramTransitionEventType"
+    );
+}
+
+#[tokio::test]
+async fn register_program_populates_available_states_and_available_transitions() {
+    let fixture = ProgramFixture::new("program_available_states");
+    let _engine = register_program(
+        fixture.node_manager.address_space(),
+        &fixture.node_manager,
+        "Cell1",
+        "Batch",
+    );
+    let address_space = fixture.node_manager.address_space().read();
+    let as_id = NodeId::new(2, "Program_Cell1_Batch_AvailableStates");
+    let at_id = NodeId::new(2, "Program_Cell1_Batch_AvailableTransitions");
+    let as_val = variable_value(&address_space, &as_id);
+    let at_val = variable_value(&address_space, &at_id);
+    assert!(
+        !matches!(as_val, Variant::Empty),
+        "AvailableStates should be populated"
+    );
+    assert!(
+        !matches!(at_val, Variant::Empty),
+        "AvailableTransitions should be populated"
+    );
 }
 
 #[tokio::test]

@@ -416,3 +416,64 @@ fn set_variable_value(address_space: &AddressSpace, id: &NodeId, value: Variant)
         }
     };
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::address_space::AddressSpace;
+    use opcua_types::StatusCode;
+
+    fn test_address_space() -> AddressSpace {
+        let address_space = AddressSpace::new();
+        address_space.add_namespace("http://opcfoundation.org/UA/", 0);
+        address_space.add_namespace("urn:test", 2);
+        address_space
+    }
+
+    fn test_dialog(space: &AddressSpace) -> DialogCondition {
+        DialogCondition::create_in_address_space(
+            space,
+            2,
+            "Dev",
+            "TestDialog",
+            NodeId::new(2, "TestSrc"),
+            LocalizedText::new("en", "Prompt"),
+            vec![
+                LocalizedText::new("en", "Cancel"),
+                LocalizedText::new("en", "OK"),
+            ],
+            -1,
+            1,
+            0,
+        )
+    }
+
+    #[test]
+    fn respond2_on_active_dialog_succeeds_and_deactivates() {
+        let address_space = test_address_space();
+        let dialog = test_dialog(&address_space);
+        dialog.activate(&address_space);
+        assert!(dialog.condition.get_active(&address_space));
+
+        let result = dialog.respond2(&address_space, 1, LocalizedText::new("en", "comment"));
+        assert!(result.is_ok());
+        assert!(!dialog.condition.get_active(&address_space));
+    }
+
+    #[test]
+    fn respond2_on_inactive_dialog_returns_error() {
+        let address_space = test_address_space();
+        let dialog = test_dialog(&address_space);
+        let result = dialog.respond2(&address_space, 0, LocalizedText::new("en", "comment"));
+        assert_eq!(result, Err(StatusCode::BadDialogNotActive));
+    }
+
+    #[test]
+    fn respond2_with_invalid_response_returns_error() {
+        let address_space = test_address_space();
+        let dialog = test_dialog(&address_space);
+        dialog.activate(&address_space);
+        let result = dialog.respond2(&address_space, 99, LocalizedText::null());
+        assert_eq!(result, Err(StatusCode::BadDialogResponseInvalid));
+    }
+}

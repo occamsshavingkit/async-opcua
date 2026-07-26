@@ -85,6 +85,14 @@ const HISTORY_OFF: HistoryServerCapabilities = HistoryServerCapabilities {
     aggregates: Vec::new(),
 };
 
+pub(crate) fn current_timezone_data() -> TimeZoneDataType {
+    let offset = chrono::Local::now().offset().fix().local_minus_utc() / 60;
+    TimeZoneDataType {
+        offset: offset as i16,
+        daylight_saving_in_offset: false,
+    }
+}
+
 #[cfg(feature = "method-call")]
 type MethodWithContextCB = Arc<
     dyn Fn(&RequestContext, &NodeId, &[Variant]) -> Result<Vec<Variant>, StatusCode>
@@ -934,6 +942,12 @@ impl CoreNodeManagerImpl {
             VariableId::Server_ServerCapabilities_LocaleIdArray => {
                 context.info.config.locale_ids.clone().into()
             }
+            VariableId::Server_ServerCapabilities_MaxSelectClauseParameters => {
+                limits.max_select_clause_parameters.into()
+            }
+            VariableId::Server_ServerCapabilities_MaxWhereClauseParameters => {
+                limits.max_where_clause_parameters.into()
+            }
 
             VariableId::OPCUANamespaceMetadata_DefaultRolePermissions => {
                 role_permissions_variant(context.info.namespace_defaults.role_permissions(0)?)
@@ -1004,13 +1018,7 @@ impl CoreNodeManagerImpl {
                 context.info.service_level.load(std::sync::atomic::Ordering::Relaxed).into()
             }
             VariableId::Server_LocalTime => {
-                let offset = chrono::Local::now().offset().fix().local_minus_utc() / 60;
-                ExtensionObject::from_message(TimeZoneDataType {
-                    offset: offset.try_into().ok()?,
-                    // TODO: Figure out how to set this. Chrono does not provide a way to
-                    // tell whether daylight savings is in effect for the local time zone.
-                    daylight_saving_in_offset: false,
-                }).into()
+                ExtensionObject::from_message(current_timezone_data()).into()
             }
             // OPC-10000-5, ServerType.EstimatedReturnTime (feature 097, CU 3198): null unless a
             // graceful shutdown with a known estimated return time has been scheduled.

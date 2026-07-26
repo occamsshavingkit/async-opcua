@@ -4,9 +4,11 @@ use crate::address_space::{AddressSpace, ObjectBuilder, VariableBuilder};
 #[cfg(feature = "method-call")]
 use crate::node_manager::RequestContext;
 use crate::programs::engine::ProgramEngine;
-use opcua_types::NodeId;
 #[cfg(feature = "method-call")]
-use opcua_types::{StatusCode, Variant};
+use opcua_types::StatusCode;
+use opcua_types::{
+    DataTypeId, NodeId, ObjectTypeId, ReferenceTypeId, VariableTypeId, Variant, VariantScalarTypeId,
+};
 use std::sync::Arc;
 
 /// Handler for Program control method calls.
@@ -95,6 +97,217 @@ impl ProgramMethodHandler {
     }
 }
 
+/// Registers state and transition sub-objects with AvailableStates/AvailableTransitions
+/// Property variables for a finite state machine in the AddressSpace.
+fn register_state_machine_nodes(
+    address_space: &Arc<opcua_core::sync::RwLock<AddressSpace>>,
+    parent_id: &NodeId,
+    ns_idx: u16,
+    base_s: &str,
+) {
+    let halted_state_id = NodeId::new(ns_idx, format!("{}_Halted", base_s));
+    let ready_state_id = NodeId::new(ns_idx, format!("{}_Ready", base_s));
+    let running_state_id = NodeId::new(ns_idx, format!("{}_Running", base_s));
+    let suspended_state_id = NodeId::new(ns_idx, format!("{}_Suspended", base_s));
+
+    let halted_to_ready_id = NodeId::new(ns_idx, format!("{}_HaltedToReady", base_s));
+    let ready_to_running_id = NodeId::new(ns_idx, format!("{}_ReadyToRunning", base_s));
+    let running_to_halted_id = NodeId::new(ns_idx, format!("{}_RunningToHalted", base_s));
+    let running_to_suspended_id = NodeId::new(ns_idx, format!("{}_RunningToSuspended", base_s));
+    let suspended_to_running_id = NodeId::new(ns_idx, format!("{}_SuspendedToRunning", base_s));
+    let suspended_to_halted_id = NodeId::new(ns_idx, format!("{}_SuspendedToHalted", base_s));
+
+    let available_states_id = NodeId::new(ns_idx, format!("{}_AvailableStates", base_s));
+    let available_transitions_id = NodeId::new(ns_idx, format!("{}_AvailableTransitions", base_s));
+
+    let space = opcua_core::trace_write_lock!(address_space);
+
+    // State sub-objects
+    let halted_obj = ObjectBuilder::new(&halted_state_id, "Halted", "Halted")
+        .has_type_definition(NodeId::from(ObjectTypeId::StateType))
+        .build();
+    space.insert(
+        halted_obj,
+        Some(&[(
+            parent_id,
+            &NodeId::new(0, 47),
+            opcua_nodes::ReferenceDirection::Inverse,
+        )]),
+    );
+
+    let ready_obj = ObjectBuilder::new(&ready_state_id, "Ready", "Ready")
+        .has_type_definition(NodeId::from(ObjectTypeId::StateType))
+        .build();
+    space.insert(
+        ready_obj,
+        Some(&[(
+            parent_id,
+            &NodeId::new(0, 47),
+            opcua_nodes::ReferenceDirection::Inverse,
+        )]),
+    );
+
+    let running_obj = ObjectBuilder::new(&running_state_id, "Running", "Running")
+        .has_type_definition(NodeId::from(ObjectTypeId::StateType))
+        .build();
+    space.insert(
+        running_obj,
+        Some(&[(
+            parent_id,
+            &NodeId::new(0, 47),
+            opcua_nodes::ReferenceDirection::Inverse,
+        )]),
+    );
+
+    let suspended_obj = ObjectBuilder::new(&suspended_state_id, "Suspended", "Suspended")
+        .has_type_definition(NodeId::from(ObjectTypeId::StateType))
+        .build();
+    space.insert(
+        suspended_obj,
+        Some(&[(
+            parent_id,
+            &NodeId::new(0, 47),
+            opcua_nodes::ReferenceDirection::Inverse,
+        )]),
+    );
+
+    // Transition sub-objects
+    let halted_to_ready_obj =
+        ObjectBuilder::new(&halted_to_ready_id, "HaltedToReady", "HaltedToReady")
+            .has_type_definition(NodeId::from(ObjectTypeId::TransitionType))
+            .build();
+    space.insert(
+        halted_to_ready_obj,
+        Some(&[(
+            parent_id,
+            &NodeId::new(0, 47),
+            opcua_nodes::ReferenceDirection::Inverse,
+        )]),
+    );
+
+    let ready_to_running_obj =
+        ObjectBuilder::new(&ready_to_running_id, "ReadyToRunning", "ReadyToRunning")
+            .has_type_definition(NodeId::from(ObjectTypeId::TransitionType))
+            .build();
+    space.insert(
+        ready_to_running_obj,
+        Some(&[(
+            parent_id,
+            &NodeId::new(0, 47),
+            opcua_nodes::ReferenceDirection::Inverse,
+        )]),
+    );
+
+    let running_to_halted_obj =
+        ObjectBuilder::new(&running_to_halted_id, "RunningToHalted", "RunningToHalted")
+            .has_type_definition(NodeId::from(ObjectTypeId::TransitionType))
+            .build();
+    space.insert(
+        running_to_halted_obj,
+        Some(&[(
+            parent_id,
+            &NodeId::new(0, 47),
+            opcua_nodes::ReferenceDirection::Inverse,
+        )]),
+    );
+
+    let running_to_suspended_obj = ObjectBuilder::new(
+        &running_to_suspended_id,
+        "RunningToSuspended",
+        "RunningToSuspended",
+    )
+    .has_type_definition(NodeId::from(ObjectTypeId::TransitionType))
+    .build();
+    space.insert(
+        running_to_suspended_obj,
+        Some(&[(
+            parent_id,
+            &NodeId::new(0, 47),
+            opcua_nodes::ReferenceDirection::Inverse,
+        )]),
+    );
+
+    let suspended_to_running_obj = ObjectBuilder::new(
+        &suspended_to_running_id,
+        "SuspendedToRunning",
+        "SuspendedToRunning",
+    )
+    .has_type_definition(NodeId::from(ObjectTypeId::TransitionType))
+    .build();
+    space.insert(
+        suspended_to_running_obj,
+        Some(&[(
+            parent_id,
+            &NodeId::new(0, 47),
+            opcua_nodes::ReferenceDirection::Inverse,
+        )]),
+    );
+
+    let suspended_to_halted_obj = ObjectBuilder::new(
+        &suspended_to_halted_id,
+        "SuspendedToHalted",
+        "SuspendedToHalted",
+    )
+    .has_type_definition(NodeId::from(ObjectTypeId::TransitionType))
+    .build();
+    space.insert(
+        suspended_to_halted_obj,
+        Some(&[(
+            parent_id,
+            &NodeId::new(0, 47),
+            opcua_nodes::ReferenceDirection::Inverse,
+        )]),
+    );
+
+    // AvailableStates Property
+    let state_ids: Vec<NodeId> = vec![
+        halted_state_id,
+        ready_state_id,
+        running_state_id,
+        suspended_state_id,
+    ];
+    let as_var = VariableBuilder::new(&available_states_id, "AvailableStates", "AvailableStates")
+        .data_type(DataTypeId::NodeId)
+        .has_type_definition(VariableTypeId::PropertyType)
+        .value(Variant::from((VariantScalarTypeId::NodeId, state_ids)))
+        .build();
+    space.insert(
+        as_var,
+        Some(&[(
+            parent_id,
+            &NodeId::new(0, 46),
+            opcua_nodes::ReferenceDirection::Inverse,
+        )]),
+    );
+
+    // AvailableTransitions Property
+    let transition_ids: Vec<NodeId> = vec![
+        halted_to_ready_id,
+        ready_to_running_id,
+        running_to_halted_id,
+        running_to_suspended_id,
+        suspended_to_running_id,
+        suspended_to_halted_id,
+    ];
+    let at_var = VariableBuilder::new(
+        &available_transitions_id,
+        "AvailableTransitions",
+        "AvailableTransitions",
+    )
+    .data_type(DataTypeId::NodeId)
+    .has_type_definition(VariableTypeId::PropertyType)
+    .value(Variant::from((VariantScalarTypeId::NodeId, transition_ids)))
+    .build();
+    space.insert(
+        at_var,
+        Some(&[(
+            parent_id,
+            &NodeId::new(0, 46),
+            opcua_nodes::ReferenceDirection::Inverse,
+        )]),
+    );
+}
+
 /// Registers a new Program and its associated control methods in the AddressSpace.
 pub fn register_program(
     address_space: &Arc<opcua_core::sync::RwLock<AddressSpace>>,
@@ -116,6 +329,11 @@ pub fn register_program(
     {
         let space = opcua_core::trace_write_lock!(address_space);
         space.insert::<_, NodeId>(program_obj, None);
+        space.insert_reference(
+            &parent_id,
+            &NodeId::from(ObjectTypeId::ProgramTransitionEventType),
+            ReferenceTypeId::GeneratesEvent,
+        );
     }
 
     // 2. Create the associated engine
@@ -234,6 +452,8 @@ pub fn register_program(
         );
     }
 
+    register_state_machine_nodes(address_space, &parent_id, ns_idx, &base_s);
+
     #[cfg(feature = "method-call")]
     {
         // 4. Create the method nodes under the Program object
@@ -349,4 +569,110 @@ pub fn register_program(
     }
 
     engine
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::address_space::NodeType;
+    use crate::node_manager::memory::InMemoryNodeManager;
+    use crate::node_manager::memory::SimpleNodeManagerImpl;
+    use crate::node_manager::NodeManagersRef;
+    use opcua_core::sync::RwLock;
+    use opcua_nodes::DefaultTypeTree;
+    use opcua_types::{BrowseDirection, ObjectTypeId};
+
+    /// CU 2811: ProgramStateMachine must expose a forward GeneratesEvent reference to
+    /// ProgramTransitionEventType (i=2378).
+    #[test]
+    fn program_state_machine_exposes_generates_event_reference_to_program_transition_event_type() {
+        let address_space = AddressSpace::new();
+        address_space.add_namespace("http://opcfoundation.org/UA/", 0);
+        address_space.add_namespace("urn:test", 2);
+        let address_space = Arc::new(RwLock::new(address_space));
+
+        let inner = SimpleNodeManagerImpl::new(Vec::new(), "test", NodeManagersRef::new_empty());
+        let node_manager = InMemoryNodeManager::new(inner, AddressSpace::new());
+
+        let _engine = register_program(&address_space, &node_manager, "Dev", "TestProgram");
+
+        let space = address_space.read();
+        let parent_id = NodeId::new(2, "Program_Dev_TestProgram");
+        let tree = DefaultTypeTree::default();
+        let refs = space.find_references(
+            &parent_id,
+            Some((NodeId::from(ReferenceTypeId::GeneratesEvent), false)),
+            &tree,
+            BrowseDirection::Forward,
+        );
+        assert!(
+            refs.iter()
+                .any(|r| r.target_id == ObjectTypeId::ProgramTransitionEventType),
+            "Program must have a GeneratesEvent reference to ProgramTransitionEventType"
+        );
+    }
+
+    /// CU 2814: ProgramStateMachine must populate AvailableStates and AvailableTransitions
+    /// Property variables with the valid state and transition NodeIds.
+    #[test]
+    fn program_state_machine_available_states_and_transitions_are_populated() {
+        let address_space = AddressSpace::new();
+        address_space.add_namespace("http://opcfoundation.org/UA/", 0);
+        address_space.add_namespace("urn:test", 2);
+        let address_space = Arc::new(RwLock::new(address_space));
+
+        let inner = SimpleNodeManagerImpl::new(Vec::new(), "test", NodeManagersRef::new_empty());
+        let node_manager = InMemoryNodeManager::new(inner, AddressSpace::new());
+
+        let _engine = register_program(&address_space, &node_manager, "Dev", "TestProgram");
+
+        let space = address_space.read();
+        let as_id = NodeId::new(2, "Program_Dev_TestProgram_AvailableStates");
+        let at_id = NodeId::new(2, "Program_Dev_TestProgram_AvailableTransitions");
+
+        let as_val = space
+            .find(&as_id)
+            .and_then(|n| {
+                if let NodeType::Variable(ref v) = *n {
+                    v.value(
+                        opcua_types::TimestampsToReturn::Neither,
+                        &opcua_types::NumericRange::None,
+                        &opcua_types::DataEncoding::Binary,
+                        0.0,
+                    )
+                    .value
+                    .clone()
+                } else {
+                    None
+                }
+            })
+            .unwrap_or(Variant::Empty);
+
+        let at_val = space
+            .find(&at_id)
+            .and_then(|n| {
+                if let NodeType::Variable(ref v) = *n {
+                    v.value(
+                        opcua_types::TimestampsToReturn::Neither,
+                        &opcua_types::NumericRange::None,
+                        &opcua_types::DataEncoding::Binary,
+                        0.0,
+                    )
+                    .value
+                    .clone()
+                } else {
+                    None
+                }
+            })
+            .unwrap_or(Variant::Empty);
+
+        assert!(
+            !matches!(as_val, Variant::Empty),
+            "AvailableStates should be populated"
+        );
+        assert!(
+            !matches!(at_val, Variant::Empty),
+            "AvailableTransitions should be populated"
+        );
+    }
 }

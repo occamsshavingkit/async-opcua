@@ -1611,6 +1611,307 @@ async fn add_nodes_emits_audit_event() {
     );
 }
 
+/// Part 3/4 auditing: DeleteNodes by a client emits an AuditDeleteNodesEventType (i=2093) from
+/// the Server node, recording the action for auditors.
+#[tokio::test]
+async fn delete_nodes_emits_audit_event() {
+    use crate::utils::ChannelNotifications;
+    use opcua::types::{
+        EventFilter, ExtensionObject, MonitoredItemCreateRequest, MonitoringMode,
+        MonitoringParameters, NumericRange, SimpleAttributeOperand, Variant,
+    };
+
+    let (_tester, _nm, ns, parent, session) = setup_simple(true).await;
+    let child = NodeId::new(ns, "AuditDeleteChild");
+    let r = session
+        .add_nodes(&[object_item(
+            parent,
+            ns,
+            "AuditDeleteChild",
+            child.clone().into(),
+        )])
+        .await
+        .unwrap();
+    assert_eq!(r[0].status_code, StatusCode::Good);
+
+    let (notifs, _, mut events) = ChannelNotifications::new();
+    let sub_id = session
+        .create_subscription(Duration::from_millis(100), 100, 20, 1000, 0, true, notifs)
+        .await
+        .unwrap();
+    let select = vec![SimpleAttributeOperand {
+        type_definition_id: NodeId::new(0, 2041), // BaseEventType
+        browse_path: Some(vec![QualifiedName::new(0, "EventType")]),
+        attribute_id: AttributeId::Value as u32,
+        index_range: NumericRange::None,
+    }];
+    let res = session
+        .create_monitored_items(
+            sub_id,
+            TimestampsToReturn::Both,
+            vec![MonitoredItemCreateRequest {
+                item_to_monitor: ReadValueId {
+                    node_id: ObjectId::Server.into(),
+                    attribute_id: AttributeId::EventNotifier as u32,
+                    ..Default::default()
+                },
+                monitoring_mode: MonitoringMode::Reporting,
+                requested_parameters: MonitoringParameters {
+                    sampling_interval: 0.0,
+                    queue_size: 10,
+                    discard_oldest: true,
+                    filter: ExtensionObject::new(EventFilter {
+                        select_clauses: Some(select),
+                        where_clause: Default::default(),
+                    }),
+                    ..Default::default()
+                },
+            }],
+        )
+        .await
+        .unwrap();
+    assert_eq!(res[0].result.status_code, StatusCode::Good);
+
+    let r = session
+        .delete_nodes(&[DeleteNodesItem {
+            node_id: child,
+            delete_target_references: true,
+        }])
+        .await
+        .unwrap();
+    assert_eq!(r, vec![StatusCode::Good]);
+
+    // AuditDeleteNodesEventType = i=2093. Find it among the delivered events.
+    let audit_type = Variant::from(NodeId::new(0, 2093));
+    let mut found = false;
+    for _ in 0..5 {
+        let Ok(Some((_h, v))) = tokio::time::timeout(Duration::from_secs(3), events.recv()).await
+        else {
+            break;
+        };
+        if v.unwrap()[0] == audit_type {
+            found = true;
+            break;
+        }
+    }
+    assert!(
+        found,
+        "an AuditDeleteNodesEventType must be delivered after DeleteNodes"
+    );
+}
+
+/// Part 3/4 auditing: AddReferences by a client emits an AuditAddReferencesEventType (i=2095)
+/// from the Server node, recording the action for auditors.
+#[tokio::test]
+async fn add_references_emits_audit_event() {
+    use crate::utils::ChannelNotifications;
+    use opcua::types::{
+        EventFilter, ExtensionObject, MonitoredItemCreateRequest, MonitoringMode,
+        MonitoringParameters, NumericRange, SimpleAttributeOperand, Variant,
+    };
+
+    let (_tester, _nm, ns, parent, session) = setup_simple(true).await;
+    let source = NodeId::new(ns, "AuditAddReferenceSource");
+    let target = NodeId::new(ns, "AuditAddReferenceTarget");
+    let r = session
+        .add_nodes(&[
+            object_item(
+                parent.clone(),
+                ns,
+                "AuditAddReferenceSource",
+                source.clone().into(),
+            ),
+            object_item(parent, ns, "AuditAddReferenceTarget", target.clone().into()),
+        ])
+        .await
+        .unwrap();
+    assert_eq!(r[0].status_code, StatusCode::Good);
+    assert_eq!(r[1].status_code, StatusCode::Good);
+
+    let (notifs, _, mut events) = ChannelNotifications::new();
+    let sub_id = session
+        .create_subscription(Duration::from_millis(100), 100, 20, 1000, 0, true, notifs)
+        .await
+        .unwrap();
+    let select = vec![SimpleAttributeOperand {
+        type_definition_id: NodeId::new(0, 2041), // BaseEventType
+        browse_path: Some(vec![QualifiedName::new(0, "EventType")]),
+        attribute_id: AttributeId::Value as u32,
+        index_range: NumericRange::None,
+    }];
+    let res = session
+        .create_monitored_items(
+            sub_id,
+            TimestampsToReturn::Both,
+            vec![MonitoredItemCreateRequest {
+                item_to_monitor: ReadValueId {
+                    node_id: ObjectId::Server.into(),
+                    attribute_id: AttributeId::EventNotifier as u32,
+                    ..Default::default()
+                },
+                monitoring_mode: MonitoringMode::Reporting,
+                requested_parameters: MonitoringParameters {
+                    sampling_interval: 0.0,
+                    queue_size: 10,
+                    discard_oldest: true,
+                    filter: ExtensionObject::new(EventFilter {
+                        select_clauses: Some(select),
+                        where_clause: Default::default(),
+                    }),
+                    ..Default::default()
+                },
+            }],
+        )
+        .await
+        .unwrap();
+    assert_eq!(res[0].result.status_code, StatusCode::Good);
+
+    let r = session
+        .add_references(&[AddReferencesItem {
+            source_node_id: source,
+            reference_type_id: ReferenceTypeId::Organizes.into(),
+            is_forward: true,
+            target_server_uri: Default::default(),
+            target_node_id: target.into(),
+            target_node_class: NodeClass::Object,
+        }])
+        .await
+        .unwrap();
+    assert_eq!(r, vec![StatusCode::Good]);
+
+    // AuditAddReferencesEventType = i=2095. Find it among the delivered events.
+    let audit_type = Variant::from(NodeId::new(0, 2095));
+    let mut found = false;
+    for _ in 0..5 {
+        let Ok(Some((_h, v))) = tokio::time::timeout(Duration::from_secs(3), events.recv()).await
+        else {
+            break;
+        };
+        if v.unwrap()[0] == audit_type {
+            found = true;
+            break;
+        }
+    }
+    assert!(
+        found,
+        "an AuditAddReferencesEventType must be delivered after AddReferences"
+    );
+}
+
+/// Part 3/4 auditing: DeleteReferences by a client emits an AuditDeleteReferencesEventType
+/// (i=2097) from the Server node, recording the action for auditors.
+#[tokio::test]
+async fn delete_references_emits_audit_event() {
+    use crate::utils::ChannelNotifications;
+    use opcua::types::{
+        EventFilter, ExtensionObject, MonitoredItemCreateRequest, MonitoringMode,
+        MonitoringParameters, NumericRange, SimpleAttributeOperand, Variant,
+    };
+
+    let (_tester, _nm, ns, parent, session) = setup_simple(true).await;
+    let source = NodeId::new(ns, "AuditDeleteReferenceSource");
+    let target = NodeId::new(ns, "AuditDeleteReferenceTarget");
+    let r = session
+        .add_nodes(&[
+            object_item(
+                parent.clone(),
+                ns,
+                "AuditDeleteReferenceSource",
+                source.clone().into(),
+            ),
+            object_item(
+                parent,
+                ns,
+                "AuditDeleteReferenceTarget",
+                target.clone().into(),
+            ),
+        ])
+        .await
+        .unwrap();
+    assert_eq!(r[0].status_code, StatusCode::Good);
+    assert_eq!(r[1].status_code, StatusCode::Good);
+    let r = session
+        .add_references(&[AddReferencesItem {
+            source_node_id: source.clone(),
+            reference_type_id: ReferenceTypeId::Organizes.into(),
+            is_forward: true,
+            target_server_uri: Default::default(),
+            target_node_id: target.clone().into(),
+            target_node_class: NodeClass::Object,
+        }])
+        .await
+        .unwrap();
+    assert_eq!(r, vec![StatusCode::Good]);
+
+    let (notifs, _, mut events) = ChannelNotifications::new();
+    let sub_id = session
+        .create_subscription(Duration::from_millis(100), 100, 20, 1000, 0, true, notifs)
+        .await
+        .unwrap();
+    let select = vec![SimpleAttributeOperand {
+        type_definition_id: NodeId::new(0, 2041), // BaseEventType
+        browse_path: Some(vec![QualifiedName::new(0, "EventType")]),
+        attribute_id: AttributeId::Value as u32,
+        index_range: NumericRange::None,
+    }];
+    let res = session
+        .create_monitored_items(
+            sub_id,
+            TimestampsToReturn::Both,
+            vec![MonitoredItemCreateRequest {
+                item_to_monitor: ReadValueId {
+                    node_id: ObjectId::Server.into(),
+                    attribute_id: AttributeId::EventNotifier as u32,
+                    ..Default::default()
+                },
+                monitoring_mode: MonitoringMode::Reporting,
+                requested_parameters: MonitoringParameters {
+                    sampling_interval: 0.0,
+                    queue_size: 10,
+                    discard_oldest: true,
+                    filter: ExtensionObject::new(EventFilter {
+                        select_clauses: Some(select),
+                        where_clause: Default::default(),
+                    }),
+                    ..Default::default()
+                },
+            }],
+        )
+        .await
+        .unwrap();
+    assert_eq!(res[0].result.status_code, StatusCode::Good);
+
+    let r = session
+        .delete_references(&[DeleteReferencesItem {
+            source_node_id: source,
+            reference_type_id: ReferenceTypeId::Organizes.into(),
+            is_forward: true,
+            target_node_id: target.into(),
+            delete_bidirectional: true,
+        }])
+        .await
+        .unwrap();
+    assert_eq!(r, vec![StatusCode::Good]);
+
+    // AuditDeleteReferencesEventType = i=2097. Find it among the delivered events.
+    let audit_type = Variant::from(NodeId::new(0, 2097));
+    let mut found = false;
+    for _ in 0..5 {
+        let Ok(Some((_h, v))) = tokio::time::timeout(Duration::from_secs(3), events.recv()).await
+        else {
+            break;
+        };
+        if v.unwrap()[0] == audit_type {
+            found = true;
+            break;
+        }
+    }
+    assert!(
+        found,
+        "an AuditDeleteReferencesEventType must be delivered after DeleteReferences"
+    );
+}
+
 /// Feature 031 US5 (Part 3 §8.55 AddReference): AddReferences requires the AddReference permission on
 /// the source node. The anonymous session holds the Anonymous role (i=15644), not Operator (i=15680),
 /// so a source granting AddReference only to Operator denies it; an unpermissioned source allows it.

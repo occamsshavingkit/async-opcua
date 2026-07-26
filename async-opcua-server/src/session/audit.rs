@@ -260,6 +260,59 @@ impl ServerAuditEvent {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
+    #[cfg(feature = "history")]
+    fn history_update(
+        event_type: ObjectTypeId,
+        server_id: UAString,
+        client_audit_entry_id: UAString,
+        client_user_id: UAString,
+        status_code_id: StatusCode,
+        session_id: Option<NodeId>,
+        node_id: &NodeId,
+    ) -> Self {
+        let now = DateTime::now();
+        let status = status_code_id.is_good();
+        let severity = if status {
+            AUDIT_SUCCESS_SEVERITY
+        } else {
+            AUDIT_FAILURE_SEVERITY
+        };
+        let message = format!("HistoryUpdate on {node_id}");
+        let base = BaseEventType::new(
+            event_type,
+            ByteString::from(Uuid::new_v4().as_bytes().as_slice()),
+            message,
+            now,
+        )
+        .set_source_node(ObjectId::Server.into())
+        .set_source_name(UAString::from(AUDIT_SOURCE_NAME))
+        .set_severity(severity);
+
+        Self {
+            base,
+            action_time_stamp: now,
+            status,
+            server_id,
+            client_audit_entry_id,
+            client_user_id,
+            status_code_id,
+            session_id,
+            secure_channel_id: None,
+            user_identity_token: None,
+            method_id: None,
+            attribute_id: None,
+            client_certificate: None,
+            client_certificate_thumbprint: None,
+            revised_session_timeout: None,
+            request_handle: None,
+            request_type: None,
+            security_policy_uri: None,
+            security_mode: None,
+            requested_lifetime: None,
+        }
+    }
+
     fn with_secure_channel_id(mut self, secure_channel_id: u32) -> Self {
         self.secure_channel_id = Some(UAString::from(secure_channel_id.to_string()));
         self
@@ -795,6 +848,25 @@ pub(crate) fn dispatch_service_failure(
     dispatch_audit_event_if_enabled!(subscriptions, &event);
 }
 
+#[cfg(all(feature = "generated-address-space", feature = "events"))]
+pub(crate) fn dispatch_role_mapping_rule_changed_audit(
+    #[cfg(feature = "events")] subscriptions: &Arc<SubscriptionCache>,
+    info: &ServerInfo,
+    session_id: Option<NodeId>,
+    status: StatusCode,
+) {
+    let event = ServerAuditEvent::outcome(
+        ObjectTypeId::RoleMappingRuleChangedAuditEventType,
+        info.application_uri.clone(),
+        "RoleMappingRuleChanged",
+        UAString::null(),
+        UAString::null(),
+        status,
+        session_id,
+    );
+    dispatch_audit_event_if_enabled!(subscriptions, &event);
+}
+
 #[cfg(feature = "method-call")]
 pub(crate) fn dispatch_method_audit(
     #[cfg(feature = "events")] subscriptions: &Arc<SubscriptionCache>,
@@ -834,6 +906,53 @@ pub(crate) fn dispatch_write_audit(
         attribute_id,
     );
     dispatch_audit_event_if_enabled!(subscriptions, &event);
+}
+
+#[cfg(feature = "history")]
+pub(crate) fn dispatch_history_update_audit(
+    #[cfg(feature = "events")] subscriptions: &Arc<SubscriptionCache>,
+    info: &ServerInfo,
+    context: &AuditEventContext,
+    node_id: &NodeId,
+    status: StatusCode,
+    event_type: ObjectTypeId,
+) {
+    let event = ServerAuditEvent::history_update(
+        event_type,
+        info.application_uri.clone(),
+        context.client_audit_entry_id.clone(),
+        context.client_user_id.clone(),
+        status,
+        context.session_id.clone(),
+        node_id,
+    );
+    dispatch_audit_event_if_enabled!(subscriptions, &event);
+}
+
+/// Maps a [`HistoryUpdateDetails`] variant to the appropriate
+/// `AuditHistory*UpdateEventType` (OPC UA Part 11 §5.8).
+#[cfg(feature = "history")]
+pub(crate) fn history_update_event_type(
+    details: &crate::node_manager::HistoryUpdateDetails,
+) -> ObjectTypeId {
+    match details {
+        crate::node_manager::HistoryUpdateDetails::UpdateData(_)
+        | crate::node_manager::HistoryUpdateDetails::UpdateStructureData(_) => {
+            ObjectTypeId::AuditHistoryValueUpdateEventType
+        }
+        crate::node_manager::HistoryUpdateDetails::UpdateEvent(_) => {
+            ObjectTypeId::AuditHistoryEventUpdateEventType
+        }
+        crate::node_manager::HistoryUpdateDetails::DeleteRawModified(_) => {
+            ObjectTypeId::AuditHistoryRawModifyDeleteEventType
+        }
+        crate::node_manager::HistoryUpdateDetails::DeleteAtTime(_) => {
+            ObjectTypeId::AuditHistoryAtTimeDeleteEventType
+        }
+        crate::node_manager::HistoryUpdateDetails::DeleteEvent(_) => {
+            ObjectTypeId::AuditHistoryEventDeleteEventType
+        }
+    }
 }
 
 pub(crate) fn dispatch_response_failure(

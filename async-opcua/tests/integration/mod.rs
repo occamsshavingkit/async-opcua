@@ -35,6 +35,7 @@ mod time_sync;
 mod triggering;
 mod walk_runner;
 mod write;
+mod write_service;
 #[cfg(feature = "wss")]
 mod wss;
 

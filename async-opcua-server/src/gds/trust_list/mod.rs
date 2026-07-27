@@ -172,6 +172,7 @@ pub struct TrustListMethodHandler {
     push_registry: Arc<GdsPushRegistry>,
     handles: TrustListHandleRegistry,
     certificate_group: CertificateGroup,
+    #[cfg_attr(not(feature = "companion-gds"), allow(dead_code))]
     node_ids: TrustListNodeIds,
 }
 

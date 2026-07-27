@@ -60,7 +60,7 @@ pub(crate) mod like_match;
 pub mod pull_methods;
 /// Push model method callbacks for certificate signing requests.
 pub mod push_methods;
-/// TrustList method callbacks for the `DefaultApplicationGroup` CertificateGroup.
+/// TrustList method callbacks for the three standard CertificateGroups.
 pub mod trust_list;
 
 /// Registries backing the standard GDS Push-model method callbacks.
@@ -68,7 +68,8 @@ pub mod trust_list;
 pub struct GdsMethodRegistries {
     /// Registry used by push-model (`ServerConfigurationType`) callbacks.
     pub push_methods: Arc<GdsPushRegistry>,
-    /// Handler backing the `DefaultApplicationGroup.TrustList` callbacks.
+    /// Application-group handler retained for API compatibility; registration also wires the
+    /// HTTPS and user-token group handlers.
     #[cfg(feature = "generated-address-space")]
     pub trust_list: Arc<TrustListMethodHandler>,
 }

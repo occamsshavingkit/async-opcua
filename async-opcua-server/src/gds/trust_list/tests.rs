@@ -1,5 +1,5 @@
 use opcua_core::sync::RwLock;
-use opcua_crypto::{SecurityPolicy, X509Data};
+use opcua_crypto::{CertificateGroup, SecurityPolicy, X509Data};
 use opcua_types::{AnonymousIdentityToken, ApplicationDescription, MessageSecurityMode, UAString};
 
 use crate::{
@@ -22,6 +22,39 @@ fn method_ids_match_the_verified_standard_nodeset() {
     assert_eq!(close_and_update_method_id(), NodeId::new(0, 12666));
     assert_eq!(add_certificate_method_id(), NodeId::new(0, 12668));
     assert_eq!(remove_certificate_method_id(), NodeId::new(0, 12670));
+
+    assert_eq!(
+        TrustListNodeIds::for_group(CertificateGroup::DefaultHttps),
+        TrustListNodeIds {
+            object: 14089,
+            open: 14095,
+            close: 14098,
+            read: 14100,
+            write: 14103,
+            get_position: 14105,
+            set_position: 14108,
+            open_with_masks: 14111,
+            close_and_update: 14114,
+            add_certificate: 14117,
+            remove_certificate: 14119,
+        }
+    );
+    assert_eq!(
+        TrustListNodeIds::for_group(CertificateGroup::DefaultUserToken),
+        TrustListNodeIds {
+            object: 14123,
+            open: 14129,
+            close: 14132,
+            read: 14134,
+            write: 14137,
+            get_position: 14139,
+            set_position: 14142,
+            open_with_masks: 14145,
+            close_and_update: 14148,
+            add_certificate: 14151,
+            remove_certificate: 14153,
+        }
+    );
 }
 
 fn unique_test_pki_dir() -> std::path::PathBuf {
@@ -105,6 +138,13 @@ fn self_signed_cert_with_cn(cn: &str) -> X509 {
 
 fn handler(push_registry: Arc<GdsPushRegistry>) -> TrustListMethodHandler {
     TrustListMethodHandler::new(push_registry)
+}
+
+fn handler_for_group(
+    push_registry: Arc<GdsPushRegistry>,
+    certificate_group: CertificateGroup,
+) -> TrustListMethodHandler {
+    TrustListMethodHandler::new_for_group(push_registry, certificate_group)
 }
 
 #[tokio::test]
@@ -317,6 +357,32 @@ async fn add_certificate_immediately_adds_a_trusted_certificate() {
 }
 
 #[tokio::test]
+async fn add_certificate_to_default_https_group_uses_its_own_trust_store() {
+    let (context, _handle) = security_admin_request_context(MessageSecurityMode::SignAndEncrypt);
+    let h = handler_for_group(
+        Arc::new(GdsPushRegistry::default()),
+        CertificateGroup::DefaultHttps,
+    );
+    let cert = self_signed_cert_with_cn("https-added-directly");
+    let der = cert.to_der().expect("cert should encode");
+
+    h.handle_add_certificate(
+        &context,
+        &[Variant::from(ByteString::from(der)), Variant::from(true)],
+    )
+    .expect("HTTPS add certificate should succeed");
+
+    let store = context.info.certificate_store.read();
+    assert_eq!(
+        store
+            .read_trusted_certs_for_group(CertificateGroup::DefaultHttps)
+            .len(),
+        1
+    );
+    assert!(store.read_trusted_certs().is_empty());
+}
+
+#[tokio::test]
 async fn add_certificate_rejects_is_trusted_certificate_false() {
     let (context, _handle) = security_admin_request_context(MessageSecurityMode::SignAndEncrypt);
     let h = handler(Arc::new(GdsPushRegistry::default()));
@@ -427,7 +493,7 @@ async fn add_certificate_rejects_while_write_transaction_open_elsewhere() {
         private_key_pem: None,
         certificate_group_id: None,
         certificate_type_id: None,
-        pending_trust_list: None,
+        pending_trust_lists: std::collections::HashMap::new(),
     });
 
     let cert = self_signed_cert_with_cn("blocked-add");

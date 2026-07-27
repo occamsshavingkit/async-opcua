@@ -47,6 +47,42 @@ const TRUSTED_CRLS_DIR: &str = "trusted_crls";
 const ISSUER_CRLS_DIR: &str = "issuer_crls";
 /// The directory holding rejected certificates
 const REJECTED_CERTS_DIR: &str = "rejected";
+/// The PKI subdirectory for the HTTPS CertificateGroup.
+const HTTPS_GROUP_DIR: &str = "https";
+/// The PKI subdirectory for the user-token CertificateGroup.
+const USER_TOKEN_GROUP_DIR: &str = "user_token";
+
+/// The standard CertificateGroups whose TrustLists are exposed by `ServerConfiguration`.
+///
+/// The application group retains the historical PKI layout directly under the configured PKI
+/// root. The HTTPS and user-token groups use dedicated subdirectories so their trust anchors and
+/// revocation lists cannot affect application-instance certificate validation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum CertificateGroup {
+    /// `ServerConfiguration.CertificateGroups.DefaultApplicationGroup`.
+    DefaultApplication,
+    /// `ServerConfiguration.CertificateGroups.DefaultHttpsGroup`.
+    DefaultHttps,
+    /// `ServerConfiguration.CertificateGroups.DefaultUserTokenGroup`.
+    DefaultUserToken,
+}
+
+impl CertificateGroup {
+    /// All standard CertificateGroups in deterministic order.
+    pub const ALL: [Self; 3] = [
+        Self::DefaultApplication,
+        Self::DefaultHttps,
+        Self::DefaultUserToken,
+    ];
+
+    const fn directory_name(self) -> Option<&'static str> {
+        match self {
+            Self::DefaultApplication => None,
+            Self::DefaultHttps => Some(HTTPS_GROUP_DIR),
+            Self::DefaultUserToken => Some(USER_TOKEN_GROUP_DIR),
+        }
+    }
+}
 
 #[derive(Clone, Copy)]
 enum IncomingCertificateKind {
@@ -711,18 +747,23 @@ impl CertificateStore {
     /// A string description of any failure
     ///
     pub fn ensure_pki_path(&self) -> Result<(), String> {
-        let mut path = self.pki_path.clone();
-        let subdirs = [
+        let mut rejected_path = self.pki_path.clone();
+        rejected_path.push(REJECTED_CERTS_DIR);
+        CertificateStore::ensure_dir(&rejected_path)?;
+
+        let trust_list_subdirs = [
             TRUSTED_CERTS_DIR,
-            REJECTED_CERTS_DIR,
             ISSUER_CERTS_DIR,
             TRUSTED_CRLS_DIR,
             ISSUER_CRLS_DIR,
         ];
-        for subdir in &subdirs {
-            path.push(subdir);
-            CertificateStore::ensure_dir(&path)?;
-            path.pop();
+        for certificate_group in CertificateGroup::ALL {
+            let mut group_path = self.certificate_group_dir(certificate_group);
+            for subdir in &trust_list_subdirs {
+                group_path.push(subdir);
+                CertificateStore::ensure_dir(&group_path)?;
+                group_path.pop();
+            }
         }
         Ok(())
     }
@@ -767,42 +808,80 @@ impl CertificateStore {
         path
     }
 
+    fn certificate_group_dir(&self, certificate_group: CertificateGroup) -> PathBuf {
+        let mut path = self.pki_path.clone();
+        if let Some(directory_name) = certificate_group.directory_name() {
+            path.push(directory_name);
+        }
+        path
+    }
+
     /// Get the path to the trusted certs dir
     pub fn trusted_certs_dir(&self) -> PathBuf {
-        let mut path = PathBuf::from(&self.pki_path);
+        self.trusted_certs_dir_for_group(CertificateGroup::DefaultApplication)
+    }
+
+    /// Get the path to the trusted certificates for `certificate_group`.
+    pub fn trusted_certs_dir_for_group(&self, certificate_group: CertificateGroup) -> PathBuf {
+        let mut path = self.certificate_group_dir(certificate_group);
         path.push(TRUSTED_CERTS_DIR);
         path
     }
 
     /// Get the path to the issuer certs dir
     pub fn issuer_certs_dir(&self) -> PathBuf {
-        let mut path = PathBuf::from(&self.pki_path);
+        self.issuer_certs_dir_for_group(CertificateGroup::DefaultApplication)
+    }
+
+    /// Get the path to the issuer certificates for `certificate_group`.
+    pub fn issuer_certs_dir_for_group(&self, certificate_group: CertificateGroup) -> PathBuf {
+        let mut path = self.certificate_group_dir(certificate_group);
         path.push(ISSUER_CERTS_DIR);
         path
     }
 
     /// Get the path to the trusted CRLs dir
     pub fn trusted_crls_dir(&self) -> PathBuf {
-        let mut path = PathBuf::from(&self.pki_path);
+        self.trusted_crls_dir_for_group(CertificateGroup::DefaultApplication)
+    }
+
+    /// Get the path to trusted-certificate CRLs for `certificate_group`.
+    pub fn trusted_crls_dir_for_group(&self, certificate_group: CertificateGroup) -> PathBuf {
+        let mut path = self.certificate_group_dir(certificate_group);
         path.push(TRUSTED_CRLS_DIR);
         path
     }
 
     /// Get the path to the issuer CRLs dir
     pub fn issuer_crls_dir(&self) -> PathBuf {
-        let mut path = PathBuf::from(&self.pki_path);
+        self.issuer_crls_dir_for_group(CertificateGroup::DefaultApplication)
+    }
+
+    /// Get the path to issuer-certificate CRLs for `certificate_group`.
+    pub fn issuer_crls_dir_for_group(&self, certificate_group: CertificateGroup) -> PathBuf {
+        let mut path = self.certificate_group_dir(certificate_group);
         path.push(ISSUER_CRLS_DIR);
         path
     }
 
     /// Read all trusted certificates from the store.
     pub fn read_trusted_certs(&self) -> Vec<X509> {
-        CertificateStore::read_cert_dir(&self.trusted_certs_dir())
+        self.read_trusted_certs_for_group(CertificateGroup::DefaultApplication)
+    }
+
+    /// Read all trusted certificates for `certificate_group`.
+    pub fn read_trusted_certs_for_group(&self, certificate_group: CertificateGroup) -> Vec<X509> {
+        CertificateStore::read_cert_dir(&self.trusted_certs_dir_for_group(certificate_group))
     }
 
     /// Read all issuer certificates from the store.
     pub fn read_issuer_certs(&self) -> Vec<X509> {
-        CertificateStore::read_cert_dir(&self.issuer_certs_dir())
+        self.read_issuer_certs_for_group(CertificateGroup::DefaultApplication)
+    }
+
+    /// Read all issuer certificates for `certificate_group`.
+    pub fn read_issuer_certs_for_group(&self, certificate_group: CertificateGroup) -> Vec<X509> {
+        CertificateStore::read_cert_dir(&self.issuer_certs_dir_for_group(certificate_group))
     }
 
     /// Read all rejected certificates from the store (OPC UA Part 12 §7.10.12 GetRejectedList).
@@ -812,23 +891,53 @@ impl CertificateStore {
 
     /// Read all trusted CRLs from the store.
     pub fn read_trusted_crls(&self) -> Vec<CertificateList> {
-        CertificateStore::read_crl_dir(&self.trusted_crls_dir())
+        self.read_trusted_crls_for_group(CertificateGroup::DefaultApplication)
+    }
+
+    fn read_trusted_crls_for_group(
+        &self,
+        certificate_group: CertificateGroup,
+    ) -> Vec<CertificateList> {
+        CertificateStore::read_crl_dir(&self.trusted_crls_dir_for_group(certificate_group))
     }
 
     /// Read all issuer CRLs from the store.
     pub fn read_issuer_crls(&self) -> Vec<CertificateList> {
-        CertificateStore::read_crl_dir(&self.issuer_crls_dir())
+        self.read_issuer_crls_for_group(CertificateGroup::DefaultApplication)
+    }
+
+    fn read_issuer_crls_for_group(
+        &self,
+        certificate_group: CertificateGroup,
+    ) -> Vec<CertificateList> {
+        CertificateStore::read_crl_dir(&self.issuer_crls_dir_for_group(certificate_group))
     }
 
     /// Read all trusted CRLs from the store as raw DER bytes (avoids exposing the `x509_cert`
     /// crate's `CertificateList` type across the crate boundary).
     pub fn read_trusted_crls_der(&self) -> Vec<Vec<u8>> {
-        Self::crls_to_der(self.read_trusted_crls())
+        self.read_trusted_crls_der_for_group(CertificateGroup::DefaultApplication)
+    }
+
+    /// Read all trusted CRLs for `certificate_group` as raw DER bytes.
+    pub fn read_trusted_crls_der_for_group(
+        &self,
+        certificate_group: CertificateGroup,
+    ) -> Vec<Vec<u8>> {
+        Self::crls_to_der(self.read_trusted_crls_for_group(certificate_group))
     }
 
     /// Read all issuer CRLs from the store as raw DER bytes.
     pub fn read_issuer_crls_der(&self) -> Vec<Vec<u8>> {
-        Self::crls_to_der(self.read_issuer_crls())
+        self.read_issuer_crls_der_for_group(CertificateGroup::DefaultApplication)
+    }
+
+    /// Read all issuer CRLs for `certificate_group` as raw DER bytes.
+    pub fn read_issuer_crls_der_for_group(
+        &self,
+        certificate_group: CertificateGroup,
+    ) -> Vec<Vec<u8>> {
+        Self::crls_to_der(self.read_issuer_crls_for_group(certificate_group))
     }
 
     fn crls_to_der(crls: Vec<CertificateList>) -> Vec<Vec<u8>> {
@@ -859,7 +968,20 @@ impl CertificateStore {
     /// A string description of any failure
     ///
     pub fn store_trusted_cert(&self, cert: &X509) -> Result<PathBuf, String> {
-        self.store_cert_in_dir(cert, &self.trusted_certs_dir())
+        self.store_trusted_cert_for_group(CertificateGroup::DefaultApplication, cert)
+    }
+
+    /// Writes a trusted certificate to `certificate_group`'s TrustList.
+    ///
+    /// # Errors
+    ///
+    /// Returns a description if the certificate cannot be persisted.
+    pub fn store_trusted_cert_for_group(
+        &self,
+        certificate_group: CertificateGroup,
+        cert: &X509,
+    ) -> Result<PathBuf, String> {
+        self.store_cert_in_dir(cert, &self.trusted_certs_dir_for_group(certificate_group))
     }
 
     /// Writes a cert to the issuer directory. If the write succeeds, the function
@@ -870,7 +992,20 @@ impl CertificateStore {
     /// A string description of any failure
     ///
     pub fn store_issuer_cert(&self, cert: &X509) -> Result<PathBuf, String> {
-        self.store_cert_in_dir(cert, &self.issuer_certs_dir())
+        self.store_issuer_cert_for_group(CertificateGroup::DefaultApplication, cert)
+    }
+
+    /// Writes an issuer certificate to `certificate_group`'s TrustList.
+    ///
+    /// # Errors
+    ///
+    /// Returns a description if the certificate cannot be persisted.
+    pub fn store_issuer_cert_for_group(
+        &self,
+        certificate_group: CertificateGroup,
+        cert: &X509,
+    ) -> Result<PathBuf, String> {
+        self.store_cert_in_dir(cert, &self.issuer_certs_dir_for_group(certificate_group))
     }
 
     fn store_cert_in_dir(&self, cert: &X509, dir: &Path) -> Result<PathBuf, String> {
@@ -890,9 +1025,22 @@ impl CertificateStore {
     /// A string description of any failure
     ///
     pub fn remove_trusted_cert(&self, thumbprint: &crate::Thumbprint) -> Result<bool, String> {
+        self.remove_trusted_cert_for_group(CertificateGroup::DefaultApplication, thumbprint)
+    }
+
+    /// Removes a trusted certificate and its associated CRLs from `certificate_group`.
+    ///
+    /// # Errors
+    ///
+    /// Returns a description if a matching certificate cannot be removed.
+    pub fn remove_trusted_cert_for_group(
+        &self,
+        certificate_group: CertificateGroup,
+        thumbprint: &crate::Thumbprint,
+    ) -> Result<bool, String> {
         self.remove_cert_and_crls(
-            &self.trusted_certs_dir(),
-            &self.trusted_crls_dir(),
+            &self.trusted_certs_dir_for_group(certificate_group),
+            &self.trusted_crls_dir_for_group(certificate_group),
             thumbprint,
         )
     }
@@ -905,9 +1053,22 @@ impl CertificateStore {
     /// A string description of any failure
     ///
     pub fn remove_issuer_cert(&self, thumbprint: &crate::Thumbprint) -> Result<bool, String> {
+        self.remove_issuer_cert_for_group(CertificateGroup::DefaultApplication, thumbprint)
+    }
+
+    /// Removes an issuer certificate and its associated CRLs from `certificate_group`.
+    ///
+    /// # Errors
+    ///
+    /// Returns a description if a matching certificate cannot be removed.
+    pub fn remove_issuer_cert_for_group(
+        &self,
+        certificate_group: CertificateGroup,
+        thumbprint: &crate::Thumbprint,
+    ) -> Result<bool, String> {
         self.remove_cert_and_crls(
-            &self.issuer_certs_dir(),
-            &self.issuer_crls_dir(),
+            &self.issuer_certs_dir_for_group(certificate_group),
+            &self.issuer_crls_dir_for_group(certificate_group),
             thumbprint,
         )
     }
@@ -986,7 +1147,20 @@ impl CertificateStore {
     /// A string description of any failure
     ///
     pub fn store_trusted_crl(&self, der: &[u8]) -> Result<PathBuf, String> {
-        Self::store_crl_der(der, &self.trusted_crls_dir())
+        self.store_trusted_crl_for_group(CertificateGroup::DefaultApplication, der)
+    }
+
+    /// Writes a trusted CRL to `certificate_group`'s TrustList.
+    ///
+    /// # Errors
+    ///
+    /// Returns a description if `der` is invalid or cannot be persisted.
+    pub fn store_trusted_crl_for_group(
+        &self,
+        certificate_group: CertificateGroup,
+        der: &[u8],
+    ) -> Result<PathBuf, String> {
+        Self::store_crl_der(der, &self.trusted_crls_dir_for_group(certificate_group))
     }
 
     /// Validates `der` as a well-formed CRL and writes it to the issuer CRLs directory, named by
@@ -998,7 +1172,20 @@ impl CertificateStore {
     /// A string description of any failure
     ///
     pub fn store_issuer_crl(&self, der: &[u8]) -> Result<PathBuf, String> {
-        Self::store_crl_der(der, &self.issuer_crls_dir())
+        self.store_issuer_crl_for_group(CertificateGroup::DefaultApplication, der)
+    }
+
+    /// Writes an issuer CRL to `certificate_group`'s TrustList.
+    ///
+    /// # Errors
+    ///
+    /// Returns a description if `der` is invalid or cannot be persisted.
+    pub fn store_issuer_crl_for_group(
+        &self,
+        certificate_group: CertificateGroup,
+        der: &[u8],
+    ) -> Result<PathBuf, String> {
+        Self::store_crl_der(der, &self.issuer_crls_dir_for_group(certificate_group))
     }
 
     fn store_crl_der(der: &[u8], dir: &Path) -> Result<PathBuf, String> {
@@ -1030,10 +1217,29 @@ impl CertificateStore {
     /// A string description of any failure
     ///
     pub fn replace_trusted_certs(&self, certs_der: &[Vec<u8>]) -> Result<(), String> {
-        Self::replace_list(&self.trusted_certs_dir(), certs_der, |der| {
-            let cert = X509::from_der(der).map_err(|e| format!("Not a valid certificate: {e}"))?;
-            self.store_trusted_cert(&cert).map(|_| ())
-        })
+        self.replace_trusted_certs_for_group(CertificateGroup::DefaultApplication, certs_der)
+    }
+
+    /// Replaces the trusted-certificate list for `certificate_group`.
+    ///
+    /// # Errors
+    ///
+    /// Returns a description if a supplied certificate is invalid or cannot be persisted.
+    pub fn replace_trusted_certs_for_group(
+        &self,
+        certificate_group: CertificateGroup,
+        certs_der: &[Vec<u8>],
+    ) -> Result<(), String> {
+        Self::replace_list(
+            &self.trusted_certs_dir_for_group(certificate_group),
+            certs_der,
+            |der| {
+                let cert =
+                    X509::from_der(der).map_err(|e| format!("Not a valid certificate: {e}"))?;
+                self.store_trusted_cert_for_group(certificate_group, &cert)
+                    .map(|_| ())
+            },
+        )
     }
 
     /// Replaces the entire issuer-certificates list with `certs_der`. See
@@ -1044,10 +1250,29 @@ impl CertificateStore {
     /// A string description of any failure
     ///
     pub fn replace_issuer_certs(&self, certs_der: &[Vec<u8>]) -> Result<(), String> {
-        Self::replace_list(&self.issuer_certs_dir(), certs_der, |der| {
-            let cert = X509::from_der(der).map_err(|e| format!("Not a valid certificate: {e}"))?;
-            self.store_issuer_cert(&cert).map(|_| ())
-        })
+        self.replace_issuer_certs_for_group(CertificateGroup::DefaultApplication, certs_der)
+    }
+
+    /// Replaces the issuer-certificate list for `certificate_group`.
+    ///
+    /// # Errors
+    ///
+    /// Returns a description if a supplied certificate is invalid or cannot be persisted.
+    pub fn replace_issuer_certs_for_group(
+        &self,
+        certificate_group: CertificateGroup,
+        certs_der: &[Vec<u8>],
+    ) -> Result<(), String> {
+        Self::replace_list(
+            &self.issuer_certs_dir_for_group(certificate_group),
+            certs_der,
+            |der| {
+                let cert =
+                    X509::from_der(der).map_err(|e| format!("Not a valid certificate: {e}"))?;
+                self.store_issuer_cert_for_group(certificate_group, &cert)
+                    .map(|_| ())
+            },
+        )
     }
 
     /// Replaces the entire trusted-CRLs list with `crls_der`. See
@@ -1058,9 +1283,27 @@ impl CertificateStore {
     /// A string description of any failure
     ///
     pub fn replace_trusted_crls(&self, crls_der: &[Vec<u8>]) -> Result<(), String> {
-        Self::replace_list(&self.trusted_crls_dir(), crls_der, |der| {
-            self.store_trusted_crl(der).map(|_| ())
-        })
+        self.replace_trusted_crls_for_group(CertificateGroup::DefaultApplication, crls_der)
+    }
+
+    /// Replaces the trusted-CRL list for `certificate_group`.
+    ///
+    /// # Errors
+    ///
+    /// Returns a description if a supplied CRL is invalid or cannot be persisted.
+    pub fn replace_trusted_crls_for_group(
+        &self,
+        certificate_group: CertificateGroup,
+        crls_der: &[Vec<u8>],
+    ) -> Result<(), String> {
+        Self::replace_list(
+            &self.trusted_crls_dir_for_group(certificate_group),
+            crls_der,
+            |der| {
+                self.store_trusted_crl_for_group(certificate_group, der)
+                    .map(|_| ())
+            },
+        )
     }
 
     /// Replaces the entire issuer-CRLs list with `crls_der`. See
@@ -1071,9 +1314,27 @@ impl CertificateStore {
     /// A string description of any failure
     ///
     pub fn replace_issuer_crls(&self, crls_der: &[Vec<u8>]) -> Result<(), String> {
-        Self::replace_list(&self.issuer_crls_dir(), crls_der, |der| {
-            self.store_issuer_crl(der).map(|_| ())
-        })
+        self.replace_issuer_crls_for_group(CertificateGroup::DefaultApplication, crls_der)
+    }
+
+    /// Replaces the issuer-CRL list for `certificate_group`.
+    ///
+    /// # Errors
+    ///
+    /// Returns a description if a supplied CRL is invalid or cannot be persisted.
+    pub fn replace_issuer_crls_for_group(
+        &self,
+        certificate_group: CertificateGroup,
+        crls_der: &[Vec<u8>],
+    ) -> Result<(), String> {
+        Self::replace_list(
+            &self.issuer_crls_dir_for_group(certificate_group),
+            crls_der,
+            |der| {
+                self.store_issuer_crl_for_group(certificate_group, der)
+                    .map(|_| ())
+            },
+        )
     }
 
     /// Clears `dir` and re-populates it by calling `store_one` for each item in `items_der`,

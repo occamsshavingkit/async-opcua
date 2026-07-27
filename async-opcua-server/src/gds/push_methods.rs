@@ -6,10 +6,10 @@
 //! `GetCertificates` are Optional per Table 87 and are not wired here: their target nodes are
 //! absent from the standard nodeset this project's code generator currently consumes.
 
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use opcua_core::sync::RwLock;
-use opcua_crypto::{gds_reload, PrivateKey, X509};
+use opcua_crypto::{gds_reload, CertificateGroup, PrivateKey, X509};
 use opcua_types::{
     ByteString, LocalizedText, MessageSecurityMode, NodeId, StatusCode, TrustListDataType, Variant,
 };
@@ -30,7 +30,7 @@ const RESET_TO_SERVER_DEFAULTS_METHOD_ID: u32 = 25709;
 /// `ApplyChanges`/`CancelChanges` (Part 12 §7.10.2 transaction lifecycle). This server supports
 /// exactly one active transaction at a time, shared between `UpdateCertificate`
 /// (`certificate_der`/`private_key_pem`) and the TrustList's `CloseAndUpdate`
-/// (`pending_trust_list`, see `gds::trust_list` and specs/102-gds-push-trustlist/data-model.md).
+/// (`pending_trust_lists`, see `gds::trust_list` and specs/102-gds-push-trustlist/data-model.md).
 #[derive(Clone)]
 pub(super) struct PushTransaction {
     pub(super) owning_session_id: u32,
@@ -38,7 +38,7 @@ pub(super) struct PushTransaction {
     pub(super) private_key_pem: Option<Vec<u8>>,
     pub(super) certificate_group_id: Option<NodeId>,
     pub(super) certificate_type_id: Option<NodeId>,
-    pub(super) pending_trust_list: Option<TrustListDataType>,
+    pub(super) pending_trust_lists: HashMap<CertificateGroup, TrustListDataType>,
 }
 
 /// In-memory state backing the GDS push model method callbacks.
@@ -158,12 +158,12 @@ impl GdsPushMethodHandler {
 
         {
             let mut transaction = self.registry.transaction.write();
-            let pending_trust_list = match &*transaction {
+            let pending_trust_lists = match &*transaction {
                 Some(existing) if existing.owning_session_id != context.session_id() => {
                     return Err(StatusCode::BadTransactionPending);
                 }
-                Some(existing) => existing.pending_trust_list.clone(),
-                None => None,
+                Some(existing) => existing.pending_trust_lists.clone(),
+                None => HashMap::new(),
             };
             *transaction = Some(PushTransaction {
                 owning_session_id: context.session_id(),
@@ -171,7 +171,7 @@ impl GdsPushMethodHandler {
                 private_key_pem,
                 certificate_group_id: Some(certificate_group_id),
                 certificate_type_id: Some(certificate_type_id),
-                pending_trust_list,
+                pending_trust_lists,
             });
         }
 
@@ -210,7 +210,7 @@ impl GdsPushMethodHandler {
             .clone()
             .zip(staged.certificate_type_id.clone());
         #[cfg(feature = "events")]
-        let changed_trust_list = staged.pending_trust_list.is_some();
+        let changed_trust_lists: Vec<_> = staged.pending_trust_lists.keys().copied().collect();
 
         if let Some(certificate_der) = staged.certificate_der {
             let store = context.info.certificate_store.read();
@@ -235,9 +235,9 @@ impl GdsPushMethodHandler {
             }
         }
 
-        if let Some(trust_list) = staged.pending_trust_list {
+        for (certificate_group, trust_list) in staged.pending_trust_lists {
             let store = context.info.certificate_store.read();
-            super::trust_list::apply_trust_list_update(&store, &trust_list)
+            super::trust_list::apply_trust_list_update(&store, certificate_group, &trust_list)
                 .map_err(|_| StatusCode::BadInternalError)?;
         }
 
@@ -252,12 +252,12 @@ impl GdsPushMethodHandler {
             );
         }
         #[cfg(feature = "events")]
-        if changed_trust_list {
+        for certificate_group in changed_trust_lists {
             super::audit::trust_list_updated(
                 context,
                 server_configuration_object_id(),
                 apply_changes_method_id(),
-                super::trust_list::trust_list_object_id(),
+                super::trust_list::trust_list_object_id_for_group(certificate_group),
                 "ApplyChanges",
             );
         }
@@ -814,13 +814,16 @@ mod tests {
             private_key_pem: None,
             certificate_group_id: None,
             certificate_type_id: None,
-            pending_trust_list: Some(TrustListDataType {
-                specified_lists: 1, // TrustListMasks::TrustedCertificates
-                trusted_certificates: Some(vec![ByteString::from(new_trusted_der)]),
-                trusted_crls: None,
-                issuer_certificates: None,
-                issuer_crls: None,
-            }),
+            pending_trust_lists: HashMap::from([(
+                CertificateGroup::DefaultApplication,
+                TrustListDataType {
+                    specified_lists: 1, // TrustListMasks::TrustedCertificates
+                    trusted_certificates: Some(vec![ByteString::from(new_trusted_der)]),
+                    trusted_crls: None,
+                    issuer_certificates: None,
+                    issuer_crls: None,
+                },
+            )]),
         });
 
         handler
@@ -851,13 +854,18 @@ mod tests {
             private_key_pem: None,
             certificate_group_id: None,
             certificate_type_id: None,
-            pending_trust_list: Some(TrustListDataType {
-                specified_lists: 1,
-                trusted_certificates: Some(vec![ByteString::from(self_signed_cert_der(&context))]),
-                trusted_crls: None,
-                issuer_certificates: None,
-                issuer_crls: None,
-            }),
+            pending_trust_lists: HashMap::from([(
+                CertificateGroup::DefaultApplication,
+                TrustListDataType {
+                    specified_lists: 1,
+                    trusted_certificates: Some(vec![ByteString::from(self_signed_cert_der(
+                        &context,
+                    ))]),
+                    trusted_crls: None,
+                    issuer_certificates: None,
+                    issuer_crls: None,
+                },
+            )]),
         });
 
         handler
@@ -883,7 +891,10 @@ mod tests {
             private_key_pem: None,
             certificate_group_id: None,
             certificate_type_id: None,
-            pending_trust_list: Some(TrustListDataType::default()),
+            pending_trust_lists: HashMap::from([(
+                CertificateGroup::DefaultApplication,
+                TrustListDataType::default(),
+            )]),
         });
 
         let (context2_base, _h2) =

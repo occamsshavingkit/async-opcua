@@ -255,6 +255,9 @@ pub struct DataSetReaderConfig {
         serialize_with = "serialize_node_ids"
     )]
     pub subscribed_variables: Vec<NodeId>,
+    /// MQTT broker transport settings, when configured for this reader.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mqtt_transport: Option<crate::MqttReaderTransportConfig>,
 }
 
 impl Default for DataSetReaderConfig {
@@ -276,6 +279,7 @@ impl Default for DataSetReaderConfig {
             message_kind: DataSetMessageKind::KeyFrame,
             target_variables: Vec::new(),
             subscribed_variables: Vec::new(),
+            mqtt_transport: None,
         }
     }
 }

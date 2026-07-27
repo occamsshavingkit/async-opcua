@@ -3,6 +3,8 @@
 /// Configuration structures for OPC UA PubSub.
 pub mod config;
 
+mod reader_transport;
+
 /// Codec modules for UADP and JSON payloads.
 pub mod codec;
 
@@ -44,6 +46,7 @@ pub use config_methods::{
     register_pubsub_config_methods, register_pubsub_config_methods_with_updates,
     PubSubConfigManager, PubSubConfigUpdateCallback,
 };
+pub use reader_transport::{MqttDeliveryGuarantee, MqttReaderTransportConfig};
 
 pub use engine::{DatagramQueue, PubSubEngine, TransportKind, PUBSUB_DATAGRAM_QUEUE_CAPACITY};
 pub use fx::{ConnectionManager, EstablishedConnection};

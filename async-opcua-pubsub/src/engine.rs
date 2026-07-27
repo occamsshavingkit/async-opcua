@@ -19,11 +19,14 @@ use crate::{
     },
     transport::{
         amqp::AmqpPublisher,
-        mqtt::MqttPublisher,
+        mqtt::{
+            quality_of_service, start_mqtt_subscriber_with_config, MqttPublisher,
+            MqttSubscriberConfig,
+        },
         udp::{bind_subscriber_socket, UdpPublisher, UdpSubscriberEndpoint},
         websocket::WebSocketPublisher,
     },
-    PubSubConnectionConfig, PubSubPublisher,
+    MqttDeliveryGuarantee, PubSubConnectionConfig, PubSubPublisher,
 };
 
 /// Supported OPC UA PubSub transport mappings.
@@ -655,11 +658,6 @@ impl PubSubEngine {
     /// logged and retried with backoff inside the subscriber task, so they
     /// never crash the engine or abort the remaining readers.
     ///
-    /// TODO(config): the topic filter should come from the reader's
-    /// `BrokerDataSetReaderTransportDataType.QueueName` (§6.4.1.6.4) once the
-    /// config model exposes it. Until then it is derived from the reader's
-    /// writer-group filter to match the publisher's
-    /// `opcua/telemetry/{writer_group_id}` topic convention.
     fn spawn_mqtt_subscribers(
         &self,
         connection: PubSubConnectionConfig,
@@ -673,10 +671,18 @@ impl PubSubEngine {
         for reader_group in &connection.reader_groups {
             for reader in &reader_group.dataset_readers {
                 let reader_id = reader.dataset_reader_id;
-                let topic_filter = match reader.writer_group_id {
-                    Some(writer_group_id) => format!("opcua/telemetry/{writer_group_id}"),
-                    None => format!("opcua/telemetry/{}", reader_group.reader_group_id),
-                };
+                let topic_filter = reader.mqtt_topic_filter(reader_group.reader_group_id);
+                let delivery_guarantee = reader
+                    .mqtt_transport
+                    .as_ref()
+                    .map_or(MqttDeliveryGuarantee::AtLeastOnce, |transport| {
+                        transport.delivery_guarantee
+                    });
+                let subscriber_config = MqttSubscriberConfig::new(
+                    broker_address.clone(),
+                    topic_filter.clone(),
+                    quality_of_service(delivery_guarantee),
+                );
 
                 let (queue, mut payload_rx) = DatagramQueue::new(self.datagram_queue_capacity);
                 // Raw sender for the broker subscriber task, which uses
@@ -686,9 +692,8 @@ impl PubSubEngine {
 
                 // Subscriber task: connects to the broker (with reconnect
                 // backoff) and forwards published payloads to the channel.
-                let subscriber_handle = crate::transport::mqtt::start_mqtt_subscriber_with_cancel(
-                    broker_address.clone(),
-                    topic_filter.clone(),
+                let subscriber_handle = start_mqtt_subscriber_with_config(
+                    subscriber_config,
                     payload_tx,
                     cancel_token.clone(),
                 );

@@ -704,8 +704,8 @@ impl GdsPullMethodHandler {
             certificate_der,
             private_key,
             issuer_certificates,
-            certificate_group_id,
-            certificate_type_id,
+            _certificate_group_id,
+            _certificate_type_id,
         ) = self
             .registry
             .take_completed_request(&application_id, &request_id)?;
@@ -735,8 +735,8 @@ impl GdsPullMethodHandler {
             context,
             self.directory.directory_object_id.clone(),
             self.directory.finish_request_id.clone(),
-            certificate_group_id,
-            certificate_type_id,
+            _certificate_group_id,
+            _certificate_type_id,
         );
 
         Ok(outputs)

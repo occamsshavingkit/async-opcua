@@ -11,6 +11,7 @@ use opcua_types::{
 use uuid::Uuid;
 
 #[cfg(feature = "events")]
+#[cfg(feature = "companion-gds")]
 use crate::node_manager::RequestContext;
 #[cfg(feature = "events")]
 use crate::subscriptions::SubscriptionCache;
@@ -976,6 +977,7 @@ pub(crate) fn dispatch_method_audit(
 }
 
 #[cfg(feature = "events")]
+#[cfg(feature = "companion-gds")]
 pub(crate) struct GdsAuditEventDetails {
     pub(crate) event_type: NodeId,
     pub(crate) source_node: NodeId,
@@ -987,6 +989,7 @@ pub(crate) struct GdsAuditEventDetails {
 }
 
 #[cfg(feature = "events")]
+#[cfg(feature = "companion-gds")]
 pub(crate) fn dispatch_gds_method_audit(context: &RequestContext, details: GdsAuditEventDetails) {
     #[cfg(feature = "companion-gds")]
     {

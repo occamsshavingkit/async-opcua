@@ -206,12 +206,12 @@ impl GdsPushMethodHandler {
         };
 
         #[cfg(feature = "events")]
-        let changed_certificate = staged
+        let _changed_certificate = staged
             .certificate_group_id
             .clone()
             .zip(staged.certificate_type_id.clone());
         #[cfg(feature = "events")]
-        let changed_trust_lists: Vec<_> = staged.pending_trust_lists.keys().copied().collect();
+        let _changed_trust_lists: Vec<_> = staged.pending_trust_lists.keys().copied().collect();
 
         if let Some(certificate_der) = staged.certificate_der {
             let store = context.info.certificate_store.read();
@@ -244,7 +244,7 @@ impl GdsPushMethodHandler {
 
         #[cfg(feature = "events")]
         #[cfg(feature = "companion-gds")]
-        if let Some((certificate_group, certificate_type)) = changed_certificate {
+        if let Some((certificate_group, certificate_type)) = _changed_certificate {
             super::audit::certificate_updated(
                 context,
                 server_configuration_object_id(),
@@ -255,7 +255,7 @@ impl GdsPushMethodHandler {
         }
         #[cfg(feature = "events")]
         #[cfg(feature = "companion-gds")]
-        for certificate_group in changed_trust_lists {
+        for certificate_group in _changed_trust_lists {
             super::audit::trust_list_updated(
                 context,
                 server_configuration_object_id(),

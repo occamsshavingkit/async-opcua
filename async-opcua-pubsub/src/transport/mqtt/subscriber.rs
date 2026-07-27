@@ -6,6 +6,33 @@ use tokio_util::sync::CancellationToken;
 
 use crate::MqttDeliveryGuarantee;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct MqttBrokerAddress<'a> {
+    host: &'a str,
+    port: u16,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MqttBrokerAddressError {
+    TlsUnsupported,
+}
+
+fn parse_broker_address(address: &str) -> Result<MqttBrokerAddress<'_>, MqttBrokerAddressError> {
+    if address.starts_with("mqtts://") {
+        return Err(MqttBrokerAddressError::TlsUnsupported);
+    }
+
+    let address = address.strip_prefix("mqtt://").unwrap_or(address);
+    let mut address_parts = address.split(':');
+    let host = address_parts.next().unwrap_or_default();
+    let port = address_parts
+        .next()
+        .and_then(|port| port.parse::<u16>().ok())
+        .unwrap_or(1883);
+
+    Ok(MqttBrokerAddress { host, port })
+}
+
 /// Maps the Part 14 broker delivery guarantee to MQTT QoS.
 #[must_use]
 pub fn quality_of_service(delivery_guarantee: MqttDeliveryGuarantee) -> QoS {
@@ -71,6 +98,13 @@ pub(crate) fn start_mqtt_subscriber_with_config(
     cancel_token: CancellationToken,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
+        let address = match parse_broker_address(&config.broker_address) {
+            Ok(address) => address,
+            Err(error) => {
+                tracing::warn!(?error, "MQTT subscriber rejected broker address");
+                return;
+            }
+        };
         let mut backoff = Duration::from_secs(1);
 
         loop {
@@ -78,19 +112,8 @@ pub(crate) fn start_mqtt_subscriber_with_config(
                 break;
             }
 
-            let address = config
-                .broker_address
-                .strip_prefix("mqtt://")
-                .unwrap_or(&config.broker_address);
-            let mut address_parts = address.split(':');
-            let host = address_parts.next().unwrap_or_default().to_string();
-            let port = address_parts
-                .next()
-                .and_then(|port| port.parse::<u16>().ok())
-                .unwrap_or(1883);
-
             let client_id = format!("opcua-subscriber-{}", uuid::Uuid::new_v4());
-            let mut options = MqttOptions::new(client_id, host, port);
+            let mut options = MqttOptions::new(client_id, address.host, address.port);
             options.set_keep_alive(Duration::from_secs(5));
 
             let (client, mut event_loop) = AsyncClient::new(options, 50);
@@ -164,4 +187,21 @@ pub(crate) fn start_mqtt_subscriber_with_config(
             }
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mqtts_broker_address_is_rejected_when_tls_is_unsupported() {
+        // Given
+        let broker_address = "mqtts://broker.example:8883";
+
+        // When
+        let result = parse_broker_address(broker_address);
+
+        // Then
+        assert_eq!(result, Err(MqttBrokerAddressError::TlsUnsupported));
+    }
 }

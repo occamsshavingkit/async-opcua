@@ -513,6 +513,36 @@ fn phase_c_interpolative_at_interval_start() {
 }
 
 #[test]
+fn interpolative_searches_outward_past_bad_boundary_samples() {
+    // Given Good samples at 0s and 4s with Bad samples nearest to both sides of the 2s boundary.
+    let series = vec![
+        good(10.0, 0),
+        dv(999.0, 1, StatusCode::BadDataUnavailable),
+        dv(999.0, 3, StatusCode::BadDataUnavailable),
+        good(20.0, 4),
+    ];
+    let start = DateTime::from((2026, 6, 6, 12, 0, 2));
+    let end = DateTime::from((2026, 6, 6, 12, 0, 5));
+    let config = AggregateConfiguration::default();
+
+    // When Interpolative resolves the value at the interval start.
+    let result = compute_processed_intervals(
+        &series,
+        &NodeId::new(0u16, 2341u32),
+        &config,
+        start,
+        end,
+        3_000.0,
+        false,
+        &[],
+    );
+
+    // Then Part 13 §3.1.8 requires searching past both Bad points to 10@0s and 20@4s.
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].value, Some(Variant::Double(15.0)));
+}
+
+#[test]
 fn phase_c_time_average_uses_leading_bound_region() {
     // Corrected TimeAverage (stepped, with the prior bound covering the leading region [2s,5s]):
     // area = 10*(5-2) + 20*(10-5) + 30*(12-10) = 30 + 100 + 60 = 190; /10s = 19.0.

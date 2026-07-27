@@ -202,6 +202,26 @@ impl Node for Base {
                     Err(StatusCode::BadTypeMismatch)
                 }
             }
+            AttributeId::RolePermissions => {
+                let Variant::Array(role_permissions) = value else {
+                    return Err(StatusCode::BadTypeMismatch);
+                };
+                let role_permissions = role_permissions
+                    .values
+                    .into_iter()
+                    .map(|role_permission| {
+                        let Variant::ExtensionObject(role_permission) = role_permission else {
+                            return Err(StatusCode::BadTypeMismatch);
+                        };
+                        role_permission
+                            .into_inner_as::<RolePermissionType>()
+                            .map(|role_permission| *role_permission)
+                            .ok_or(StatusCode::BadTypeMismatch)
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                self.role_permissions = Some(role_permissions);
+                Ok(())
+            }
             _ => Err(StatusCode::BadAttributeIdInvalid),
         }
     }

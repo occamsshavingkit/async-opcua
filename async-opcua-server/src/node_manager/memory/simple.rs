@@ -1301,23 +1301,32 @@ impl SimpleNodeManagerImpl {
             }
         };
 
-        if node.node_class() != NodeClass::Variable
-            || write.value().attribute_id != AttributeId::Value
-        {
-            write.set_status(StatusCode::BadNotWritable);
-            return PreparedWriteValue::Complete { notification: None };
+        let attribute_id = write.value().attribute_id;
+        match attribute_id {
+            AttributeId::Value if node.node_class() != NodeClass::Variable => {
+                write.set_status(StatusCode::BadNotWritable);
+                return PreparedWriteValue::Complete { notification: None };
+            }
+            AttributeId::Value | AttributeId::RolePermissions => {}
+            _ => {
+                write.set_status(StatusCode::BadNotWritable);
+                return PreparedWriteValue::Complete { notification: None };
+            }
         }
 
-        let attribute_id = write.value().attribute_id;
-        if let Some(cb) = cbs.get(node.as_node().node_id()).cloned() {
-            // Capture all callback inputs while internal guards are held, then invoke later.
-            PreparedWriteValue::Callback {
-                cb,
-                value: write.value().value.clone(),
-                index_range: write.value().index_range.clone(),
-                notification_target: (node.node_id().clone(), attribute_id),
+        if attribute_id == AttributeId::Value {
+            if let Some(cb) = cbs.get(node.as_node().node_id()).cloned() {
+                // Capture all callback inputs while internal guards are held, then invoke later.
+                return PreparedWriteValue::Callback {
+                    cb,
+                    value: write.value().value.clone(),
+                    index_range: write.value().index_range.clone(),
+                    notification_target: (node.node_id().clone(), attribute_id),
+                };
             }
-        } else if write.value().value.value.is_some() {
+        }
+
+        if write.value().value.value.is_some() {
             // If not, write the value to the node hierarchy.
             match write_node_value(&context.info, &mut node, write.value()) {
                 Ok(_) => write.set_status(StatusCode::Good),
@@ -1493,13 +1502,15 @@ impl InMemoryNodeManager<SimpleNodeManagerImpl> {
 mod tests {
     use async_trait::async_trait;
     use opcua_types::{
-        ApplicationDescription, ByteString, DataValue, DateTime, DeleteAtTimeDetails,
-        DeleteEventDetails, DeleteRawModifiedDetails, DiagnosticBits, EventFilter,
-        HistoryEventFieldList, PerformUpdateType, StatusCode, TimestampsToReturn, UAString,
-        UpdateDataDetails, UpdateEventDetails, UpdateStructureDataDetails, Variant,
+        ApplicationDescription, ByteString, DataTypeId, DataValue, DateTime, DeleteAtTimeDetails,
+        DeleteEventDetails, DeleteRawModifiedDetails, DiagnosticBits, EventFilter, ExtensionObject,
+        HistoryEventFieldList, ObjectId, PerformUpdateType, PermissionType, RolePermissionType,
+        StatusCode, TimestampsToReturn, UAString, UpdateDataDetails, UpdateEventDetails,
+        UpdateStructureDataDetails, Variant, WriteMask, WriteValue,
     };
 
     use crate::{
+        address_space::{AccessLevel, VariableBuilder},
         alarms::{LimitConfig, LimitDef, LimitMode},
         authenticator::UserToken,
         history::{HistoryRawModifiedResult, HistoryStorageBackend},
@@ -1730,6 +1741,71 @@ mod tests {
             "history-update-test",
             NodeManagersRef::new_empty(),
         )
+    }
+
+    #[tokio::test]
+    async fn prepare_write_only_enables_role_permissions_non_value_attribute() {
+        let manager = manager();
+        let context = request_context();
+        let address_space = AddressSpace::new();
+        address_space.add_namespace("urn:test:write-attributes", 1);
+        let node_id = NodeId::new(1, "write-attributes");
+        let variable = VariableBuilder::new(&node_id, "WriteAttributes", "WriteAttributes")
+            .value(0.0f64)
+            .data_type(DataTypeId::Double)
+            .access_level(AccessLevel::CURRENT_READ)
+            .user_access_level(AccessLevel::CURRENT_READ)
+            .write_mask(
+                WriteMask::ROLE_PERMISSIONS | WriteMask::USER_WRITE_MASK | WriteMask::ACCESS_LEVEL,
+            )
+            .build();
+        address_space.add_variables(vec![variable], &ObjectId::ObjectsFolder.into());
+        let type_tree = trace_read_lock!(context.type_tree);
+        let callbacks = HashMap::new();
+        let role_permission = RolePermissionType {
+            role_id: NodeId::new(0, 15644),
+            permissions: PermissionType::Read,
+        };
+        let role_permissions: Variant = vec![ExtensionObject::from_message(role_permission)].into();
+        let cases = [
+            (
+                AttributeId::UserWriteMask,
+                Variant::from(WriteMask::empty().bits()),
+                StatusCode::BadNotWritable,
+            ),
+            (
+                AttributeId::AccessLevel,
+                Variant::from(AccessLevel::CURRENT_READ.bits()),
+                StatusCode::BadNotWritable,
+            ),
+            (
+                AttributeId::RolePermissions,
+                role_permissions,
+                StatusCode::Good,
+            ),
+        ];
+
+        for (attribute_id, value, expected_status) in cases {
+            let mut write = WriteNode::new(
+                WriteValue {
+                    node_id: node_id.clone(),
+                    attribute_id: attribute_id as u32,
+                    index_range: Default::default(),
+                    value: DataValue::new_now(value),
+                },
+                DiagnosticBits::empty(),
+            );
+
+            manager.prepare_write_node_value(
+                &callbacks,
+                &context,
+                &address_space,
+                &type_tree,
+                &mut write,
+            );
+
+            assert_eq!(write.status(), expected_status, "{attribute_id:?}");
+        }
     }
 
     #[test]

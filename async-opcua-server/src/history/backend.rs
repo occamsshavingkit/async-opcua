@@ -260,7 +260,8 @@ pub trait HistoryStorageBackend: Send + Sync {
         Err(StatusCode::BadHistoryOperationUnsupported)
     }
 
-    /// Reads annotation data values from the history backend.
+    /// Reads annotation data values, applying the standard continuation-point rules from
+    /// OPC-10000-11 §6.5.6.2/§6.3 by paginating requested timestamps by index.
     async fn read_annotations(
         &self,
         _node_id: &NodeId,
@@ -278,7 +279,7 @@ pub trait HistoryStorageBackend: Send + Sync {
         values: Vec<DataValue>,
     ) -> Result<Vec<StatusCode>, StatusCode>;
 
-    /// Updates annotation history data values.
+    /// Updates structured history data values, including annotations.
     async fn update_structure_data(
         &self,
         _node_id: &NodeId,
@@ -341,7 +342,7 @@ pub trait HistoryStorageBackend: Send + Sync {
 mod read_at_time {
     use opcua_types::{DataValue, DateTime, NodeId, StatusCode, StatusCodeValueType, Variant};
 
-    use crate::aggregates::engine::{interpolated_bound_at, variant_to_f64};
+    use crate::aggregates::engine::{interpolated_bound_at, nearest_good_value, variant_to_f64};
 
     use super::HistoryStorageBackend;
 
@@ -468,7 +469,7 @@ mod read_at_time {
         let mut limit = OUTWARD_SEARCH_INITIAL_BATCH;
         loop {
             let candidates = backend.read_raw_reverse(node_id, req_time, limit).await?;
-            if let Some(good) = candidates.iter().find(|v| is_good(v)) {
+            if let Some(good) = nearest_good_value(candidates.iter()) {
                 return Ok(Some(good.clone()));
             }
             if (candidates.len() as u32) < limit || limit >= OUTWARD_SEARCH_MAX_BATCH {
@@ -492,7 +493,7 @@ mod read_at_time {
             let (candidates, ..) = backend
                 .read_raw_modified(node_id, after_time, far_future, limit, false, false, None)
                 .await?;
-            if let Some(good) = candidates.iter().find(|v| is_good(v)) {
+            if let Some(good) = nearest_good_value(candidates.iter()) {
                 return Ok(Some(good.clone()));
             }
             if (candidates.len() as u32) < limit || limit >= OUTWARD_SEARCH_MAX_BATCH {

@@ -418,21 +418,23 @@ async fn annotation_insert_replace_remove_and_read() {
 }
 
 #[tokio::test]
-async fn non_annotation_value_is_rejected_not_panicked() {
+async fn non_annotation_structure_data_update_is_readable() {
+    // Given: a structured-history node with no value at the target timestamp.
     let b = InMemoryDataHistory::new();
     let n = node();
+
+    // When: UpdateStructureData receives a non-Annotation DataValue.
     assert_eq!(
-        b.update_structure_data(&n, PerformUpdateType::Insert, vec![at(100, 1.0)])
+        b.update_structure_data(&n, PerformUpdateType::Update, vec![at(100, 1.0)])
             .await
             .unwrap(),
-        vec![StatusCode::BadTypeMismatch]
+        vec![StatusCode::GoodEntryInserted]
     );
-    assert!(b
-        .read_annotations(&n, &[], None)
-        .await
-        .unwrap()
-        .0
-        .is_empty());
+
+    // Then: the backend returns the same structured-history value.
+    let (values, _cp) = b.read_annotations(&n, &[], None).await.unwrap();
+    assert_eq!(values.len(), 1);
+    assert_eq!(double(&values[0]), 1.0);
 }
 
 // ---- Feature 035: AnnotationCount aggregate over in-memory annotations ----

@@ -24,10 +24,11 @@ use opcua_server::{
     ServerBuilder, ServerHandle, ANONYMOUS_USER_TOKEN_ID,
 };
 use opcua_types::{
-    AggregateConfiguration, ByteString, DataTypeId, DataValue, DateTime, EventFilter, HistoryData,
-    HistoryEvent, HistoryReadValueId, MessageSecurityMode, NodeId, NumericRange, PerformUpdateType,
-    QualifiedName, ReadAnnotationDataDetails, ReadAtTimeDetails, ReadEventDetails,
-    ReadProcessedDetails, StatusCode, StatusCodeValueType, TimestampsToReturn, Variant,
+    AggregateConfiguration, Annotation, ByteString, DataTypeId, DataValue, DateTime, EventFilter,
+    HistoryData, HistoryEvent, HistoryReadValueId, MessageSecurityMode, NodeId, NumericRange,
+    PerformUpdateType, QualifiedName, ReadAnnotationDataDetails, ReadAtTimeDetails,
+    ReadEventDetails, ReadProcessedDetails, StatusCode, StatusCodeValueType, TimestampsToReturn,
+    Variant,
 };
 use tokio::net::TcpListener;
 
@@ -182,6 +183,17 @@ fn data_value(value: f64, timestamp: DateTime) -> DataValue {
         server_timestamp: Some(timestamp),
         ..Default::default()
     }
+}
+
+fn annotation_value(message: String, timestamp: DateTime) -> DataValue {
+    DataValue::new_at(
+        opcua_types::ExtensionObject::from_message(Annotation {
+            message: message.into(),
+            user_name: "tester".into(),
+            annotation_time: timestamp,
+        }),
+        timestamp,
+    )
 }
 
 fn source_ticks(value: &DataValue) -> i64 {
@@ -463,6 +475,88 @@ async fn test_history_read_annotations_empty_result() {
         .into_inner_as::<HistoryData>()
         .expect("HistoryData");
     assert!(history_data.data_values.unwrap_or_default().is_empty());
+}
+
+#[tokio::test]
+async fn test_history_read_annotations_continuation_round_trip() {
+    // Given: a real server with more requested annotations than one server batch.
+    let server = setup_history_server("annotations-continuation").await;
+    let node_id = NodeId::new(server.namespace_index, "PagedAnnotatedValue");
+    add_historical_variable(&server.node_manager, &node_id);
+    let base_time = DateTime::from((2026, 6, 6, 5, 30, 0));
+    let req_times = (0..1_001i64)
+        .map(|offset| DateTime::from(base_time.ticks() + offset))
+        .collect::<Vec<_>>();
+    server
+        .backend
+        .update_structure_data(
+            &node_id,
+            PerformUpdateType::Insert,
+            req_times
+                .iter()
+                .enumerate()
+                .map(|(index, timestamp)| {
+                    annotation_value(format!("annotation-{index}"), *timestamp)
+                })
+                .collect(),
+        )
+        .await
+        .expect("insert annotations");
+    let details = ReadAnnotationDataDetails {
+        req_times: Some(req_times),
+    };
+
+    // When: the client reads one page and resumes with the returned opaque token.
+    let first_results = server
+        .session
+        .history_read(
+            HistoryReadAction::ReadAnnotationDataDetails(details.clone()),
+            TimestampsToReturn::Both,
+            false,
+            &[history_read_value_id(node_id.clone(), None)],
+        )
+        .await
+        .expect("first annotation history read");
+    assert_eq!(first_results.len(), 1);
+    assert_eq!(first_results[0].status_code, StatusCode::Good);
+    let continuation_point = first_results[0].continuation_point.clone();
+    assert!(continuation_point.value.is_some());
+    let first_page = first_results[0]
+        .history_data
+        .clone()
+        .into_inner_as::<HistoryData>()
+        .expect("first HistoryData")
+        .data_values
+        .unwrap_or_default();
+
+    let second_results = server
+        .session
+        .history_read(
+            HistoryReadAction::ReadAnnotationDataDetails(details),
+            TimestampsToReturn::Both,
+            false,
+            &[history_read_value_id(node_id, Some(continuation_point))],
+        )
+        .await
+        .expect("resumed annotation history read");
+
+    // Then: the resumed page succeeds and completes the requested timestamps without overlap.
+    assert_eq!(second_results.len(), 1);
+    assert_eq!(second_results[0].status_code, StatusCode::Good);
+    assert!(second_results[0].continuation_point.value.is_none());
+    let second_page = second_results[0]
+        .history_data
+        .clone()
+        .into_inner_as::<HistoryData>()
+        .expect("second HistoryData")
+        .data_values
+        .unwrap_or_default();
+    assert_eq!(first_page.len(), 1_000);
+    assert_eq!(second_page.len(), 1);
+    assert_eq!(
+        source_ticks(&first_page[999]) + 1,
+        source_ticks(&second_page[0])
+    );
 }
 
 /// Feature 107 / OPC-10000-11 §6.5.5.2: a real client `HistoryRead(ReadAtTimeDetails)` round

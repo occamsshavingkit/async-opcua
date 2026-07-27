@@ -433,7 +433,7 @@ impl TrustListMethodHandler {
 
         #[cfg(feature = "events")]
         #[cfg(feature = "companion-gds")]
-        super::audit::trust_list_updated(
+        super::audit::trust_list_update_requested(
             context,
             NodeId::new(0, self.node_ids.object),
             NodeId::new(0, self.node_ids.close_and_update),
@@ -953,5 +953,7 @@ fn string_arg(args: &[Variant], index: usize) -> Result<String, StatusCode> {
     }
 }
 
+#[cfg(all(test, feature = "events", feature = "companion-gds"))]
+mod audit_tests;
 #[cfg(test)]
 mod tests;

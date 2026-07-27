@@ -115,7 +115,7 @@ fn request_context(
     (context, handle)
 }
 
-fn security_admin_request_context(
+pub(super) fn security_admin_request_context(
     security_mode: MessageSecurityMode,
 ) -> (RequestContext, crate::ServerHandle) {
     request_context(security_mode, vec![WellKnownRole::SecurityAdmin.node_id()])
@@ -136,7 +136,7 @@ fn self_signed_cert_with_cn(cn: &str) -> X509 {
     cert
 }
 
-fn handler(push_registry: Arc<GdsPushRegistry>) -> TrustListMethodHandler {
+pub(super) fn handler(push_registry: Arc<GdsPushRegistry>) -> TrustListMethodHandler {
     TrustListMethodHandler::new(push_registry)
 }
 

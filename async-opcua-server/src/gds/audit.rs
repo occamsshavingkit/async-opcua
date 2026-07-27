@@ -60,6 +60,23 @@ pub(super) fn trust_list_updated(
     dispatch_gds_method_audit(context, event);
 }
 
+pub(super) fn trust_list_update_requested(
+    context: &RequestContext,
+    source_node: NodeId,
+    method_id: NodeId,
+    trust_list_id: NodeId,
+    action: &'static str,
+) {
+    let mut event = details(
+        ObjectTypeId::TrustListUpdateRequestedAuditEventType.into(),
+        source_node,
+        method_id,
+        action,
+    );
+    event.trust_list_id = Some(trust_list_id);
+    dispatch_gds_method_audit(context, event);
+}
+
 pub(super) fn certificate_requested(
     context: &RequestContext,
     directory_object_id: NodeId,

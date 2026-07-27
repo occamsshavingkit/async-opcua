@@ -18,6 +18,8 @@ enum MqttBrokerAddressError {
 }
 
 fn parse_broker_address(address: &str) -> Result<MqttBrokerAddress<'_>, MqttBrokerAddressError> {
+    let address = address.trim();
+
     if address.starts_with("mqtts://") {
         return Err(MqttBrokerAddressError::TlsUnsupported);
     }
@@ -203,5 +205,53 @@ mod tests {
 
         // Then
         assert_eq!(result, Err(MqttBrokerAddressError::TlsUnsupported));
+    }
+
+    #[test]
+    fn whitespace_wrapped_mqtts_broker_address_is_rejected_when_tls_is_unsupported() {
+        // Given
+        let broker_address = " mqtts://broker.example:8883 ";
+
+        // When
+        let result = parse_broker_address(broker_address);
+
+        // Then
+        assert_eq!(result, Err(MqttBrokerAddressError::TlsUnsupported));
+    }
+
+    #[test]
+    fn whitespace_wrapped_mqtt_broker_address_preserves_explicit_port() {
+        // Given
+        let broker_address = " mqtt://broker.example:1884 ";
+
+        // When
+        let result = parse_broker_address(broker_address);
+
+        // Then
+        assert_eq!(
+            result,
+            Ok(MqttBrokerAddress {
+                host: "broker.example",
+                port: 1884,
+            })
+        );
+    }
+
+    #[test]
+    fn bare_broker_address_uses_default_mqtt_port() {
+        // Given
+        let broker_address = "broker.example";
+
+        // When
+        let result = parse_broker_address(broker_address);
+
+        // Then
+        assert_eq!(
+            result,
+            Ok(MqttBrokerAddress {
+                host: "broker.example",
+                port: 1883,
+            })
+        );
     }
 }

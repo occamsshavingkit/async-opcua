@@ -579,6 +579,7 @@ impl GdsPullMethodHandler {
         );
 
         #[cfg(feature = "events")]
+        #[cfg(feature = "companion-gds")]
         super::audit::certificate_requested(
             context,
             self.directory.directory_object_id.clone(),
@@ -668,6 +669,7 @@ impl GdsPullMethodHandler {
         );
 
         #[cfg(feature = "events")]
+        #[cfg(feature = "companion-gds")]
         super::audit::certificate_requested(
             context,
             self.directory.directory_object_id.clone(),
@@ -728,6 +730,7 @@ impl GdsPullMethodHandler {
         ];
 
         #[cfg(feature = "events")]
+        #[cfg(feature = "companion-gds")]
         super::audit::certificate_delivered(
             context,
             self.directory.directory_object_id.clone(),
@@ -846,6 +849,7 @@ impl GdsPullMethodHandler {
             self.directory.default_application_group_id.clone(),
         )?;
         #[cfg(feature = "events")]
+        #[cfg(feature = "companion-gds")]
         super::audit::application_registration_changed(
             context,
             self.directory.directory_object_id.clone(),
@@ -870,6 +874,7 @@ impl GdsPullMethodHandler {
         let record = application_record_arg(args, 0)?;
         self.registry.update_full(record)?;
         #[cfg(feature = "events")]
+        #[cfg(feature = "companion-gds")]
         super::audit::application_registration_changed(
             context,
             self.directory.directory_object_id.clone(),
@@ -895,6 +900,7 @@ impl GdsPullMethodHandler {
         let application_id = node_id_arg(args, 0)?;
         self.registry.unregister(&application_id)?;
         #[cfg(feature = "events")]
+        #[cfg(feature = "companion-gds")]
         super::audit::application_registration_changed(
             context,
             self.directory.directory_object_id.clone(),

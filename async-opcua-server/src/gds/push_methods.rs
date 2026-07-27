@@ -176,6 +176,7 @@ impl GdsPushMethodHandler {
         }
 
         #[cfg(feature = "events")]
+        #[cfg(feature = "companion-gds")]
         super::audit::certificate_update_requested(
             context,
             server_configuration_object_id(),
@@ -242,6 +243,7 @@ impl GdsPushMethodHandler {
         }
 
         #[cfg(feature = "events")]
+        #[cfg(feature = "companion-gds")]
         if let Some((certificate_group, certificate_type)) = changed_certificate {
             super::audit::certificate_updated(
                 context,
@@ -252,6 +254,7 @@ impl GdsPushMethodHandler {
             );
         }
         #[cfg(feature = "events")]
+        #[cfg(feature = "companion-gds")]
         for certificate_group in changed_trust_lists {
             super::audit::trust_list_updated(
                 context,

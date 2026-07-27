@@ -219,6 +219,7 @@ impl ServerAuditEvent {
     }
 
     #[allow(clippy::too_many_arguments)]
+    #[cfg(feature = "companion-gds")]
     fn typed_method_call(
         event_type: NodeId,
         source_node: NodeId,
@@ -440,6 +441,7 @@ impl ServerAuditEvent {
         self
     }
 
+    #[cfg(feature = "companion-gds")]
     fn with_certificate_details(
         mut self,
         certificate_group: NodeId,
@@ -450,6 +452,7 @@ impl ServerAuditEvent {
         self
     }
 
+    #[cfg(feature = "companion-gds")]
     fn with_trust_list_id(mut self, trust_list_id: NodeId) -> Self {
         self.trust_list_id = Some(trust_list_id);
         self
@@ -985,27 +988,30 @@ pub(crate) struct GdsAuditEventDetails {
 
 #[cfg(feature = "events")]
 pub(crate) fn dispatch_gds_method_audit(context: &RequestContext, details: GdsAuditEventDetails) {
-    let session_id = Some(context.session.read().session_id().clone());
-    let mut event = ServerAuditEvent::typed_method_call(
-        details.event_type,
-        details.source_node,
-        context.info.application_uri.clone(),
-        UAString::null(),
-        UAString::from(context.user_token().0.as_str()),
-        session_id,
-        details.method_id,
-        details.action,
-    );
-    if let (Some(certificate_group), Some(certificate_type)) =
-        (details.certificate_group, details.certificate_type)
+    #[cfg(feature = "companion-gds")]
     {
-        event = event.with_certificate_details(certificate_group, certificate_type);
+        let session_id = Some(context.session.read().session_id().clone());
+        let mut event = ServerAuditEvent::typed_method_call(
+            details.event_type,
+            details.source_node,
+            context.info.application_uri.clone(),
+            UAString::null(),
+            UAString::from(context.user_token().0.as_str()),
+            session_id,
+            details.method_id,
+            details.action,
+        );
+        if let (Some(certificate_group), Some(certificate_type)) =
+            (details.certificate_group, details.certificate_type)
+        {
+            event = event.with_certificate_details(certificate_group, certificate_type);
+        }
+        if let Some(trust_list_id) = details.trust_list_id {
+            event = event.with_trust_list_id(trust_list_id);
+        }
+        let subscriptions = &context.subscriptions;
+        dispatch_audit_event_if_enabled!(subscriptions, &event);
     }
-    if let Some(trust_list_id) = details.trust_list_id {
-        event = event.with_trust_list_id(trust_list_id);
-    }
-    let subscriptions = &context.subscriptions;
-    dispatch_audit_event_if_enabled!(subscriptions, &event);
 }
 
 pub(crate) fn dispatch_write_audit(

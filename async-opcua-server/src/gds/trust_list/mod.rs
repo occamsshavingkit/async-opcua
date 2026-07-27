@@ -431,6 +431,7 @@ impl TrustListMethodHandler {
         self.handles.remove(file_handle);
 
         #[cfg(feature = "events")]
+        #[cfg(feature = "companion-gds")]
         super::audit::trust_list_updated(
             context,
             NodeId::new(0, self.node_ids.object),
@@ -479,6 +480,7 @@ impl TrustListMethodHandler {
             .map_err(|_| StatusCode::BadInternalError)?;
 
         #[cfg(feature = "events")]
+        #[cfg(feature = "companion-gds")]
         super::audit::trust_list_updated(
             context,
             NodeId::new(0, self.node_ids.object),
@@ -537,6 +539,7 @@ impl TrustListMethodHandler {
         }
 
         #[cfg(feature = "events")]
+        #[cfg(feature = "companion-gds")]
         super::audit::trust_list_updated(
             context,
             NodeId::new(0, self.node_ids.object),

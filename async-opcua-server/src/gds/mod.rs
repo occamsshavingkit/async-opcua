@@ -39,6 +39,7 @@ use self::pull_methods::GdsPullMethodHandler;
 pub(crate) const GDS_REGISTRY_CAPACITY: usize = 1024;
 
 #[cfg(feature = "events")]
+#[cfg(feature = "companion-gds")]
 mod audit;
 
 /// Compatibility re-exports for the hand-authored shared `ApplicationRecordDataType` (Part 12

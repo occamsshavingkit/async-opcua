@@ -38,6 +38,9 @@ use self::pull_methods::GdsPullMethodHandler;
 /// sustained authorized GDS traffic from growing registry memory without bound.
 pub(crate) const GDS_REGISTRY_CAPACITY: usize = 1024;
 
+#[cfg(feature = "events")]
+mod audit;
+
 /// Compatibility re-exports for the hand-authored shared `ApplicationRecordDataType` (Part 12
 /// §6.5.5) and its `TypeLoader`. Gated on `companion-gds` to preserve the server API's existing
 /// feature boundary while allowing clients to use the canonical definitions from `opcua_types`.

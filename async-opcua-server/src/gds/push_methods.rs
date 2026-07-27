@@ -36,6 +36,8 @@ pub(super) struct PushTransaction {
     pub(super) owning_session_id: u32,
     pub(super) certificate_der: Option<Vec<u8>>,
     pub(super) private_key_pem: Option<Vec<u8>>,
+    pub(super) certificate_group_id: Option<NodeId>,
+    pub(super) certificate_type_id: Option<NodeId>,
     pub(super) pending_trust_list: Option<TrustListDataType>,
 }
 
@@ -125,8 +127,8 @@ impl GdsPushMethodHandler {
         if args.len() < 6 {
             return Err(StatusCode::BadArgumentsMissing);
         }
-        let _certificate_group_id = node_id_arg(args, 0)?;
-        let _certificate_type_id = node_id_arg(args, 1)?;
+        let certificate_group_id = node_id_arg(args, 0)?;
+        let certificate_type_id = node_id_arg(args, 1)?;
         let certificate = non_empty_byte_string_arg(args, 2)?;
         let _issuer_certificates = args.get(3);
         let private_key_format = opt_string_arg(args, 4)?;
@@ -167,9 +169,18 @@ impl GdsPushMethodHandler {
                 owning_session_id: context.session_id(),
                 certificate_der: Some(certificate_der),
                 private_key_pem,
+                certificate_group_id: Some(certificate_group_id),
+                certificate_type_id: Some(certificate_type_id),
                 pending_trust_list,
             });
         }
+
+        #[cfg(feature = "events")]
+        super::audit::certificate_update_requested(
+            context,
+            server_configuration_object_id(),
+            update_certificate_method_id(),
+        );
 
         Ok(vec![Variant::from(true)])
     }
@@ -192,6 +203,14 @@ impl GdsPushMethodHandler {
                 Some(_) => transaction.take().expect("checked Some above"),
             }
         };
+
+        #[cfg(feature = "events")]
+        let changed_certificate = staged
+            .certificate_group_id
+            .clone()
+            .zip(staged.certificate_type_id.clone());
+        #[cfg(feature = "events")]
+        let changed_trust_list = staged.pending_trust_list.is_some();
 
         if let Some(certificate_der) = staged.certificate_der {
             let store = context.info.certificate_store.read();
@@ -220,6 +239,27 @@ impl GdsPushMethodHandler {
             let store = context.info.certificate_store.read();
             super::trust_list::apply_trust_list_update(&store, &trust_list)
                 .map_err(|_| StatusCode::BadInternalError)?;
+        }
+
+        #[cfg(feature = "events")]
+        if let Some((certificate_group, certificate_type)) = changed_certificate {
+            super::audit::certificate_updated(
+                context,
+                server_configuration_object_id(),
+                apply_changes_method_id(),
+                certificate_group,
+                certificate_type,
+            );
+        }
+        #[cfg(feature = "events")]
+        if changed_trust_list {
+            super::audit::trust_list_updated(
+                context,
+                server_configuration_object_id(),
+                apply_changes_method_id(),
+                super::trust_list::trust_list_object_id(),
+                "ApplyChanges",
+            );
         }
 
         Ok(vec![])
@@ -772,6 +812,8 @@ mod tests {
             owning_session_id: context.session_id(),
             certificate_der: None,
             private_key_pem: None,
+            certificate_group_id: None,
+            certificate_type_id: None,
             pending_trust_list: Some(TrustListDataType {
                 specified_lists: 1, // TrustListMasks::TrustedCertificates
                 trusted_certificates: Some(vec![ByteString::from(new_trusted_der)]),
@@ -807,6 +849,8 @@ mod tests {
             owning_session_id: context.session_id(),
             certificate_der: None,
             private_key_pem: None,
+            certificate_group_id: None,
+            certificate_type_id: None,
             pending_trust_list: Some(TrustListDataType {
                 specified_lists: 1,
                 trusted_certificates: Some(vec![ByteString::from(self_signed_cert_der(&context))]),
@@ -837,6 +881,8 @@ mod tests {
             owning_session_id: 1,
             certificate_der: None,
             private_key_pem: None,
+            certificate_group_id: None,
+            certificate_type_id: None,
             pending_trust_list: Some(TrustListDataType::default()),
         });
 

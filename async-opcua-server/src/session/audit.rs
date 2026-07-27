@@ -11,6 +11,8 @@ use opcua_types::{
 use uuid::Uuid;
 
 #[cfg(feature = "events")]
+use crate::node_manager::RequestContext;
+#[cfg(feature = "events")]
 use crate::subscriptions::SubscriptionCache;
 use crate::{identity_token::IdentityToken, info::ServerInfo, ANONYMOUS_USER_TOKEN_ID};
 
@@ -74,6 +76,9 @@ struct ServerAuditEvent {
     security_policy_uri: Option<UAString>,
     security_mode: Option<i32>,
     requested_lifetime: Option<u32>,
+    certificate_group: Option<NodeId>,
+    certificate_type: Option<NodeId>,
+    trust_list_id: Option<NodeId>,
 }
 
 impl ServerAuditEvent {
@@ -130,6 +135,9 @@ impl ServerAuditEvent {
             security_policy_uri: None,
             security_mode: None,
             requested_lifetime: None,
+            certificate_group: None,
+            certificate_type: None,
+            trust_list_id: None,
         }
     }
 
@@ -204,6 +212,58 @@ impl ServerAuditEvent {
             security_policy_uri: None,
             security_mode: None,
             requested_lifetime: None,
+            certificate_group: None,
+            certificate_type: None,
+            trust_list_id: None,
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn typed_method_call(
+        event_type: NodeId,
+        source_node: NodeId,
+        server_id: UAString,
+        client_audit_entry_id: UAString,
+        client_user_id: UAString,
+        session_id: Option<NodeId>,
+        method_id: NodeId,
+        action: &str,
+    ) -> Self {
+        let now = DateTime::now();
+        let base = BaseEventType::new(
+            event_type,
+            ByteString::from(Uuid::new_v4().as_bytes().as_slice()),
+            format!("{action} succeeded"),
+            now,
+        )
+        .set_source_node(source_node)
+        .set_source_name(UAString::from(AUDIT_SOURCE_NAME))
+        .set_severity(AUDIT_SUCCESS_SEVERITY);
+
+        Self {
+            base,
+            action_time_stamp: now,
+            status: true,
+            server_id,
+            client_audit_entry_id,
+            client_user_id,
+            status_code_id: StatusCode::Good,
+            session_id,
+            secure_channel_id: None,
+            user_identity_token: None,
+            method_id: Some(method_id),
+            attribute_id: None,
+            client_certificate: None,
+            client_certificate_thumbprint: None,
+            revised_session_timeout: None,
+            request_handle: None,
+            request_type: None,
+            security_policy_uri: None,
+            security_mode: None,
+            requested_lifetime: None,
+            certificate_group: None,
+            certificate_type: None,
+            trust_list_id: None,
         }
     }
 
@@ -257,6 +317,9 @@ impl ServerAuditEvent {
             security_policy_uri: None,
             security_mode: None,
             requested_lifetime: None,
+            certificate_group: None,
+            certificate_type: None,
+            trust_list_id: None,
         }
     }
 
@@ -310,6 +373,9 @@ impl ServerAuditEvent {
             security_policy_uri: None,
             security_mode: None,
             requested_lifetime: None,
+            certificate_group: None,
+            certificate_type: None,
+            trust_list_id: None,
         }
     }
 
@@ -373,6 +439,21 @@ impl ServerAuditEvent {
         self.requested_lifetime = Some(requested_lifetime);
         self
     }
+
+    fn with_certificate_details(
+        mut self,
+        certificate_group: NodeId,
+        certificate_type: NodeId,
+    ) -> Self {
+        self.certificate_group = Some(certificate_group);
+        self.certificate_type = Some(certificate_type);
+        self
+    }
+
+    fn with_trust_list_id(mut self, trust_list_id: NodeId) -> Self {
+        self.trust_list_id = Some(trust_list_id);
+        self
+    }
 }
 
 impl Event for ServerAuditEvent {
@@ -411,11 +492,15 @@ impl EventField for ServerAuditEvent {
         }
 
         let field = &remaining_path[0];
-        if field.namespace_index != 0 {
-            return Variant::Empty;
-        }
-
         match field.name.as_ref() {
+            "CertificateGroup" => self
+                .certificate_group
+                .get_value(attribute_id, index_range, &[]),
+            "CertificateType" => self
+                .certificate_type
+                .get_value(attribute_id, index_range, &[]),
+            "TrustListId" => self.trust_list_id.get_value(attribute_id, index_range, &[]),
+            _ if field.namespace_index != 0 => Variant::Empty,
             "ActionTimeStamp" => self
                 .action_time_stamp
                 .get_value(attribute_id, index_range, &[]),
@@ -887,6 +972,42 @@ pub(crate) fn dispatch_method_audit(
     dispatch_audit_event_if_enabled!(subscriptions, &event);
 }
 
+#[cfg(feature = "events")]
+pub(crate) struct GdsAuditEventDetails {
+    pub(crate) event_type: NodeId,
+    pub(crate) source_node: NodeId,
+    pub(crate) method_id: NodeId,
+    pub(crate) action: &'static str,
+    pub(crate) certificate_group: Option<NodeId>,
+    pub(crate) certificate_type: Option<NodeId>,
+    pub(crate) trust_list_id: Option<NodeId>,
+}
+
+#[cfg(feature = "events")]
+pub(crate) fn dispatch_gds_method_audit(context: &RequestContext, details: GdsAuditEventDetails) {
+    let session_id = Some(context.session.read().session_id().clone());
+    let mut event = ServerAuditEvent::typed_method_call(
+        details.event_type,
+        details.source_node,
+        context.info.application_uri.clone(),
+        UAString::null(),
+        UAString::from(context.user_token().0.as_str()),
+        session_id,
+        details.method_id,
+        details.action,
+    );
+    if let (Some(certificate_group), Some(certificate_type)) =
+        (details.certificate_group, details.certificate_type)
+    {
+        event = event.with_certificate_details(certificate_group, certificate_type);
+    }
+    if let Some(trust_list_id) = details.trust_list_id {
+        event = event.with_trust_list_id(trust_list_id);
+    }
+    let subscriptions = &context.subscriptions;
+    dispatch_audit_event_if_enabled!(subscriptions, &event);
+}
+
 pub(crate) fn dispatch_write_audit(
     #[cfg(feature = "events")] subscriptions: &Arc<SubscriptionCache>,
     info: &ServerInfo,
@@ -1271,6 +1392,92 @@ mod tests {
                 &field("StatusCodeId")
             ),
             Variant::from(StatusCode::BadCertificateUntrusted)
+        );
+    }
+
+    #[test]
+    fn gds_method_audit_exposes_specialized_type_source_and_certificate_fields() {
+        // Given: a successful GDS CertificateRequestedAuditEventType operation.
+        let event_type = NodeId::new(2, 91);
+        let source_node = NodeId::new(2, 141);
+        let method_id = NodeId::new(2, 157);
+        let certificate_group = NodeId::new(2, 615);
+        let certificate_type = NodeId::new(0, 12557);
+
+        // When: the specialized method audit event is constructed.
+        let event = ServerAuditEvent::typed_method_call(
+            event_type.clone(),
+            source_node.clone(),
+            UAString::from("urn:test-server"),
+            UAString::from("audit-entry"),
+            UAString::from("operator"),
+            Some(NodeId::new(1, 7)),
+            method_id.clone(),
+            "StartSigningRequest",
+        )
+        .with_certificate_details(certificate_group.clone(), certificate_type.clone());
+
+        // Then: the EventType, source, MethodId, and companion-namespace properties are exposed.
+        assert_eq!(
+            event.get_value(AttributeId::Value, &NumericRange::None, &field("EventType")),
+            Variant::from(event_type)
+        );
+        assert_eq!(
+            event.get_value(
+                AttributeId::Value,
+                &NumericRange::None,
+                &field("SourceNode")
+            ),
+            Variant::from(source_node)
+        );
+        assert_eq!(
+            event.get_value(AttributeId::Value, &NumericRange::None, &field("MethodId")),
+            Variant::from(method_id)
+        );
+        assert_eq!(
+            event.get_value(
+                AttributeId::Value,
+                &NumericRange::None,
+                &[QualifiedName::new(2, "CertificateGroup")]
+            ),
+            Variant::from(certificate_group)
+        );
+        assert_eq!(
+            event.get_value(
+                AttributeId::Value,
+                &NumericRange::None,
+                &[QualifiedName::new(2, "CertificateType")]
+            ),
+            Variant::from(certificate_type)
+        );
+    }
+
+    #[test]
+    fn trust_list_updated_audit_exposes_trust_list_id() {
+        // Given: a successful TrustListUpdatedAuditEventType operation.
+        let trust_list_id = NodeId::new(0, 12642);
+
+        // When: the specialized method audit event carries the changed TrustList.
+        let event = ServerAuditEvent::typed_method_call(
+            NodeId::from(ObjectTypeId::TrustListUpdatedAuditEventType),
+            trust_list_id.clone(),
+            UAString::from("urn:test-server"),
+            UAString::null(),
+            UAString::from("operator"),
+            Some(NodeId::new(1, 7)),
+            NodeId::new(0, 12668),
+            "AddCertificate",
+        )
+        .with_trust_list_id(trust_list_id.clone());
+
+        // Then: the mandatory TrustListId property is exposed.
+        assert_eq!(
+            event.get_value(
+                AttributeId::Value,
+                &NumericRange::None,
+                &field("TrustListId")
+            ),
+            Variant::from(trust_list_id)
         );
     }
 }

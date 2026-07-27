@@ -425,6 +425,8 @@ async fn add_certificate_rejects_while_write_transaction_open_elsewhere() {
         owning_session_id: 1,
         certificate_der: None,
         private_key_pem: None,
+        certificate_group_id: None,
+        certificate_type_id: None,
         pending_trust_list: None,
     });
 

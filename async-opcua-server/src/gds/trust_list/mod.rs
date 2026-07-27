@@ -353,12 +353,23 @@ impl TrustListMethodHandler {
                         owning_session_id: session_id,
                         certificate_der: None,
                         private_key_pem: None,
+                        certificate_group_id: None,
+                        certificate_type_id: None,
                         pending_trust_list: Some(trust_list),
                     });
                 }
             }
         }
         self.handles.remove(file_handle);
+
+        #[cfg(feature = "events")]
+        super::audit::trust_list_updated(
+            context,
+            trust_list_object_id(),
+            close_and_update_method_id(),
+            trust_list_object_id(),
+            "CloseAndUpdate",
+        );
 
         Ok(vec![Variant::from(true)])
     }
@@ -398,6 +409,15 @@ impl TrustListMethodHandler {
         store
             .store_trusted_cert(&cert)
             .map_err(|_| StatusCode::BadInternalError)?;
+
+        #[cfg(feature = "events")]
+        super::audit::trust_list_updated(
+            context,
+            trust_list_object_id(),
+            add_certificate_method_id(),
+            trust_list_object_id(),
+            "AddCertificate",
+        );
 
         Ok(vec![])
     }
@@ -442,6 +462,15 @@ impl TrustListMethodHandler {
         if !removed {
             return Err(StatusCode::BadInvalidArgument);
         }
+
+        #[cfg(feature = "events")]
+        super::audit::trust_list_updated(
+            context,
+            trust_list_object_id(),
+            remove_certificate_method_id(),
+            trust_list_object_id(),
+            "RemoveCertificate",
+        );
 
         Ok(vec![])
     }

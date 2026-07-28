@@ -100,19 +100,20 @@ async fn subscribe_to_event_fields(context: &RequestContext) -> u32 {
             discard_oldest: true,
         },
     );
-    let type_tree = context.info.type_tree.read();
-    let mut item = CreateMonitoredItem::new(
-        request,
-        context.info.monitored_item_id_handle.next(),
-        subscription_id,
-        &context.info,
-        TimestampsToReturn::Both,
-        DiagnosticBits::empty(),
-        &*type_tree,
-        None,
-    );
+    let mut item = {
+        let type_tree = context.info.type_tree.read();
+        CreateMonitoredItem::new(
+            request,
+            context.info.monitored_item_id_handle.next(),
+            subscription_id,
+            &context.info,
+            TimestampsToReturn::Both,
+            DiagnosticBits::empty(),
+            &*type_tree,
+            None,
+        )
+    };
     item.set_status(StatusCode::Good);
-    drop(type_tree);
     let results = context
         .subscriptions()
         .create_monitored_items(context.session_id(), subscription_id, vec![item])

@@ -137,14 +137,11 @@ impl PushTransactionState {
                     current
                         .pending_trust_lists
                         .extend(replacement.pending_trust_lists);
-                    match replacement.certificate_der {
-                        Some(certificate_der) => {
-                            current.certificate_der = Some(certificate_der);
-                            current.private_key_pem = replacement.private_key_pem;
-                            current.certificate_group_id = replacement.certificate_group_id;
-                            current.certificate_type_id = replacement.certificate_type_id;
-                        }
-                        None => {}
+                    if let Some(certificate_der) = replacement.certificate_der {
+                        current.certificate_der = Some(certificate_der);
+                        current.private_key_pem = replacement.private_key_pem;
+                        current.certificate_group_id = replacement.certificate_group_id;
+                        current.certificate_type_id = replacement.certificate_type_id;
                     }
                     Self::Staged(current)
                 }

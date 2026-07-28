@@ -21,7 +21,7 @@ use std::sync::{
 use opcua_crypto::{PrivateKey, X509};
 use opcua_types::{
     ApplicationDescription, ApplicationType, Array, ByteString, DateTime, LocalizedText,
-    MessageSecurityMode, NodeId, ServerOnNetwork, StatusCode, UAString, Variant,
+    MessageSecurityMode, NodeId, ObjectTypeId, ServerOnNetwork, StatusCode, UAString, Variant,
 };
 
 #[cfg(all(feature = "generated-address-space", feature = "companion-gds"))]
@@ -142,6 +142,42 @@ impl GdsApplicationRecord {
         (mask & QUERY_APPLICATION_TYPE_SERVERS != 0 && is_server)
             || (mask & QUERY_APPLICATION_TYPE_CLIENTS != 0 && is_client)
     }
+}
+
+/// Validates explicit certificate identifiers and resolves null identifiers to the defaults
+/// required by Part 12 §7.9.3/§7.9.4. The first registered group is the application's default:
+/// both registration paths seed `certificate_group_ids` with that group deterministically.
+fn validate_certificate_identifiers(
+    application: &GdsApplicationRecord,
+    certificate_group_id: &NodeId,
+    certificate_type_id: &NodeId,
+) -> Result<(NodeId, NodeId), StatusCode> {
+    let certificate_group_id = if certificate_group_id.is_null() {
+        application
+            .certificate_group_ids
+            .first()
+            .cloned()
+            .ok_or(StatusCode::BadInvalidArgument)?
+    } else if application
+        .certificate_group_ids
+        .contains(certificate_group_id)
+    {
+        certificate_group_id.clone()
+    } else {
+        return Err(StatusCode::BadInvalidArgument);
+    };
+
+    let default_certificate_type_id =
+        NodeId::from(ObjectTypeId::RsaSha256ApplicationCertificateType);
+    let certificate_type_id = if certificate_type_id.is_null() {
+        default_certificate_type_id
+    } else if certificate_type_id == &default_certificate_type_id {
+        certificate_type_id.clone()
+    } else {
+        return Err(StatusCode::BadInvalidArgument);
+    };
+
+    Ok((certificate_group_id, certificate_type_id))
 }
 
 fn uastring_array(values: &[String]) -> Option<Vec<UAString>> {
@@ -541,6 +577,11 @@ impl GdsPullMethodHandler {
             .registry
             .application(&application_id)
             .ok_or(StatusCode::BadNotFound)?;
+        let (certificate_group_id, certificate_type_id) = validate_certificate_identifiers(
+            &application,
+            &certificate_group_id,
+            &certificate_type_id,
+        )?;
 
         let csr_der: Vec<u8> = csr
             .value
@@ -586,7 +627,8 @@ impl GdsPullMethodHandler {
             self.directory.start_signing_request_id.clone(),
             certificate_group_id,
             certificate_type_id,
-            "StartSigningRequest",
+            super::audit::AuditAction::StartSigningRequest,
+            args,
         );
 
         Ok(vec![Variant::from(request_id)])
@@ -616,6 +658,11 @@ impl GdsPullMethodHandler {
             .registry
             .application(&application_id)
             .ok_or(StatusCode::BadNotFound)?;
+        let (certificate_group_id, certificate_type_id) = validate_certificate_identifiers(
+            &application,
+            &certificate_group_id,
+            &certificate_type_id,
+        )?;
 
         if !private_key_format.is_empty()
             && !private_key_format.eq_ignore_ascii_case("PEM")
@@ -676,7 +723,8 @@ impl GdsPullMethodHandler {
             self.directory.start_new_key_pair_request_id.clone(),
             certificate_group_id,
             certificate_type_id,
-            "StartNewKeyPairRequest",
+            super::audit::AuditAction::StartNewKeyPairRequest,
+            args,
         );
 
         Ok(vec![Variant::from(request_id)])
@@ -737,6 +785,7 @@ impl GdsPullMethodHandler {
             self.directory.finish_request_id.clone(),
             _certificate_group_id,
             _certificate_type_id,
+            args,
         );
 
         Ok(outputs)
@@ -854,7 +903,8 @@ impl GdsPullMethodHandler {
             context,
             self.directory.directory_object_id.clone(),
             self.directory.register_application_id.clone(),
-            "RegisterApplication",
+            super::audit::AuditAction::RegisterApplication,
+            args,
         );
         Ok(vec![Variant::from(application_id)])
     }
@@ -879,7 +929,8 @@ impl GdsPullMethodHandler {
             context,
             self.directory.directory_object_id.clone(),
             self.directory.update_application_id.clone(),
-            "UpdateApplication",
+            super::audit::AuditAction::UpdateApplication,
+            args,
         );
         Ok(vec![])
     }
@@ -905,7 +956,8 @@ impl GdsPullMethodHandler {
             context,
             self.directory.directory_object_id.clone(),
             self.directory.unregister_application_id.clone(),
-            "UnregisterApplication",
+            super::audit::AuditAction::UnregisterApplication,
+            args,
         );
         Ok(vec![])
     }

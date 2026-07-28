@@ -6,13 +6,20 @@ use opcua_nodes::{BaseEventType, Event, EventField};
 use opcua_types::{
     ActivateSessionRequest, AttributeId, ByteString, CreateSessionRequest, DateTime,
     ExtensionObject, NodeId, NumericRange, ObjectId, ObjectTypeId, QualifiedName, RequestHeader,
-    StatusCode, UAString, Variant,
+    StatusCode, UAString, Variant, VariantScalarTypeId,
 };
 use uuid::Uuid;
 
-#[cfg(feature = "events")]
-#[cfg(feature = "companion-gds")]
+#[cfg(all(feature = "events", feature = "gds", feature = "companion-gds"))]
 use crate::node_manager::RequestContext;
+#[cfg(all(
+    feature = "events",
+    any(
+        all(feature = "gds", feature = "companion-gds"),
+        all(feature = "node-management", feature = "generated-address-space")
+    )
+))]
+use crate::session::instance::Session;
 #[cfg(feature = "events")]
 use crate::subscriptions::SubscriptionCache;
 use crate::{identity_token::IdentityToken, info::ServerInfo, ANONYMOUS_USER_TOKEN_ID};
@@ -68,6 +75,7 @@ struct ServerAuditEvent {
     secure_channel_id: Option<UAString>,
     user_identity_token: Option<ExtensionObject>,
     method_id: Option<NodeId>,
+    input_arguments: Option<Vec<Variant>>,
     attribute_id: Option<u32>,
     client_certificate: Option<ByteString>,
     client_certificate_thumbprint: Option<ByteString>,
@@ -127,6 +135,7 @@ impl ServerAuditEvent {
             secure_channel_id: None,
             user_identity_token: None,
             method_id: None,
+            input_arguments: None,
             attribute_id: None,
             client_certificate: None,
             client_certificate_thumbprint: None,
@@ -204,6 +213,7 @@ impl ServerAuditEvent {
             secure_channel_id: None,
             user_identity_token: None,
             method_id: Some(method_id),
+            input_arguments: None,
             attribute_id: None,
             client_certificate: None,
             client_certificate_thumbprint: None,
@@ -220,7 +230,7 @@ impl ServerAuditEvent {
     }
 
     #[allow(clippy::too_many_arguments)]
-    #[cfg(feature = "companion-gds")]
+    #[cfg(all(feature = "events", feature = "gds", feature = "companion-gds"))]
     fn typed_method_call(
         event_type: NodeId,
         source_node: NodeId,
@@ -230,6 +240,7 @@ impl ServerAuditEvent {
         session_id: Option<NodeId>,
         method_id: NodeId,
         action: &str,
+        input_arguments: Vec<Variant>,
     ) -> Self {
         let now = DateTime::now();
         let base = BaseEventType::new(
@@ -254,6 +265,7 @@ impl ServerAuditEvent {
             secure_channel_id: None,
             user_identity_token: None,
             method_id: Some(method_id),
+            input_arguments: Some(input_arguments),
             attribute_id: None,
             client_certificate: None,
             client_certificate_thumbprint: None,
@@ -310,6 +322,7 @@ impl ServerAuditEvent {
             secure_channel_id: None,
             user_identity_token: None,
             method_id: None,
+            input_arguments: None,
             attribute_id: Some(attribute_id),
             client_certificate: None,
             client_certificate_thumbprint: None,
@@ -366,6 +379,7 @@ impl ServerAuditEvent {
             secure_channel_id: None,
             user_identity_token: None,
             method_id: None,
+            input_arguments: None,
             attribute_id: None,
             client_certificate: None,
             client_certificate_thumbprint: None,
@@ -442,7 +456,7 @@ impl ServerAuditEvent {
         self
     }
 
-    #[cfg(feature = "companion-gds")]
+    #[cfg(all(feature = "events", feature = "gds", feature = "companion-gds"))]
     fn with_certificate_details(
         mut self,
         certificate_group: NodeId,
@@ -453,7 +467,7 @@ impl ServerAuditEvent {
         self
     }
 
-    #[cfg(feature = "companion-gds")]
+    #[cfg(all(feature = "events", feature = "gds", feature = "companion-gds"))]
     fn with_trust_list_id(mut self, trust_list_id: NodeId) -> Self {
         self.trust_list_id = Some(trust_list_id);
         self
@@ -557,10 +571,20 @@ impl EventField for ServerAuditEvent {
                 self.requested_lifetime
                     .get_value(attribute_id, index_range, &[])
             }
-            "InputArguments" | "OutputArguments" => {
-                // ponytail: flat audit events do not carry generated method argument arrays.
-                Variant::Empty
+            "InputArguments" => {
+                let Some(input_arguments) = &self.input_arguments else {
+                    return Variant::Empty;
+                };
+                Variant::from((
+                    VariantScalarTypeId::Variant,
+                    input_arguments
+                        .iter()
+                        .cloned()
+                        .map(|argument| Variant::Variant(Box::new(argument)))
+                        .collect::<Vec<_>>(),
+                ))
             }
+            "OutputArguments" => Variant::Empty,
             "NewValue" | "OldValue" => {
                 // ponytail: flat audit events do not carry generated write value fields.
                 Variant::Empty
@@ -937,7 +961,11 @@ pub(crate) fn dispatch_service_failure(
     dispatch_audit_event_if_enabled!(subscriptions, &event);
 }
 
-#[cfg(all(feature = "generated-address-space", feature = "events"))]
+#[cfg(all(
+    feature = "generated-address-space",
+    feature = "events",
+    feature = "rbac"
+))]
 pub(crate) fn dispatch_role_mapping_rule_changed_audit(
     #[cfg(feature = "events")] subscriptions: &Arc<SubscriptionCache>,
     info: &ServerInfo,
@@ -976,45 +1004,43 @@ pub(crate) fn dispatch_method_audit(
     dispatch_audit_event_if_enabled!(subscriptions, &event);
 }
 
-#[cfg(feature = "events")]
-#[cfg(feature = "companion-gds")]
+#[cfg(all(feature = "events", feature = "gds", feature = "companion-gds"))]
 pub(crate) struct GdsAuditEventDetails {
     pub(crate) event_type: NodeId,
     pub(crate) source_node: NodeId,
     pub(crate) method_id: NodeId,
     pub(crate) action: &'static str,
+    pub(crate) input_arguments: Vec<Variant>,
     pub(crate) certificate_group: Option<NodeId>,
     pub(crate) certificate_type: Option<NodeId>,
     pub(crate) trust_list_id: Option<NodeId>,
 }
 
-#[cfg(feature = "events")]
-#[cfg(feature = "companion-gds")]
+#[cfg(all(feature = "events", feature = "gds", feature = "companion-gds"))]
 pub(crate) fn dispatch_gds_method_audit(context: &RequestContext, details: GdsAuditEventDetails) {
-    #[cfg(feature = "companion-gds")]
+    let session = context.session.read();
+    let session_id = Some(session.session_id().clone());
+    let mut event = ServerAuditEvent::typed_method_call(
+        details.event_type,
+        details.source_node,
+        context.info.application_uri.clone(),
+        context.client_audit_entry_id().clone(),
+        client_user_id_from_session(&session),
+        session_id,
+        details.method_id,
+        details.action,
+        details.input_arguments,
+    );
+    if let (Some(certificate_group), Some(certificate_type)) =
+        (details.certificate_group, details.certificate_type)
     {
-        let session_id = Some(context.session.read().session_id().clone());
-        let mut event = ServerAuditEvent::typed_method_call(
-            details.event_type,
-            details.source_node,
-            context.info.application_uri.clone(),
-            UAString::null(),
-            UAString::from(context.user_token().0.as_str()),
-            session_id,
-            details.method_id,
-            details.action,
-        );
-        if let (Some(certificate_group), Some(certificate_type)) =
-            (details.certificate_group, details.certificate_type)
-        {
-            event = event.with_certificate_details(certificate_group, certificate_type);
-        }
-        if let Some(trust_list_id) = details.trust_list_id {
-            event = event.with_trust_list_id(trust_list_id);
-        }
-        let subscriptions = &context.subscriptions;
-        dispatch_audit_event_if_enabled!(subscriptions, &event);
+        event = event.with_certificate_details(certificate_group, certificate_type);
     }
+    if let Some(trust_list_id) = details.trust_list_id {
+        event = event.with_trust_list_id(trust_list_id);
+    }
+    let subscriptions = &context.subscriptions;
+    dispatch_audit_event_if_enabled!(subscriptions, &event);
 }
 
 pub(crate) fn dispatch_write_audit(
@@ -1107,6 +1133,31 @@ fn dispatch_audit_event(subscriptions: &SubscriptionCache, event: &ServerAuditEv
     subscriptions.notify_events(items);
 }
 
+#[cfg(all(
+    feature = "events",
+    any(
+        all(feature = "gds", feature = "companion-gds"),
+        all(feature = "node-management", feature = "generated-address-space")
+    )
+))]
+pub(crate) fn client_user_id_from_session(session: &Session) -> UAString {
+    match session.user_identity() {
+        IdentityToken::Anonymous(_) => UAString::from(ANONYMOUS_USER_TOKEN_ID),
+        IdentityToken::UserName(token) => token.user_name.clone(),
+        IdentityToken::X509(token) => opcua_crypto::X509::from_byte_string(&token.certificate_data)
+            .map(|certificate| UAString::from(certificate.subject_name()))
+            .unwrap_or_else(|_| UAString::null()),
+        IdentityToken::IssuedToken(_) => session
+            .user_token()
+            .map(|token| UAString::from(token.0.as_str()))
+            .unwrap_or_else(UAString::null),
+        IdentityToken::None | IdentityToken::Invalid(_) => session
+            .user_token()
+            .map(|token| UAString::from(token.0.as_str()))
+            .unwrap_or_else(UAString::null),
+    }
+}
+
 fn client_user_id_from_identity_token(user_identity_token: &ExtensionObject) -> UAString {
     match IdentityToken::new(user_identity_token.clone()) {
         IdentityToken::Anonymous(_) => UAString::from(ANONYMOUS_USER_TOKEN_ID),
@@ -1168,6 +1219,45 @@ mod tests {
                 &field("StatusCodeId")
             ),
             Variant::StatusCode(StatusCode::BadUserAccessDenied)
+        );
+    }
+
+    #[test]
+    fn audit_event_input_arguments_preserve_mixed_variant_values() {
+        // Given
+        let input_arguments = vec![
+            Variant::Boolean(true),
+            Variant::Int32(-7),
+            Variant::from(UAString::from("argument")),
+        ];
+        let mut event = ServerAuditEvent::failure(
+            ObjectTypeId::AuditUpdateMethodEventType,
+            UAString::from("urn:test-server"),
+            "Call",
+            UAString::from("audit-entry"),
+            UAString::from("operator"),
+            StatusCode::BadInvalidArgument,
+            Some(NodeId::new(1, 42)),
+        );
+        event.input_arguments = Some(input_arguments.clone());
+
+        // When
+        let value = event.get_value(
+            AttributeId::Value,
+            &NumericRange::None,
+            &field("InputArguments"),
+        );
+
+        // Then
+        assert_eq!(
+            value,
+            Variant::from((
+                VariantScalarTypeId::Variant,
+                input_arguments
+                    .into_iter()
+                    .map(|argument| Variant::Variant(Box::new(argument)))
+                    .collect::<Vec<_>>(),
+            ))
         );
     }
 
@@ -1404,6 +1494,7 @@ mod tests {
         );
     }
 
+    #[cfg(all(feature = "events", feature = "gds", feature = "companion-gds"))]
     #[test]
     fn gds_method_audit_exposes_specialized_type_source_and_certificate_fields() {
         // Given: a successful GDS CertificateRequestedAuditEventType operation.
@@ -1423,6 +1514,7 @@ mod tests {
             Some(NodeId::new(1, 7)),
             method_id.clone(),
             "StartSigningRequest",
+            Vec::new(),
         )
         .with_certificate_details(certificate_group.clone(), certificate_type.clone());
 
@@ -1461,6 +1553,7 @@ mod tests {
         );
     }
 
+    #[cfg(all(feature = "events", feature = "gds", feature = "companion-gds"))]
     #[test]
     fn trust_list_updated_audit_exposes_trust_list_id() {
         // Given: a successful TrustListUpdatedAuditEventType operation.
@@ -1476,6 +1569,7 @@ mod tests {
             Some(NodeId::new(1, 7)),
             NodeId::new(0, 12668),
             "AddCertificate",
+            Vec::new(),
         )
         .with_trust_list_id(trust_list_id.clone());
 

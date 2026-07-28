@@ -35,7 +35,7 @@ use opcua_nodes::Event;
 use opcua_types::MonitoringMode;
 #[cfg(all(feature = "node-management", feature = "events"))]
 use opcua_types::ObjectId;
-#[cfg(any(feature = "method-call", feature = "node-management"))]
+#[cfg(feature = "method-call")]
 use opcua_types::Variant;
 use opcua_types::{DataValue, NodeId, StatusCode, TimestampsToReturn};
 #[cfg(feature = "node-management")]

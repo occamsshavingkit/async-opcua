@@ -39,6 +39,14 @@ use super::lifecycle::{
 use super::{activate_session, SessionManager};
 
 mod activation;
+#[cfg(all(
+    feature = "events",
+    any(
+        all(feature = "gds", feature = "companion-gds"),
+        all(feature = "node-management", feature = "generated-address-space")
+    )
+))]
+mod client_user_id;
 mod expiry;
 mod lifecycle;
 

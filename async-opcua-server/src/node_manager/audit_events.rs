@@ -9,7 +9,7 @@ use opcua_types::{
 #[cfg(all(feature = "generated-address-space", feature = "events"))]
 mod generated {
     use super::*;
-    use crate::{identity_token::IdentityToken, ANONYMOUS_USER_TOKEN_ID};
+    use crate::session::audit::client_user_id_from_session;
     use opcua_core_namespace::events::{
         AuditAddNodesEventType, AuditAddReferencesEventType, AuditDeleteNodesEventType,
         AuditDeleteReferencesEventType, AuditEventType, AuditNodeManagementEventType,
@@ -102,6 +102,7 @@ mod generated {
         message: &str,
     ) -> AuditEventType {
         let now = DateTime::now();
+        let session = context.session.read();
         let base = BaseEventType::new(
             event_type,
             ByteString::from(Uuid::new_v4().as_bytes().as_slice()),
@@ -115,27 +116,10 @@ mod generated {
         AuditEventType {
             base,
             action_time_stamp: now,
-            client_audit_entry_id: UAString::null(),
-            client_user_id: client_user_id(context),
+            client_audit_entry_id: context.client_audit_entry_id().clone(),
+            client_user_id: client_user_id_from_session(&session),
             server_id: context.info.application_uri.clone(),
             status: true,
-        }
-    }
-
-    fn client_user_id(context: &RequestContext) -> UAString {
-        let session = context.session.read();
-        match session.user_identity() {
-            IdentityToken::Anonymous(_) => UAString::from(ANONYMOUS_USER_TOKEN_ID),
-            IdentityToken::UserName(token) => token.user_name.clone(),
-            IdentityToken::X509(_) => UAString::from("x509"),
-            IdentityToken::IssuedToken(_) => session
-                .user_token()
-                .map(|token| UAString::from(token.0.as_str()))
-                .unwrap_or_else(|| UAString::from("issued-token")),
-            IdentityToken::None | IdentityToken::Invalid(_) => session
-                .user_token()
-                .map(|token| UAString::from(token.0.as_str()))
-                .unwrap_or_else(UAString::null),
         }
     }
 

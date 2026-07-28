@@ -68,6 +68,7 @@ fn request_context() -> RequestContext {
 
     RequestContext {
         current_node_manager_index: 0,
+        client_audit_entry_id: UAString::null(),
         inner: Arc::new(RequestContextInner {
             session: Arc::new(RwLock::new(session)),
             session_id: 1,
@@ -218,3 +219,6 @@ fn deleted_node_item(node_id: &NodeId, delete_target_references: bool) -> Delete
 
 mod crud;
 mod references;
+
+#[cfg(all(feature = "events", feature = "generated-address-space"))]
+mod audit;

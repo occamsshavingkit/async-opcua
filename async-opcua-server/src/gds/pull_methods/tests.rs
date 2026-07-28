@@ -104,6 +104,31 @@ fn handler_with_directory() -> Option<(GdsPullMethodHandler, DirectoryInstanceNo
     Some((handler, directory))
 }
 
+fn handler_with_test_directory() -> (GdsPullMethodHandler, DirectoryInstanceNodeIds) {
+    let id = |name: &str| NodeId::new(1, name);
+    let directory = DirectoryInstanceNodeIds {
+        directory_object_id: id("Directory"),
+        start_signing_request_id: id("StartSigningRequest"),
+        start_new_key_pair_request_id: id("StartNewKeyPairRequest"),
+        finish_request_id: id("FinishRequest"),
+        get_certificate_groups_id: id("GetCertificateGroups"),
+        get_trust_list_id: id("GetTrustList"),
+        get_certificate_status_id: id("GetCertificateStatus"),
+        default_application_group_id: id("DefaultApplicationGroup"),
+        default_application_group_trust_list_id: id("DefaultApplicationGroup.TrustList"),
+        register_application_id: id("RegisterApplication"),
+        query_servers_id: id("QueryServers"),
+        query_applications_id: id("QueryApplications"),
+        find_applications_id: id("FindApplications"),
+        update_application_id: id("UpdateApplication"),
+        unregister_application_id: id("UnregisterApplication"),
+        get_application_id: id("GetApplication"),
+        applications_folder_id: id("Applications"),
+    };
+    let handler = GdsPullMethodHandler::new(GdsPullMethodRegistry::default(), directory.clone());
+    (handler, directory)
+}
+
 fn signing_request_args(application_id: NodeId, csr_der: Vec<u8>) -> Vec<Variant> {
     vec![
         Variant::from(application_id),
@@ -123,6 +148,43 @@ fn new_key_pair_args(application_id: NodeId) -> Vec<Variant> {
         Variant::from(UAString::null()),
         Variant::from(UAString::null()),
     ]
+}
+
+fn signing_request_args_with_ids(
+    application_id: NodeId,
+    certificate_group_id: NodeId,
+    certificate_type_id: NodeId,
+    csr_der: Vec<u8>,
+) -> Vec<Variant> {
+    vec![
+        Variant::from(application_id),
+        Variant::from(certificate_group_id),
+        Variant::from(certificate_type_id),
+        Variant::from(ByteString::from(csr_der)),
+    ]
+}
+
+fn new_key_pair_args_with_ids(
+    application_id: NodeId,
+    certificate_group_id: NodeId,
+    certificate_type_id: NodeId,
+) -> Vec<Variant> {
+    vec![
+        Variant::from(application_id),
+        Variant::from(certificate_group_id),
+        Variant::from(certificate_type_id),
+        Variant::from(UAString::null()),
+        Variant::Empty,
+        Variant::from(UAString::null()),
+        Variant::from(UAString::null()),
+    ]
+}
+
+fn assert_no_staged_requests(handler: &GdsPullMethodHandler) {
+    assert!(
+        handler.registry.inner.requests.iter().next().is_none(),
+        "invalid request must not stage a completed request"
+    );
 }
 
 #[tokio::test]
@@ -211,6 +273,206 @@ async fn start_signing_request_with_matching_csr_returns_certificate_without_pri
     assert!(
         pkey.is_null_or_empty(),
         "StartSigningRequest must not return a private key"
+    );
+}
+
+#[tokio::test]
+async fn start_signing_request_rejects_invalid_certificate_group_without_staging() {
+    let (handler, directory) = handler_with_test_directory();
+    let (context, _handle) = security_admin_request_context(MessageSecurityMode::SignAndEncrypt);
+    let application_id = handler.registry().register_application(
+        "urn:test:invalid-signing-group",
+        directory.default_application_group_id.clone(),
+    );
+    let requester_pkey =
+        opcua_crypto::PrivateKey::new(2048).expect("requester key pair should generate");
+    let csr_der = X509::create_signing_request(
+        &requester_pkey,
+        "CN=requester",
+        "urn:test:invalid-signing-group",
+    )
+    .expect("CSR should build");
+
+    assert_eq!(
+        handler.handle_start_signing_request(
+            &context,
+            &signing_request_args_with_ids(
+                application_id,
+                NodeId::new(1, "invalid-certificate-group"),
+                NodeId::null(),
+                csr_der,
+            ),
+        ),
+        Err(StatusCode::BadInvalidArgument)
+    );
+    assert_no_staged_requests(&handler);
+}
+
+#[tokio::test]
+async fn start_signing_request_rejects_invalid_certificate_type_without_staging() {
+    let (handler, directory) = handler_with_test_directory();
+    let (context, _handle) = security_admin_request_context(MessageSecurityMode::SignAndEncrypt);
+    let application_id = handler.registry().register_application(
+        "urn:test:invalid-signing-type",
+        directory.default_application_group_id.clone(),
+    );
+    let requester_pkey =
+        opcua_crypto::PrivateKey::new(2048).expect("requester key pair should generate");
+    let csr_der = X509::create_signing_request(
+        &requester_pkey,
+        "CN=requester",
+        "urn:test:invalid-signing-type",
+    )
+    .expect("CSR should build");
+
+    assert_eq!(
+        handler.handle_start_signing_request(
+            &context,
+            &signing_request_args_with_ids(
+                application_id,
+                directory.default_application_group_id.clone(),
+                NodeId::new(1, "invalid-certificate-type"),
+                csr_der,
+            ),
+        ),
+        Err(StatusCode::BadInvalidArgument)
+    );
+    assert_no_staged_requests(&handler);
+}
+
+#[tokio::test]
+async fn start_new_key_pair_request_rejects_invalid_certificate_group_without_staging() {
+    let (handler, directory) = handler_with_test_directory();
+    let (context, _handle) = security_admin_request_context(MessageSecurityMode::SignAndEncrypt);
+    let application_id = handler.registry().register_application(
+        "urn:test:invalid-key-pair-group",
+        directory.default_application_group_id.clone(),
+    );
+
+    assert_eq!(
+        handler.handle_start_new_key_pair_request(
+            &context,
+            &new_key_pair_args_with_ids(
+                application_id,
+                NodeId::new(1, "invalid-certificate-group"),
+                NodeId::null(),
+            ),
+        ),
+        Err(StatusCode::BadInvalidArgument)
+    );
+    assert_no_staged_requests(&handler);
+}
+
+#[tokio::test]
+async fn start_new_key_pair_request_rejects_invalid_certificate_type_without_staging() {
+    let (handler, directory) = handler_with_test_directory();
+    let (context, _handle) = security_admin_request_context(MessageSecurityMode::SignAndEncrypt);
+    let application_id = handler.registry().register_application(
+        "urn:test:invalid-key-pair-type",
+        directory.default_application_group_id.clone(),
+    );
+
+    assert_eq!(
+        handler.handle_start_new_key_pair_request(
+            &context,
+            &new_key_pair_args_with_ids(
+                application_id,
+                directory.default_application_group_id.clone(),
+                NodeId::new(1, "invalid-certificate-type"),
+            ),
+        ),
+        Err(StatusCode::BadInvalidArgument)
+    );
+    assert_no_staged_requests(&handler);
+}
+
+#[tokio::test]
+async fn start_new_key_pair_request_accepts_registered_non_null_certificate_identifiers() {
+    let (handler, directory) = handler_with_test_directory();
+    let (context, _handle) = security_admin_request_context(MessageSecurityMode::SignAndEncrypt);
+    let application_id = handler.registry().register_application(
+        "urn:test:valid-key-pair-identifiers",
+        directory.default_application_group_id.clone(),
+    );
+
+    let result = handler.handle_start_new_key_pair_request(
+        &context,
+        &new_key_pair_args_with_ids(
+            application_id,
+            directory.default_application_group_id.clone(),
+            NodeId::from(ObjectTypeId::RsaSha256ApplicationCertificateType),
+        ),
+    );
+
+    assert!(result.is_ok());
+}
+
+#[tokio::test]
+async fn start_signing_request_resolves_null_certificate_identifiers_before_staging() {
+    let (handler, directory) = handler_with_test_directory();
+    let (context, _handle) = security_admin_request_context(MessageSecurityMode::SignAndEncrypt);
+    let application_uri = "urn:test:default-signing-identifiers";
+    let application_id = handler.registry().register_application(
+        application_uri,
+        directory.default_application_group_id.clone(),
+    );
+    let requester_pkey =
+        opcua_crypto::PrivateKey::new(2048).expect("requester key pair should generate");
+    let csr_der = X509::create_signing_request(&requester_pkey, "CN=requester", application_uri)
+        .expect("CSR should build");
+
+    let outputs = handler
+        .handle_start_signing_request(&context, &signing_request_args(application_id, csr_der))
+        .expect("start signing request should succeed");
+
+    let Variant::NodeId(request_id) = &outputs[0] else {
+        panic!("expected NodeId output");
+    };
+    let staged = handler
+        .registry
+        .inner
+        .requests
+        .get(request_id.as_ref())
+        .expect("completed signing request should be staged");
+    assert_eq!(
+        staged.certificate_group_id,
+        directory.default_application_group_id
+    );
+    assert_eq!(
+        staged.certificate_type_id,
+        NodeId::from(ObjectTypeId::RsaSha256ApplicationCertificateType)
+    );
+}
+
+#[tokio::test]
+async fn start_new_key_pair_request_resolves_null_certificate_identifiers_before_staging() {
+    let (handler, directory) = handler_with_test_directory();
+    let (context, _handle) = security_admin_request_context(MessageSecurityMode::SignAndEncrypt);
+    let application_id = handler.registry().register_application(
+        "urn:test:default-key-pair-identifiers",
+        directory.default_application_group_id.clone(),
+    );
+
+    let outputs = handler
+        .handle_start_new_key_pair_request(&context, &new_key_pair_args(application_id))
+        .expect("start new key pair request should succeed");
+
+    let Variant::NodeId(request_id) = &outputs[0] else {
+        panic!("expected NodeId output");
+    };
+    let staged = handler
+        .registry
+        .inner
+        .requests
+        .get(request_id.as_ref())
+        .expect("completed new-key-pair request should be staged");
+    assert_eq!(
+        staged.certificate_group_id,
+        directory.default_application_group_id
+    );
+    assert_eq!(
+        staged.certificate_type_id,
+        NodeId::from(ObjectTypeId::RsaSha256ApplicationCertificateType)
     );
 }
 

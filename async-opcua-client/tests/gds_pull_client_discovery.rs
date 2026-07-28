@@ -97,7 +97,7 @@ async fn start_server_with_gds() -> RunningServer {
         .node_managers()
         .get_of_type::<CoreNodeManager>()
         .expect("default server should have a CoreNodeManager for namespace 0");
-    register_gds_pull_methods_from_companion(&core_node_manager, &server_handle.type_tree().read())
+    register_gds_pull_methods_from_companion(&core_node_manager, &server_handle)
         .expect("companion XML is present, Pull-model wiring should succeed");
 
     let server_task = tokio::spawn(async move {

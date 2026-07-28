@@ -21,6 +21,8 @@ use opcua_types::{
 use crate::node_manager::memory::CoreNodeManager;
 use crate::node_manager::RequestContext;
 
+#[cfg(test)]
+use super::push_methods::PushTransactionState;
 use super::push_methods::{
     authorize_authenticated_security_admin, non_empty_byte_string_arg, GdsPushRegistry,
     PushTransaction,
@@ -172,8 +174,6 @@ pub struct TrustListMethodHandler {
     push_registry: Arc<GdsPushRegistry>,
     handles: TrustListHandleRegistry,
     certificate_group: CertificateGroup,
-    #[cfg_attr(not(feature = "companion-gds"), allow(dead_code))]
-    node_ids: TrustListNodeIds,
 }
 
 impl TrustListMethodHandler {
@@ -192,7 +192,6 @@ impl TrustListMethodHandler {
             push_registry,
             handles: TrustListHandleRegistry::new(Duration::from_secs(60)),
             certificate_group,
-            node_ids: TrustListNodeIds::for_group(certificate_group),
         }
     }
 
@@ -403,43 +402,41 @@ impl TrustListMethodHandler {
 
         {
             let mut transaction = self.push_registry.transaction.write();
-            match &*transaction {
-                Some(existing) if existing.owning_session_id != session_id => {
+            let mut updated = match transaction.staging_base(session_id) {
+                Err(status) => {
                     self.handles.remove(file_handle);
-                    return Err(StatusCode::BadTransactionPending);
+                    return Err(status);
                 }
-                Some(existing) => {
-                    let mut updated = existing.clone();
-                    updated
-                        .pending_trust_lists
-                        .insert(self.certificate_group, trust_list);
-                    *transaction = Some(updated);
-                }
-                None => {
-                    let pending_trust_lists =
-                        std::collections::HashMap::from([(self.certificate_group, trust_list)]);
-                    *transaction = Some(PushTransaction {
-                        owning_session_id: session_id,
-                        certificate_der: None,
-                        private_key_pem: None,
-                        certificate_group_id: None,
-                        certificate_type_id: None,
-                        pending_trust_lists,
-                    });
-                }
-            }
+                Ok(Some(existing)) => existing.clone(),
+                Ok(None) => PushTransaction {
+                    owning_session_id: session_id,
+                    certificate_der: None,
+                    private_key_pem: None,
+                    certificate_group_id: None,
+                    certificate_type_id: None,
+                    pending_trust_lists: std::collections::HashMap::new(),
+                },
+            };
+            updated
+                .pending_trust_lists
+                .insert(self.certificate_group, trust_list);
+            transaction.stage(updated);
         }
         self.handles.remove(file_handle);
 
         #[cfg(feature = "events")]
         #[cfg(feature = "companion-gds")]
-        super::audit::trust_list_update_requested(
-            context,
-            NodeId::new(0, self.node_ids.object),
-            NodeId::new(0, self.node_ids.close_and_update),
-            NodeId::new(0, self.node_ids.object),
-            "CloseAndUpdate",
-        );
+        {
+            let node_ids = TrustListNodeIds::for_group(self.certificate_group);
+            super::audit::trust_list_update_requested(
+                context,
+                NodeId::new(0, node_ids.object),
+                NodeId::new(0, node_ids.close_and_update),
+                NodeId::new(0, node_ids.object),
+                super::audit::AuditAction::CloseAndUpdate,
+                args,
+            );
+        }
 
         Ok(vec![Variant::from(true)])
     }
@@ -482,13 +479,17 @@ impl TrustListMethodHandler {
 
         #[cfg(feature = "events")]
         #[cfg(feature = "companion-gds")]
-        super::audit::trust_list_updated(
-            context,
-            NodeId::new(0, self.node_ids.object),
-            NodeId::new(0, self.node_ids.add_certificate),
-            NodeId::new(0, self.node_ids.object),
-            "AddCertificate",
-        );
+        {
+            let node_ids = TrustListNodeIds::for_group(self.certificate_group);
+            super::audit::trust_list_updated(
+                context,
+                NodeId::new(0, node_ids.object),
+                NodeId::new(0, node_ids.add_certificate),
+                NodeId::new(0, node_ids.object),
+                super::audit::AuditAction::AddCertificate,
+                args,
+            );
+        }
 
         Ok(vec![])
     }
@@ -541,13 +542,17 @@ impl TrustListMethodHandler {
 
         #[cfg(feature = "events")]
         #[cfg(feature = "companion-gds")]
-        super::audit::trust_list_updated(
-            context,
-            NodeId::new(0, self.node_ids.object),
-            NodeId::new(0, self.node_ids.remove_certificate),
-            NodeId::new(0, self.node_ids.object),
-            "RemoveCertificate",
-        );
+        {
+            let node_ids = TrustListNodeIds::for_group(self.certificate_group);
+            super::audit::trust_list_updated(
+                context,
+                NodeId::new(0, node_ids.object),
+                NodeId::new(0, node_ids.remove_certificate),
+                NodeId::new(0, node_ids.object),
+                super::audit::AuditAction::RemoveCertificate,
+                args,
+            );
+        }
 
         Ok(vec![])
     }
@@ -851,7 +856,7 @@ fn register_trust_list_group_methods(
         &RequestContext,
         &[Variant],
     ) -> Result<Vec<Variant>, StatusCode>;
-    let node_ids = handler.node_ids;
+    let node_ids = TrustListNodeIds::for_group(handler.certificate_group);
     let bindings: [(NodeId, Handle); 10] = [
         (
             NodeId::new(0, node_ids.open),

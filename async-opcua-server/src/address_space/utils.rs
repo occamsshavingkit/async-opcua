@@ -632,6 +632,7 @@ mod tests {
 
         RequestContext {
             current_node_manager_index: 0,
+            client_audit_entry_id: UAString::null(),
             inner: Arc::new(RequestContextInner {
                 session,
                 session_id: 1,

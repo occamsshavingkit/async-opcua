@@ -9,7 +9,7 @@ use crate::{
 };
 use opcua_core::{sync::RwLock, trace_read_lock};
 use opcua_nodes::TypeTree;
-use opcua_types::{BrowseDescriptionResultMask, MessageSecurityMode, NodeId};
+use opcua_types::{BrowseDescriptionResultMask, MessageSecurityMode, NodeId, UAString};
 use parking_lot::lock_api::{RawRwLock, RwLockReadGuard};
 use tracing::debug_span;
 use tracing_futures::Instrument;
@@ -126,6 +126,7 @@ impl TypeTreeReadContext for TypeTreeSnapshot {
 pub struct RequestContext {
     /// Index of the current node manager.
     pub current_node_manager_index: usize,
+    pub(crate) client_audit_entry_id: UAString,
     /// Inner request context object, shared between service calls.
     pub(crate) inner: Arc<RequestContextInner>,
 }
@@ -171,8 +172,20 @@ impl RequestContext {
     pub fn new_test(inner: Arc<RequestContextInner>) -> Self {
         Self {
             current_node_manager_index: 0,
+            client_audit_entry_id: UAString::null(),
             inner,
         }
+    }
+
+    #[cfg(feature = "method-call")]
+    pub(crate) fn with_client_audit_entry_id(mut self, client_audit_entry_id: UAString) -> Self {
+        self.client_audit_entry_id = client_audit_entry_id;
+        self
+    }
+
+    /// Get the audit entry ID supplied by the client for the current request.
+    pub fn client_audit_entry_id(&self) -> &UAString {
+        &self.client_audit_entry_id
     }
 
     /// Get the type tree for the current user.

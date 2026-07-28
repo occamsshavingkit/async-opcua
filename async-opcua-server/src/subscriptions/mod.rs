@@ -42,7 +42,7 @@ use opcua_types::{
     MonitoringMode, NodeId, NotificationMessage, NumericRange, PublishRequest, RepublishRequest,
     ResponseHeader, SetPublishingModeRequest, SetPublishingModeResponse, StatusCode,
     TimestampsToReturn, TransferResult, TransferSubscriptionsRequest,
-    TransferSubscriptionsResponse, Variant,
+    TransferSubscriptionsResponse, UAString, Variant,
 };
 
 #[cfg(all(feature = "generated-address-space", feature = "diagnostics"))]
@@ -725,6 +725,7 @@ impl SubscriptionCache {
             };
             let ctx = RequestContext {
                 current_node_manager_index: 0,
+                client_audit_entry_id: UAString::null(),
                 inner: Arc::new(RequestContextInner {
                     session,
                     session_id: id,

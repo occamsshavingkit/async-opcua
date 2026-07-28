@@ -38,8 +38,7 @@ use self::pull_methods::GdsPullMethodHandler;
 /// sustained authorized GDS traffic from growing registry memory without bound.
 pub(crate) const GDS_REGISTRY_CAPACITY: usize = 1024;
 
-#[cfg(feature = "events")]
-#[cfg(feature = "companion-gds")]
+#[cfg(all(feature = "events", feature = "gds", feature = "companion-gds"))]
 mod audit;
 
 /// Compatibility re-exports for the hand-authored shared `ApplicationRecordDataType` (Part 12
@@ -121,6 +120,10 @@ pub fn register_gds_certificate_management_methods_with_handle(
 /// project's existing companion-spec operator model. Returns `None` (logging a warning, never
 /// panicking) if the companion NodeSet wasn't actually importable -- the server otherwise
 /// continues exactly as if this function had never been called.
+///
+/// `server_handle` must belong to the same server as `core_node_manager`. Call this during server
+/// startup, before [`crate::Server::run`] begins serving concurrent requests, so the imported type
+/// metadata can replace the startup snapshot used by subscription event filters.
 #[cfg(all(
     feature = "method-call",
     feature = "generated-address-space",
@@ -128,8 +131,27 @@ pub fn register_gds_certificate_management_methods_with_handle(
 ))]
 pub fn register_gds_pull_methods_from_companion(
     core_node_manager: &CoreNodeManager,
-    type_tree: &opcua_nodes::DefaultTypeTree,
+    server_handle: &ServerHandle,
 ) -> Option<Arc<GdsPullMethodHandler>> {
+    let Some(handle_core_node_manager) = server_handle
+        .node_managers()
+        .get_of_type::<CoreNodeManager>()
+    else {
+        tracing::warn!(
+            "cannot register GDS companion methods: server handle has no CoreNodeManager"
+        );
+        return None;
+    };
+    if !Arc::ptr_eq(
+        core_node_manager.address_space(),
+        handle_core_node_manager.address_space(),
+    ) {
+        tracing::warn!(
+            "cannot register GDS companion methods: server handle belongs to a different server"
+        );
+        return None;
+    }
+
     // The address space's own namespace table (what the companion import's "next free index"
     // allocation consults) and the type tree's namespace table (e.g. populated by
     // `DiagnosticsNodeManager` registering the server's own application namespace at startup) are
@@ -138,8 +160,35 @@ pub fn register_gds_pull_methods_from_companion(
     // type tree already claims for something else, which would otherwise make
     // `Server_NamespaceArray` silently misreport one of the two colliding namespaces to clients.
     {
+        let type_tree = server_handle.type_tree().read();
         let address_space = core_node_manager.address_space().read();
         let existing = address_space.namespaces();
+        for (uri, index) in type_tree.namespaces().known_namespaces() {
+            if let Some(existing_uri) = existing.get(index) {
+                if existing_uri != uri {
+                    tracing::warn!(
+                        index,
+                        address_space_uri = %existing_uri,
+                        type_tree_uri = %uri,
+                        "cannot register GDS companion methods with conflicting namespace indices"
+                    );
+                    return None;
+                }
+                continue;
+            }
+            if let Some((existing_index, _)) = existing
+                .iter()
+                .find(|(_, existing_uri)| *existing_uri == uri)
+            {
+                tracing::warn!(
+                    address_space_index = existing_index,
+                    type_tree_index = index,
+                    namespace_uri = %uri,
+                    "cannot register GDS companion methods with conflicting namespace indices"
+                );
+                return None;
+            }
+        }
         for (uri, index) in type_tree.namespaces().known_namespaces() {
             if !existing.contains_key(index) {
                 address_space.add_namespace(uri, *index);
@@ -153,6 +202,21 @@ pub fn register_gds_pull_methods_from_companion(
     // Browse dispatch) was snapshotted at construction time, before this import ran -- refresh it
     // so the newly-instantiated Directory object's namespace is recognized as owned.
     core_node_manager.refresh_namespaces();
+
+    {
+        let mut type_tree = server_handle.type_tree().write();
+        let address_space = core_node_manager.address_space().read();
+        let mut namespaces = type_tree.namespaces().known_namespaces().clone();
+        namespaces.extend(
+            address_space
+                .namespaces()
+                .into_iter()
+                .map(|(index, uri)| (uri, index)),
+        );
+        *type_tree.namespaces_mut() = opcua_types::NamespaceMap::new_full(namespaces);
+        address_space.load_into_type_tree(&mut type_tree);
+        server_handle.info().publish_type_tree_snapshot(&type_tree);
+    }
 
     let directory = {
         let address_space = core_node_manager.address_space().read();

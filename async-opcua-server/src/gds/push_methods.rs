@@ -11,7 +11,8 @@ use std::{collections::HashMap, sync::Arc};
 use opcua_core::sync::RwLock;
 use opcua_crypto::{gds_reload, CertificateGroup, PrivateKey, X509};
 use opcua_types::{
-    ByteString, LocalizedText, MessageSecurityMode, NodeId, StatusCode, TrustListDataType, Variant,
+    ByteString, LocalizedText, MessageSecurityMode, NodeId, ObjectId, ObjectTypeId, StatusCode,
+    TrustListDataType, Variant,
 };
 
 #[cfg(all(feature = "method-call", feature = "generated-address-space"))]
@@ -41,10 +42,182 @@ pub(super) struct PushTransaction {
     pub(super) pending_trust_lists: HashMap<CertificateGroup, TrustListDataType>,
 }
 
+#[derive(Default)]
+pub(super) enum PushTransactionState {
+    #[default]
+    Idle,
+    Staged(PushTransaction),
+    Applying {
+        current: PushTransaction,
+        replacement: Option<PushTransaction>,
+    },
+}
+
+impl PushTransactionState {
+    pub(super) fn staging_base(
+        &self,
+        session_id: u32,
+    ) -> Result<Option<&PushTransaction>, StatusCode> {
+        match self {
+            Self::Idle => Ok(None),
+            Self::Staged(existing) if existing.owning_session_id != session_id => {
+                Err(StatusCode::BadTransactionPending)
+            }
+            Self::Staged(existing) => Ok(Some(existing)),
+            Self::Applying { current, .. } if current.owning_session_id != session_id => {
+                Err(StatusCode::BadTransactionPending)
+            }
+            Self::Applying { replacement, .. } => match replacement {
+                Some(replacement) => Ok(Some(replacement)),
+                None => Ok(None),
+            },
+        }
+    }
+
+    /// Stages `transaction`, replacing any update already staged by the same session.
+    ///
+    /// While an apply is active, the replacement must belong to `current.owning_session_id`.
+    pub(super) fn stage(&mut self, transaction: PushTransaction) {
+        match self {
+            Self::Idle | Self::Staged(_) => *self = Self::Staged(transaction),
+            Self::Applying {
+                current,
+                replacement,
+            } => {
+                debug_assert_eq!(
+                    transaction.owning_session_id, current.owning_session_id,
+                    "replacement transaction must belong to the active transaction's owning session"
+                );
+                *replacement = Some(transaction);
+            }
+        }
+    }
+
+    fn begin_apply(&mut self, session_id: u32) -> Result<PushTransaction, StatusCode> {
+        match std::mem::take(self) {
+            Self::Idle => Err(StatusCode::BadNothingToDo),
+            Self::Staged(current) if current.owning_session_id != session_id => {
+                *self = Self::Staged(current);
+                Err(StatusCode::BadSessionIdInvalid)
+            }
+            Self::Staged(current) => {
+                let staged = current.clone();
+                *self = Self::Applying {
+                    current,
+                    replacement: None,
+                };
+                Ok(staged)
+            }
+            Self::Applying {
+                current,
+                replacement,
+            } => {
+                let status = if current.owning_session_id == session_id {
+                    StatusCode::BadTransactionPending
+                } else {
+                    StatusCode::BadSessionIdInvalid
+                };
+                *self = Self::Applying {
+                    current,
+                    replacement,
+                };
+                Err(status)
+            }
+        }
+    }
+
+    fn finish_apply(&mut self, succeeded: bool) {
+        *self = match std::mem::take(self) {
+            Self::Applying {
+                mut current,
+                replacement: Some(replacement),
+            } => match succeeded {
+                true => Self::Staged(replacement),
+                false => {
+                    current
+                        .pending_trust_lists
+                        .extend(replacement.pending_trust_lists);
+                    match replacement.certificate_der {
+                        Some(certificate_der) => {
+                            current.certificate_der = Some(certificate_der);
+                            current.private_key_pem = replacement.private_key_pem;
+                            current.certificate_group_id = replacement.certificate_group_id;
+                            current.certificate_type_id = replacement.certificate_type_id;
+                        }
+                        None => {}
+                    }
+                    Self::Staged(current)
+                }
+            },
+            Self::Applying {
+                current,
+                replacement: None,
+            } => match succeeded {
+                true => Self::Idle,
+                false => Self::Staged(current),
+            },
+            state @ (Self::Idle | Self::Staged(_)) => state,
+        };
+    }
+}
+
+#[cfg(test)]
+impl PushTransactionState {
+    pub(super) fn staged(&self) -> Option<&PushTransaction> {
+        match self {
+            Self::Staged(transaction) => Some(transaction),
+            Self::Idle | Self::Applying { .. } => None,
+        }
+    }
+
+    pub(super) fn is_idle(&self) -> bool {
+        matches!(self, Self::Idle)
+    }
+}
+
 /// In-memory state backing the GDS push model method callbacks.
 #[derive(Default)]
 pub struct GdsPushRegistry {
-    pub(super) transaction: RwLock<Option<PushTransaction>>,
+    pub(super) transaction: RwLock<PushTransactionState>,
+}
+
+/// Its [`Drop`] implementation calls `finish_apply` on normal scope exit and during unwinding.
+struct ApplyTransactionGuard<'a> {
+    transaction: &'a RwLock<PushTransactionState>,
+    succeeded: bool,
+}
+
+impl<'a> ApplyTransactionGuard<'a> {
+    fn new(transaction: &'a RwLock<PushTransactionState>) -> Self {
+        Self {
+            transaction,
+            succeeded: false,
+        }
+    }
+
+    /// Records the outcome consumed by [`Drop`]; the transition itself occurs on drop.
+    fn finish(mut self, succeeded: bool) {
+        self.succeeded = succeeded;
+    }
+}
+
+impl Drop for ApplyTransactionGuard<'_> {
+    fn drop(&mut self) {
+        self.transaction.write().finish_apply(self.succeeded);
+    }
+}
+
+fn resolve_certificate_identifier(
+    identifier: NodeId,
+    default: NodeId,
+) -> Result<NodeId, StatusCode> {
+    if identifier.is_null() {
+        Ok(default)
+    } else if identifier == default {
+        Ok(identifier)
+    } else {
+        Err(StatusCode::BadInvalidArgument)
+    }
 }
 
 impl GdsPushRegistry {
@@ -53,7 +226,14 @@ impl GdsPushRegistry {
     /// (TrustList `Open` in write mode, `AddCertificate`, `RemoveCertificate`), without
     /// themselves reserving or creating a transaction.
     pub(super) fn transaction_pending_for_other_session(&self, session_id: u32) -> bool {
-        matches!(&*self.transaction.read(), Some(t) if t.owning_session_id != session_id)
+        match &*self.transaction.read() {
+            PushTransactionState::Idle => false,
+            PushTransactionState::Staged(transaction)
+            | PushTransactionState::Applying {
+                current: transaction,
+                ..
+            } => transaction.owning_session_id != session_id,
+        }
     }
 }
 
@@ -127,8 +307,14 @@ impl GdsPushMethodHandler {
         if args.len() < 6 {
             return Err(StatusCode::BadArgumentsMissing);
         }
-        let certificate_group_id = node_id_arg(args, 0)?;
-        let certificate_type_id = node_id_arg(args, 1)?;
+        let certificate_group_id = resolve_certificate_identifier(
+            node_id_arg(args, 0)?,
+            NodeId::from(ObjectId::ServerConfiguration_CertificateGroups_DefaultApplicationGroup),
+        )?;
+        let certificate_type_id = resolve_certificate_identifier(
+            node_id_arg(args, 1)?,
+            NodeId::from(ObjectTypeId::RsaSha256ApplicationCertificateType),
+        )?;
         let certificate = non_empty_byte_string_arg(args, 2)?;
         let _issuer_certificates = args.get(3);
         let private_key_format = opt_string_arg(args, 4)?;
@@ -158,19 +344,17 @@ impl GdsPushMethodHandler {
 
         {
             let mut transaction = self.registry.transaction.write();
-            let pending_trust_lists = match &*transaction {
-                Some(existing) if existing.owning_session_id != context.session_id() => {
-                    return Err(StatusCode::BadTransactionPending);
-                }
-                Some(existing) => existing.pending_trust_lists.clone(),
-                None => HashMap::new(),
-            };
-            *transaction = Some(PushTransaction {
+            let pending_trust_lists = transaction
+                .staging_base(context.session_id())?
+                .map_or_else(HashMap::new, |existing| {
+                    existing.pending_trust_lists.clone()
+                });
+            transaction.stage(PushTransaction {
                 owning_session_id: context.session_id(),
                 certificate_der: Some(certificate_der),
                 private_key_pem,
-                certificate_group_id: Some(certificate_group_id),
-                certificate_type_id: Some(certificate_type_id),
+                certificate_group_id: Some(certificate_group_id.clone()),
+                certificate_type_id: Some(certificate_type_id.clone()),
                 pending_trust_lists,
             });
         }
@@ -181,6 +365,9 @@ impl GdsPushMethodHandler {
             context,
             server_configuration_object_id(),
             update_certificate_method_id(),
+            certificate_group_id,
+            certificate_type_id,
+            args,
         );
 
         Ok(vec![Variant::from(true)])
@@ -196,14 +383,9 @@ impl GdsPushMethodHandler {
 
         let staged = {
             let mut transaction = self.registry.transaction.write();
-            match &*transaction {
-                None => return Err(StatusCode::BadNothingToDo),
-                Some(existing) if existing.owning_session_id != context.session_id() => {
-                    return Err(StatusCode::BadSessionIdInvalid);
-                }
-                Some(_) => transaction.take().expect("checked Some above"),
-            }
+            transaction.begin_apply(context.session_id())?
         };
+        let apply_guard = ApplyTransactionGuard::new(&self.registry.transaction);
 
         #[cfg(feature = "events")]
         let _changed_certificate = staged
@@ -213,34 +395,47 @@ impl GdsPushMethodHandler {
         #[cfg(feature = "events")]
         let _changed_trust_lists: Vec<_> = staged.pending_trust_lists.keys().copied().collect();
 
-        if let Some(certificate_der) = staged.certificate_der {
-            let store = context.info.certificate_store.read();
-            let pkey_pem = match staged.private_key_pem {
-                Some(pem) => pem,
-                None => store
-                    .read_own_pkey()
-                    .map_err(|_| StatusCode::BadInternalError)?
-                    .to_pem()
-                    .map_err(|_| StatusCode::BadInternalError)?
-                    .into_bytes(),
-            };
-            gds_reload::save_new_credentials(&store, &certificate_der, &pkey_pem)
-                .map_err(|_| StatusCode::BadInternalError)?;
-            let (cert, pkey) = gds_reload::reload_store_from_disk(&store)
-                .map_err(|_| StatusCode::BadInternalError)?;
-            drop(store);
+        let apply_result: Result<(), StatusCode> = (|| {
+            if let Some(certificate_der) = staged.certificate_der {
+                let store = context.info.certificate_store.read();
+                let pkey_pem = match staged.private_key_pem {
+                    Some(pem) => pem,
+                    None => store
+                        .read_own_pkey()
+                        .map_err(|_| StatusCode::BadInternalError)?
+                        .to_pem()
+                        .map_err(|_| StatusCode::BadInternalError)?
+                        .into_bytes(),
+                };
+                gds_reload::save_new_credentials(&store, &certificate_der, &pkey_pem)
+                    .map_err(|_| StatusCode::BadInternalError)?;
+                let (cert, pkey) = gds_reload::reload_store_from_disk(&store)
+                    .map_err(|_| StatusCode::BadInternalError)?;
+                drop(store);
 
-            let mut endpoint_certs = context.info.endpoint_certificates.write();
-            for entry in endpoint_certs.values_mut() {
-                *entry = Some((cert.clone(), pkey.clone()));
+                let mut endpoint_certs = context.info.endpoint_certificates.write();
+                for entry in endpoint_certs.values_mut() {
+                    *entry = Some((cert.clone(), pkey.clone()));
+                }
             }
-        }
 
-        for (certificate_group, trust_list) in staged.pending_trust_lists {
-            let store = context.info.certificate_store.read();
-            super::trust_list::apply_trust_list_update(&store, certificate_group, &trust_list)
-                .map_err(|_| StatusCode::BadInternalError)?;
-        }
+            if !staged.pending_trust_lists.is_empty() {
+                let store = context.info.certificate_store.read();
+                for (certificate_group, trust_list) in staged.pending_trust_lists {
+                    super::trust_list::apply_trust_list_update(
+                        &store,
+                        certificate_group,
+                        &trust_list,
+                    )
+                    .map_err(|_| StatusCode::BadInternalError)?;
+                }
+            }
+
+            Ok(())
+        })();
+
+        apply_guard.finish(apply_result.is_ok());
+        apply_result?;
 
         #[cfg(feature = "events")]
         #[cfg(feature = "companion-gds")]
@@ -251,6 +446,7 @@ impl GdsPushMethodHandler {
                 apply_changes_method_id(),
                 certificate_group,
                 certificate_type,
+                &[],
             );
         }
         #[cfg(feature = "events")]
@@ -261,7 +457,8 @@ impl GdsPushMethodHandler {
                 server_configuration_object_id(),
                 apply_changes_method_id(),
                 super::trust_list::trust_list_object_id_for_group(certificate_group),
-                "ApplyChanges",
+                super::audit::AuditAction::ApplyChanges,
+                &[],
             );
         }
 
@@ -277,14 +474,22 @@ impl GdsPushMethodHandler {
 
         let mut transaction = self.registry.transaction.write();
         match &*transaction {
-            None => Err(StatusCode::BadNothingToDo),
-            Some(existing) if existing.owning_session_id != context.session_id() => {
+            PushTransactionState::Idle => Err(StatusCode::BadNothingToDo),
+            PushTransactionState::Staged(existing)
+                if existing.owning_session_id != context.session_id() =>
+            {
                 Err(StatusCode::BadSessionIdInvalid)
             }
-            Some(_) => {
-                *transaction = None;
+            PushTransactionState::Staged(_) => {
+                *transaction = PushTransactionState::Idle;
                 Ok(vec![])
             }
+            PushTransactionState::Applying { current, .. }
+                if current.owning_session_id != context.session_id() =>
+            {
+                Err(StatusCode::BadSessionIdInvalid)
+            }
+            PushTransactionState::Applying { .. } => Err(StatusCode::BadTransactionPending),
         }
     }
 
@@ -686,6 +891,36 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn update_certificate_rejects_invalid_certificate_group_id_before_parsing() {
+        let (context, _handle) =
+            security_admin_request_context(MessageSecurityMode::SignAndEncrypt);
+        let handler = GdsPushMethodHandler::new(Arc::new(GdsPushRegistry::default()), None);
+        let mut args = update_certificate_args(vec![0x01, 0x02, 0x03]);
+        args[0] = Variant::from(NodeId::new(0, 999_999u32));
+
+        assert_eq!(
+            handler.handle_update_certificate(&context, &args),
+            Err(StatusCode::BadInvalidArgument)
+        );
+        assert!(handler.registry.transaction.read().is_idle());
+    }
+
+    #[tokio::test]
+    async fn update_certificate_rejects_invalid_certificate_type_id_before_parsing() {
+        let (context, _handle) =
+            security_admin_request_context(MessageSecurityMode::SignAndEncrypt);
+        let handler = GdsPushMethodHandler::new(Arc::new(GdsPushRegistry::default()), None);
+        let mut args = update_certificate_args(vec![0x01, 0x02, 0x03]);
+        args[1] = Variant::from(NodeId::new(0, 999_999u32));
+
+        assert_eq!(
+            handler.handle_update_certificate(&context, &args),
+            Err(StatusCode::BadInvalidArgument)
+        );
+        assert!(handler.registry.transaction.read().is_idle());
+    }
+
+    #[tokio::test]
     async fn update_certificate_stages_a_transaction_and_requires_apply_changes() {
         let (context, _handle) =
             security_admin_request_context(MessageSecurityMode::SignAndEncrypt);
@@ -697,7 +932,37 @@ mod tests {
             .expect("valid update should succeed");
 
         assert_eq!(outputs, vec![Variant::from(true)]);
-        assert!(handler.registry.transaction.read().is_some());
+        assert!(handler.registry.transaction.read().staged().is_some());
+    }
+
+    #[tokio::test]
+    async fn update_certificate_normalizes_null_ids_to_effective_defaults() {
+        // OPC-10000-12 §7.10.5: null IDs resolve to their effective certificate defaults.
+        let (context, _handle) =
+            security_admin_request_context(MessageSecurityMode::SignAndEncrypt);
+        let handler = GdsPushMethodHandler::new(Arc::new(GdsPushRegistry::default()), None);
+        let cert_der = self_signed_cert_der(&context);
+
+        handler
+            .handle_update_certificate(&context, &update_certificate_args(cert_der))
+            .expect("valid update should succeed");
+
+        let transaction = handler.registry.transaction.read();
+        let staged = transaction
+            .staged()
+            .expect("update should stage a transaction");
+        assert_eq!(
+            staged.certificate_group_id,
+            Some(NodeId::from(
+                ObjectId::ServerConfiguration_CertificateGroups_DefaultApplicationGroup,
+            ))
+        );
+        assert_eq!(
+            staged.certificate_type_id,
+            Some(NodeId::from(
+                ObjectTypeId::RsaSha256ApplicationCertificateType
+            ))
+        );
     }
 
     #[tokio::test]
@@ -747,10 +1012,365 @@ mod tests {
             .handle_apply_changes(&context)
             .expect("apply changes should succeed");
 
-        assert!(handler.registry.transaction.read().is_none());
+        assert!(handler.registry.transaction.read().is_idle());
         let store = context.info.certificate_store.read();
         let applied = store.read_own_cert().expect("own cert should exist");
         assert_eq!(applied.to_der().expect("cert should encode"), cert_der);
+    }
+
+    #[tokio::test]
+    async fn apply_changes_failure_keeps_the_owning_sessions_transaction_staged() {
+        // Given
+        let (context, _handle) =
+            security_admin_request_context(MessageSecurityMode::SignAndEncrypt);
+        let handler = GdsPushMethodHandler::new(Arc::new(GdsPushRegistry::default()), None);
+        let cert_der = self_signed_cert_der(&context);
+        handler
+            .handle_update_certificate(&context, &update_certificate_args(cert_der))
+            .expect("update should succeed");
+        let cert_path = context.info.certificate_store.read().own_certificate_path();
+        std::fs::remove_file(&cert_path).expect("own certificate file should be removable");
+        std::fs::create_dir(&cert_path)
+            .expect("directory at the certificate path should force a real write failure");
+
+        // When
+        let result = handler.handle_apply_changes(&context);
+
+        // Then
+        assert_eq!(result, Err(StatusCode::BadInternalError));
+        let transaction = handler.registry.transaction.read();
+        let staged = transaction.staged().expect(
+            "failed ApplyChanges must keep the owning session's transaction staged for retry",
+        );
+        assert_eq!(staged.owning_session_id, context.session_id());
+    }
+
+    #[test]
+    fn successful_finish_keeps_identical_same_session_replacement_staged() {
+        // Given
+        const SESSION_ID: u32 = 1;
+        let certificate_der = vec![1, 2, 3];
+        let transaction = PushTransaction {
+            owning_session_id: SESSION_ID,
+            certificate_der: Some(certificate_der.clone()),
+            private_key_pem: None,
+            certificate_group_id: None,
+            certificate_type_id: None,
+            pending_trust_lists: HashMap::new(),
+        };
+        let replacement = transaction.clone();
+        let mut state = PushTransactionState::Staged(transaction);
+        state
+            .begin_apply(SESSION_ID)
+            .expect("first apply should begin");
+
+        // When
+        state.stage(replacement);
+        state.finish_apply(true);
+
+        // Then
+        let staged = state
+            .staged()
+            .expect("successful apply must preserve a same-session replacement");
+        assert_eq!(staged.owning_session_id, SESSION_ID);
+        assert_eq!(
+            staged.certificate_der.as_deref(),
+            Some(certificate_der.as_slice())
+        );
+    }
+
+    #[test]
+    fn failed_finish_combines_current_work_with_certificate_replacement() {
+        // Given
+        const SESSION_ID: u32 = 1;
+        let current_certificate_der = vec![1, 2, 3];
+        let current_private_key_pem = vec![4, 5, 6];
+        let current_certificate_group_id = NodeId::new(0, 10u32);
+        let current_certificate_type_id = NodeId::new(0, 11u32);
+        let replacement_certificate_der = vec![7, 8, 9];
+        let replacement_private_key_pem = vec![10, 11, 12];
+        let replacement_certificate_group_id = NodeId::new(0, 20u32);
+        let replacement_certificate_type_id = NodeId::new(0, 21u32);
+        let current = PushTransaction {
+            owning_session_id: SESSION_ID,
+            certificate_der: Some(current_certificate_der),
+            private_key_pem: Some(current_private_key_pem),
+            certificate_group_id: Some(current_certificate_group_id),
+            certificate_type_id: Some(current_certificate_type_id),
+            pending_trust_lists: HashMap::from([
+                (
+                    CertificateGroup::DefaultApplication,
+                    TrustListDataType {
+                        specified_lists: 1,
+                        ..TrustListDataType::default()
+                    },
+                ),
+                (
+                    CertificateGroup::DefaultHttps,
+                    TrustListDataType {
+                        specified_lists: 2,
+                        ..TrustListDataType::default()
+                    },
+                ),
+            ]),
+        };
+        let replacement = PushTransaction {
+            owning_session_id: SESSION_ID,
+            certificate_der: Some(replacement_certificate_der.clone()),
+            private_key_pem: Some(replacement_private_key_pem.clone()),
+            certificate_group_id: Some(replacement_certificate_group_id.clone()),
+            certificate_type_id: Some(replacement_certificate_type_id.clone()),
+            pending_trust_lists: HashMap::from([
+                (
+                    CertificateGroup::DefaultApplication,
+                    TrustListDataType {
+                        specified_lists: 3,
+                        ..TrustListDataType::default()
+                    },
+                ),
+                (
+                    CertificateGroup::DefaultUserToken,
+                    TrustListDataType {
+                        specified_lists: 4,
+                        ..TrustListDataType::default()
+                    },
+                ),
+            ]),
+        };
+        let mut state = PushTransactionState::Staged(current);
+        state
+            .begin_apply(SESSION_ID)
+            .expect("first apply should begin");
+        state.stage(replacement);
+
+        // When
+        state.finish_apply(false);
+
+        // Then
+        let staged = state
+            .staged()
+            .expect("failed apply must combine current work with its replacement");
+        assert_eq!(
+            staged.certificate_der.as_deref(),
+            Some(replacement_certificate_der.as_slice())
+        );
+        assert_eq!(
+            staged.private_key_pem.as_deref(),
+            Some(replacement_private_key_pem.as_slice())
+        );
+        assert_eq!(
+            staged.certificate_group_id,
+            Some(replacement_certificate_group_id)
+        );
+        assert_eq!(
+            staged.certificate_type_id,
+            Some(replacement_certificate_type_id)
+        );
+        assert_eq!(staged.pending_trust_lists.len(), 3);
+        assert_eq!(
+            staged
+                .pending_trust_lists
+                .get(&CertificateGroup::DefaultApplication)
+                .map(|trust_list| trust_list.specified_lists),
+            Some(3)
+        );
+        assert_eq!(
+            staged
+                .pending_trust_lists
+                .get(&CertificateGroup::DefaultHttps)
+                .map(|trust_list| trust_list.specified_lists),
+            Some(2)
+        );
+        assert_eq!(
+            staged
+                .pending_trust_lists
+                .get(&CertificateGroup::DefaultUserToken)
+                .map(|trust_list| trust_list.specified_lists),
+            Some(4)
+        );
+    }
+
+    #[test]
+    fn failed_finish_without_replacement_certificate_keeps_current_certificate_tuple() {
+        // Given
+        const SESSION_ID: u32 = 1;
+        let current_certificate_der = vec![1, 2, 3];
+        let current_private_key_pem = vec![4, 5, 6];
+        let current_certificate_group_id = NodeId::new(0, 10u32);
+        let current_certificate_type_id = NodeId::new(0, 11u32);
+        let current = PushTransaction {
+            owning_session_id: SESSION_ID,
+            certificate_der: Some(current_certificate_der.clone()),
+            private_key_pem: Some(current_private_key_pem.clone()),
+            certificate_group_id: Some(current_certificate_group_id.clone()),
+            certificate_type_id: Some(current_certificate_type_id.clone()),
+            pending_trust_lists: HashMap::from([(
+                CertificateGroup::DefaultApplication,
+                TrustListDataType {
+                    specified_lists: 1,
+                    ..TrustListDataType::default()
+                },
+            )]),
+        };
+        let replacement = PushTransaction {
+            owning_session_id: SESSION_ID,
+            certificate_der: None,
+            private_key_pem: Some(vec![7, 8, 9]),
+            certificate_group_id: Some(NodeId::new(0, 20u32)),
+            certificate_type_id: Some(NodeId::new(0, 21u32)),
+            pending_trust_lists: HashMap::from([(
+                CertificateGroup::DefaultUserToken,
+                TrustListDataType {
+                    specified_lists: 2,
+                    ..TrustListDataType::default()
+                },
+            )]),
+        };
+        let mut state = PushTransactionState::Staged(current);
+        state
+            .begin_apply(SESSION_ID)
+            .expect("first apply should begin");
+        state.stage(replacement);
+
+        // When
+        state.finish_apply(false);
+
+        // Then
+        let staged = state
+            .staged()
+            .expect("failed apply must preserve the current certificate tuple");
+        assert_eq!(
+            staged.certificate_der.as_deref(),
+            Some(current_certificate_der.as_slice())
+        );
+        assert_eq!(
+            staged.private_key_pem.as_deref(),
+            Some(current_private_key_pem.as_slice())
+        );
+        assert_eq!(
+            staged.certificate_group_id,
+            Some(current_certificate_group_id)
+        );
+        assert_eq!(
+            staged.certificate_type_id,
+            Some(current_certificate_type_id)
+        );
+        assert_eq!(staged.pending_trust_lists.len(), 2);
+        assert_eq!(
+            staged
+                .pending_trust_lists
+                .get(&CertificateGroup::DefaultApplication)
+                .map(|trust_list| trust_list.specified_lists),
+            Some(1)
+        );
+        assert_eq!(
+            staged
+                .pending_trust_lists
+                .get(&CertificateGroup::DefaultUserToken)
+                .map(|trust_list| trust_list.specified_lists),
+            Some(2)
+        );
+    }
+
+    #[test]
+    fn staging_base_hides_current_fields_while_apply_is_active() {
+        // Given
+        const SESSION_ID: u32 = 1;
+        let state = PushTransactionState::Applying {
+            current: PushTransaction {
+                owning_session_id: SESSION_ID,
+                certificate_der: Some(vec![1, 2, 3]),
+                private_key_pem: None,
+                certificate_group_id: None,
+                certificate_type_id: None,
+                pending_trust_lists: HashMap::from([(
+                    CertificateGroup::DefaultApplication,
+                    TrustListDataType {
+                        specified_lists: 1,
+                        trusted_certificates: Some(vec![ByteString::from(vec![4, 5, 6])]),
+                        trusted_crls: None,
+                        issuer_certificates: None,
+                        issuer_crls: None,
+                    },
+                )]),
+            },
+            replacement: None,
+        };
+
+        // When
+        let staging_base = state
+            .staging_base(SESSION_ID)
+            .expect("owning session should be allowed to stage a replacement");
+
+        // Then
+        assert!(
+            staging_base.is_none(),
+            "the in-flight certificate and trust-list fields must not seed a replacement"
+        );
+    }
+
+    #[test]
+    fn begin_apply_from_owning_session_is_rejected_while_apply_is_active() {
+        // Given
+        const SESSION_ID: u32 = 1;
+        let transaction = PushTransaction {
+            owning_session_id: SESSION_ID,
+            certificate_der: Some(vec![1, 2, 3]),
+            private_key_pem: None,
+            certificate_group_id: None,
+            certificate_type_id: None,
+            pending_trust_lists: HashMap::new(),
+        };
+        let mut state = PushTransactionState::Staged(transaction);
+        state
+            .begin_apply(SESSION_ID)
+            .expect("first apply should begin");
+
+        // When
+        let duplicate = state.begin_apply(SESSION_ID);
+
+        // Then
+        assert!(matches!(duplicate, Err(StatusCode::BadTransactionPending)));
+        assert!(matches!(
+            state,
+            PushTransactionState::Applying {
+                current,
+                replacement: None,
+            } if current.owning_session_id == SESSION_ID
+        ));
+    }
+
+    #[test]
+    fn apply_guard_restores_staged_transaction_on_unwind() {
+        // Given
+        const SESSION_ID: u32 = 1;
+        let registry = GdsPushRegistry::default();
+        {
+            let mut state = registry.transaction.write();
+            state.stage(PushTransaction {
+                owning_session_id: SESSION_ID,
+                certificate_der: Some(vec![1, 2, 3]),
+                private_key_pem: None,
+                certificate_group_id: None,
+                certificate_type_id: None,
+                pending_trust_lists: HashMap::new(),
+            });
+            state.begin_apply(SESSION_ID).expect("apply should begin");
+        }
+
+        // When
+        let unwind = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = ApplyTransactionGuard::new(&registry.transaction);
+            panic!("simulated panic while applying changes");
+        }));
+
+        // Then
+        assert!(unwind.is_err());
+        let state = registry.transaction.read();
+        let staged = state
+            .staged()
+            .expect("unwind cleanup must restore the current transaction");
+        assert_eq!(staged.owning_session_id, SESSION_ID);
     }
 
     #[tokio::test]
@@ -781,7 +1401,7 @@ mod tests {
             .handle_cancel_changes(&context)
             .expect("cancel should succeed");
 
-        assert!(handler.registry.transaction.read().is_none());
+        assert!(handler.registry.transaction.read().is_idle());
         let store = context.info.certificate_store.read();
         let unchanged = store.read_own_cert().expect("own cert should exist");
         assert_eq!(
@@ -811,7 +1431,7 @@ mod tests {
         let original_own_cert_der = self_signed_cert_der(&context);
         let new_trusted_der = self_signed_cert_der(&context);
 
-        *registry.transaction.write() = Some(PushTransaction {
+        *registry.transaction.write() = PushTransactionState::Staged(PushTransaction {
             owning_session_id: context.session_id(),
             certificate_der: None,
             private_key_pem: None,
@@ -833,7 +1453,7 @@ mod tests {
             .handle_apply_changes(&context)
             .expect("apply changes should succeed");
 
-        assert!(handler.registry.transaction.read().is_none());
+        assert!(handler.registry.transaction.read().is_idle());
         let store = context.info.certificate_store.read();
         // The TrustList update must not affect the server's own application certificate.
         let own_cert = store.read_own_cert().expect("own cert should exist");
@@ -851,7 +1471,7 @@ mod tests {
         let registry = Arc::new(GdsPushRegistry::default());
         let handler = GdsPushMethodHandler::new(registry.clone(), None);
 
-        *registry.transaction.write() = Some(PushTransaction {
+        *registry.transaction.write() = PushTransactionState::Staged(PushTransaction {
             owning_session_id: context.session_id(),
             certificate_der: None,
             private_key_pem: None,
@@ -875,7 +1495,7 @@ mod tests {
             .handle_cancel_changes(&context)
             .expect("cancel should succeed");
 
-        assert!(handler.registry.transaction.read().is_none());
+        assert!(handler.registry.transaction.read().is_idle());
         assert!(context
             .info
             .certificate_store
@@ -888,7 +1508,7 @@ mod tests {
     async fn update_certificate_is_rejected_while_a_trust_list_transaction_is_open_elsewhere() {
         let registry = Arc::new(GdsPushRegistry::default());
         let handler = GdsPushMethodHandler::new(registry.clone(), None);
-        *registry.transaction.write() = Some(PushTransaction {
+        *registry.transaction.write() = PushTransactionState::Staged(PushTransaction {
             owning_session_id: 1,
             certificate_der: None,
             private_key_pem: None,

@@ -40,10 +40,7 @@ impl PubSubPublisher for TsnPublisher {
         cancel_token: CancellationToken,
     ) -> Result<tokio::task::JoinHandle<()>, StatusCode> {
         // Parse the interface name from the address, e.g. "tsn://eth0"
-        let addr = connection_config
-            .address
-            .strip_prefix("tsn://")
-            .unwrap_or(&connection_config.address);
+        let addr = parse_tsn_interface(&connection_config.address)?;
         let interface_name = addr.to_string();
 
         // 1. Try to set up the kernel-space fallback driver (tc taprio)
@@ -189,6 +186,30 @@ impl PubSubPublisher for TsnPublisher {
     }
 }
 
+pub(crate) fn parse_tsn_interface(address: &str) -> Result<&str, StatusCode> {
+    const SCHEME: &str = "tsn://";
+    const IFNAMSIZ: usize = 16;
+
+    let address = address.trim();
+    let interface_name = address
+        .get(..SCHEME.len())
+        .filter(|prefix| prefix.eq_ignore_ascii_case(SCHEME))
+        .map_or(address, |_| &address[SCHEME.len()..]);
+
+    if interface_name.is_empty()
+        || interface_name.len() >= IFNAMSIZ
+        || matches!(interface_name, "." | "..")
+        || interface_name.contains(['\0', '/', ':'])
+        || interface_name
+            .bytes()
+            .any(|byte| byte.is_ascii_whitespace())
+    {
+        return Err(StatusCode::BadConfigurationError);
+    }
+
+    Ok(interface_name)
+}
+
 /// Helper function to convert an OPC-UA `JsonEncodable` type to a `serde_json::Value`.
 fn opcua_to_json_value<T: opcua_types::json::JsonEncodable>(
     value: &T,
@@ -198,4 +219,51 @@ fn opcua_to_json_value<T: opcua_types::json::JsonEncodable>(
     let val =
         serde_json::from_str(&json_str).map_err(|e| opcua_types::Error::decoding(e.to_string()))?;
     Ok(val)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_tsn_interface;
+    use opcua_types::StatusCode;
+
+    #[test]
+    fn strips_tsn_scheme_case_insensitively() {
+        assert_eq!(parse_tsn_interface("TsN://eth0"), Ok("eth0"));
+    }
+
+    #[test]
+    fn preserves_bare_interface_name() {
+        assert_eq!(parse_tsn_interface("eth0"), Ok("eth0"));
+    }
+
+    #[test]
+    fn trims_outer_whitespace_before_stripping_scheme() {
+        assert_eq!(parse_tsn_interface(" \tTsN://eth0\n "), Ok("eth0"));
+    }
+
+    #[test]
+    fn rejects_invalid_tsn_interface_names() {
+        // Given: names that violate Linux interface-name constraints.
+        let invalid_names = [
+            "",
+            "abcdefghijklmnop",
+            ".",
+            "..",
+            "eth/0",
+            "eth:0",
+            "eth\0",
+            "eth 0",
+            "eth\t0",
+            "eth\n0",
+            "eth\r0",
+        ];
+
+        for name in invalid_names {
+            // When: the TSN interface parser receives an invalid name.
+            let result = parse_tsn_interface(name);
+
+            // Then: configuration is rejected with the OPC UA configuration error.
+            assert_eq!(result, Err(StatusCode::BadConfigurationError));
+        }
+    }
 }

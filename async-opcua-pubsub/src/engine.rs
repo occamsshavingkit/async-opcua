@@ -1,18 +1,20 @@
 //! PubSub publishing coordinator.
 
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::{hash_map::Entry, HashMap},
+    sync::Arc,
+};
 
 use opcua_core::sync::RwLock;
 use opcua_crypto::SecurityPolicy;
 use opcua_server::address_space::AddressSpace;
-use opcua_types::{Context, ContextOwned, MessageSecurityMode, StatusCode};
+use opcua_types::{Context, ContextOwned, StatusCode};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    codec::uadp::UadpNetworkMessage,
-    security::{ReplayWindow, SecurityGroup, SharedSecurityGroup, UadpSecurityCodec},
+    security::{ReplayWindow, SharedSecurityGroup},
     subscriber::{
         effective_security_config, DataSetReaderStatus, SubscriberApplyOutcome, SubscriberRuntime,
         SubscriberSecurityConfig,
@@ -26,13 +28,103 @@ use crate::{
         udp::{bind_subscriber_socket, UdpPublisher, UdpSubscriberEndpoint},
         websocket::WebSocketPublisher,
     },
-    MqttDeliveryGuarantee, PubSubConnectionConfig, PubSubPublisher,
+    MqttDeliveryGuarantee, PubSubConnectionConfig, PubSubPublisher, PublisherId,
 };
 
+mod security;
 mod subscriber_mqtt;
 mod transport;
 
 pub use transport::TransportKind;
+
+// Bounds retained authenticated identities to resist key-holder memory exhaustion.
+const MAX_REPLAY_STREAMS_PER_SECURITY_GROUP: usize = 1024;
+
+#[derive(Eq, Hash, PartialEq)]
+enum ReplayPublisherId {
+    None,
+    Byte(u8),
+    UInt16(u16),
+    UInt32(u32),
+    UInt64(u64),
+    String(String),
+}
+
+impl From<&PublisherId> for ReplayPublisherId {
+    fn from(publisher_id: &PublisherId) -> Self {
+        match publisher_id {
+            PublisherId::None => Self::None,
+            PublisherId::Byte(value) => Self::Byte(*value),
+            PublisherId::UInt16(value) => Self::UInt16(*value),
+            PublisherId::UInt32(value) => Self::UInt32(*value),
+            PublisherId::UInt64(value) => Self::UInt64(*value),
+            PublisherId::String(value) => Self::String(value.clone()),
+        }
+    }
+}
+
+#[derive(Eq, Hash, PartialEq)]
+struct ReplayStreamIdentity {
+    publisher_id: ReplayPublisherId,
+    writer_group_id: u16,
+}
+
+impl ReplayStreamIdentity {
+    fn new(publisher_id: &PublisherId, writer_group_id: u16) -> Self {
+        Self {
+            publisher_id: publisher_id.into(),
+            writer_group_id,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+struct CandidateTokenSnapshot {
+    current: u32,
+    next: u32,
+}
+
+impl CandidateTokenSnapshot {
+    fn new(current: u32, next: u32) -> Self {
+        Self { current, next }
+    }
+
+    fn contains(self, token_id: u32) -> bool {
+        token_id == self.current || token_id == self.next
+    }
+}
+
+#[derive(Default)]
+struct ReplayGroupState {
+    candidate_tokens: Option<CandidateTokenSnapshot>,
+    streams: HashMap<ReplayStreamIdentity, HashMap<u32, ReplayWindow>>,
+}
+
+impl ReplayGroupState {
+    fn reconcile_candidate_tokens(&mut self, candidate_tokens: CandidateTokenSnapshot) {
+        if self.candidate_tokens == Some(candidate_tokens) {
+            return;
+        }
+
+        self.streams.retain(|_, token_windows| {
+            token_windows.retain(|token_id, _| candidate_tokens.contains(*token_id));
+            !token_windows.is_empty()
+        });
+        self.candidate_tokens = Some(candidate_tokens);
+    }
+
+    fn stream_windows_mut_or_insert(
+        &mut self,
+        stream_identity: ReplayStreamIdentity,
+    ) -> Result<&mut HashMap<u32, ReplayWindow>, StatusCode> {
+        let has_capacity = self.streams.len() < MAX_REPLAY_STREAMS_PER_SECURITY_GROUP;
+        match self.streams.entry(stream_identity) {
+            Entry::Occupied(entry) => Ok(entry.into_mut()),
+            Entry::Vacant(entry) if has_capacity => Ok(entry.insert(HashMap::new())),
+            Entry::Vacant(_) => Err(StatusCode::BadResourceUnavailable),
+        }
+    }
+}
 
 /// Default PubSub datagram queue capacity.
 ///
@@ -101,7 +193,7 @@ pub struct PubSubEngine {
     address_space: Arc<RwLock<AddressSpace>>,
     connections: Vec<PubSubConnectionConfig>,
     security_groups: HashMap<String, SharedSecurityGroup>,
-    replay_windows: RwLock<HashMap<String, ReplayWindow>>,
+    replay_windows: RwLock<HashMap<String, ReplayGroupState>>,
     cancel_token: Option<CancellationToken>,
     publisher_handles: Vec<JoinHandle<()>>,
     subscriber_runtime: Option<Arc<RwLock<SubscriberRuntime>>>,
@@ -193,111 +285,6 @@ impl PubSubEngine {
     /// Returns the configured PubSub connections.
     pub fn connection_configs(&self) -> &[PubSubConnectionConfig] {
         &self.connections
-    }
-
-    /// Registers a PubSub security group for publisher message signing.
-    pub fn register_security_group(
-        &mut self,
-        security_group: SecurityGroup,
-    ) -> SharedSecurityGroup {
-        let group_id = security_group.group_id().to_string();
-        let shared_group = Arc::new(RwLock::new(security_group));
-        self.replay_windows.write().remove(&group_id);
-        self.security_groups.insert(group_id, shared_group.clone());
-        shared_group
-    }
-
-    /// Registers shared PubSub security group state for publisher message signing.
-    pub fn register_shared_security_group(&mut self, security_group: SharedSecurityGroup) {
-        let group_id = security_group.read().group_id().to_string();
-        self.replay_windows.write().remove(&group_id);
-        self.security_groups.insert(group_id, security_group);
-    }
-
-    /// Removes a registered PubSub security group.
-    pub fn remove_security_group(&mut self, group_id: &str) -> Option<SharedSecurityGroup> {
-        self.replay_windows.write().remove(group_id);
-        self.security_groups.remove(group_id)
-    }
-
-    /// Returns a registered PubSub security group.
-    pub fn security_group(&self, group_id: &str) -> Option<SharedSecurityGroup> {
-        self.security_groups.get(group_id).cloned()
-    }
-
-    /// Encodes a publisher UADP NetworkMessage using the current key for a security group.
-    pub fn encode_publisher_uadp_message(
-        &self,
-        security_group_id: &str,
-        security_mode: MessageSecurityMode,
-        security_policy: SecurityPolicy,
-        message: &UadpNetworkMessage,
-        ctx: &Context<'_>,
-    ) -> Result<Vec<u8>, StatusCode> {
-        let security_group = self
-            .security_groups
-            .get(security_group_id)
-            .ok_or(StatusCode::BadSecurityChecksFailed)?;
-        let key_set = security_group.read().current_key_set().clone();
-        UadpSecurityCodec::new(security_mode, security_policy, key_set)
-            .encode_network_message(message, ctx)
-            .map_err(|error| error.status())
-    }
-
-    /// Signs a publisher UADP NetworkMessage using the current key for a security group.
-    pub fn sign_publisher_uadp_message(
-        &self,
-        security_group_id: &str,
-        security_policy: SecurityPolicy,
-        message: &UadpNetworkMessage,
-        ctx: &Context<'_>,
-    ) -> Result<Vec<u8>, StatusCode> {
-        self.encode_publisher_uadp_message(
-            security_group_id,
-            MessageSecurityMode::Sign,
-            security_policy,
-            message,
-            ctx,
-        )
-    }
-
-    /// Decodes and verifies a subscriber UADP NetworkMessage using a security group's current key.
-    pub fn decode_subscriber_uadp_message(
-        &self,
-        security_group_id: &str,
-        security_mode: MessageSecurityMode,
-        security_policy: SecurityPolicy,
-        payload: &[u8],
-        ctx: &Context<'_>,
-    ) -> Result<UadpNetworkMessage, StatusCode> {
-        let security_group = self
-            .security_groups
-            .get(security_group_id)
-            .ok_or(StatusCode::BadSecurityChecksFailed)?;
-        let (token_id, key_sets) = {
-            let security_group = security_group.read();
-            (
-                security_group.current_key_set().token_id(),
-                vec![
-                    security_group.current_key_set().clone(),
-                    security_group.next_key_set().clone(),
-                ],
-            )
-        };
-        let message = UadpSecurityCodec::with_candidates(security_mode, security_policy, key_sets)
-            .decode_network_message(payload, ctx)
-            .map_err(|error| error.status())?;
-
-        if security_mode != MessageSecurityMode::None {
-            self.replay_windows
-                .write()
-                .entry(security_group_id.to_string())
-                .or_default()
-                .check(token_id, message.sequence_number)
-                .map_err(|error| error.status())?;
-        }
-
-        Ok(message)
     }
 
     /// Processes one subscriber datagram for the named connection.

@@ -87,13 +87,24 @@ impl UadpSecurityCodec {
         payload: &[u8],
         ctx: &Context<'_>,
     ) -> Result<UadpNetworkMessage, Error> {
+        self.decode_network_message_with_token(payload, ctx)
+            .map(|(message, _)| message)
+    }
+
+    pub(crate) fn decode_network_message_with_token(
+        &self,
+        payload: &[u8],
+        ctx: &Context<'_>,
+    ) -> Result<(UadpNetworkMessage, Option<u32>), Error> {
         enforce_secured_payload_len(payload.len(), ctx)?;
 
         match self.security_mode {
-            MessageSecurityMode::None => UadpNetworkMessage::decode(&mut &payload[..], ctx),
-            MessageSecurityMode::Sign | MessageSecurityMode::SignAndEncrypt => {
-                self.decode_secured_message(payload, ctx)
+            MessageSecurityMode::None => {
+                UadpNetworkMessage::decode(&mut &payload[..], ctx).map(|message| (message, None))
             }
+            MessageSecurityMode::Sign | MessageSecurityMode::SignAndEncrypt => self
+                .decode_secured_message(payload, ctx)
+                .map(|(message, token_id)| (message, Some(token_id))),
             MessageSecurityMode::Invalid => Err(security_error("invalid message security mode")),
         }
     }
@@ -167,7 +178,7 @@ impl UadpSecurityCodec {
         &self,
         payload: &[u8],
         ctx: &Context<'_>,
-    ) -> Result<UadpNetworkMessage, Error> {
+    ) -> Result<(UadpNetworkMessage, u32), Error> {
         self.ensure_secure_policy()?;
 
         let mut cursor = Cursor::new(payload);
@@ -222,7 +233,10 @@ impl UadpSecurityCodec {
                 "secured UADP payload contains trailing bytes",
             ));
         }
-        Ok(rebuild_message(header_region, dataset_messages))
+        Ok((
+            rebuild_message(header_region, dataset_messages),
+            key_set.token_id(),
+        ))
     }
 
     fn verify_security_flags(&self, security_flags: u8) -> Result<(), Error> {

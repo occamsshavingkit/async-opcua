@@ -29,6 +29,7 @@ use crate::{
     MqttDeliveryGuarantee, PubSubConnectionConfig, PubSubPublisher,
 };
 
+mod subscriber_mqtt;
 mod transport;
 
 pub use transport::TransportKind;
@@ -637,6 +638,7 @@ impl PubSubEngine {
 
         for reader_group in &connection.reader_groups {
             for reader in &reader_group.dataset_readers {
+                let reader = reader.clone();
                 let reader_id = reader.dataset_reader_id;
                 let topic_filter = reader.mqtt_topic_filter(reader_group.reader_group_id);
                 let delivery_guarantee = reader
@@ -680,11 +682,11 @@ impl PubSubEngine {
                             _ = cancel.cancelled() => break,
                             payload = payload_rx.recv() => {
                                 let Some(payload) = payload else { break };
-                                let ctx_owned = ContextOwned::default();
-                                let ctx = ctx_owned.context();
-                                if let Err(status) = runtime
-                                    .write()
-                                    .process_datagram(&payload, &ctx)
+                                if let Err(status) = subscriber_mqtt::process_reader_payload(
+                                    &runtime,
+                                    &reader,
+                                    &payload,
+                                )
                                 {
                                     tracing::debug!(
                                         ?status,

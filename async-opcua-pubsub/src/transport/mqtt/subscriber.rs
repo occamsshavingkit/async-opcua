@@ -1,36 +1,119 @@
-use std::time::Duration;
+use std::{borrow::Cow, time::Duration};
 
 use rumqttc::{AsyncClient, Event, Incoming, MqttOptions, QoS};
 use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
+use url::{Host, Url};
 
 use crate::MqttDeliveryGuarantee;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct MqttBrokerAddress<'a> {
-    host: &'a str,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct MqttBrokerAddress {
+    host: String,
     port: u16,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum MqttBrokerAddressError {
-    TlsUnsupported,
-}
-
-fn parse_broker_address(address: &str) -> Result<MqttBrokerAddress<'_>, MqttBrokerAddressError> {
-    let address = address.trim();
-
-    if address.starts_with("mqtts://") {
-        return Err(MqttBrokerAddressError::TlsUnsupported);
+impl MqttBrokerAddress {
+    pub(crate) fn host(&self) -> &str {
+        &self.host
     }
 
-    let address = address.strip_prefix("mqtt://").unwrap_or(address);
-    let mut address_parts = address.split(':');
-    let host = address_parts.next().unwrap_or_default();
-    let port = address_parts
-        .next()
-        .and_then(|port| port.parse::<u16>().ok())
-        .unwrap_or(1883);
+    pub(crate) const fn port(&self) -> u16 {
+        self.port
+    }
+}
+
+/// Error returned when an MQTT broker address cannot be used by the subscriber.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum MqttBrokerAddressError {
+    /// The MQTT TLS transport is not implemented.
+    #[error("mqtt tls transport is unsupported")]
+    TlsUnsupported,
+    /// The broker address does not contain a host.
+    #[error("mqtt broker address has an invalid host")]
+    InvalidHost,
+    /// The broker port is not a valid `u16`.
+    #[error("mqtt broker address has an invalid port")]
+    InvalidPort,
+    /// The broker authority contains unsupported extra components.
+    #[error("mqtt broker address contains unsupported extra components")]
+    ExtraComponents,
+}
+
+impl MqttBrokerAddressError {
+    /// Maps this broker-address error to the corresponding OPC UA status code.
+    #[must_use]
+    pub const fn status_code(self) -> opcua_types::StatusCode {
+        match self {
+            Self::TlsUnsupported => opcua_types::StatusCode::BadNotSupported,
+            Self::InvalidHost | Self::InvalidPort | Self::ExtraComponents => {
+                opcua_types::StatusCode::BadConfigurationError
+            }
+        }
+    }
+}
+
+pub(crate) fn parse_broker_address(
+    address: &str,
+) -> Result<MqttBrokerAddress, MqttBrokerAddressError> {
+    let address = address.trim();
+    if address.bytes().any(|byte| byte.is_ascii_control()) {
+        return Err(MqttBrokerAddressError::InvalidHost);
+    }
+    if address.ends_with(':') {
+        return Err(MqttBrokerAddressError::InvalidPort);
+    }
+    let address = if address
+        .get(..7)
+        .is_some_and(|scheme| scheme.eq_ignore_ascii_case("mqtt://"))
+        || address
+            .get(..8)
+            .is_some_and(|scheme| scheme.eq_ignore_ascii_case("mqtts://"))
+    {
+        Cow::Borrowed(address)
+    } else {
+        Cow::Owned(format!("mqtt://{address}"))
+    };
+    let address = Url::parse(address.as_ref()).map_err(|error| match error {
+        url::ParseError::InvalidPort => {
+            let has_extra_authority = address
+                .rsplit_once(':')
+                .and_then(|(prefix, _)| Url::parse(prefix).ok())
+                .and_then(|prefix| prefix.port())
+                .is_some();
+            if has_extra_authority {
+                MqttBrokerAddressError::ExtraComponents
+            } else {
+                MqttBrokerAddressError::InvalidPort
+            }
+        }
+        _ => MqttBrokerAddressError::InvalidHost,
+    })?;
+
+    match address.scheme() {
+        "mqtt" => {}
+        "mqtts" => return Err(MqttBrokerAddressError::TlsUnsupported),
+        _ => return Err(MqttBrokerAddressError::ExtraComponents),
+    }
+    if !address.username().is_empty()
+        || address.password().is_some()
+        || !matches!(address.path(), "" | "/")
+        || address.query().is_some()
+        || address.fragment().is_some()
+    {
+        return Err(MqttBrokerAddressError::ExtraComponents);
+    }
+    let host = match address.host() {
+        Some(Host::Domain(host)) if !host.is_empty() => host.to_string(),
+        Some(Host::Ipv4(host)) => host.to_string(),
+        Some(Host::Ipv6(host)) => host.to_string(),
+        _ => return Err(MqttBrokerAddressError::InvalidHost),
+    };
+    let port = address.port().unwrap_or(1883);
+    if port == 0 {
+        return Err(MqttBrokerAddressError::InvalidPort);
+    }
 
     Ok(MqttBrokerAddress { host, port })
 }
@@ -67,11 +150,16 @@ impl MqttSubscriberConfig {
 /// The subscriber uses the broker QueueName as its topic filter, forwards
 /// received payload bytes over the supplied bounded channel, and reconnects
 /// with exponential backoff. This compatibility entry point uses MQTT QoS 1.
+///
+/// # Errors
+///
+/// Returns [`MqttBrokerAddressError`] before spawning the subscriber task when
+/// the broker address is invalid or requests the unsupported MQTT TLS transport.
 pub fn start_mqtt_subscriber(
     broker_address: String,
     topic_filter: String,
     sender: tokio::sync::mpsc::Sender<Vec<u8>>,
-) -> tokio::task::JoinHandle<()> {
+) -> Result<tokio::task::JoinHandle<()>, MqttBrokerAddressError> {
     start_mqtt_subscriber_with_cancel(
         broker_address,
         topic_filter,
@@ -81,17 +169,23 @@ pub fn start_mqtt_subscriber(
 }
 
 /// Starts an MQTT subscriber that exits when `cancel_token` is cancelled.
+///
+/// # Errors
+///
+/// Returns [`MqttBrokerAddressError`] before spawning the subscriber task when
+/// the broker address is invalid or requests the unsupported MQTT TLS transport.
 pub fn start_mqtt_subscriber_with_cancel(
     broker_address: String,
     topic_filter: String,
     sender: tokio::sync::mpsc::Sender<Vec<u8>>,
     cancel_token: CancellationToken,
-) -> tokio::task::JoinHandle<()> {
-    start_mqtt_subscriber_with_config(
+) -> Result<tokio::task::JoinHandle<()>, MqttBrokerAddressError> {
+    parse_broker_address(&broker_address)?;
+    Ok(start_mqtt_subscriber_with_config(
         MqttSubscriberConfig::new(broker_address, topic_filter, QoS::AtLeastOnce),
         sender,
         cancel_token,
-    )
+    ))
 }
 
 pub(crate) fn start_mqtt_subscriber_with_config(
@@ -115,7 +209,7 @@ pub(crate) fn start_mqtt_subscriber_with_config(
             }
 
             let client_id = format!("opcua-subscriber-{}", uuid::Uuid::new_v4());
-            let mut options = MqttOptions::new(client_id, address.host, address.port);
+            let mut options = MqttOptions::new(client_id, address.host(), address.port());
             options.set_keep_alive(Duration::from_secs(5));
 
             let (client, mut event_loop) = AsyncClient::new(options, 50);
@@ -192,66 +286,4 @@ pub(crate) fn start_mqtt_subscriber_with_config(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn mqtts_broker_address_is_rejected_when_tls_is_unsupported() {
-        // Given
-        let broker_address = "mqtts://broker.example:8883";
-
-        // When
-        let result = parse_broker_address(broker_address);
-
-        // Then
-        assert_eq!(result, Err(MqttBrokerAddressError::TlsUnsupported));
-    }
-
-    #[test]
-    fn whitespace_wrapped_mqtts_broker_address_is_rejected_when_tls_is_unsupported() {
-        // Given
-        let broker_address = " mqtts://broker.example:8883 ";
-
-        // When
-        let result = parse_broker_address(broker_address);
-
-        // Then
-        assert_eq!(result, Err(MqttBrokerAddressError::TlsUnsupported));
-    }
-
-    #[test]
-    fn whitespace_wrapped_mqtt_broker_address_preserves_explicit_port() {
-        // Given
-        let broker_address = " mqtt://broker.example:1884 ";
-
-        // When
-        let result = parse_broker_address(broker_address);
-
-        // Then
-        assert_eq!(
-            result,
-            Ok(MqttBrokerAddress {
-                host: "broker.example",
-                port: 1884,
-            })
-        );
-    }
-
-    #[test]
-    fn bare_broker_address_uses_default_mqtt_port() {
-        // Given
-        let broker_address = "broker.example";
-
-        // When
-        let result = parse_broker_address(broker_address);
-
-        // Then
-        assert_eq!(
-            result,
-            Ok(MqttBrokerAddress {
-                host: "broker.example",
-                port: 1883,
-            })
-        );
-    }
-}
+mod tests;

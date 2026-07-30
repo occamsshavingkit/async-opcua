@@ -12,10 +12,14 @@ use opcua_types::{
 use rumqttc::{AsyncClient, MqttOptions, QoS};
 
 mod subscriber;
+pub(crate) use subscriber::{
+    parse_broker_address, start_mqtt_subscriber_with_config, MqttBrokerAddress,
+    MqttSubscriberConfig,
+};
 pub use subscriber::{
     quality_of_service, start_mqtt_subscriber, start_mqtt_subscriber_with_cancel,
+    MqttBrokerAddressError,
 };
-pub(crate) use subscriber::{start_mqtt_subscriber_with_config, MqttSubscriberConfig};
 
 use crate::{
     codec::json::{opcua_to_json_value, JsonDataSetMessage, JsonNetworkMessage},
@@ -60,18 +64,10 @@ impl PubSubPublisher for MqttPublisher {
         connection_config: PubSubConnectionConfig,
         cancel_token: CancellationToken,
     ) -> Result<tokio::task::JoinHandle<()>, StatusCode> {
-        // Parse host and port from address
-        let addr = connection_config
-            .address
-            .strip_prefix("mqtt://")
-            .unwrap_or(&connection_config.address);
-        let parts: Vec<&str> = addr.split(':').collect();
-        let host = parts[0].to_string();
-        let port = if parts.len() > 1 {
-            parts[1].parse::<u16>().unwrap_or(1883)
-        } else {
-            1883
-        };
+        let broker_address = parse_broker_address(&connection_config.address)
+            .map_err(|error| error.status_code())?;
+        let host = broker_address.host().to_owned();
+        let port = broker_address.port();
 
         let address_space = self.address_space.clone();
         let cache = self.cache.clone();

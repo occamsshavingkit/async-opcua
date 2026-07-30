@@ -324,7 +324,8 @@ async fn start_mqtt_subscriber_stops_when_cancelled() {
         "opcua/telemetry/7".to_string(),
         payload_tx,
         cancel.clone(),
-    );
+    )
+    .expect("valid MQTT broker address");
 
     tokio::time::sleep(Duration::from_millis(50)).await;
     cancel.cancel();
@@ -416,7 +417,8 @@ async fn start_mqtt_subscriber_returns_abortable_handle_without_broker() {
         "mqtt://127.0.0.1:1".to_string(),
         "opcua/telemetry/7".to_string(),
         payload_tx,
-    );
+    )
+    .expect("valid MQTT broker address");
 
     // Task must exist and remain live (reconnecting with backoff) rather than
     // completing or panicking immediately.

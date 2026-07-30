@@ -6,14 +6,15 @@ use std::time::Duration;
 use opcua_core::sync::RwLock;
 use opcua_crypto::SecurityPolicy;
 use opcua_pubsub::{
-    engine::PubSubEngine, DataSetReaderConfig, PubSubConnectionConfig, PublisherId,
-    ReaderGroupConfig, SecurityGroup, TransportKind, UadpDataSetMessage, UadpNetworkMessage,
-    UadpSecurityCodec, WriterGroupConfig,
+    engine::PubSubEngine, DataSetReaderConfig, MqttPublisher, PubSubConnectionConfig,
+    PubSubPublisher, PublisherId, ReaderGroupConfig, SecurityGroup, TransportKind,
+    UadpDataSetMessage, UadpNetworkMessage, UadpSecurityCodec, WriterGroupConfig,
 };
 use opcua_server::address_space::AddressSpace;
 use opcua_types::{
     BinaryEncodable, ContextOwned, DateTime, MessageSecurityMode, StatusCode, Variant,
 };
+use tokio_util::sync::CancellationToken;
 
 fn empty_connection(connection_id: &str, address: &str) -> PubSubConnectionConfig {
     PubSubConnectionConfig {
@@ -105,6 +106,24 @@ async fn replacing_connections_while_subscribers_run_invalidates_runtime() {
     engine.start_subscribers().unwrap();
 
     assert!(engine.subscriber_status(9).is_none());
+}
+
+#[tokio::test]
+async fn mqtt_publisher_rejects_mqtts_before_spawning() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let mqtts_address = format!("mqtts://{}", listener.local_addr().unwrap());
+    let publisher = MqttPublisher::new(address_space());
+    let result = publisher.start_publishing(
+        empty_connection("mqtts-1", &mqtts_address),
+        CancellationToken::new(),
+    );
+
+    assert_eq!(result.err(), Some(StatusCode::BadNotSupported));
+    assert!(
+        tokio::time::timeout(Duration::from_millis(500), listener.accept())
+            .await
+            .is_err()
+    );
 }
 
 #[test]

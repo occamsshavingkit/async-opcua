@@ -22,13 +22,20 @@ use crate::{
     MessageEncoding, PubSubConnectionConfig, PubSubPublisher,
 };
 
+mod address;
+#[cfg(test)]
+#[path = "amqp/tests.rs"]
+mod address_tests;
+
+pub(crate) use address::parse_amqp_address;
+
 const MAX_CACHE_SIZE: usize = 1000;
 const DEFAULT_AMQP_PORT: u16 = 5672;
 const DEFAULT_ROUTING_KEY: &str = "opcua.telemetry";
 const DEFAULT_EXCHANGE: &str = "";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct AmqpAddressSettings {
+pub(crate) struct AmqpAddressSettings {
     broker_url: String,
     routing_key: String,
 }
@@ -76,7 +83,7 @@ impl PubSubPublisher for AmqpPublisher {
         connection_config: PubSubConnectionConfig,
         cancel_token: CancellationToken,
     ) -> Result<tokio::task::JoinHandle<()>, StatusCode> {
-        let settings = parse_amqp_address(&connection_config.address);
+        let settings = parse_amqp_address(&connection_config.address)?;
         let address_space = self.address_space.clone();
         let cache = self.cache.clone();
         let publisher_id = connection_config.connection_id.clone();
@@ -205,49 +212,6 @@ impl PubSubPublisher for AmqpPublisher {
     }
 }
 
-fn parse_amqp_address(address: &str) -> AmqpAddressSettings {
-    let (scheme, addr) = if let Some(addr) = address.strip_prefix("amqp://") {
-        ("amqp", addr)
-    } else if let Some(addr) = address.strip_prefix("amqps://") {
-        ("amqps", addr)
-    } else {
-        ("amqp", address)
-    };
-
-    let default_port = if scheme == "amqps" {
-        5671
-    } else {
-        DEFAULT_AMQP_PORT
-    };
-    let (authority, routing_key) = addr.split_once('/').unwrap_or((addr, ""));
-    let authority = if authority.is_empty() {
-        format!("127.0.0.1:{default_port}")
-    } else if authority_has_port(authority) {
-        authority.to_string()
-    } else {
-        format!("{authority}:{default_port}")
-    };
-
-    AmqpAddressSettings {
-        broker_url: format!("{scheme}://{authority}"),
-        routing_key: if routing_key.is_empty() {
-            DEFAULT_ROUTING_KEY.to_string()
-        } else {
-            routing_key.to_string()
-        },
-    }
-}
-
-fn authority_has_port(authority: &str) -> bool {
-    let host_port = authority.rsplit('@').next().unwrap_or(authority);
-    if let Some(rest) = host_port.strip_prefix('[') {
-        return rest
-            .find(']')
-            .is_some_and(|end| rest[end + 1..].starts_with(':'));
-    }
-    host_port.rsplit_once(':').is_some()
-}
-
 fn push_cached_message(cache: &MessageCache, routing_key: String, payload: Vec<u8>) {
     if let Ok(mut cache) = cache.lock() {
         if cache.len() >= MAX_CACHE_SIZE {
@@ -372,22 +336,6 @@ mod tests {
     use opcua_core::sync::RwLock;
     use opcua_server::address_space::AddressSpace;
     use std::sync::Arc;
-
-    #[test]
-    fn parses_amqp_address_with_prefix_and_queue() {
-        let settings = parse_amqp_address("amqp://broker.local:5673/plant.telemetry");
-
-        assert_eq!(settings.broker_url, "amqp://broker.local:5673");
-        assert_eq!(settings.routing_key, "plant.telemetry");
-    }
-
-    #[test]
-    fn parses_amqp_address_without_prefix_using_default_port_and_queue() {
-        let settings = parse_amqp_address("broker.local");
-
-        assert_eq!(settings.broker_url, "amqp://broker.local:5672");
-        assert_eq!(settings.routing_key, "opcua.telemetry");
-    }
 
     #[test]
     fn publish_immediate_keeps_bounded_fifo_cache() {

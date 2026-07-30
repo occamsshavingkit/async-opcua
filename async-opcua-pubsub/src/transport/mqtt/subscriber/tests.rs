@@ -1,5 +1,7 @@
 use super::*;
 
+mod backpressure;
+
 #[test]
 fn broker_address_error_implements_std_error() {
     fn assert_error<T: std::error::Error>() {}

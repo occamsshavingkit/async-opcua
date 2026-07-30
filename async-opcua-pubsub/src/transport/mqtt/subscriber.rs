@@ -1,11 +1,16 @@
 use std::{borrow::Cow, time::Duration};
 
 use rumqttc::{AsyncClient, Event, Incoming, MqttOptions, QoS};
+use tokio::sync::mpsc::error::TrySendError;
 use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
 use url::{Host, Url};
 
 use crate::MqttDeliveryGuarantee;
+
+mod forwarding;
+
+use forwarding::PayloadForwarder;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct MqttBrokerAddress {
@@ -201,6 +206,7 @@ pub(crate) fn start_mqtt_subscriber_with_config(
                 return;
             }
         };
+        let forwarder = PayloadForwarder::new(sender);
         let mut backoff = Duration::from_secs(1);
 
         loop {
@@ -243,8 +249,7 @@ pub(crate) fn start_mqtt_subscriber_with_config(
                     Ok(Event::Incoming(Incoming::Publish(publish))) => {
                         backoff = Duration::from_secs(1);
                         let payload = publish.payload.to_vec();
-                        if let Err(error) = sender.try_send(payload) {
-                            use tokio::sync::mpsc::error::TrySendError;
+                        if let Err(error) = forwarder.forward(payload) {
                             match error {
                                 TrySendError::Full(_) => {
                                     tracing::warn!(

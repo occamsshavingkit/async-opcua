@@ -1,3 +1,4 @@
+use futures::stream::FuturesUnordered;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 use std::time::Duration;
@@ -14,6 +15,7 @@ use opcua_types::{
 use crate::{
     codec::json::{JsonDataSetMessage, JsonNetworkMessage},
     codec::uadp::{PublisherId, UadpDataSetMessage, UadpNetworkMessage},
+    transport::supervise_transport,
     MessageEncoding, PubSubConnectionConfig, PubSubPublisher,
 };
 
@@ -124,6 +126,7 @@ impl PubSubPublisher for UdpPublisher {
 
         // Spawn a coordinator task that manages the individual writer group loops
         let handle = tokio::spawn(async move {
+            let writer_futures = FuturesUnordered::new();
             for writer_group in connection_config.writer_groups {
                 let address_space = address_space.clone();
                 let cancel_token = cancel_token.clone();
@@ -142,14 +145,17 @@ impl PubSubPublisher for UdpPublisher {
                 let _ = socket.set_multicast_loop_v4(true);
                 let _ = socket.set_multicast_ttl_v4(32);
 
-                tokio::spawn(async move {
+                writer_futures.push(async move {
                     let mut sequence_number: u16 = 0;
                     loop {
                         if cancel_token.is_cancelled() {
                             break;
                         }
 
-                        sleep(Duration::from_millis(writer_group.publishing_interval)).await;
+                        tokio::select! {
+                            _ = cancel_token.cancelled() => break,
+                            _ = sleep(Duration::from_millis(writer_group.publishing_interval)) => {}
+                        }
 
                         // Query address space inside a block: the guard
                         // must not be in scope across an await.
@@ -263,8 +269,7 @@ impl PubSubPublisher for UdpPublisher {
                 });
             }
 
-            // Keep coordinator task alive until cancelled
-            cancel_token.cancelled().await;
+            supervise_transport(&cancel_token, std::future::pending::<()>(), writer_futures).await;
         });
 
         Ok(handle)
@@ -285,6 +290,110 @@ fn opcua_to_json_value<T: opcua_types::json::JsonEncodable>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{DataSetWriterConfig, PublishedDataSetConfig, WriterGroupConfig};
+
+    #[tokio::test]
+    async fn aborting_coordinator_stops_writer_group_future() {
+        let receiver = UdpSocket::bind("127.0.0.1:0")
+            .await
+            .expect("loopback receiver binds");
+        let destination = receiver
+            .local_addr()
+            .expect("loopback receiver has an address");
+        let publisher = UdpPublisher::new(Arc::new(RwLock::new(AddressSpace::new())));
+        let cancel_token = CancellationToken::new();
+        let config = PubSubConnectionConfig {
+            connection_id: "udp-regression".to_string(),
+            name: "udp-regression".to_string(),
+            address: format!("udp://{destination}"),
+            writer_groups: vec![WriterGroupConfig {
+                writer_group_id: 1,
+                publishing_interval: 10,
+                encoding: MessageEncoding::Json,
+                dataset_writers: vec![DataSetWriterConfig {
+                    dataset_writer_id: 1,
+                    dataset_name: "empty".to_string(),
+                    published_dataset: PublishedDataSetConfig {
+                        published_variables: Vec::new(),
+                        configuration_version: Default::default(),
+                    },
+                }],
+            }],
+            reader_groups: Vec::new(),
+        };
+
+        let coordinator = publisher
+            .start_publishing(config, cancel_token.clone())
+            .expect("publisher starts");
+        let mut packet = [0u8; 2048];
+        tokio::time::timeout(Duration::from_secs(1), receiver.recv_from(&mut packet))
+            .await
+            .expect("writer emits a datagram before the deadline")
+            .expect("writer datagram is received");
+
+        coordinator.abort();
+        assert!(coordinator
+            .await
+            .expect_err("coordinator was aborted")
+            .is_cancelled());
+        sleep(Duration::from_millis(30)).await;
+
+        while receiver.try_recv_from(&mut packet).is_ok() {}
+
+        let continued_packet =
+            tokio::time::timeout(Duration::from_millis(50), receiver.recv_from(&mut packet)).await;
+        assert!(
+            continued_packet.is_err(),
+            "writer group delivered a datagram after coordinator abort"
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn aborting_coordinator_drops_writer_future_before_returning() {
+        // Given: a coordinator that has taken direct ownership of one writer future.
+        let publisher = UdpPublisher::new(Arc::new(RwLock::new(AddressSpace::new())));
+        let config = PubSubConnectionConfig {
+            connection_id: "udp-abort-drop-regression".to_string(),
+            name: "UDP abort drop regression".to_string(),
+            address: "udp://127.0.0.1:9".to_string(),
+            writer_groups: vec![WriterGroupConfig {
+                writer_group_id: 1,
+                publishing_interval: 60_000,
+                encoding: MessageEncoding::Json,
+                dataset_writers: Vec::new(),
+            }],
+            reader_groups: Vec::new(),
+        };
+        let coordinator = publisher
+            .start_publishing(config, CancellationToken::new())
+            .expect("UDP publisher should start");
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while Arc::strong_count(&publisher.address_space) < 3 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("UDP coordinator did not take ownership of the writer future");
+
+        // When: the coordinator is aborted and awaited to completion.
+        let observed_address_space = Arc::clone(&publisher.address_space);
+        let observed_strong_count = tokio::spawn(async move {
+            coordinator.abort();
+            let join_error = coordinator
+                .await
+                .expect_err("coordinator completed instead of being aborted");
+            assert!(join_error.is_cancelled(), "coordinator was not cancelled");
+            Arc::strong_count(&observed_address_space)
+        })
+        .await
+        .expect("ownership observer task failed");
+
+        // Then: no writer future retains the publisher's address space.
+        assert_eq!(
+            observed_strong_count, 2,
+            "UDP writer future remained alive after the aborted coordinator returned"
+        );
+    }
 
     #[test]
     fn subscriber_endpoint_parse_strips_mixed_case_udp_scheme() {
@@ -352,5 +461,59 @@ mod tests {
 
         // Then: the existing IPv6 support boundary remains unchanged.
         assert_eq!(result, Err(StatusCode::BadNotSupported));
+    }
+
+    #[tokio::test]
+    async fn graceful_cancellation_stops_datagram_production() {
+        let receiver = UdpSocket::bind("127.0.0.1:0")
+            .await
+            .expect("loopback receiver binds");
+        let destination = receiver
+            .local_addr()
+            .expect("loopback receiver has an address");
+        let publisher = UdpPublisher::new(Arc::new(RwLock::new(AddressSpace::new())));
+        let cancel_token = CancellationToken::new();
+        let config = PubSubConnectionConfig {
+            connection_id: "udp-graceful-shutdown".to_string(),
+            name: "udp-graceful-shutdown".to_string(),
+            address: format!("udp://{destination}"),
+            writer_groups: vec![WriterGroupConfig {
+                writer_group_id: 1,
+                publishing_interval: 10,
+                encoding: MessageEncoding::Json,
+                dataset_writers: vec![DataSetWriterConfig {
+                    dataset_writer_id: 1,
+                    dataset_name: "empty".to_string(),
+                    published_dataset: PublishedDataSetConfig {
+                        published_variables: Vec::new(),
+                        configuration_version: Default::default(),
+                    },
+                }],
+            }],
+            reader_groups: Vec::new(),
+        };
+
+        let coordinator = publisher
+            .start_publishing(config, cancel_token.clone())
+            .expect("publisher starts");
+        let mut packet = [0u8; 2048];
+        tokio::time::timeout(Duration::from_secs(1), receiver.recv_from(&mut packet))
+            .await
+            .expect("writer emits a datagram before the deadline")
+            .expect("writer datagram is received");
+
+        cancel_token.cancel();
+        tokio::time::timeout(Duration::from_secs(2), coordinator)
+            .await
+            .expect("coordinator should stop before the deadline")
+            .expect("coordinator should shut down successfully");
+
+        while receiver.try_recv_from(&mut packet).is_ok() {}
+        let continued_packet =
+            tokio::time::timeout(Duration::from_millis(50), receiver.recv_from(&mut packet)).await;
+        assert!(
+            continued_packet.is_err(),
+            "writer group delivered a datagram after graceful cancellation"
+        );
     }
 }

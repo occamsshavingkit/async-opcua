@@ -33,6 +33,8 @@ tokio-tungstenite = "0.21.0"
 tracing = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+thiserror = { workspace = true }
+url = { workspace = true }
 # default features disabled to drop the unused rustls TLS stack, which
 # transitively pulls ring. This transport uses plaintext AMQP only; re-enable
 # a TLS feature if AMQP-over-TLS is wired up.

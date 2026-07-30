@@ -20,17 +20,13 @@ use crate::{
         SubscriberSecurityConfig,
     },
     transport::{
-        amqp::AmqpPublisher,
-        mqtt::{
-            quality_of_service, start_mqtt_subscriber_with_config, MqttPublisher,
-            MqttSubscriberConfig,
-        },
-        udp::{bind_subscriber_socket, UdpPublisher, UdpSubscriberEndpoint},
-        websocket::WebSocketPublisher,
+        mqtt::{quality_of_service, start_mqtt_subscriber_with_config, MqttSubscriberConfig},
+        udp::{bind_subscriber_socket, UdpSubscriberEndpoint},
     },
-    MqttDeliveryGuarantee, PubSubConnectionConfig, PubSubPublisher, PublisherId,
+    MqttDeliveryGuarantee, PubSubConnectionConfig, PublisherId,
 };
 
+mod publisher;
 mod security;
 mod subscriber_mqtt;
 mod transport;
@@ -352,16 +348,6 @@ impl PubSubEngine {
             .and_then(|runtime| runtime.read().reader_status(reader_id))
     }
 
-    /// Returns true when the engine has started publisher loops.
-    pub fn is_running(&self) -> bool {
-        self.cancel_token.is_some()
-    }
-
-    /// Returns the number of active publisher coordinator handles.
-    pub fn active_handle_count(&self) -> usize {
-        self.publisher_handles.len()
-    }
-
     /// Returns true when subscriber receive loops are running.
     pub fn subscribers_are_running(&self) -> bool {
         self.subscriber_cancel_token.is_some()
@@ -370,46 +356,6 @@ impl PubSubEngine {
     /// Returns the number of active subscriber receive task handles.
     pub fn active_subscriber_handle_count(&self) -> usize {
         self.subscriber_handles.len()
-    }
-
-    /// Starts transport publisher loops for all configured connections.
-    pub fn start(&mut self) -> Result<(), StatusCode> {
-        if self.is_running() {
-            return Ok(());
-        }
-
-        let cancel_token = CancellationToken::new();
-        let mut handles = Vec::with_capacity(self.connections.len());
-
-        for connection in &self.connections {
-            match self.start_connection(connection.clone(), cancel_token.clone()) {
-                Ok(handle) => handles.push(handle),
-                Err(status) => {
-                    cancel_token.cancel();
-                    for handle in handles {
-                        handle.abort();
-                    }
-                    return Err(status);
-                }
-            }
-        }
-
-        self.cancel_token = Some(cancel_token);
-        self.publisher_handles = handles;
-        Ok(())
-    }
-
-    /// Stops all active publisher loops and waits for their coordinator tasks to finish.
-    pub async fn stop(&mut self) {
-        self.stop_subscribers().await;
-
-        if let Some(cancel_token) = self.cancel_token.take() {
-            cancel_token.cancel();
-        }
-
-        while let Some(handle) = self.publisher_handles.pop() {
-            let _ = handle.await;
-        }
     }
 
     /// Starts subscriber receive loops for configured ReaderGroups.
@@ -691,28 +637,6 @@ impl PubSubEngine {
         }
 
         handles
-    }
-
-    fn start_connection(
-        &self,
-        connection: PubSubConnectionConfig,
-        cancel_token: CancellationToken,
-    ) -> Result<JoinHandle<()>, StatusCode> {
-        match TransportKind::from_address(&connection.address)? {
-            TransportKind::Mqtt => MqttPublisher::new(self.address_space.clone())
-                .start_publishing(connection, cancel_token),
-            TransportKind::Udp => UdpPublisher::new(self.address_space.clone())
-                .start_publishing(connection, cancel_token),
-            #[cfg(feature = "tsn")]
-            TransportKind::Tsn => {
-                crate::transport::tsn::publisher::TsnPublisher::new(self.address_space.clone())
-                    .start_publishing(connection, cancel_token)
-            }
-            TransportKind::Amqp => AmqpPublisher::new(self.address_space.clone())
-                .start_publishing(connection, cancel_token),
-            TransportKind::WebSocket => WebSocketPublisher::new(self.address_space.clone())
-                .start_publishing(connection, cancel_token),
-        }
     }
 
     fn ensure_subscriber_runtime(&mut self) -> Result<Arc<RwLock<SubscriberRuntime>>, StatusCode> {

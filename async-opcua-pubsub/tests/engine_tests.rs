@@ -244,7 +244,7 @@ async fn start_rejects_mqtts_without_starting_a_publisher() {
     let mut engine = PubSubEngine::new(address_space());
     engine.add_connection(empty_connection("mqtts-1", "mqtts://broker.local:8883"));
 
-    // When: startup classifies the configured transport.
+    // When: startup validates the configured transport.
     let status = engine.start().unwrap_err();
 
     // Then: secure MQTT is rejected before any publisher task starts.

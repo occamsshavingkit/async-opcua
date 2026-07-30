@@ -312,9 +312,14 @@ impl PubSubEngine {
             .find(|connection| connection.connection_id == connection_id)
             .cloned()
             .ok_or(StatusCode::BadNotFound)?;
-        connection.validate_subscriber_config()?;
 
         let reader_ids = connection_reader_ids(&connection);
+        let readers = connection
+            .reader_groups
+            .iter()
+            .flat_map(|reader_group| reader_group.dataset_readers.iter())
+            .cloned()
+            .collect::<Vec<_>>();
         let security = first_effective_security(&connection);
         let runtime = self.ensure_subscriber_runtime()?;
 
@@ -343,8 +348,12 @@ impl PubSubEngine {
             };
         }
 
-        let result = runtime.write().process_datagram(payload, ctx);
-        result
+        let mut outcome = SubscriberApplyOutcome::default();
+        let mut runtime = runtime.write();
+        for reader in &readers {
+            outcome.accumulate(runtime.process_datagram_for_reader(reader, payload, ctx)?);
+        }
+        Ok(outcome)
     }
 
     /// Returns a subscriber DataSetReader status snapshot.
@@ -722,7 +731,7 @@ impl PubSubEngine {
             return Ok(runtime.clone());
         }
 
-        let runtime = SubscriberRuntime::with_connections(
+        let runtime = SubscriberRuntime::with_reader_validated_connections(
             self.address_space.clone(),
             self.connections.clone(),
         )?;

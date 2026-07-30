@@ -7,8 +7,8 @@ use opcua_core::sync::RwLock;
 use opcua_pubsub::{
     transport::udp::{bind_subscriber_socket, UdpSubscriberEndpoint},
     DataSetFieldEncoding, DataSetMessageKind, DataSetReaderConfig, FieldTargetConfig,
-    PubSubConnectionConfig, PublisherId, ReaderGroupConfig, SubscriberError, SubscriberRuntime,
-    UadpDataSetMessage, UadpNetworkMessage,
+    PubSubConnectionConfig, PubSubEngine, PublisherId, ReaderGroupConfig, SubscriberError,
+    SubscriberRuntime, UadpDataSetMessage, UadpNetworkMessage,
 };
 use opcua_server::address_space::{AddressSpace, VariableBuilder};
 use opcua_types::{
@@ -270,6 +270,53 @@ fn malformed_datagram_is_rejected_without_panic() {
         runtime.process_datagram(&[0xff, 0x00], &ctx).unwrap_err(),
         StatusCode::BadDecodingError
     );
+}
+
+#[test]
+fn engine_datagram_processing_routes_only_to_named_connection_readers() {
+    // Given: two matching readers owned by different connections.
+    let space = AddressSpace::new();
+    space.add_namespace("urn:test", 1);
+    let owner_target = insert_target(&space, "OwnerTarget", Variant::Double(0.0));
+    let unrelated_target = insert_target(&space, "UnrelatedTarget", Variant::Double(0.0));
+    let address_space = Arc::new(RwLock::new(space));
+
+    let owner_reader = reader(vec![owner_target.clone()]);
+    let mut unrelated_reader = reader(vec![unrelated_target.clone()]);
+    unrelated_reader.name = Some("reader-b".to_string());
+    unrelated_reader.dataset_reader_id = 2;
+
+    let mut owner_connection = connection(owner_reader);
+    owner_connection.connection_id = "owner".to_string();
+    owner_connection.name = "owner".to_string();
+    let mut unrelated_connection = connection(unrelated_reader);
+    unrelated_connection.connection_id = "unrelated".to_string();
+    unrelated_connection.name = "unrelated".to_string();
+
+    let mut engine = PubSubEngine::with_connections(
+        address_space.clone(),
+        vec![owner_connection, unrelated_connection],
+    );
+    let ctx_owned = ContextOwned::default();
+    let ctx = ctx_owned.context();
+    let payload = network_msg(dataset_msg(42, 1, vec![Variant::Double(17.5)])).encode_to_vec(&ctx);
+
+    // When: the datagram is dispatched for the owning connection.
+    let outcome = engine
+        .process_subscriber_datagram("owner", &payload, &ctx)
+        .unwrap();
+
+    // Then: only the owning connection's reader observes and applies it.
+    assert_eq!(outcome.applied_readers, 1);
+    assert_eq!(
+        target_value(&address_space.read(), &owner_target),
+        Some(Variant::Double(17.5))
+    );
+    assert_eq!(
+        target_value(&address_space.read(), &unrelated_target),
+        Some(Variant::Double(0.0))
+    );
+    assert_eq!(engine.subscriber_status(2).unwrap().accepted_count, 0);
 }
 
 #[test]

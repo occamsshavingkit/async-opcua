@@ -210,6 +210,25 @@ fn rejects_unknown_transport_addresses() {
 }
 
 #[test]
+fn datagram_processing_does_not_revalidate_transport_address() {
+    // Given: a reader configuration whose transport address is irrelevant after startup preflight.
+    let mut connection = empty_connection("subscriber", "ftp://broker.local/pubsub");
+    connection.reader_groups.push(ReaderGroupConfig {
+        dataset_readers: vec![DataSetReaderConfig::default()],
+        ..ReaderGroupConfig::default()
+    });
+    let mut engine = PubSubEngine::with_connections(address_space(), vec![connection]);
+    let ctx_owned = ContextOwned::default();
+    let ctx = ctx_owned.context();
+
+    // When: a malformed datagram reaches per-datagram processing.
+    let result = engine.process_subscriber_datagram("subscriber", &[0xff, 0x00], &ctx);
+
+    // Then: payload decoding, not transport reclassification, determines the error.
+    assert_eq!(result, Err(StatusCode::BadDecodingError));
+}
+
+#[test]
 fn start_rejects_unknown_transport_without_marking_engine_running() {
     let mut engine = PubSubEngine::new(address_space());
     engine.add_connection(empty_connection("bad-1", "ftp://broker.local/pubsub"));

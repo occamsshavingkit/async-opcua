@@ -15,15 +15,13 @@ use opcua_types::{
 
 use crate::{
     codec::{
-        json::{decode_network_message, JsonDataSetMessage, JsonNetworkMessage},
+        json::{JsonDataSetMessage, JsonNetworkMessage},
         uadp::{PublisherId, UadpDataSetMessage, UadpNetworkMessage},
     },
-    config::{
-        DataSetReaderConfig, FieldTargetConfig, MessageEncoding, PubSubConnectionConfig,
-        ReaderGroupConfig,
-    },
-    transport::udp::is_custom_fragment_datagram,
+    config::{DataSetReaderConfig, FieldTargetConfig, PubSubConnectionConfig, ReaderGroupConfig},
 };
+
+mod routing;
 
 /// Subscriber-side processing error captured in reader diagnostics.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -132,6 +130,32 @@ impl SubscriberRuntime {
             connection.validate_subscriber_config()?;
         }
 
+        Ok(Self::from_connections(address_space, connections))
+    }
+
+    /// Builds a subscriber runtime after validating only its DataSetReaders.
+    ///
+    /// Callers must validate connection-level invariants, including transport
+    /// addresses and ReaderGroup settings, before calling this constructor.
+    /// [`with_connections`] and [`PubSubConnectionConfig::validate_subscriber_config`]
+    /// perform complete subscriber configuration validation.
+    pub(crate) fn with_reader_validated_connections(
+        address_space: Arc<RwLock<AddressSpace>>,
+        connections: Vec<PubSubConnectionConfig>,
+    ) -> Result<Self, StatusCode> {
+        for connection in &connections {
+            let mut reader_config = connection.clone();
+            reader_config.address = "udp://127.0.0.1:0".to_string();
+            reader_config.validate_subscriber_config()?;
+        }
+
+        Ok(Self::from_connections(address_space, connections))
+    }
+
+    pub(crate) fn from_connections(
+        address_space: Arc<RwLock<AddressSpace>>,
+        connections: Vec<PubSubConnectionConfig>,
+    ) -> Self {
         let mut reader_groups = Vec::new();
         let mut statuses = HashMap::new();
         let mut timeouts = HashMap::new();
@@ -153,141 +177,13 @@ impl SubscriberRuntime {
             }
         }
 
-        Ok(Self {
+        Self {
             address_space,
             reader_groups,
             statuses,
             timeouts,
             metadata_major_versions,
-        })
-    }
-
-    /// Processes a plain UADP datagram.
-    pub fn process_datagram(
-        &mut self,
-        payload: &[u8],
-        ctx: &Context<'_>,
-    ) -> Result<SubscriberApplyOutcome, StatusCode> {
-        // Dispatch to the appropriate decode path based on the configured
-        // DataSetReader message encoding. When a reader is configured with a
-        // JsonDataSetReaderMessageDataType (OPC-10000-14 §6.3.2.4.3), payloads
-        // must be routed through the JSON decode path instead of UADP.
-        let any_json_reader = self
-            .reader_groups
-            .iter()
-            .flat_map(|reader_group| reader_group.dataset_readers.iter())
-            .any(|reader| reader.message_encoding == MessageEncoding::Json);
-
-        if any_json_reader {
-            return self.process_json_datagram(payload, ctx);
         }
-
-        if is_custom_fragment_datagram(payload) {
-            self.record_drop_for_all(SubscriberError::UnsupportedTarget);
-            return Err(StatusCode::BadNotSupported);
-        }
-
-        let message =
-            UadpNetworkMessage::decode(&mut &payload[..], ctx).map_err(|error| error.status())?;
-        self.process_network_message(&message)
-    }
-
-    /// Decodes a JSON-encoded PubSub NetworkMessage and applies matching DataSetReaders.
-    ///
-    /// This is the JSON dispatch branch referenced from [`process_datagram`]. It handles
-    /// payloads received for DataSetReaders configured with
-    /// `JsonDataSetReaderMessageDataType` (OPC-10000-14 §6.3.2.4.3), parsing the JSON
-    /// envelope defined in §7.2.5.4 instead of the UADP binary wire format.
-    fn process_json_datagram(
-        &mut self,
-        payload: &[u8],
-        _ctx: &Context<'_>,
-    ) -> Result<SubscriberApplyOutcome, StatusCode> {
-        let message = decode_network_message(payload)?;
-        let now = Instant::now();
-        let mut outcome = SubscriberApplyOutcome::default();
-
-        for json_msg in &message.messages {
-            let readers: Vec<DataSetReaderConfig> = self
-                .reader_groups
-                .iter()
-                .flat_map(|reader_group| reader_group.dataset_readers.iter())
-                .cloned()
-                .collect();
-
-            for reader in readers {
-                if !json_reader_matches(&reader, &message, json_msg) {
-                    outcome.filtered_readers += 1;
-                    if let Some(status) = self.statuses.get_mut(&reader.dataset_reader_id) {
-                        status.filtered_count += 1;
-                    }
-                    continue;
-                }
-
-                outcome.matched_readers += 1;
-                match self.apply_json_reader(&reader, json_msg, now) {
-                    Ok(()) => outcome.applied_readers += 1,
-                    Err(error) => {
-                        if let Some(status) = self.statuses.get_mut(&reader.dataset_reader_id) {
-                            status.last_error = Some(error);
-                            status.dropped_count += 1;
-                            status.state = PubSubState::Error;
-                        }
-                    }
-                }
-            }
-        }
-
-        Ok(outcome)
-    }
-
-    /// Processes an already decoded and verified UADP NetworkMessage.
-    pub fn process_network_message(
-        &mut self,
-        message: &UadpNetworkMessage,
-    ) -> Result<SubscriberApplyOutcome, StatusCode> {
-        self.process_network_message_at(message, Instant::now())
-    }
-
-    /// Processes an already decoded and verified UADP NetworkMessage at a supplied time.
-    pub fn process_network_message_at(
-        &mut self,
-        message: &UadpNetworkMessage,
-        now: Instant,
-    ) -> Result<SubscriberApplyOutcome, StatusCode> {
-        let mut outcome = SubscriberApplyOutcome::default();
-
-        for dataset_message in &message.dataset_messages {
-            for reader in self
-                .reader_groups
-                .iter()
-                .flat_map(|reader_group| reader_group.dataset_readers.iter())
-                .cloned()
-                .collect::<Vec<_>>()
-            {
-                if !reader_matches(&reader, message, dataset_message) {
-                    outcome.filtered_readers += 1;
-                    if let Some(status) = self.statuses.get_mut(&reader.dataset_reader_id) {
-                        status.filtered_count += 1;
-                    }
-                    continue;
-                }
-
-                outcome.matched_readers += 1;
-                match self.apply_reader(&reader, dataset_message, now) {
-                    Ok(()) => outcome.applied_readers += 1,
-                    Err(error) => {
-                        if let Some(status) = self.statuses.get_mut(&reader.dataset_reader_id) {
-                            status.last_error = Some(error);
-                            status.dropped_count += 1;
-                            status.state = PubSubState::Error;
-                        }
-                    }
-                }
-            }
-        }
-
-        Ok(outcome)
     }
 
     /// Returns a reader status snapshot.
@@ -443,13 +339,6 @@ impl SubscriberRuntime {
         };
 
         self.apply_reader(reader, &synthetic, now)
-    }
-
-    fn record_drop_for_all(&mut self, error: SubscriberError) {
-        for status in self.statuses.values_mut() {
-            status.dropped_count += 1;
-            status.last_error = Some(error);
-        }
     }
 }
 

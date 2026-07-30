@@ -7,6 +7,10 @@ use std::{collections::HashSet, str::FromStr, time::Duration};
 
 use crate::codec::uadp::PublisherId;
 
+mod subscriber_security;
+
+pub(crate) use subscriber_security::SubscriberSecurityConfig;
+
 /// Message encoding formats supported by the PubSub implementation.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum MessageEncoding {
@@ -388,15 +392,17 @@ impl PubSubConnectionConfig {
             return Err(StatusCode::BadNotSupported);
         }
 
-        for reader_group in &self.reader_groups {
-            validate_unique_reader_names(reader_group)?;
-            for reader in &reader_group.dataset_readers {
-                reader.validate()?;
-                validate_security(reader_group, reader)?;
-            }
-        }
+        self.validate_subscriber_readers()
+    }
 
-        Ok(())
+    pub(crate) fn validate_subscriber_readers(&self) -> Result<(), StatusCode> {
+        self.validated_subscriber_security().map(drop)
+    }
+
+    pub(crate) fn validated_subscriber_security(
+        &self,
+    ) -> Result<Option<SubscriberSecurityConfig>, StatusCode> {
+        subscriber_security::validated_subscriber_security(self)
     }
 }
 
@@ -410,33 +416,6 @@ fn validate_unique_reader_names(reader_group: &ReaderGroupConfig) -> Result<(), 
             return Err(StatusCode::BadConfigurationError);
         }
     }
-    Ok(())
-}
-
-fn validate_security(
-    reader_group: &ReaderGroupConfig,
-    reader: &DataSetReaderConfig,
-) -> Result<(), StatusCode> {
-    let mode = reader.security_mode.or(reader_group.security_mode);
-    if matches!(
-        mode,
-        Some(MessageSecurityMode::Sign | MessageSecurityMode::SignAndEncrypt)
-    ) {
-        let policy = reader
-            .security_policy_uri
-            .as_deref()
-            .or(reader_group.security_policy_uri.as_deref())
-            .unwrap_or_default();
-        let group_id = reader
-            .security_group_id
-            .as_deref()
-            .or(reader_group.security_group_id.as_deref())
-            .unwrap_or_default();
-        if policy.is_empty() || group_id.is_empty() {
-            return Err(StatusCode::BadConfigurationError);
-        }
-    }
-
     Ok(())
 }
 

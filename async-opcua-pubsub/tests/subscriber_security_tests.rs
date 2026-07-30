@@ -255,3 +255,27 @@ fn dataset_reader_security_override_wins_over_reader_group_none() {
         Some(Variant::Double(4.0))
     );
 }
+
+#[test]
+fn heterogeneous_config_rejects_datagram_before_decode_or_state_mutation() {
+    // Given: a heterogeneous connection, an existing target, and malformed UADP bytes.
+    let context = ContextOwned::default();
+    let (address_space, target) = address_space_with_target();
+    let mut config = connection(target.clone(), Some(MessageSecurityMode::SignAndEncrypt));
+    let mut unsecured_group = config.reader_groups[0].clone();
+    unsecured_group.reader_group_id = 2;
+    unsecured_group.security_mode = None;
+    config.reader_groups.push(unsecured_group);
+    let mut engine = PubSubEngine::with_connections(address_space.clone(), vec![config]);
+
+    // When: the datagram enters the real subscriber processing boundary.
+    let result = engine.process_subscriber_datagram("secure-conn", &[0xff], &context.context());
+
+    // Then: configuration fails before runtime status, decode, or target mutation.
+    assert_eq!(result.unwrap_err(), StatusCode::BadConfigurationError);
+    assert!(engine.subscriber_status(1).is_none());
+    assert_eq!(
+        target_value(&address_space.read(), &target),
+        Some(Variant::Double(0.0))
+    );
+}

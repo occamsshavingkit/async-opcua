@@ -27,7 +27,7 @@ pub(crate) fn parse_amqp_address(address: &str) -> Result<AmqpAddressSettings, S
     } else {
         DEFAULT_AMQP_PORT
     };
-    let (authority, routing_key) = addr.split_once("/").unwrap_or((addr, ""));
+    let (authority, routing_key) = addr.split_once('/').unwrap_or((addr, ""));
     let authority = if authority.is_empty() {
         format!("127.0.0.1:{default_port}")
     } else if authority_has_port(authority) {
@@ -50,11 +50,11 @@ pub(crate) fn parse_amqp_address(address: &str) -> Result<AmqpAddressSettings, S
 }
 
 fn authority_has_port(authority: &str) -> bool {
-    let host_port = authority.rsplit("@").next().unwrap_or(authority);
-    if let Some(rest) = host_port.strip_prefix("[") {
+    let host_port = authority.rsplit('@').next().unwrap_or(authority);
+    if let Some(rest) = host_port.strip_prefix('[') {
         return rest
-            .find("]")
-            .is_some_and(|end| rest[end + 1..].starts_with(":"));
+            .find(']')
+            .is_some_and(|end| rest[end + 1..].starts_with(':'));
     }
-    host_port.rsplit_once(":").is_some()
+    host_port.rsplit_once(':').is_some()
 }

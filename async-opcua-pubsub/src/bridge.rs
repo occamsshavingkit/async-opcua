@@ -14,7 +14,7 @@ use crate::{
     codec::uadp::{PublisherId, UadpDataSetMessage, UadpNetworkMessage},
     transport::amqp::AmqpPublisher,
     transport::mqtt::MqttPublisher,
-    transport::udp::UdpPublisher,
+    transport::udp::{strip_udp_scheme, UdpPublisher},
     transport::websocket::WebSocketPublisher,
     MessageEncoding, PubSubConnectionConfig,
 };
@@ -74,6 +74,10 @@ impl PubSubBridge {
         let udp = self.udp_publisher.clone();
         let amqp = self.amqp_publisher.clone();
         let websocket = self.websocket_publisher.clone();
+        let udp_destination = udp.is_some().then(|| {
+            let address = config.address.trim();
+            strip_udp_scheme(address).unwrap_or(address).to_string()
+        });
 
         tokio::spawn(async move {
             let mut last_values = std::collections::HashMap::new();
@@ -195,11 +199,9 @@ impl PubSubBridge {
                                     if let Some(ref m) = mqtt {
                                         m.publish_immediate(topic.clone(), payload.clone());
                                     }
-                                    if let Some(ref u) = udp {
-                                        let addr = config
-                                            .address
-                                            .strip_prefix("udp://")
-                                            .unwrap_or(&config.address);
+                                    if let (Some(u), Some(addr)) =
+                                        (udp.as_ref(), udp_destination.as_deref())
+                                    {
                                         u.publish_immediate(payload.clone(), addr).await;
                                     }
                                     if let Some(ref a) = amqp {
@@ -238,11 +240,9 @@ impl PubSubBridge {
                                         &writer_group.encoding,
                                     );
                                 }
-                                if let Some(ref u) = udp {
-                                    let addr = config
-                                        .address
-                                        .strip_prefix("udp://")
-                                        .unwrap_or(&config.address);
+                                if let (Some(u), Some(addr)) =
+                                    (udp.as_ref(), udp_destination.as_deref())
+                                {
                                     u.publish_immediate(payload.clone(), addr).await;
                                 }
                             }
@@ -268,7 +268,13 @@ fn opcua_to_json_value<T: opcua_types::json::JsonEncodable>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::transport::{amqp::AmqpPublisher, websocket::WebSocketPublisher};
+    use crate::{
+        transport::{amqp::AmqpPublisher, websocket::WebSocketPublisher},
+        DataSetWriterConfig, PublishedDataSetConfig, WriterGroupConfig,
+    };
+    use opcua_server::address_space::VariableBuilder;
+    use opcua_types::{DataTypeId, NodeId};
+    use tokio::net::UdpSocket;
 
     #[test]
     fn bridge_accepts_publishers_for_all_transport_mappings() {
@@ -294,5 +300,68 @@ mod tests {
         assert!(bridge.udp_publisher.is_some());
         assert!(bridge.amqp_publisher.is_some());
         assert!(bridge.websocket_publisher.is_some());
+    }
+
+    #[tokio::test]
+    async fn bridge_publishes_to_standard_mixed_case_opc_udp_address() {
+        // Given: a bridge using the OPC-10000-14 §§7.3.2.2-7.3.2.3 UDP URI scheme.
+        let receiver = UdpSocket::bind("127.0.0.1:0")
+            .await
+            .expect("loopback receiver binds");
+        let destination = receiver
+            .local_addr()
+            .expect("loopback receiver has an address");
+        let node_id = NodeId::new(1, "BridgeUdpValue");
+        let space = AddressSpace::new();
+        space.add_namespace("http://opcfoundation.org/UA/", 0);
+        space.add_namespace("urn:test", 1);
+        VariableBuilder::new(&node_id, "BridgeUdpValue", "BridgeUdpValue")
+            .data_type(DataTypeId::Double)
+            .value(72.5_f64)
+            .insert(&space);
+        let address_space = Arc::new(RwLock::new(space));
+        let config = PubSubConnectionConfig {
+            connection_id: "opc-udp-bridge".to_string(),
+            name: "opc-udp-bridge".to_string(),
+            address: format!("OpC.UdP://{destination}"),
+            writer_groups: vec![WriterGroupConfig {
+                writer_group_id: 1,
+                publishing_interval: 50,
+                encoding: MessageEncoding::Uadp,
+                dataset_writers: vec![DataSetWriterConfig {
+                    dataset_writer_id: 1,
+                    dataset_name: "bridge-dataset".to_string(),
+                    published_dataset: PublishedDataSetConfig {
+                        published_variables: vec![node_id],
+                        configuration_version: Default::default(),
+                    },
+                }],
+            }],
+            reader_groups: Vec::new(),
+        };
+        let bridge = PubSubBridge::new(
+            address_space.clone(),
+            config,
+            None,
+            Some(Arc::new(UdpPublisher::new(address_space))),
+        );
+        let cancel_token = CancellationToken::new();
+        let handle = bridge.start(cancel_token.clone());
+
+        // When: the bridge observes the initial value and publishes its first datagram.
+        let mut payload = [0_u8; 2048];
+        let received =
+            tokio::time::timeout(Duration::from_secs(1), receiver.recv_from(&mut payload)).await;
+        cancel_token.cancel();
+        tokio::time::timeout(Duration::from_secs(1), handle)
+            .await
+            .expect("bridge should stop before the deadline")
+            .expect("bridge task should shut down successfully");
+
+        // Then: mixed-case standard scheme normalization reaches the UDP socket.
+        assert!(
+            received.is_ok(),
+            "bridge did not publish an OPC UDP datagram"
+        );
     }
 }

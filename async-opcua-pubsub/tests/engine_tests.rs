@@ -50,6 +50,84 @@ fn classifies_all_supported_pubsub_transport_addresses() {
     );
 }
 
+#[test]
+fn classifies_standard_and_mixed_case_opc_udp_transport_addresses() {
+    // OPC-10000-14 §§7.3.2.2-7.3.2.3 define `opc.udp` as the UDP PubSub URI scheme.
+    assert_eq!(
+        TransportKind::from_address("opc.udp://239.0.0.1:4840").unwrap(),
+        TransportKind::Udp
+    );
+    assert_eq!(
+        TransportKind::from_address("  OpC.UdP://239.0.0.1:4840  ").unwrap(),
+        TransportKind::Udp
+    );
+}
+
+#[test]
+fn rejects_mqtts_transport_addresses() {
+    // Given: a secure MQTT address unsupported by the publisher transport.
+    // When: the address is classified.
+    // Then: classification rejects it explicitly.
+    assert_eq!(
+        TransportKind::from_address("mqtts://broker.local:8883").unwrap_err(),
+        StatusCode::BadNotSupported
+    );
+}
+
+#[test]
+fn classifies_mixed_case_mqtt_transport_addresses() {
+    assert_eq!(
+        TransportKind::from_address("MQTT://broker.local:1883").unwrap(),
+        TransportKind::Mqtt
+    );
+    assert_eq!(
+        TransportKind::from_address("MQTTS://broker.local:8883").unwrap_err(),
+        StatusCode::BadNotSupported
+    );
+}
+
+#[test]
+fn classifies_mixed_case_non_mqtt_transport_addresses() {
+    assert_eq!(
+        TransportKind::from_address("  UdP://239.0.0.1:4840  ").unwrap(),
+        TransportKind::Udp
+    );
+    assert_eq!(
+        TransportKind::from_address("aMqP://broker.local:5672/topic").unwrap(),
+        TransportKind::Amqp
+    );
+    assert_eq!(
+        TransportKind::from_address("AMQPS://broker.local:5671/topic").unwrap(),
+        TransportKind::Amqp
+    );
+    assert_eq!(
+        TransportKind::from_address("Ws://broker.local:9001/pubsub").unwrap(),
+        TransportKind::WebSocket
+    );
+    assert_eq!(
+        TransportKind::from_address("WSS://broker.local:9443/pubsub").unwrap(),
+        TransportKind::WebSocket
+    );
+
+    #[cfg(feature = "tsn")]
+    assert_eq!(
+        TransportKind::from_address("TsN://eth0").unwrap(),
+        TransportKind::Tsn
+    );
+}
+
+#[cfg(not(feature = "tsn"))]
+#[test]
+fn rejects_tsn_transport_addresses_when_feature_is_disabled() {
+    // Given: a syntactically recognized TSN address without TSN support enabled.
+    // When: the address is classified.
+    // Then: classification reports that the transport is not supported.
+    assert_eq!(
+        TransportKind::from_address("tsn://eth0").unwrap_err(),
+        StatusCode::BadNotSupported
+    );
+}
+
 #[tokio::test]
 async fn manages_connection_configs_and_udp_publisher_lifecycle() {
     let mut engine = PubSubEngine::new(address_space());
@@ -137,6 +215,21 @@ fn start_rejects_unknown_transport_without_marking_engine_running() {
     engine.add_connection(empty_connection("bad-1", "ftp://broker.local/pubsub"));
 
     assert_eq!(engine.start().unwrap_err(), StatusCode::BadInvalidArgument);
+    assert!(!engine.is_running());
+    assert_eq!(engine.active_handle_count(), 0);
+}
+
+#[tokio::test]
+async fn start_rejects_mqtts_without_starting_a_publisher() {
+    // Given: an engine configured with a secure MQTT connection.
+    let mut engine = PubSubEngine::new(address_space());
+    engine.add_connection(empty_connection("mqtts-1", "mqtts://broker.local:8883"));
+
+    // When: startup classifies the configured transport.
+    let status = engine.start().unwrap_err();
+
+    // Then: secure MQTT is rejected before any publisher task starts.
+    assert_eq!(status, StatusCode::BadNotSupported);
     assert!(!engine.is_running());
     assert_eq!(engine.active_handle_count(), 0);
 }

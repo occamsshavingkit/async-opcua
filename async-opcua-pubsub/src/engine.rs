@@ -29,51 +29,9 @@ use crate::{
     MqttDeliveryGuarantee, PubSubConnectionConfig, PubSubPublisher,
 };
 
-/// Supported OPC UA PubSub transport mappings.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TransportKind {
-    /// MQTT broker transport.
-    Mqtt,
-    /// UDP multicast or unicast transport.
-    Udp,
-    /// AMQP broker transport.
-    Amqp,
-    /// WebSocket transport.
-    WebSocket,
-    /// TSN transport. Experimental, requires the `tsn` feature.
-    #[cfg(feature = "tsn")]
-    Tsn,
-}
+mod transport;
 
-impl TransportKind {
-    /// Classifies a PubSub connection address by URI scheme.
-    pub fn from_address(address: &str) -> Result<Self, StatusCode> {
-        let address = address.trim();
-
-        if address.starts_with("mqtt://") || address.starts_with("mqtts://") {
-            return Ok(Self::Mqtt);
-        }
-
-        if address.starts_with("udp://") {
-            return Ok(Self::Udp);
-        }
-
-        #[cfg(feature = "tsn")]
-        if address.starts_with("tsn://") {
-            return Ok(Self::Tsn);
-        }
-
-        if address.starts_with("amqp://") || address.starts_with("amqps://") {
-            return Ok(Self::Amqp);
-        }
-
-        if address.starts_with("ws://") || address.starts_with("wss://") {
-            return Ok(Self::WebSocket);
-        }
-
-        Err(StatusCode::BadInvalidArgument)
-    }
-}
+pub use transport::TransportKind;
 
 /// Default PubSub datagram queue capacity.
 ///

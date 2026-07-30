@@ -19,6 +19,26 @@ use crate::{
 
 /// Maximum transmission unit for a single UDP packet to avoid IP-level fragmentation.
 const MTU: usize = 1400;
+const UDP_SCHEMES: [&str; 2] = ["opc.udp://", "udp://"];
+
+/// Strips the OPC-10000-14 §§7.3.2.2-7.3.2.3 UDP scheme or its legacy alias.
+pub(crate) fn strip_udp_scheme(address: &str) -> Option<&str> {
+    let address = address.trim();
+    UDP_SCHEMES.into_iter().find_map(|scheme| {
+        address
+            .get(..scheme.len())
+            .filter(|prefix| prefix.eq_ignore_ascii_case(scheme))
+            .map(|_| &address[scheme.len()..])
+    })
+}
+
+pub(crate) fn parse_udp_destination(address: &str) -> Result<SocketAddr, StatusCode> {
+    let address = address.trim();
+    strip_udp_scheme(address)
+        .unwrap_or(address)
+        .parse::<SocketAddr>()
+        .map_err(|_| StatusCode::BadConfigurationError)
+}
 
 /// Parsed UDP subscriber bind endpoint.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -30,15 +50,9 @@ pub struct UdpSubscriberEndpoint {
 }
 
 impl UdpSubscriberEndpoint {
-    /// Parses an OPC UA PubSub UDP URL such as `udp://239.0.0.1:4840`.
+    /// Parses an OPC UA PubSub UDP URL such as `opc.udp://239.0.0.1:4840`.
     pub fn parse(address: &str) -> Result<Self, StatusCode> {
-        let addr = address
-            .trim()
-            .strip_prefix("udp://")
-            .unwrap_or(address.trim());
-        let socket_addr = addr
-            .parse::<SocketAddr>()
-            .map_err(|_| StatusCode::BadInvalidArgument)?;
+        let socket_addr = parse_udp_destination(address)?;
 
         match socket_addr.ip() {
             IpAddr::V4(ip) if ip.is_multicast() => Ok(Self {
@@ -102,11 +116,8 @@ impl PubSubPublisher for UdpPublisher {
         connection_config: PubSubConnectionConfig,
         cancel_token: CancellationToken,
     ) -> Result<tokio::task::JoinHandle<()>, StatusCode> {
-        let addr = connection_config
-            .address
-            .strip_prefix("udp://")
-            .unwrap_or(&connection_config.address);
-        let destination_address = addr.to_string();
+        let address = connection_config.address.trim();
+        let destination_address = strip_udp_scheme(address).unwrap_or(address).to_string();
 
         let address_space = self.address_space.clone();
         let publisher_id = connection_config.connection_id.clone();
@@ -269,4 +280,77 @@ fn opcua_to_json_value<T: opcua_types::json::JsonEncodable>(
     let val =
         serde_json::from_str(&json_str).map_err(|e| opcua_types::Error::decoding(e.to_string()))?;
     Ok(val)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn subscriber_endpoint_parse_strips_mixed_case_udp_scheme() {
+        let endpoint = UdpSubscriberEndpoint::parse("  UdP://127.0.0.1:4840  ")
+            .expect("mixed-case UDP scheme should parse");
+
+        assert_eq!(endpoint.bind_addr, "127.0.0.1:4840".parse().unwrap());
+        assert_eq!(endpoint.multicast_addr, None);
+    }
+
+    #[test]
+    fn publisher_destination_parse_strips_mixed_case_udp_scheme() {
+        let destination = parse_udp_destination("UdP://239.0.0.1:4840")
+            .expect("mixed-case UDP scheme should parse");
+
+        assert_eq!(destination, "239.0.0.1:4840".parse().unwrap());
+    }
+
+    #[test]
+    fn subscriber_endpoint_parse_accepts_standard_mixed_case_opc_udp_scheme() {
+        // Given: the UDP URI scheme required by OPC-10000-14 §§7.3.2.2-7.3.2.3.
+        let address = "  OpC.UdP://127.0.0.1:4840  ";
+
+        // When: the subscriber endpoint is parsed.
+        let endpoint = UdpSubscriberEndpoint::parse(address)
+            .expect("standards-compliant OPC UDP scheme should parse");
+
+        // Then: the socket address is normalized without changing unicast behavior.
+        assert_eq!(endpoint.bind_addr, "127.0.0.1:4840".parse().unwrap());
+        assert_eq!(endpoint.multicast_addr, None);
+    }
+
+    #[test]
+    fn publisher_destination_parse_accepts_standard_mixed_case_opc_udp_scheme() {
+        // Given: a standards-compliant mixed-case OPC UDP destination.
+        let address = "OpC.UdP://239.0.0.1:4840";
+
+        // When: publisher destination parsing normalizes the address.
+        let destination = parse_udp_destination(address)
+            .expect("standards-compliant OPC UDP scheme should parse");
+
+        // Then: the multicast socket address is preserved.
+        assert_eq!(destination, "239.0.0.1:4840".parse().unwrap());
+    }
+
+    #[test]
+    fn subscriber_endpoint_maps_malformed_socket_address_to_configuration_error() {
+        // Given: a recognized UDP scheme with an invalid socket address.
+        let address = "opc.udp://127.0.0.1:not-a-port";
+
+        // When: subscriber configuration parses the endpoint.
+        let result = UdpSubscriberEndpoint::parse(address);
+
+        // Then: malformed configuration uses the common transport configuration status.
+        assert_eq!(result, Err(StatusCode::BadConfigurationError));
+    }
+
+    #[test]
+    fn subscriber_endpoint_keeps_ipv6_unsupported_for_standard_opc_udp_scheme() {
+        // Given: a syntactically valid IPv6 OPC UDP endpoint.
+        let address = "opc.udp://[::1]:4840";
+
+        // When: subscriber configuration parses the endpoint.
+        let result = UdpSubscriberEndpoint::parse(address);
+
+        // Then: the existing IPv6 support boundary remains unchanged.
+        assert_eq!(result, Err(StatusCode::BadNotSupported));
+    }
 }

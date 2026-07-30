@@ -19,7 +19,7 @@ use crate::{
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct WebSocketAddressSettings {
+pub(crate) struct WebSocketAddressSettings {
     url: String,
 }
 
@@ -167,14 +167,24 @@ impl PubSubPublisher for WebSocketPublisher {
     }
 }
 
-fn parse_websocket_address(address: &str) -> Result<WebSocketAddressSettings, StatusCode> {
+pub(crate) fn parse_websocket_address(
+    address: &str,
+) -> Result<WebSocketAddressSettings, StatusCode> {
     let address = address.trim();
     if address.is_empty() {
         return Err(StatusCode::BadInvalidArgument);
     }
 
-    let url = if address.starts_with("ws://") || address.starts_with("wss://") {
-        address.to_string()
+    let url = if address
+        .get(..6)
+        .is_some_and(|scheme| scheme.eq_ignore_ascii_case("wss://"))
+    {
+        format!("wss://{}", &address[6..])
+    } else if address
+        .get(..5)
+        .is_some_and(|scheme| scheme.eq_ignore_ascii_case("ws://"))
+    {
+        format!("ws://{}", &address[5..])
     } else {
         format!("ws://{address}")
     };
@@ -289,6 +299,20 @@ mod tests {
         let settings = parse_websocket_address("ws://broker.local:9001/opcua").unwrap();
 
         assert_eq!(settings.url, "ws://broker.local:9001/opcua");
+    }
+
+    #[test]
+    fn parses_mixed_case_ws_scheme_as_lowercase() {
+        let settings = parse_websocket_address("Ws://broker.local:9001/opcua").unwrap();
+
+        assert_eq!(settings.url, "ws://broker.local:9001/opcua");
+    }
+
+    #[test]
+    fn parses_mixed_case_wss_scheme_as_lowercase() {
+        let settings = parse_websocket_address("WSS://broker.local:9001/opcua").unwrap();
+
+        assert_eq!(settings.url, "wss://broker.local:9001/opcua");
     }
 
     #[test]

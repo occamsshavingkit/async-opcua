@@ -4,10 +4,13 @@ The `async-opcua-pubsub` crate implements the OPC UA PubSub (Part 14) specificat
 
 ## 1. Supported Transport Protocols
 
-1. **UDP Multicast (UADP)**: Brokerless communication ideal for high-throughput, low-latency factory floor networks.
-2. **MQTT (JSON)**: Brokered communication for cloud and IoT integration.
-3. **AMQP (JSON)**: Enterprise messaging integration using brokers like RabbitMQ.
-4. **WebSockets (JSON)**: Web-based telemetry streaming.
+1. **UDP Multicast (UADP)**: Publisher and subscriber support for brokerless,
+   low-latency factory-floor communication.
+2. **MQTT (UADP/JSON)**: Publisher and subscriber support for brokered cloud and
+   IoT integration.
+3. **AMQP (JSON, publisher only)**: Enterprise messaging integration using brokers
+   such as RabbitMQ.
+4. **WebSockets (JSON, publisher only)**: Web-based telemetry streaming.
 
 ## 2. Configuration Structures
 
@@ -133,14 +136,37 @@ runtime.process_datagram(&udp_payload, &ctx)?;
 let status = runtime.reader_status(1);
 ```
 
+## 5. Engine-Level Subscriber Startup
+
+`PubSubEngine::start_subscribers` starts all configured subscriber receive loops
+from the engine. It is async and returns `Result<(), StatusCode>`, so callers
+must `.await` it:
+
+```rust
+let mut engine = PubSubEngine::new(address_space);
+engine.add_connection(config)?;
+engine.start_subscribers().await?;
+```
+
+The method validates every subscriber configuration against supported transports
+(OPC 10000-14 §6.4) and binds all UDP sockets before committing any subscriber
+task or running state. If validation or UDP preparation fails, the engine returns
+an error and no subscriber is left partially running.
+
+Unsupported subscriber transports (AMQP, WebSocket, TSN, `mqtts://`) fail closed
+with `StatusCode::BadNotSupported` during the same pre-start validation.
+
 ## Limitations and experimental features
 
-- **Subscriber scope**: the reader side supports brokerless UDP UADP key-frame
-  DataSetMessages with Variant/DataValue-compatible fields and Value-attribute
-  target writes. JSON mapping, broker transports, RawData payloads, delta frames,
-  event DataSetMessages, non-Value target attributes, index ranges, and the
-  crate's legacy publisher fragmentation header are rejected with
-  `BadNotSupported`.
+- **Subscriber scope**: the reader side supports brokerless UDP UADP and brokered
+  MQTT UADP/JSON key-frame DataSetMessages with Variant/DataValue-compatible
+  fields and Value-attribute target writes. The public `start_mqtt_subscriber*`
+  helpers return `MqttBrokerAddressError` for invalid broker addresses before task
+  spawn. Engine dispatch returns `BadNotSupported` for `mqtts://` TLS, AMQP,
+  WebSocket, and TSN subscribers. MQTT TLS subscriber support remains unimplemented.
+  RawData payloads, delta frames, event DataSetMessages, non-Value target
+  attributes, index ranges, and the crate's legacy publisher fragmentation header
+  are rejected with `BadNotSupported`.
 - **Message security**: secured UADP NetworkMessages use the OPC UA Part 14
   SecurityHeader, SecurityTokenId, MessageNonce, AES-CTR payload encryption,
   HMAC-SHA256 signing, and subscriber anti-replay checks before target Variables

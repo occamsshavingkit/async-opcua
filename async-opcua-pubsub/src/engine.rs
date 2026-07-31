@@ -572,7 +572,6 @@ impl PubSubEngine {
         for reader_group in &connection.reader_groups {
             for reader in &reader_group.dataset_readers {
                 let reader = reader.clone();
-                let reader_id = reader.dataset_reader_id;
                 let topic_filter = reader.mqtt_topic_filter(reader_group.reader_group_id);
                 let delivery_guarantee = reader
                     .mqtt_transport
@@ -586,7 +585,7 @@ impl PubSubEngine {
                     quality_of_service(delivery_guarantee),
                 );
 
-                let (queue, mut payload_rx) = DatagramQueue::new(self.datagram_queue_capacity);
+                let (queue, payload_rx) = DatagramQueue::new(self.datagram_queue_capacity);
                 // Raw sender for the broker subscriber task, which uses
                 // `try_send` and treats `Full` as `BadTooManyPublishRequests`
                 // (see `transport::mqtt::start_mqtt_subscriber`).
@@ -601,38 +600,18 @@ impl PubSubEngine {
                 );
                 handles.push(subscriber_handle);
 
-                // Forwarder task: drains received payloads into the subscriber
-                // runtime. Exits on cancellation or when the subscriber drops
-                // its sender (e.g. unrecoverable broker loss), which in turn
-                // lets the subscriber task wind down.
-                let runtime = runtime.clone();
-                let cancel = cancel_token.clone();
-                let connection_id = connection_id.clone();
-                let topic = topic_filter.clone();
-                handles.push(tokio::spawn(async move {
-                    loop {
-                        tokio::select! {
-                            _ = cancel.cancelled() => break,
-                            payload = payload_rx.recv() => {
-                                let Some(payload) = payload else { break };
-                                if let Err(status) = subscriber_mqtt::process_reader_payload(
-                                    &runtime,
-                                    &reader,
-                                    &payload,
-                                )
-                                {
-                                    tracing::debug!(
-                                        ?status,
-                                        %connection_id,
-                                        %topic,
-                                        reader_id,
-                                        "dropped PubSub subscriber MQTT payload"
-                                    );
-                                }
-                            }
-                        }
+                // Forwarder task: drains received payloads into only the owning reader.
+                handles.push(
+                    subscriber_mqtt::MqttForwarder {
+                        runtime: runtime.clone(),
+                        reader,
+                        payload_rx,
+                        cancel: cancel_token.clone(),
+                        connection_id: connection_id.clone(),
+                        topic: topic_filter,
                     }
-                }));
+                    .spawn(),
+                );
             }
         }
 

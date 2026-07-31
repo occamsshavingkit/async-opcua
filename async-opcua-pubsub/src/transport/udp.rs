@@ -118,8 +118,7 @@ impl PubSubPublisher for UdpPublisher {
         connection_config: PubSubConnectionConfig,
         cancel_token: CancellationToken,
     ) -> Result<tokio::task::JoinHandle<()>, StatusCode> {
-        let address = connection_config.address.trim();
-        let destination_address = strip_udp_scheme(address).unwrap_or(address).to_string();
+        let destination_address = parse_udp_destination(&connection_config.address)?;
 
         let address_space = self.address_space.clone();
         let publisher_id = connection_config.connection_id.clone();
@@ -130,7 +129,7 @@ impl PubSubPublisher for UdpPublisher {
             for writer_group in connection_config.writer_groups {
                 let address_space = address_space.clone();
                 let cancel_token = cancel_token.clone();
-                let destination_address = destination_address.clone();
+                let destination_address = destination_address;
                 let publisher_id = publisher_id.clone();
 
                 // Bind a local UDP socket for this group
@@ -245,7 +244,7 @@ impl PubSubPublisher for UdpPublisher {
                         if let Some(payload) = payload {
                             // Send payload with datagram fragmentation if size > MTU
                             if payload.len() <= MTU {
-                                let _ = socket.send_to(&payload, &destination_address).await;
+                                let _ = socket.send_to(&payload, destination_address).await;
                             } else {
                                 let total_fragments = payload.len().div_ceil(MTU) as u8;
                                 for fragment_index in 0..total_fragments {
@@ -261,7 +260,7 @@ impl PubSubPublisher for UdpPublisher {
                                     packet.extend_from_slice(&(chunk.len() as u16).to_be_bytes());
                                     packet.extend_from_slice(chunk);
 
-                                    let _ = socket.send_to(&packet, &destination_address).await;
+                                    let _ = socket.send_to(&packet, destination_address).await;
                                 }
                             }
                         }
@@ -291,6 +290,31 @@ fn opcua_to_json_value<T: opcua_types::json::JsonEncodable>(
 mod tests {
     use super::*;
     use crate::{DataSetWriterConfig, PublishedDataSetConfig, WriterGroupConfig};
+
+    #[tokio::test]
+    async fn start_publishing_rejects_malformed_destination_before_spawn() {
+        // Given: a UDP publisher configured with a malformed socket address.
+        let publisher = UdpPublisher::new(Arc::new(RwLock::new(AddressSpace::new())));
+        let config = PubSubConnectionConfig {
+            connection_id: "malformed-udp".to_string(),
+            name: "malformed-udp".to_string(),
+            address: "udp://not-a-socket-address".to_string(),
+            writer_groups: Vec::new(),
+            reader_groups: Vec::new(),
+        };
+
+        // When: publishing is started directly.
+        let result = publisher.start_publishing(config, CancellationToken::new());
+
+        // Then: malformed configuration is rejected instead of returning a spawned handle.
+        match result {
+            Err(status) => assert_eq!(status, StatusCode::BadConfigurationError),
+            Ok(handle) => {
+                handle.abort();
+                panic!("malformed UDP destination returned a publisher handle");
+            }
+        }
+    }
 
     #[tokio::test]
     async fn aborting_coordinator_stops_writer_group_future() {
@@ -431,7 +455,7 @@ mod tests {
         // Given: a standards-compliant mixed-case OPC UDP destination.
         let address = "OpC.UdP://239.0.0.1:4840";
 
-        // When: publisher destination parsing normalizes the address.
+        // When: publisher preflight parses the destination.
         let destination = parse_udp_destination(address)
             .expect("standards-compliant OPC UDP scheme should parse");
 
@@ -444,7 +468,7 @@ mod tests {
         // Given: a recognized UDP scheme with an invalid socket address.
         let address = "opc.udp://127.0.0.1:not-a-port";
 
-        // When: subscriber configuration parses the endpoint.
+        // When: subscriber preflight parses the endpoint.
         let result = UdpSubscriberEndpoint::parse(address);
 
         // Then: malformed configuration uses the common transport configuration status.
@@ -456,7 +480,7 @@ mod tests {
         // Given: a syntactically valid IPv6 OPC UDP endpoint.
         let address = "opc.udp://[::1]:4840";
 
-        // When: subscriber configuration parses the endpoint.
+        // When: subscriber preflight parses the endpoint.
         let result = UdpSubscriberEndpoint::parse(address);
 
         // Then: the existing IPv6 support boundary remains unchanged.

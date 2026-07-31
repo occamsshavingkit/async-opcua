@@ -1,4 +1,4 @@
-//! Publisher startup URI acceptance tests.
+//! Publisher startup rollback regression tests.
 
 use std::sync::Arc;
 

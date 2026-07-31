@@ -30,7 +30,7 @@ struct JsonReaderMessage<'a> {
 }
 
 impl SubscriberApplyOutcome {
-    pub(crate) fn accumulate(&mut self, next: Self) {
+    fn accumulate(&mut self, next: Self) {
         self.matched_readers += next.matched_readers;
         self.applied_readers += next.applied_readers;
         self.filtered_readers += next.filtered_readers;

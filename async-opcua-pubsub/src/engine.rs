@@ -205,12 +205,6 @@ impl PubSubEngine {
     }
 
     /// Replaces all connection configurations with a fresh writable-config snapshot.
-    ///
-    /// Connection mutations made while subscribers are running do not affect
-    /// active datagram processing or bound sockets. Call `stop_subscribers`
-    /// followed by `start_subscribers` to apply them. The same restart
-    /// requirement applies to mutations made with `add_connection` and
-    /// `remove_connection`.
     pub fn replace_connections(&mut self, connections: Vec<PubSubConnectionConfig>) {
         self.connections = connections;
         self.invalidate_subscriber_runtime();

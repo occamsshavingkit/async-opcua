@@ -63,12 +63,6 @@ impl PubSubEngine {
             .ok_or(StatusCode::BadNotFound)?;
 
         let reader_ids = connection_reader_ids(&connection);
-        let readers = connection
-            .reader_groups
-            .iter()
-            .flat_map(|reader_group| reader_group.dataset_readers.iter())
-            .cloned()
-            .collect::<Vec<_>>();
         let security = connection.validated_subscriber_security()?;
         let runtime = self.ensure_subscriber_runtime()?;
 
@@ -97,12 +91,7 @@ impl PubSubEngine {
             };
         }
 
-        let mut outcome = SubscriberApplyOutcome::default();
-        let mut runtime = runtime.write();
-        for reader in &readers {
-            outcome.accumulate(runtime.process_datagram_for_reader(reader, payload, ctx)?);
-        }
-        Ok(outcome)
+        return runtime.write().process_datagram(payload, ctx);
     }
 
     /// Returns a subscriber DataSetReader status snapshot.

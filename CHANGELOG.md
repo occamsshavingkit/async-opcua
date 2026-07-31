@@ -91,7 +91,20 @@ boundary) — see "Breaking changes" below.
   `Thumbprint::new` now returns `Result`.
 * Default value changes: `TCP_NODELAY` on; TCP keep-alive on; client
   `max_failed_keep_alive_count` 0→3; client `channel_lifetime` 60s→600s;
-  `max_monitored_items_per_sub` 0→100000; new connection/session/in-flight limits.
+   `max_monitored_items_per_sub` 0→100000; new connection/session/in-flight limits.
+* `start_mqtt_subscriber` and `start_mqtt_subscriber_with_cancel` now return
+  `Result<JoinHandle<()>, MqttBrokerAddressError>` and reject malformed or
+  `mqtts://` addresses before spawning a task instead of parsing inside the
+  spawned task.
+* `mqtts://` broker addresses now fail closed with `StatusCode::BadNotSupported`
+  in `TransportKind::from_address`. Unsupported subscriber transport mappings
+  (AMQP, WebSocket, TSN) fail closed with `StatusCode::BadNotSupported` during
+  engine subscriber dispatch instead of being skipped.
+* `PubSubEngine::start_subscribers` is now `async` and returns
+  `Result<(), StatusCode>`. Callers must `.await` it. The method validates
+  every subscriber configuration and binds every UDP socket before committing
+  subscriber tasks and engine running state, so startup failures return errors
+  without a partially started subscriber.
 
 ### Performance
 

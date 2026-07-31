@@ -190,7 +190,10 @@ async fn replacing_connections_while_subscribers_run_invalidates_runtime() {
 #[tokio::test]
 async fn adding_connection_while_subscribers_run_rebuilds_runtime_on_restart() {
     // Given: a running subscriber with reader 9 and a second valid local UDP reader configuration.
-    let mut initial = empty_connection("udp-1", "udp://127.0.0.1:0");
+    let first_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    let first_address = format!("udp://{}", first_socket.local_addr().unwrap());
+    drop(first_socket);
+    let mut initial = empty_connection("udp-1", &first_address);
     initial.reader_groups.push(ReaderGroupConfig {
         reader_group_id: 1,
         dataset_readers: vec![DataSetReaderConfig {
@@ -205,7 +208,10 @@ async fn adding_connection_while_subscribers_run_rebuilds_runtime_on_restart() {
     engine.start_subscribers().await.unwrap();
     assert!(engine.subscriber_status(9).is_some());
 
-    let mut added = empty_connection("udp-2", "udp://127.0.0.1:0");
+    let second_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    let second_address = format!("udp://{}", second_socket.local_addr().unwrap());
+    drop(second_socket);
+    let mut added = empty_connection("udp-2", &second_address);
     added.reader_groups.push(ReaderGroupConfig {
         reader_group_id: 2,
         dataset_readers: vec![DataSetReaderConfig {
@@ -223,7 +229,6 @@ async fn adding_connection_while_subscribers_run_rebuilds_runtime_on_restart() {
 
     // Then: the restarted runtime exposes the newly added reader status.
     assert!(engine.subscriber_status(10).is_some());
-    engine.stop_subscribers().await;
 }
 
 #[tokio::test]

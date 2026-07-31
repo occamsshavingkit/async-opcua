@@ -134,13 +134,13 @@ pub fn quality_of_service(delivery_guarantee: MqttDeliveryGuarantee) -> QoS {
 }
 
 pub(crate) struct MqttSubscriberConfig {
-    broker_address: String,
+    broker_address: MqttBrokerAddress,
     topic_filter: String,
     qos: QoS,
 }
 
 impl MqttSubscriberConfig {
-    pub(crate) fn new(broker_address: String, topic_filter: String, qos: QoS) -> Self {
+    pub(crate) fn new(broker_address: MqttBrokerAddress, topic_filter: String, qos: QoS) -> Self {
         Self {
             broker_address,
             topic_filter,
@@ -185,7 +185,7 @@ pub fn start_mqtt_subscriber_with_cancel(
     sender: tokio::sync::mpsc::Sender<Vec<u8>>,
     cancel_token: CancellationToken,
 ) -> Result<tokio::task::JoinHandle<()>, MqttBrokerAddressError> {
-    parse_broker_address(&broker_address)?;
+    let broker_address = parse_broker_address(&broker_address)?;
     Ok(start_mqtt_subscriber_with_config(
         MqttSubscriberConfig::new(broker_address, topic_filter, QoS::AtLeastOnce),
         sender,
@@ -199,13 +199,6 @@ pub(crate) fn start_mqtt_subscriber_with_config(
     cancel_token: CancellationToken,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
-        let address = match parse_broker_address(&config.broker_address) {
-            Ok(address) => address,
-            Err(error) => {
-                tracing::warn!(?error, "MQTT subscriber rejected broker address");
-                return;
-            }
-        };
         let forwarder = PayloadForwarder::new(sender);
         let mut backoff = Duration::from_secs(1);
 
@@ -215,7 +208,11 @@ pub(crate) fn start_mqtt_subscriber_with_config(
             }
 
             let client_id = format!("opcua-subscriber-{}", uuid::Uuid::new_v4());
-            let mut options = MqttOptions::new(client_id, address.host(), address.port());
+            let mut options = MqttOptions::new(
+                client_id,
+                config.broker_address.host(),
+                config.broker_address.port(),
+            );
             options.set_keep_alive(Duration::from_secs(5));
 
             let (client, mut event_loop) = AsyncClient::new(options, 50);
@@ -241,6 +238,7 @@ pub(crate) fn start_mqtt_subscriber_with_config(
 
             loop {
                 let event = tokio::select! {
+                    biased;
                     _ = cancel_token.cancelled() => return,
                     event = event_loop.poll() => event,
                 };

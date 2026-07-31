@@ -254,3 +254,24 @@ fn mqtts_broker_address_is_rejected_before_subscriber_task_starts() {
         Err(MqttBrokerAddressError::TlsUnsupported)
     ));
 }
+
+#[test]
+fn subscriber_configuration_rejects_mqtts_before_startup() {
+    // Given
+    let config = crate::PubSubConnectionConfig {
+        connection_id: "mqtt-tls".to_string(),
+        name: "mqtt-tls".to_string(),
+        address: "mqtts://broker.example:8883".to_string(),
+        writer_groups: Vec::new(),
+        reader_groups: vec![crate::ReaderGroupConfig {
+            reader_group_id: 1,
+            ..crate::ReaderGroupConfig::default()
+        }],
+    };
+
+    // When
+    let result = config.validate_subscriber_config();
+
+    // Then
+    assert_eq!(result, Err(opcua_types::StatusCode::BadNotSupported));
+}

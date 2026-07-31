@@ -14,6 +14,7 @@ use opcua_server::address_space::AddressSpace;
 use opcua_types::{
     BinaryEncodable, ContextOwned, DateTime, MessageSecurityMode, StatusCode, Variant,
 };
+use tokio::net::UdpSocket;
 use tokio_util::sync::CancellationToken;
 
 fn empty_connection(connection_id: &str, address: &str) -> PubSubConnectionConfig {
@@ -176,14 +177,239 @@ async fn replacing_connections_while_subscribers_run_invalidates_runtime() {
     });
     engine.add_connection(initial);
 
-    engine.start_subscribers().unwrap();
+    engine.start_subscribers().await.unwrap();
     assert!(engine.subscriber_status(9).is_some());
 
     engine.replace_connections(Vec::new());
     engine.stop_subscribers().await;
-    engine.start_subscribers().unwrap();
+    engine.start_subscribers().await.unwrap();
 
     assert!(engine.subscriber_status(9).is_none());
+}
+
+#[tokio::test]
+async fn adding_connection_while_subscribers_run_rebuilds_runtime_on_restart() {
+    // Given: a running subscriber with reader 9 and a second valid local UDP reader configuration.
+    let mut initial = empty_connection("udp-1", "udp://127.0.0.1:0");
+    initial.reader_groups.push(ReaderGroupConfig {
+        reader_group_id: 1,
+        dataset_readers: vec![DataSetReaderConfig {
+            dataset_reader_id: 9,
+            dataset_writer_id: 7,
+            ..DataSetReaderConfig::default()
+        }],
+        ..ReaderGroupConfig::default()
+    });
+    let mut engine = PubSubEngine::new(address_space());
+    engine.add_connection(initial);
+    engine.start_subscribers().await.unwrap();
+    assert!(engine.subscriber_status(9).is_some());
+
+    let mut added = empty_connection("udp-2", "udp://127.0.0.1:0");
+    added.reader_groups.push(ReaderGroupConfig {
+        reader_group_id: 2,
+        dataset_readers: vec![DataSetReaderConfig {
+            dataset_reader_id: 10,
+            dataset_writer_id: 8,
+            ..DataSetReaderConfig::default()
+        }],
+        ..ReaderGroupConfig::default()
+    });
+
+    // When: the new connection is added while running, then subscribers are stopped and restarted.
+    engine.add_connection(added);
+    engine.stop_subscribers().await;
+    engine.start_subscribers().await.unwrap();
+
+    // Then: the restarted runtime exposes the newly added reader status.
+    assert!(engine.subscriber_status(10).is_some());
+    engine.stop_subscribers().await;
+}
+
+#[tokio::test]
+async fn unsupported_amqp_reader_does_not_start_earlier_mqtt_subscriber() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let mqtt_address = format!("mqtt://{}", listener.local_addr().unwrap());
+    let mut mqtt = empty_connection("1-mqtt", &mqtt_address);
+    mqtt.reader_groups.push(ReaderGroupConfig {
+        dataset_readers: vec![DataSetReaderConfig {
+            publisher_id: Some(PublisherId::String("publisher-1".to_string())),
+            writer_group_id: Some(1),
+            dataset_reader_id: 9,
+            dataset_writer_id: 7,
+            ..DataSetReaderConfig::default()
+        }],
+        ..ReaderGroupConfig::default()
+    });
+
+    let mut amqp = empty_connection("2-amqp", "amqp://127.0.0.1:5672/topic");
+    amqp.reader_groups.push(ReaderGroupConfig {
+        dataset_readers: vec![DataSetReaderConfig {
+            publisher_id: Some(PublisherId::String("publisher-2".to_string())),
+            writer_group_id: Some(2),
+            dataset_reader_id: 10,
+            dataset_writer_id: 8,
+            ..DataSetReaderConfig::default()
+        }],
+        ..ReaderGroupConfig::default()
+    });
+
+    let mut engine = PubSubEngine::new(address_space());
+    engine.replace_connections(vec![mqtt, amqp]);
+
+    assert_eq!(
+        engine.start_subscribers().await.unwrap_err(),
+        StatusCode::BadNotSupported
+    );
+    tokio::task::yield_now().await;
+    assert_eq!(engine.active_subscriber_handle_count(), 0);
+    assert!(!engine.subscribers_are_running());
+    assert!(
+        tokio::time::timeout(Duration::from_millis(500), listener.accept())
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test]
+async fn malformed_later_udp_reader_does_not_start_earlier_mqtt_subscriber() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let mqtt_address = format!("mqtt://{}", listener.local_addr().unwrap());
+    let mut mqtt = empty_connection("1-mqtt", &mqtt_address);
+    mqtt.reader_groups.push(ReaderGroupConfig {
+        dataset_readers: vec![DataSetReaderConfig {
+            publisher_id: Some(PublisherId::String("publisher-1".to_string())),
+            writer_group_id: Some(1),
+            dataset_reader_id: 9,
+            dataset_writer_id: 7,
+            ..DataSetReaderConfig::default()
+        }],
+        ..ReaderGroupConfig::default()
+    });
+
+    let mut malformed_udp = empty_connection("2-udp", "udp://127.0.0.1:not-a-port");
+    malformed_udp.reader_groups.push(ReaderGroupConfig {
+        dataset_readers: vec![DataSetReaderConfig {
+            dataset_reader_id: 10,
+            dataset_writer_id: 8,
+            ..DataSetReaderConfig::default()
+        }],
+        ..ReaderGroupConfig::default()
+    });
+
+    let mut engine = PubSubEngine::new(address_space());
+    engine.replace_connections(vec![mqtt, malformed_udp]);
+
+    assert_eq!(
+        engine.start_subscribers().await.unwrap_err(),
+        StatusCode::BadConfigurationError
+    );
+    tokio::task::yield_now().await;
+    assert_eq!(engine.active_subscriber_handle_count(), 0);
+    assert!(!engine.subscribers_are_running());
+    assert!(
+        tokio::time::timeout(Duration::from_millis(500), listener.accept())
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test]
+async fn udp_bind_failure_is_reported_without_committing_subscriber_state() {
+    // Given: a configured UDP subscriber whose port is already occupied.
+    let occupied = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    let address = format!("udp://{}", occupied.local_addr().unwrap());
+    let mut connection = empty_connection("udp-conflict", &address);
+    connection.reader_groups.push(ReaderGroupConfig {
+        dataset_readers: vec![DataSetReaderConfig {
+            dataset_reader_id: 11,
+            dataset_writer_id: 7,
+            ..DataSetReaderConfig::default()
+        }],
+        ..ReaderGroupConfig::default()
+    });
+    let mut engine = PubSubEngine::with_connections(address_space(), vec![connection]);
+
+    // When: subscriber startup attempts to bind the occupied UDP port.
+    let result = tokio::time::timeout(Duration::from_millis(500), engine.start_subscribers())
+        .await
+        .unwrap();
+
+    // Then: startup fails atomically before running state or reader status is committed.
+    assert_eq!(result.unwrap_err(), StatusCode::BadCommunicationError);
+    assert!(!engine.subscribers_are_running());
+    assert_eq!(engine.active_subscriber_handle_count(), 0);
+    assert!(engine.subscriber_status(11).is_none());
+}
+
+#[tokio::test]
+async fn mixed_subscriber_preparation_is_atomic_across_udp_and_mqtt_resources() {
+    // Given: an earlier valid UDP connection, an MQTT connection, and a later UDP conflict.
+    let earlier_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    let earlier_address = format!("udp://{}", earlier_socket.local_addr().unwrap());
+    drop(earlier_socket);
+
+    let conflicting_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    let conflicting_address = format!("udp://{}", conflicting_socket.local_addr().unwrap());
+    let mqtt_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let mqtt_address = format!("mqtt://{}", mqtt_listener.local_addr().unwrap());
+
+    let mut earlier_udp = empty_connection("1-udp", &earlier_address);
+    earlier_udp.reader_groups.push(ReaderGroupConfig {
+        dataset_readers: vec![DataSetReaderConfig {
+            dataset_reader_id: 21,
+            dataset_writer_id: 7,
+            ..DataSetReaderConfig::default()
+        }],
+        ..ReaderGroupConfig::default()
+    });
+    let mut mqtt = empty_connection("2-mqtt", &mqtt_address);
+    mqtt.reader_groups.push(ReaderGroupConfig {
+        dataset_readers: vec![DataSetReaderConfig {
+            dataset_reader_id: 22,
+            dataset_writer_id: 8,
+            ..DataSetReaderConfig::default()
+        }],
+        ..ReaderGroupConfig::default()
+    });
+    let mut conflicting_udp = empty_connection("3-udp", &conflicting_address);
+    conflicting_udp.reader_groups.push(ReaderGroupConfig {
+        dataset_readers: vec![DataSetReaderConfig {
+            dataset_reader_id: 23,
+            dataset_writer_id: 9,
+            ..DataSetReaderConfig::default()
+        }],
+        ..ReaderGroupConfig::default()
+    });
+    let mut engine =
+        PubSubEngine::with_connections(address_space(), vec![earlier_udp, mqtt, conflicting_udp]);
+
+    // When: startup prepares all subscriber resources and encounters the occupied later UDP port.
+    let result = tokio::time::timeout(Duration::from_millis(500), engine.start_subscribers())
+        .await
+        .unwrap();
+
+    // Then: no resource or subscriber state is committed, including the MQTT TCP connection.
+    assert_eq!(result.unwrap_err(), StatusCode::BadCommunicationError);
+    assert_eq!(engine.active_subscriber_handle_count(), 0);
+    assert!(!engine.subscribers_are_running());
+    assert!(engine.subscriber_status(21).is_none());
+    assert!(engine.subscriber_status(22).is_none());
+    assert!(engine.subscriber_status(23).is_none());
+    assert!(
+        tokio::time::timeout(Duration::from_millis(500), mqtt_listener.accept())
+            .await
+            .is_err()
+    );
+
+    // Then: the earlier UDP port is immediately available after failed preparation.
+    let rebound = tokio::time::timeout(
+        Duration::from_millis(500),
+        UdpSocket::bind(earlier_address.strip_prefix("udp://").unwrap()),
+    )
+    .await
+    .unwrap();
+    assert!(rebound.is_ok());
 }
 
 #[tokio::test]

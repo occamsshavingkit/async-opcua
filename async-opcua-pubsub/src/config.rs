@@ -5,11 +5,23 @@ use opcua_types::{
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::{collections::HashSet, str::FromStr, time::Duration};
 
-use crate::codec::uadp::PublisherId;
+use crate::{
+    codec::uadp::PublisherId,
+    engine::TransportKind,
+    transport::{
+        mqtt::{parse_broker_address, MqttBrokerAddress},
+        udp::UdpSubscriberEndpoint,
+    },
+};
 
 mod subscriber_security;
 
 pub(crate) use subscriber_security::SubscriberSecurityConfig;
+
+pub(crate) enum ParsedSubscriberTransport {
+    Mqtt(MqttBrokerAddress),
+    Udp(UdpSubscriberEndpoint),
+}
 
 /// Message encoding formats supported by the PubSub implementation.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -368,7 +380,7 @@ pub struct PubSubConnectionConfig {
     pub connection_id: String,
     /// Symbolic name of the connection.
     pub name: String,
-    /// Transport URL (e.g., `mqtt://broker.local:1883` or `udp://239.0.0.1:4840`).
+    /// Transport URL (e.g., `mqtt://broker.local:1883` or `opc.udp://239.0.0.1:4840`).
     pub address: String,
     /// List of writer groups associated with this connection.
     pub writer_groups: Vec<WriterGroupConfig>,
@@ -384,15 +396,29 @@ impl PubSubConnectionConfig {
             return Ok(());
         }
 
-        let address = self.address.trim();
-        let is_subscriber_transport = address.starts_with("udp://")
-            || address.starts_with("mqtt://")
-            || address.starts_with("mqtts://");
-        if !is_subscriber_transport {
-            return Err(StatusCode::BadNotSupported);
-        }
+        self.subscriber_preflight().map(drop)
+    }
 
-        self.validate_subscriber_readers()
+    pub(crate) fn subscriber_preflight(&self) -> Result<ParsedSubscriberTransport, StatusCode> {
+        let address = self.address.trim();
+        let transport = match TransportKind::from_address(address)? {
+            TransportKind::Mqtt => ParsedSubscriberTransport::Mqtt(
+                parse_broker_address(address).map_err(|error| error.status_code())?,
+            ),
+            TransportKind::Udp => {
+                ParsedSubscriberTransport::Udp(UdpSubscriberEndpoint::parse(address)?)
+            }
+            TransportKind::Amqp | TransportKind::WebSocket => {
+                return Err(StatusCode::BadNotSupported);
+            }
+            #[cfg(feature = "tsn")]
+            TransportKind::Tsn => {
+                return Err(StatusCode::BadNotSupported);
+            }
+        };
+
+        self.validate_subscriber_readers()?;
+        Ok(transport)
     }
 
     pub(crate) fn validate_subscriber_readers(&self) -> Result<(), StatusCode> {

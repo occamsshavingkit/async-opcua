@@ -256,7 +256,7 @@ async fn mqtt_subscriber_receives_uadp_from_live_mosquitto() {
             reader(vec![target.clone()]),
         )],
     );
-    engine.start_subscribers().unwrap();
+    engine.start_subscribers().await.unwrap();
 
     let mut options = MqttOptions::new(
         format!("async-opcua-test-publisher-{}", std::process::id()),

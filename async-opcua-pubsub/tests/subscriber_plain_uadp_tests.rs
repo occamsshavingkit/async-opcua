@@ -127,6 +127,19 @@ fn validation_rejects_duplicate_target_variables() {
 }
 
 #[test]
+fn validation_accepts_standard_mixed_case_opc_udp_address() {
+    // Given: a reader-bearing connection using the OPC-10000-14 §§7.3.2.2-7.3.2.3 scheme.
+    let mut config = connection(reader(Vec::new()));
+    config.address = "OpC.UdP://127.0.0.1:4840".to_string();
+
+    // When: subscriber configuration is preflighted.
+    let result = config.validate_subscriber_config();
+
+    // Then: the standard UDP URI is accepted just like the legacy `udp://` spelling.
+    assert_eq!(result, Ok(()));
+}
+
+#[test]
 fn legacy_subscribed_variables_map_to_value_attribute_targets() {
     let target = NodeId::new(1, "Target");
     let reader = DataSetReaderConfig {
@@ -345,7 +358,7 @@ fn validation_rejects_unsupported_subscriber_modes() {
     unsupported.address = "http://broker.local:8080".to_string();
     assert_eq!(
         unsupported.validate_subscriber_config().unwrap_err(),
-        StatusCode::BadNotSupported
+        StatusCode::BadInvalidArgument
     );
 
     let mut raw = reader(Vec::new());
@@ -368,6 +381,19 @@ fn validation_rejects_unsupported_subscriber_modes() {
         connection(event).validate_subscriber_config().unwrap_err(),
         StatusCode::BadNotSupported
     );
+}
+
+#[test]
+fn validation_preserves_unknown_transport_status_code() {
+    // Given: a reader-bearing connection with an unrecognized transport scheme.
+    let mut config = connection(reader(Vec::new()));
+    config.address = "ftp://broker.local/pubsub".to_string();
+
+    // When: subscriber configuration validation classifies the transport.
+    let result = config.validate_subscriber_config();
+
+    // Then: the classifier's precise error is returned unchanged.
+    assert_eq!(result, Err(StatusCode::BadInvalidArgument));
 }
 
 #[tokio::test]

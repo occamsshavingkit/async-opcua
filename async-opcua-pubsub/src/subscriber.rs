@@ -9,8 +9,7 @@ use std::{
 use opcua_core::sync::RwLock;
 use opcua_server::address_space::{AddressSpace, NodeType};
 use opcua_types::{
-    AttributeId, BinaryDecodable, Context, DataValue, MessageSecurityMode, PubSubState, StatusCode,
-    UAString, Variant,
+    AttributeId, BinaryDecodable, Context, DataValue, PubSubState, StatusCode, UAString, Variant,
 };
 
 use crate::{
@@ -103,14 +102,6 @@ pub struct SubscriberApplyOutcome {
     pub dropped_reason: Option<SubscriberError>,
 }
 
-/// Effective secure UADP settings for a DataSetReader.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct SubscriberSecurityConfig {
-    pub(crate) security_mode: MessageSecurityMode,
-    pub(crate) security_policy_uri: String,
-    pub(crate) security_group_id: String,
-}
-
 /// Runtime receiver, dispatcher, target applier, and status store for DataSetReaders.
 pub struct SubscriberRuntime {
     address_space: Arc<RwLock<AddressSpace>>,
@@ -144,9 +135,7 @@ impl SubscriberRuntime {
         connections: Vec<PubSubConnectionConfig>,
     ) -> Result<Self, StatusCode> {
         for connection in &connections {
-            let mut reader_config = connection.clone();
-            reader_config.address = "udp://127.0.0.1:0".to_string();
-            reader_config.validate_subscriber_config()?;
+            connection.validate_subscriber_readers()?;
         }
 
         Ok(Self::from_connections(address_space, connections))
@@ -506,36 +495,6 @@ fn validate_target_config(target: &FieldTargetConfig) -> Result<(), SubscriberEr
         return Err(SubscriberError::UnsupportedTarget);
     }
     Ok(())
-}
-
-pub(crate) fn effective_security_config(
-    reader_group: &ReaderGroupConfig,
-    reader: &DataSetReaderConfig,
-) -> Option<SubscriberSecurityConfig> {
-    let security_mode = reader.security_mode.or(reader_group.security_mode)?;
-    if !matches!(
-        security_mode,
-        MessageSecurityMode::Sign | MessageSecurityMode::SignAndEncrypt
-    ) {
-        return None;
-    }
-
-    let security_policy_uri = reader
-        .security_policy_uri
-        .as_deref()
-        .or(reader_group.security_policy_uri.as_deref())?
-        .to_string();
-    let security_group_id = reader
-        .security_group_id
-        .as_deref()
-        .or(reader_group.security_group_id.as_deref())?
-        .to_string();
-
-    Some(SubscriberSecurityConfig {
-        security_mode,
-        security_policy_uri,
-        security_group_id,
-    })
 }
 
 fn update_sequence_status(status: &mut DataSetReaderStatus, sequence_number: u16) -> bool {

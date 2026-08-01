@@ -45,6 +45,20 @@ pub(super) fn validated_subscriber_security(
         ))
 }
 
+pub(crate) fn reader_groups_require_security(
+    reader_groups: &[ReaderGroupConfig],
+) -> Result<bool, StatusCode> {
+    for reader_group in reader_groups {
+        for reader in &reader_group.dataset_readers {
+            if effective_security_tuple(reader_group, reader)?.is_some() {
+                return Ok(true);
+            }
+        }
+    }
+
+    Ok(false)
+}
+
 fn effective_security_tuple<'a>(
     reader_group: &'a ReaderGroupConfig,
     reader: &'a DataSetReaderConfig,
@@ -52,6 +66,9 @@ fn effective_security_tuple<'a>(
     let Some(security_mode) = reader.security_mode.or(reader_group.security_mode) else {
         return Ok(None);
     };
+    if security_mode == MessageSecurityMode::Invalid {
+        return Err(StatusCode::BadConfigurationError);
+    }
     if !matches!(
         security_mode,
         MessageSecurityMode::Sign | MessageSecurityMode::SignAndEncrypt

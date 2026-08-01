@@ -16,7 +16,7 @@ use crate::{
 
 mod subscriber_security;
 
-pub(crate) use subscriber_security::SubscriberSecurityConfig;
+pub(crate) use subscriber_security::{reader_groups_require_security, SubscriberSecurityConfig};
 
 pub(crate) enum ParsedSubscriberTransport {
     Mqtt(MqttBrokerAddress),
@@ -422,6 +422,17 @@ impl PubSubConnectionConfig {
     }
 
     pub(crate) fn validate_subscriber_readers(&self) -> Result<(), StatusCode> {
+        let mut reader_ids = HashSet::new();
+        for reader in self
+            .reader_groups
+            .iter()
+            .flat_map(|reader_group| reader_group.dataset_readers.iter())
+        {
+            if !reader_ids.insert(reader.dataset_reader_id) {
+                return Err(StatusCode::BadConfigurationError);
+            }
+        }
+
         self.validated_subscriber_security().map(drop)
     }
 

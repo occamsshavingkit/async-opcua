@@ -214,6 +214,26 @@ fn validation_rejects_secure_readers_with_different_security_groups() {
 }
 
 #[test]
+fn validation_rejects_invalid_effective_message_security_mode() {
+    // Given: one reader group whose effective mode is Invalid at the validation boundary.
+    let config = connection(vec![secured_group(
+        1,
+        1,
+        security(
+            MessageSecurityMode::Invalid,
+            SecurityPolicy::PubSubAes256Ctr,
+            "line-a",
+        ),
+    )]);
+
+    // When: subscriber configuration is validated.
+    let result = config.validate_subscriber_config();
+
+    // Then: the unsupported mode is rejected as invalid configuration.
+    assert_eq!(result, Err(StatusCode::BadConfigurationError));
+}
+
+#[test]
 fn validation_accepts_identical_effective_tuple_from_group_and_reader_overrides() {
     // Given: one reader inherits security while another overrides every field identically.
     let inherited = secured_group(
@@ -280,11 +300,11 @@ fn validation_accepts_no_reader_groups_or_readers() {
 
 #[test]
 fn validation_accepts_secure_readers_with_an_empty_group_between_them() {
-    // Given: identical secured readers are separated by an empty ReaderGroup.
-    let secured = || {
+    // Given: readers with identical security are separated by an empty ReaderGroup.
+    let secured = |reader_group_id, reader_id| {
         secured_group(
-            1,
-            1,
+            reader_group_id,
+            reader_id,
             security(
                 MessageSecurityMode::SignAndEncrypt,
                 SecurityPolicy::PubSubAes256Ctr,
@@ -293,12 +313,12 @@ fn validation_accepts_secure_readers_with_an_empty_group_between_them() {
         )
     };
     let config = connection(vec![
-        secured(),
+        secured(1, 1),
         ReaderGroupConfig {
             reader_group_id: 2,
             ..ReaderGroupConfig::default()
         },
-        secured(),
+        secured(3, 3),
     ]);
 
     // When: subscriber configuration is validated.

@@ -1,5 +1,9 @@
 # Quickstart: Part 14 Subscriber Runtime
 
+> This quickstart preserves the original brokerless UDP/UADP scenario. Spec 074
+> later added MQTT UADP/JSON subscriber support and connection-scoped direct
+> ingress. See `contracts/subscriber-runtime.md` for the current API contract.
+
 ## Goal
 
 Validate that the PubSub crate can receive broker-less UADP over UDP, dispatch the DataSetMessage to a matching DataSetReader, and update target Variables safely.
@@ -38,11 +42,35 @@ cargo test -p async-opcua-pubsub
 - ReaderGroup or DataSetReader secured UADP with fail-closed verification.
 - DataSetReader status and diagnostics.
 
-## Explicitly unsupported in this feature
+## Added by spec 074
 
-- Brokered MQTT or AMQP subscriber transports.
-- JSON PubSub subscriber mapping.
+- Brokered MQTT UADP and JSON key-frame subscribers.
+- Connection-scoped reader identity through `DataSetReaderKey`.
+- `process_datagram_for_connection`, `process_network_message_for_connection`, and `reader_status_by_key` for multi-connection runtimes.
+
+## Explicitly unsupported in the current runtime
+
+- AMQP and WebSocket subscriber transports.
+- MQTT TLS through `mqtts://`.
 - TSN hardware scheduling.
 - Delta frame, event DataSetMessage, and RawData subscriber application.
+- Non-Value target attributes and non-empty index ranges.
 - Full Part 14 PubSub information-model method coverage.
 - Custom UDP fragment reassembly that is not defined by OPC 10000-14.
+
+## Current Capability Notes
+
+- `SubscriberRuntime::process_datagram` and `process_datagram_for_connection`
+  accept raw bytes only when every configured reader is effectively unsecured
+  after applying its DataSetReader override. Connections with an effective
+  `Sign` or `SignAndEncrypt` mode return `BadSecurityChecksFailed`, and secured
+  ingress must use `PubSubEngine::process_subscriber_datagram`. The
+  `process_network_message*` methods are the trusted boundary for already
+  decoded, verified, decrypted, and replay-checked UADP messages.
+- `MessageReceiveTimeout` transitions are evaluated only when
+  `SubscriberRuntime::check_timeouts_at` is explicitly called. Transport
+  receive loops do not independently schedule timeout checks.
+- `DataSetReaderStatus` is available as in-memory snapshots. The
+  information-model reflection exposes custom `ReaderState`, `AcceptedCount`,
+  `FilteredCount`, and `DroppedCount` properties, but mandatory Part 14
+  Status Object and State nodes are not yet live-synchronized.

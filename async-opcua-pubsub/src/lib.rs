@@ -65,8 +65,8 @@ pub use transport::websocket::WebSocketPublisher;
 pub use codec::json::{json_value_to_opcua, JsonDataSetMessage, JsonNetworkMessage};
 pub use codec::uadp::{PublisherId, UadpDataSetMessage, UadpNetworkMessage};
 pub use subscriber::{
-    apply_network_message, decode_and_apply, DataSetReaderStatus, SubscriberApplyOutcome,
-    SubscriberError, SubscriberRuntime,
+    apply_network_message, decode_and_apply, DataSetReaderKey, DataSetReaderStatus,
+    SubscriberApplyOutcome, SubscriberError, SubscriberRuntime,
 };
 
 /// Bridge module to monitor AddressSpace changes and publish events.

@@ -1,9 +1,9 @@
 //! UADP subscriber runtime for applying received DataSet fields to Variables.
 
 use std::{
-    collections::HashMap,
+    collections::{hash_map::Entry, HashMap, HashSet},
     sync::Arc,
-    time::{Duration, Instant},
+    time::Instant,
 };
 
 use opcua_core::sync::RwLock;
@@ -17,10 +17,17 @@ use crate::{
         json::{JsonDataSetMessage, JsonNetworkMessage},
         uadp::{PublisherId, UadpDataSetMessage, UadpNetworkMessage},
     },
-    config::{DataSetReaderConfig, FieldTargetConfig, PubSubConnectionConfig, ReaderGroupConfig},
+    config::{
+        reader_groups_require_security, DataSetReaderConfig, FieldTargetConfig,
+        PubSubConnectionConfig, ReaderGroupConfig,
+    },
 };
 
+mod reader;
 mod routing;
+
+pub(crate) use reader::{update_sequence_status, BoundDataSetReader, DataSetReaderRuntimeRecord};
+pub use reader::{DataSetReaderKey, DataSetReaderStatus};
 
 /// Subscriber-side processing error captured in reader diagnostics.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -39,56 +46,6 @@ pub enum SubscriberError {
     MetadataMajorVersionMismatch,
 }
 
-/// Observable per-DataSetReader status snapshot.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DataSetReaderStatus {
-    /// Part 14 PubSub state for this DataSetReader.
-    pub state: PubSubState,
-    /// Last accepted DataSetMessage sequence number.
-    pub last_sequence_number: Option<u64>,
-    /// Last accepted receive timestamp.
-    pub last_receive_time: Option<Instant>,
-    /// Last structured subscriber error.
-    pub last_error: Option<SubscriberError>,
-    /// Accepted DataSetMessages.
-    pub accepted_count: u64,
-    /// Messages filtered by reader criteria.
-    pub filtered_count: u64,
-    /// Malformed or unsupported messages.
-    pub dropped_count: u64,
-    /// Observed sequence gaps.
-    pub sequence_gap_count: u64,
-    /// Observed duplicate sequences.
-    pub duplicate_count: u64,
-    /// Observed out-of-order sequences.
-    pub out_of_order_count: u64,
-    /// MessageReceiveTimeout expirations.
-    pub timeout_count: u64,
-    /// Security verification, token, nonce, or replay failures.
-    pub security_failure_count: u64,
-    pub(crate) metadata_mismatch_since: Option<Instant>,
-}
-
-impl Default for DataSetReaderStatus {
-    fn default() -> Self {
-        Self {
-            state: PubSubState::PreOperational,
-            last_sequence_number: None,
-            last_receive_time: None,
-            last_error: None,
-            accepted_count: 0,
-            filtered_count: 0,
-            dropped_count: 0,
-            sequence_gap_count: 0,
-            duplicate_count: 0,
-            out_of_order_count: 0,
-            timeout_count: 0,
-            security_failure_count: 0,
-            metadata_mismatch_since: None,
-        }
-    }
-}
-
 /// Result summary for one subscriber datagram or NetworkMessage.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct SubscriberApplyOutcome {
@@ -105,10 +62,10 @@ pub struct SubscriberApplyOutcome {
 /// Runtime receiver, dispatcher, target applier, and status store for DataSetReaders.
 pub struct SubscriberRuntime {
     address_space: Arc<RwLock<AddressSpace>>,
-    reader_groups: Vec<ReaderGroupConfig>,
-    statuses: HashMap<u16, DataSetReaderStatus>,
-    timeouts: HashMap<u16, Duration>,
-    metadata_major_versions: HashMap<u16, Option<u32>>,
+    connection_ids: HashSet<String>,
+    secured_connection_ids: HashSet<String>,
+    readers: Vec<Arc<BoundDataSetReader>>,
+    reader_records: HashMap<DataSetReaderKey, DataSetReaderRuntimeRecord>,
 }
 
 impl SubscriberRuntime {
@@ -121,7 +78,7 @@ impl SubscriberRuntime {
             connection.validate_subscriber_config()?;
         }
 
-        Ok(Self::from_connections(address_space, connections))
+        Self::from_connections(address_space, connections)
     }
 
     /// Builds a subscriber runtime after validating only its DataSetReaders.
@@ -138,65 +95,86 @@ impl SubscriberRuntime {
             connection.validate_subscriber_readers()?;
         }
 
-        Ok(Self::from_connections(address_space, connections))
+        Self::from_connections(address_space, connections)
     }
 
     pub(crate) fn from_connections(
         address_space: Arc<RwLock<AddressSpace>>,
         connections: Vec<PubSubConnectionConfig>,
-    ) -> Self {
-        let mut reader_groups = Vec::new();
-        let mut statuses = HashMap::new();
-        let mut timeouts = HashMap::new();
-        let mut metadata_major_versions = HashMap::new();
+    ) -> Result<Self, StatusCode> {
+        let mut readers = Vec::new();
+        let mut reader_records = HashMap::new();
+        let mut connection_ids = HashSet::new();
+        let mut secured_connection_ids = HashSet::new();
 
         for connection in connections {
+            let is_secured = connection.validated_subscriber_security()?.is_some();
+            let connection_id = connection.connection_id;
+            if !connection_ids.insert(connection_id.clone()) {
+                return Err(StatusCode::BadConfigurationError);
+            }
+            if is_secured {
+                secured_connection_ids.insert(connection_id.clone());
+            }
             for reader_group in connection.reader_groups {
-                for reader in &reader_group.dataset_readers {
-                    statuses
-                        .entry(reader.dataset_reader_id)
-                        .or_insert_with(DataSetReaderStatus::default);
-                    if let Some(timeout) = reader.message_receive_timeout {
-                        timeouts.insert(reader.dataset_reader_id, timeout);
+                for reader in reader_group.dataset_readers {
+                    let bound_reader = Arc::new(BoundDataSetReader::new(&connection_id, reader));
+                    match reader_records.entry(bound_reader.key.clone()) {
+                        Entry::Occupied(_) => return Err(StatusCode::BadConfigurationError),
+                        Entry::Vacant(entry) => {
+                            entry.insert(DataSetReaderRuntimeRecord::new(&bound_reader.config));
+                        }
                     }
-                    metadata_major_versions
-                        .insert(reader.dataset_reader_id, reader.metadata_major_version);
+                    readers.push(bound_reader);
                 }
-                reader_groups.push(reader_group);
             }
         }
 
-        Self {
+        Ok(Self {
             address_space,
-            reader_groups,
-            statuses,
-            timeouts,
-            metadata_major_versions,
-        }
+            connection_ids,
+            secured_connection_ids,
+            readers,
+            reader_records,
+        })
     }
 
-    /// Returns a reader status snapshot.
+    /// Returns a reader status snapshot by its connection-scoped identity.
+    ///
+    /// The key pairs connection_id with dataset_reader_id to prevent
+    /// cross-connection collisions when numeric reader ids repeat.
+    #[must_use]
+    pub fn reader_status_by_key(&self, key: &DataSetReaderKey) -> Option<DataSetReaderStatus> {
+        self.reader_records
+            .get(key)
+            .map(|record| record.status.clone())
+    }
+
+    /// Returns a status by numeric id only when exactly one configured reader has that id.
+    ///
+    /// Numeric ids reused by multiple connections are ambiguous and return
+    /// `None`; callers should use [`Self::reader_status_by_key`].
     #[must_use]
     pub fn reader_status(&self, reader_id: u16) -> Option<DataSetReaderStatus> {
-        self.statuses.get(&reader_id).cloned()
+        let key = self.unique_key_for_reader_id(reader_id)?;
+        self.reader_status_by_key(key)
     }
 
-    /// Records a security failure for specific reader ids.
-    pub(crate) fn record_security_failure_for_readers(&mut self, reader_ids: &[u16]) {
-        for reader_id in reader_ids {
-            if let Some(status) = self.statuses.get_mut(reader_id) {
-                status.security_failure_count += 1;
-                status.last_error = None;
+    pub(crate) fn record_security_failure_for_readers(&mut self, reader_keys: &[DataSetReaderKey]) {
+        for reader_key in reader_keys {
+            if let Some(record) = self.reader_records.get_mut(reader_key) {
+                record.status.security_failure_count += 1;
             }
         }
     }
 
     /// Checks MessageReceiveTimeout and pending metadata-version mismatch deadlines.
     pub fn check_timeouts_at(&mut self, now: Instant) {
-        for (reader_id, status) in &mut self.statuses {
-            let Some(timeout) = self.timeouts.get(reader_id).copied() else {
+        for record in self.reader_records.values_mut() {
+            let Some(timeout) = record.message_receive_timeout else {
                 continue;
             };
+            let status = &mut record.status;
 
             if let Some(mismatch_since) = status.metadata_mismatch_since {
                 if now.duration_since(mismatch_since) >= timeout {
@@ -225,31 +203,51 @@ impl SubscriberRuntime {
         observed_major_version: u32,
         now: Instant,
     ) -> Result<(), StatusCode> {
-        let Some(configured_major_version) = self.metadata_major_versions.get(&reader_id).copied()
-        else {
-            return Err(StatusCode::BadNotFound);
-        };
-        let Some(status) = self.statuses.get_mut(&reader_id) else {
-            return Err(StatusCode::BadNotFound);
-        };
+        let key = self
+            .unique_key_for_reader_id(reader_id)
+            .cloned()
+            .ok_or(StatusCode::BadNotFound)?;
+        self.observe_metadata_major_version_for_key_at(&key, observed_major_version, now)
+    }
 
-        if matches!(configured_major_version, Some(configured) if configured != observed_major_version)
+    /// Observes a received metadata major version for one connection-scoped reader.
+    pub fn observe_metadata_major_version_for_key_at(
+        &mut self,
+        key: &DataSetReaderKey,
+        observed_major_version: u32,
+        now: Instant,
+    ) -> Result<(), StatusCode> {
+        let record = self
+            .reader_records
+            .get_mut(key)
+            .ok_or(StatusCode::BadNotFound)?;
+
+        if matches!(record.metadata_major_version, Some(configured) if configured != observed_major_version)
         {
-            status.metadata_mismatch_since.get_or_insert(now);
+            record.status.metadata_mismatch_since.get_or_insert(now);
         } else {
-            status.metadata_mismatch_since = None;
+            record.status.metadata_mismatch_since = None;
         }
 
         Ok(())
     }
 
+    fn unique_key_for_reader_id(&self, reader_id: u16) -> Option<&DataSetReaderKey> {
+        let mut matches = self
+            .reader_records
+            .keys()
+            .filter(|key| key.dataset_reader_id == reader_id);
+        let key = matches.next()?;
+        matches.next().is_none().then_some(key)
+    }
+
     fn apply_reader(
         &mut self,
-        reader: &DataSetReaderConfig,
+        reader: &BoundDataSetReader,
         dataset_message: &UadpDataSetMessage,
         now: Instant,
     ) -> Result<(), SubscriberError> {
-        let targets = reader.effective_target_variables();
+        let targets = reader.config.effective_target_variables();
         if targets.len() != dataset_message.fields.len() {
             return Err(SubscriberError::FieldCountMismatch);
         }
@@ -288,7 +286,8 @@ impl SubscriberRuntime {
             }
         }
 
-        if let Some(status) = self.statuses.get_mut(&reader.dataset_reader_id) {
+        if let Some(record) = self.reader_records.get_mut(&reader.key) {
+            let status = &mut record.status;
             let was_operational = status.state == PubSubState::Operational;
             let is_new = update_sequence_status(status, dataset_message.sequence_number);
             status.state = PubSubState::Operational;
@@ -305,7 +304,7 @@ impl SubscriberRuntime {
 
     fn apply_json_reader(
         &mut self,
-        reader: &DataSetReaderConfig,
+        reader: &BoundDataSetReader,
         dataset_msg: &JsonDataSetMessage,
         now: Instant,
     ) -> Result<(), SubscriberError> {
@@ -332,6 +331,9 @@ impl SubscriberRuntime {
 }
 
 /// Bind a decoded NetworkMessage's DataSets into the address space via matching DataSetReaders.
+///
+/// Callers are responsible for verifying, decrypting, and replay-checking the
+/// message before calling this trusted decoded-message boundary.
 ///
 /// Returns the number of DataSetMessages applied.
 pub fn apply_network_message(
@@ -375,6 +377,10 @@ pub fn decode_and_apply(
     ctx: &Context<'_>,
     reader_groups: &[ReaderGroupConfig],
 ) -> Result<usize, StatusCode> {
+    if reader_groups_require_security(reader_groups)? {
+        return Err(StatusCode::BadSecurityChecksFailed);
+    }
+
     let message =
         UadpNetworkMessage::decode(&mut &payload[..], ctx).map_err(|error| error.status())?;
     Ok(apply_network_message(
@@ -495,31 +501,4 @@ fn validate_target_config(target: &FieldTargetConfig) -> Result<(), SubscriberEr
         return Err(SubscriberError::UnsupportedTarget);
     }
     Ok(())
-}
-
-fn update_sequence_status(status: &mut DataSetReaderStatus, sequence_number: u16) -> bool {
-    let is_new = match status.last_sequence_number {
-        None => true,
-        Some(last) => {
-            let last = last as u16;
-            if sequence_number == last {
-                status.duplicate_count += 1;
-                false
-            } else {
-                let expected = last.wrapping_add(1);
-                if sequence_number != expected {
-                    let forward_distance = sequence_number.wrapping_sub(last);
-                    if forward_distance < (u16::MAX / 2) {
-                        status.sequence_gap_count += 1;
-                    } else {
-                        status.out_of_order_count += 1;
-                    }
-                }
-                true
-            }
-        }
-    };
-
-    status.last_sequence_number = Some(sequence_number as u64);
-    is_new
 }

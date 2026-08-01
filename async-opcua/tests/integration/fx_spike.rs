@@ -122,7 +122,9 @@ async fn fx_c2c_process_value_flows_ac1_to_ac2() {
         Some(publisher),
     );
     let cancel = CancellationToken::new();
-    let _handle = bridge.start(cancel.clone());
+    let _handle = bridge
+        .start(cancel.clone())
+        .expect("FX UDP bridge should start with a valid destination");
 
     let mut buf = [0u8; 4096];
     let (len, _from) = tokio::time::timeout(

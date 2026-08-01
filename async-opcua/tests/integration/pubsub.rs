@@ -62,7 +62,9 @@ async fn test_udp_multicast_pubsub() {
     );
 
     let cancel_token = CancellationToken::new();
-    let _bridge_handle = bridge.start(cancel_token.clone());
+    let _bridge_handle = bridge
+        .start(cancel_token.clone())
+        .expect("UDP bridge should start with a valid destination");
 
     // Wait for the cyclic publishing loop to start and query the initial value
     tokio::time::sleep(Duration::from_millis(150)).await;

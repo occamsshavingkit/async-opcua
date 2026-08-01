@@ -14,7 +14,7 @@ use crate::{
     codec::uadp::{PublisherId, UadpDataSetMessage, UadpNetworkMessage},
     transport::amqp::AmqpPublisher,
     transport::mqtt::MqttPublisher,
-    transport::udp::{strip_udp_scheme, UdpPublisher},
+    transport::udp::{parse_udp_destination, UdpPublisher},
     transport::websocket::WebSocketPublisher,
     MessageEncoding, PubSubConnectionConfig,
 };
@@ -67,19 +67,28 @@ impl PubSubBridge {
     }
 
     /// Starts the background monitoring loop for changes in the Address Space.
-    pub fn start(&self, cancel_token: CancellationToken) -> tokio::task::JoinHandle<()> {
+    ///
+    /// # Errors
+    /// Returns [`StatusCode::BadConfigurationError`] when a configured UDP publisher does not
+    /// have a valid UDP destination.
+    pub fn start(
+        &self,
+        cancel_token: CancellationToken,
+    ) -> Result<tokio::task::JoinHandle<()>, StatusCode> {
         let address_space = self.address_space.clone();
         let config = self.connection_config.clone();
         let mqtt = self.mqtt_publisher.clone();
-        let udp = self.udp_publisher.clone();
+        let udp = match self.udp_publisher.as_ref() {
+            Some(publisher) => Some((
+                publisher.clone(),
+                parse_udp_destination(&config.address)?.to_string(),
+            )),
+            None => None,
+        };
         let amqp = self.amqp_publisher.clone();
         let websocket = self.websocket_publisher.clone();
-        let udp_destination = udp.is_some().then(|| {
-            let address = config.address.trim();
-            strip_udp_scheme(address).unwrap_or(address).to_string()
-        });
 
-        tokio::spawn(async move {
+        Ok(tokio::spawn(async move {
             let mut last_values = std::collections::HashMap::new();
             let mut sequence_number: u16 = 0;
             let publisher_id = config.connection_id.clone();
@@ -199,9 +208,7 @@ impl PubSubBridge {
                                     if let Some(ref m) = mqtt {
                                         m.publish_immediate(topic.clone(), payload.clone());
                                     }
-                                    if let (Some(u), Some(addr)) =
-                                        (udp.as_ref(), udp_destination.as_deref())
-                                    {
+                                    if let Some((u, addr)) = udp.as_ref() {
                                         u.publish_immediate(payload.clone(), addr).await;
                                     }
                                     if let Some(ref a) = amqp {
@@ -240,9 +247,7 @@ impl PubSubBridge {
                                         &writer_group.encoding,
                                     );
                                 }
-                                if let (Some(u), Some(addr)) =
-                                    (udp.as_ref(), udp_destination.as_deref())
-                                {
+                                if let Some((u, addr)) = udp.as_ref() {
                                     u.publish_immediate(payload.clone(), addr).await;
                                 }
                             }
@@ -250,7 +255,7 @@ impl PubSubBridge {
                     }
                 }
             }
-        })
+        }))
     }
 }
 
@@ -303,6 +308,37 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn bridge_start_rejects_non_udp_destination_for_udp_publisher() {
+        // Given: a UDP publisher paired with a non-UDP connection address.
+        let address_space = Arc::new(RwLock::new(AddressSpace::new()));
+        let config = PubSubConnectionConfig {
+            connection_id: "udp-publisher-mqtt-address".to_string(),
+            name: "udp-publisher-mqtt-address".to_string(),
+            address: "mqtt://127.0.0.1:1883".to_string(),
+            writer_groups: Vec::new(),
+            reader_groups: Vec::new(),
+        };
+        let bridge = PubSubBridge::new(
+            address_space.clone(),
+            config,
+            None,
+            Some(Arc::new(UdpPublisher::new(address_space))),
+        );
+
+        // When: starting the bridge.
+        let result = bridge.start(CancellationToken::new());
+
+        // Then: configuration is rejected before a background task is spawned.
+        match result {
+            Err(status) => assert_eq!(status, StatusCode::BadConfigurationError),
+            Ok(handle) => {
+                handle.abort();
+                panic!("bridge started with a non-UDP destination");
+            }
+        }
+    }
+
+    #[tokio::test]
     async fn bridge_publishes_to_standard_mixed_case_opc_udp_address() {
         // Given: a bridge using the OPC-10000-14 §§7.3.2.2-7.3.2.3 UDP URI scheme.
         let receiver = UdpSocket::bind("127.0.0.1:0")
@@ -346,7 +382,9 @@ mod tests {
             Some(Arc::new(UdpPublisher::new(address_space))),
         );
         let cancel_token = CancellationToken::new();
-        let handle = bridge.start(cancel_token.clone());
+        let handle = bridge
+            .start(cancel_token.clone())
+            .expect("UDP bridge should start with a valid destination");
 
         // When: the bridge observes the initial value and publishes its first datagram.
         let mut payload = [0_u8; 2048];

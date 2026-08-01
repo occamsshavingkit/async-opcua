@@ -2,8 +2,16 @@
 
 **Feature Branch**: `037-part14-subscriber`  
 **Created**: 2026-06-28  
-**Status**: Draft  
+**Status**: Implemented (capability boundary extended by spec 074)
 **Input**: User description: "Implement OPC UA Part 14 PubSub subscriber/DataSetReader support for UADP over UDP and secured UADP: configure ReaderGroups and DataSetReaders, receive brokerless NetworkMessages, validate WriterGroup/DataSetWriter identifiers and sequence continuity, verify and decrypt secured NetworkMessages, decode DataSetMessages into field values, update configured target Variables safely, expose observable status/diagnostics for dropped invalid messages, and document limits. TSN hardware scheduling, brokered MQTT/AMQP subscriber operation, and full PubSub information-model method surface are out of scope unless needed for fail-closed behavior."
+
+> **Current implementation**: This specification records the original brokerless
+> UDP/UADP delivery. Spec 074 later added MQTT UADP/JSON subscribers and
+> connection-scoped direct ingress. The current runtime identifies a reader by
+> `(connection_id, dataset_reader_id)`. Multi-connection callers use
+> `process_datagram_for_connection` or `process_network_message_for_connection`;
+> unscoped ingress returns `BadInvalidArgument` when more than one connection is
+> configured. See `contracts/subscriber-runtime.md` for the current API contract.
 
 ## Standards Grounding
 
@@ -11,6 +19,7 @@
 - OPC 10000-14 Section 5.4.2.2 requires received DataSetMessages of interest to be passed to a DataSetReader, with DataSetMetaData used to decode the DataSet content.
 - OPC 10000-14 Section 5.4.6.2.2 describes the broker-less OPC UA UDP subscriber model and notes that UDP does not guarantee timeliness, delivery, ordering, or duplicate protection.
 - OPC 10000-14 Sections 6.1, 6.2.8, and 6.2.9 define ReaderGroup and DataSetReader configuration as the subscriber-side grouping and filtering model.
+- OPC 10000-14 Sections 6.2.9.1, 6.2.9.2, and 6.2.9.3 define the PublisherId, WriterGroupId, and DataSetWriterId filters respectively.
 - OPC 10000-14 Sections 6.2.10.2.1 and 6.2.10.2.3 define target-variable mappings between received DataSet fields and target Variables.
 - OPC 10000-14 Sections 6.2.1, 6.2.9.4, and 6.2.9.6 define DataSetReader state behavior for first data, metadata version gaps, and message receive timeout.
 - OPC 10000-14 Sections 7.2.3, 7.2.4.1, 7.2.4.4.2, and 7.2.4.4.3.2 define sequence number behavior, UADP NetworkMessage layout, SecurityHeader presence, and AES-CTR nonce handling.
@@ -33,7 +42,7 @@ As a server embedding the PubSub crate, I can configure a ReaderGroup with DataS
 1. **Given** a DataSetReader with PublisherId, WriterGroupId, DataSetWriterId, and target Variables configured, **When** a matching UADP key-frame DataSetMessage arrives over UDP, **Then** the decoded fields are applied to the matching target Variables in configured field order.
 2. **Given** a configured DataSetReader, **When** a UADP NetworkMessage arrives with a different PublisherId, WriterGroupId, NetworkMessageNumber, or DataSetWriterId, **Then** the message is ignored without changing target Variables.
 3. **Given** a configured DataSetReader, **When** a malformed, oversized, or unsupported UADP datagram arrives, **Then** the runtime rejects it without panicking and records a drop diagnostic.
-4. **Given** a configured DataSetReader using zero or null wildcard filters allowed by OPC 10000-14 Sections 6.2.7.1 and 6.2.9.3, **When** an otherwise matching DataSetMessage arrives, **Then** the wildcarded filter does not block the update.
+4. **Given** a configured DataSetReader using zero or null wildcard filters allowed by OPC 10000-14 Sections 6.2.9.1 and 6.2.9.3, **When** an otherwise matching DataSetMessage arrives, **Then** the wildcarded filter does not block the update.
 
 ---
 
@@ -82,7 +91,7 @@ As a library maintainer, I can reject invalid or unsupported Part 14 subscriber 
 
 1. **Given** duplicate DataSetReader names in one ReaderGroup, **When** the subscriber configuration is validated, **Then** validation fails before any receive loop starts.
 2. **Given** duplicate target Variables in one TargetVariables set, **When** the DataSetReader configuration is validated, **Then** validation fails before messages can mutate the AddressSpace.
-3. **Given** a brokered MQTT, brokered AMQP, JSON mapping, TSN hardware scheduling, or unsupported DataSetMessage representation request, **When** the subscriber starts, **Then** the runtime returns an unsupported error and docs list the limit.
+3. **Given** an AMQP, WebSocket, MQTT TLS, TSN hardware scheduling, or unsupported DataSetMessage representation request, **When** the subscriber starts, **Then** the runtime returns an unsupported error and docs list the limit.
 
 ### Edge Cases
 
@@ -92,7 +101,7 @@ As a library maintainer, I can reject invalid or unsupported Part 14 subscriber 
 - DataSetMetaData major version gap: if the received metadata version cannot be reconciled within MessageReceiveTimeout, the DataSetReader moves to Error.
 - Field count mismatch: no target Variables are mutated for that DataSetReader unless all required target-field mappings can be resolved.
 - Bad field status or unsupported override value handling: fail closed until the supported behavior is explicitly implemented.
-- Unsupported DataSetMessage forms: delta frame, event, RawData, JSON, broker transport, TSN hardware scheduling, and full PubSub method surface are out of scope for this feature unless a specific fail-closed check is required.
+- Unsupported DataSetMessage forms and transports: delta frame, event, RawData, AMQP, WebSocket, MQTT TLS, TSN hardware scheduling, and the full PubSub method surface are out of scope for this feature unless a specific fail-closed check is required.
 - Existing UDP publisher custom fragmentation: subscriber behavior is standards-oriented UADP datagrams; non-Part-14 custom fragment headers are rejected and documented.
 
 ## Requirements *(mandatory)*
@@ -100,7 +109,7 @@ As a library maintainer, I can reject invalid or unsupported Part 14 subscriber 
 ### Functional Requirements
 
 - **FR-001**: The system MUST provide a production subscriber runtime for broker-less OPC UA UDP UADP NetworkMessages configured through PubSubConnection ReaderGroups and DataSetReaders. (OPC 10000-14 Sections 4.3, 5.4.6.2.2, 6.1, 6.2.8)
-- **FR-002**: The system MUST filter received NetworkMessages and DataSetMessages by configured PublisherId, WriterGroupId, NetworkMessageNumber, and DataSetWriterId, including Part 14 wildcard behavior for null, empty, or zero PublisherId and zero DataSetWriterId. (OPC 10000-14 Sections 6.2.7.1, 6.2.9.3, 7.2.4.1, 7.2.4.4.2)
+- **FR-002**: The system MUST filter received NetworkMessages and DataSetMessages by configured PublisherId, WriterGroupId, NetworkMessageNumber, and DataSetWriterId, including Part 14 wildcard behavior for null, empty, or zero PublisherId and zero DataSetWriterId. (OPC 10000-14 Sections 6.2.9.1, 6.2.9.2, 6.2.9.3, 7.2.4.4.2)
 - **FR-003**: The system MUST validate DataSetReader names as unique within a ReaderGroup before starting subscriber receive loops. (OPC 10000-14 Section 6.2.9.13.1)
 - **FR-004**: The system MUST decode supported UADP key-frame DataSetMessages using DataSetReader configuration and DataSetMetaData-compatible field ordering. (OPC 10000-14 Sections 5.4.2.2, 5.3.2, 7.2.4.5.5)
 - **FR-005**: The system MUST map decoded DataSet fields to configured target Variables using a FieldTargetDataType-equivalent mapping, including field index, target NodeId, AttributeId, index range placeholder, and override handling status. (OPC 10000-14 Sections 6.2.10.2.1, 6.2.10.2.3, 9.1.8.5)
@@ -109,12 +118,21 @@ As a library maintainer, I can reject invalid or unsupported Part 14 subscriber 
 - **FR-008**: The system MUST implement DataSetReader status transitions from Disabled or PreOperational to Operational after the first valid key frame, to Error on MessageReceiveTimeout, and back to Operational on the next valid new DataSetMessage. (OPC 10000-14 Sections 6.2.1, 6.2.9.6)
 - **FR-009**: The system MUST set DataSetReader state to Error when DataSetMetaData major version changes and updated metadata is unavailable within MessageReceiveTimeout. (OPC 10000-14 Section 6.2.9.4)
 - **FR-010**: The system MUST expose per-DataSetReader status snapshots and diagnostics compatible with the current information-model reflection approach. (OPC 10000-14 Sections 9.1.8.2, 9.1.10.1)
+
+> **Current implementation capability**: FR-008 timeout transitions are
+> evaluated only when `SubscriberRuntime::check_timeouts_at` is explicitly
+> called; transport receive loops do not independently schedule timeout checks.
+> For FR-010, `DataSetReaderStatus` snapshots are available in-memory and the
+> information-model reflection exposes custom `ReaderState`, `AcceptedCount`,
+> `FilteredCount`, and `DroppedCount` properties, but mandatory Part 14 Status
+> Object and State nodes are not yet materialized or live-synchronized.
+> These are tracked as deferred capabilities, not missing requirements.
 - **FR-011**: The system MUST support ReaderGroup-level and DataSetReader-level security configuration, with DataSetReader settings overriding ReaderGroup settings when not INVALID. (OPC 10000-14 Sections 6.2.5.2, 6.2.9.9)
 - **FR-012**: The system MUST verify, decrypt, and replay-check secured UADP NetworkMessages before UADP payload decoding or target Variable mutation. (OPC 10000-14 Sections 7.2.4.4.2, 7.2.4.4.3.2, Annex A.2.1.5, Annex A.2.1.6)
 - **FR-013**: The system MUST reject malformed, oversized, unsupported, tampered, unknown-token, or replayed datagrams without panics and without target Variable mutation.
 - **FR-014**: The system MUST bound datagram size, field count, decode recursion, and allocation behavior using existing codec limits where possible.
 - **FR-015**: The system MUST provide cancellation-safe UDP subscriber receive loops for unicast and multicast broker-less addresses configured on PubSubConnection or DataSetReader transport settings. (OPC 10000-14 Sections 5.4.6.2.2, 6.4.1.6.1)
-- **FR-016**: The system MUST explicitly reject brokered MQTT/AMQP subscriber mode, JSON subscriber mapping, TSN hardware scheduling, non-Part-14 UDP fragment headers, delta frames, event DataSetMessages, RawData payloads, and full PubSub information-model method coverage for this feature.
+- **FR-016**: The system MUST explicitly reject AMQP, WebSocket, MQTT TLS subscriber mode, TSN hardware scheduling, non-Part-14 UDP fragment headers, delta frames, event DataSetMessages, RawData payloads, and full PubSub information-model method coverage for this feature.
 - **FR-017**: The system MUST update `docs/pubsub.md` and quickstart material so repository documentation no longer says subscriber support is decode-only once the runtime is implemented.
 - **FR-018**: The implementation MUST include unit and integration tests for each user story before the corresponding implementation tasks are marked complete.
 

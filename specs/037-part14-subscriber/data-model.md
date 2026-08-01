@@ -1,5 +1,9 @@
 # Data Model: Part 14 Subscriber Runtime
 
+> **Current implementation**: Spec 074 extended this model with MQTT UADP/JSON
+> subscribers and connection-scoped direct ingress. The sections below describe
+> the resulting runtime where they supersede the original spec 037 boundary.
+
 ## ReaderGroupConfig
 
 Represents a subscriber-side grouping of DataSetReaders.
@@ -25,8 +29,8 @@ Fields to preserve or extend:
 
 - `name`: optional human-readable name, unique within a ReaderGroup.
 - `dataset_reader_id`: local identifier.
-- `publisher_id`: optional subscriber-side PublisherId filter. (OPC 10000-14 Section 6.2.7.1)
-- `writer_group_id`: optional UADP WriterGroupId filter. (OPC 10000-14 Sections 7.2.4.1 and 7.2.4.4.2)
+- `publisher_id`: optional subscriber-side PublisherId filter. (OPC 10000-14 Section 6.2.9.1)
+- `writer_group_id`: optional UADP WriterGroupId filter. (OPC 10000-14 Section 6.2.9.2)
 - `network_message_number`: optional UADP NetworkMessageNumber filter. (OPC 10000-14 Section 7.2.4.4.2)
 - `dataset_writer_id`: DataSetWriterId filter; zero means ignore this filter. (OPC 10000-14 Section 6.2.9.3)
 - `message_receive_timeout`: optional timeout from first Operational state. (OPC 10000-14 Section 6.2.9.6)
@@ -41,7 +45,8 @@ Validation:
 
 - The runtime must reject missing target mappings for supported receive mode.
 - The runtime must reject duplicate target NodeIds within one target list. (OPC 10000-14 Section 6.2.10.2.1)
-- The runtime must reject unsupported RawData, delta, event, broker, JSON, or TSN hardware settings with explicit errors.
+- The runtime supports UADP and JSON key-frame readers over supported transports.
+- The runtime must reject RawData, delta frame, event, AMQP, WebSocket, `mqtts://`, and TSN subscriber settings with explicit errors.
 - The runtime must validate security override completeness before starting a receive loop.
 
 ## FieldTargetConfig
@@ -65,22 +70,34 @@ Validation:
 
 ## SubscriberRuntime
 
-Coordinates UDP receive, security processing, UADP decode, DataSetReader dispatch, target apply, cancellation, and diagnostics.
+Coordinates UADP/JSON decode, DataSetReader dispatch, target apply, timeout
+evaluation, and diagnostics. Transport tasks and the security registry are
+owned by `PubSubEngine`, not by the runtime.
 
 Fields:
 
-- `connections`: PubSubConnectionConfig entries with ReaderGroups.
-- `address_space`: shared AddressSpace handle used only during bounded apply operations.
-- `security_registry`: existing PubSub security group/key registry.
-- `reader_status`: map keyed by connection, ReaderGroup, and DataSetReader ids.
-- `decode_limits`: datagram size and field-count limits from existing codec configuration.
-- `tasks`: cancellation-safe receive-loop handles.
+- `address_space`: shared AddressSpace handle used during bounded apply
+  operations.
+- `connection_ids`: set of all configured connection ids.
+- `secured_connection_ids`: set of connection ids whose validated effective
+  reader security resolves to `Sign` or `SignAndEncrypt` after DataSetReader
+  overrides are applied.
+- `readers`: all configured `BoundDataSetReader` instances.
+- `reader_records`: runtime status and timeout records keyed by
+  `DataSetReaderKey(connection_id, dataset_reader_id)`.
+
+Identity and ingress rules:
+
+- Connection ids are unique across a runtime. DataSetReader ids are unique within one connection, across its ReaderGroups. Duplicate identities fail with `BadConfigurationError`.
+- `reader_status_by_key` is the authoritative status lookup. Numeric-only `reader_status(u16)` returns a value only when that id is unambiguous across all connections.
+- `process_datagram_for_connection` and `process_network_message_for_connection` select readers belonging to the named connection. Raw-byte methods fail closed with `BadSecurityChecksFailed` for secured connections; secured ingress must use `PubSubEngine::process_subscriber_datagram`.
+- Unscoped `process_datagram` and `process_network_message` are compatibility APIs for runtimes with at most one connection; they return `BadInvalidArgument` for multi-connection runtimes.
 
 Invariants:
 
 - No payload decode or target mutation occurs until required security checks pass.
 - Target mutation for one DataSetReader update is all-or-nothing.
-- Runtime cancellation stops receive loops without leaking tasks.
+- Engine cancellation stops receive loops without leaking tasks.
 
 ## DataSetReaderStatus
 
@@ -118,7 +135,6 @@ Fields:
 - `applied_readers`: count of readers whose target Variables were updated.
 - `filtered_readers`: count of readers that rejected the message by filters.
 - `dropped_reason`: optional structured failure for datagram-level drop.
-- `security_result`: accepted, unsigned, verified, decrypted, replay_rejected, token_unknown, signature_bad, or unsupported.
 
 Usage:
 

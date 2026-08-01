@@ -1,14 +1,12 @@
-use std::sync::Arc;
 use std::time::Duration;
 
-use opcua_core::sync::RwLock;
 use opcua_types::{ContextOwned, StatusCode};
 use tokio::net::UdpSocket;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
-use super::{DatagramQueue, PubSubEngine};
-use crate::{subscriber::SubscriberRuntime, PubSubConnectionConfig};
+use super::{subscriber::SubscriberDatagramProcessor, DatagramQueue, PubSubEngine};
+use crate::PubSubConnectionConfig;
 
 const RECEIVE_RETRY_INTERVAL: Duration = Duration::from_millis(10);
 
@@ -29,6 +27,26 @@ impl ReceiveErrorLogState {
 
     fn on_receive_success(&mut self) {
         self.has_consecutive_error = false;
+    }
+}
+
+#[derive(Default)]
+struct QueueFullLogState {
+    has_consecutive_full_queue: bool,
+}
+
+impl QueueFullLogState {
+    fn on_queue_full(&mut self) -> tracing::Level {
+        if self.has_consecutive_full_queue {
+            tracing::Level::DEBUG
+        } else {
+            self.has_consecutive_full_queue = true;
+            tracing::Level::WARN
+        }
+    }
+
+    fn on_enqueue_success(&mut self) {
+        self.has_consecutive_full_queue = false;
     }
 }
 
@@ -56,7 +74,7 @@ impl PubSubEngine {
         &self,
         connection: PubSubConnectionConfig,
         socket: UdpSocket,
-        runtime: Arc<RwLock<SubscriberRuntime>>,
+        mut processor: SubscriberDatagramProcessor,
         cancel_token: CancellationToken,
     ) -> Vec<JoinHandle<()>> {
         let connection_id = connection.connection_id;
@@ -66,22 +84,18 @@ impl PubSubEngine {
         // Consumer task: drains the bounded queue and runs the (synchronous)
         // subscriber runtime processing. Exits on cancellation or once the
         // producer drops its sender and the queue drains.
-        let consumer_runtime = runtime.clone();
         let consumer_cancel = cancel_token.clone();
         let consumer_connection_id = connection_id.clone();
         handles.push(tokio::spawn(async move {
             let mut payload_rx = payload_rx;
+            let ctx_owned = ContextOwned::default();
+            let ctx = ctx_owned.context();
             loop {
                 tokio::select! {
                     _ = consumer_cancel.cancelled() => break,
                     payload = payload_rx.recv() => {
                         let Some(payload) = payload else { break };
-                        let ctx_owned = ContextOwned::default();
-                        let ctx = ctx_owned.context();
-                        if let Err(status) = consumer_runtime
-                            .write()
-                            .process_datagram(&payload, &ctx)
-                        {
+                        if let Err(status) = processor.process(&payload, &ctx) {
                             tracing::debug!(
                                 ?status,
                                 %consumer_connection_id,
@@ -99,6 +113,7 @@ impl PubSubEngine {
         handles.push(tokio::spawn(async move {
             let mut buf = vec![0_u8; 65_535];
             let mut receive_error_state = ReceiveErrorLogState::default();
+            let mut queue_full_log_state = QueueFullLogState::default();
 
             loop {
                 tokio::select! {
@@ -107,15 +122,26 @@ impl PubSubEngine {
                         match received {
                             Ok((len, _peer)) => {
                                 receive_error_state.on_receive_success();
-                                if let Err(status) = queue.try_enqueue(buf[..len].to_vec()) {
-                                    if status == StatusCode::BadTooManyPublishRequests {
-                                        tracing::warn!(
-                                            ?status,
-                                            %connection_id,
-                                            "PubSub subscriber UDP datagram rejected; \
-                                             datagram queue full"
-                                        );
-                                    } else {
+                                match queue.try_enqueue(buf[..len].to_vec()) {
+                                    Ok(()) => queue_full_log_state.on_enqueue_success(),
+                                    Err(status) if status == StatusCode::BadTooManyPublishRequests => {
+                                        if queue_full_log_state.on_queue_full() == tracing::Level::WARN {
+                                            tracing::warn!(
+                                                ?status,
+                                                %connection_id,
+                                                "PubSub subscriber UDP datagram rejected; \
+                                                 datagram queue full"
+                                            );
+                                        } else {
+                                            tracing::debug!(
+                                                ?status,
+                                                %connection_id,
+                                                "PubSub subscriber UDP datagram rejected; \
+                                                 datagram queue full"
+                                            );
+                                        }
+                                    }
+                                    Err(status) => {
                                         tracing::debug!(
                                             ?status,
                                             %connection_id,
@@ -157,7 +183,7 @@ impl PubSubEngine {
 
 #[cfg(test)]
 mod tests {
-    use super::{wait_for_receive_retry, ReceiveErrorLogState};
+    use super::{wait_for_receive_retry, QueueFullLogState, ReceiveErrorLogState};
     use tokio::time::{timeout, Duration};
     use tokio_util::sync::CancellationToken;
     use tracing::Level;
@@ -187,6 +213,31 @@ mod tests {
         assert_eq!(error_after_success_level, Level::WARN);
     }
 
+    #[test]
+    fn queue_full_warning_is_suppressed_until_success_resets_state() {
+        // Given a queue-full state with no prior consecutive full-queue events.
+        let mut state = QueueFullLogState::default();
+
+        // When the first queue-full event is recorded.
+        let first_full_level = state.on_queue_full();
+
+        // Then it selects a warning.
+        assert_eq!(first_full_level, Level::WARN);
+
+        // When another queue-full event is recorded without a successful enqueue.
+        let repeated_full_level = state.on_queue_full();
+
+        // Then the repeated warning is suppressed at debug level.
+        assert_eq!(repeated_full_level, Level::DEBUG);
+
+        // When an enqueue succeeds and the next queue-full event is recorded.
+        state.on_enqueue_success();
+        let full_after_success_level = state.on_queue_full();
+
+        // Then warning selection is reset for the new full-queue run.
+        assert_eq!(full_after_success_level, Level::WARN);
+    }
+
     #[tokio::test]
     async fn wait_for_receive_retry_paces_and_honors_cancellation() {
         // Given a retry interval and an uncancelled receive-loop token.
@@ -214,3 +265,10 @@ mod tests {
         assert!(completed.is_ok());
     }
 }
+
+#[cfg(test)]
+#[path = "subscriber_udp/isolation_tests.rs"]
+mod isolation_tests;
+#[cfg(test)]
+#[path = "subscriber_udp/security_tests.rs"]
+mod security_tests;

@@ -103,8 +103,8 @@ use std::sync::Arc;
 
 use opcua_core::sync::RwLock;
 use opcua_pubsub::{
-    DataSetReaderConfig, FieldTargetConfig, PubSubConnectionConfig, ReaderGroupConfig,
-    SubscriberRuntime,
+    DataSetReaderConfig, DataSetReaderKey, FieldTargetConfig, PubSubConnectionConfig,
+    ReaderGroupConfig, SubscriberRuntime,
 };
 use opcua_server::address_space::AddressSpace;
 use opcua_types::{ContextOwned, NodeId};
@@ -132,8 +132,8 @@ let config = PubSubConnectionConfig {
 let mut runtime = SubscriberRuntime::with_connections(address_space, vec![config])?;
 let ctx_owned = ContextOwned::default();
 let ctx = ctx_owned.context();
-runtime.process_datagram(&udp_payload, &ctx)?;
-let status = runtime.reader_status(1);
+runtime.process_datagram_for_connection("subscriber-1", &udp_payload, &ctx)?;
+let status = runtime.reader_status_by_key(&DataSetReaderKey::new("subscriber-1", 1));
 ```
 
 ## 5. Engine-Level Subscriber Startup
@@ -144,7 +144,7 @@ must `.await` it:
 
 ```rust
 let mut engine = PubSubEngine::new(address_space);
-engine.add_connection(config)?;
+engine.add_connection(config);
 engine.start_subscribers().await?;
 ```
 
@@ -167,6 +167,33 @@ with `StatusCode::BadNotSupported` during the same pre-start validation.
   RawData payloads, delta frames, event DataSetMessages, non-Value target
   attributes, index ranges, and the crate's legacy publisher fragmentation header
   are rejected with `BadNotSupported`.
+- **Security boundary and ingress**: `SubscriberRuntime::process_datagram` and
+  `process_datagram_for_connection` accept raw bytes only when every configured
+  reader is effectively unsecured after applying its DataSetReader override.
+  If any reader requires signing or signing and encryption, the runtime returns
+  `BadSecurityChecksFailed` without decoding the payload.
+  Secured bytes must enter through `PubSubEngine::process_subscriber_datagram`,
+  which owns the security verification, decryption, and anti-replay pipeline.
+  The legacy `decode_and_apply` helper enforces the same raw-byte restriction.
+  `apply_network_message`, `process_network_message`, and
+  `process_network_message_for_connection` accept already decoded, verified,
+  decrypted, and replay-checked UADP NetworkMessages and are the trusted boundary
+  for the variable-apply path.
+- **Multi-connection direct ingress**: use `process_datagram_for_connection` or
+  `process_network_message_for_connection` to select the owning connection.
+  Unscoped direct ingress returns `BadInvalidArgument` when more than one
+  connection is configured; unknown scoped connection ids return `BadNotFound`.
+  Status is keyed by `DataSetReaderKey` through `reader_status_by_key`;
+  numeric-only `reader_status(u16)` returns no result when the id is ambiguous
+  across connections.
+- **MessageReceiveTimeout**: timeout transitions are evaluated only when
+  `SubscriberRuntime::check_timeouts_at` is explicitly called. Current
+  transport receive loops do not independently schedule timeout checks.
+- **DataSetReader status**: `DataSetReaderStatus` snapshots are available
+  in-memory through `reader_status_by_key`. The information-model reflection
+  exposes custom `ReaderState`, `AcceptedCount`, `FilteredCount`, and
+  `DroppedCount` properties, but mandatory Part 14 Status Object and State
+  nodes are not yet materialized or live-synchronized with the runtime.
 - **Message security**: secured UADP NetworkMessages use the OPC UA Part 14
   SecurityHeader, SecurityTokenId, MessageNonce, AES-CTR payload encryption,
   HMAC-SHA256 signing, and subscriber anti-replay checks before target Variables

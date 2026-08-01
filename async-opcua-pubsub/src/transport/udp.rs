@@ -42,6 +42,15 @@ pub(crate) fn parse_udp_destination(address: &str) -> Result<SocketAddr, StatusC
         .map_err(|_| StatusCode::BadConfigurationError)
 }
 
+fn bind_publisher_socket(bind_addr: SocketAddr) -> Result<UdpSocket, StatusCode> {
+    let socket =
+        std::net::UdpSocket::bind(bind_addr).map_err(|_| StatusCode::BadCommunicationError)?;
+    socket
+        .set_nonblocking(true)
+        .map_err(|_| StatusCode::BadCommunicationError)?;
+    UdpSocket::from_std(socket).map_err(|_| StatusCode::BadCommunicationError)
+}
+
 /// Parsed UDP subscriber bind endpoint.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct UdpSubscriberEndpoint {
@@ -122,27 +131,34 @@ impl PubSubPublisher for UdpPublisher {
 
         let address_space = self.address_space.clone();
         let publisher_id = connection_config.connection_id.clone();
+        let bind_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0);
+        let prepared_sockets = connection_config
+            .writer_groups
+            .iter()
+            .map(|_| {
+                let socket = bind_publisher_socket(bind_addr)?;
+                socket
+                    .set_multicast_loop_v4(true)
+                    .map_err(|_| StatusCode::BadCommunicationError)?;
+                socket
+                    .set_multicast_ttl_v4(32)
+                    .map_err(|_| StatusCode::BadCommunicationError)?;
+                Ok(Arc::new(socket))
+            })
+            .collect::<Result<Vec<_>, StatusCode>>()?;
 
         // Spawn a coordinator task that manages the individual writer group loops
         let handle = tokio::spawn(async move {
             let writer_futures = FuturesUnordered::new();
-            for writer_group in connection_config.writer_groups {
+            for (writer_group, socket) in connection_config
+                .writer_groups
+                .into_iter()
+                .zip(prepared_sockets)
+            {
                 let address_space = address_space.clone();
                 let cancel_token = cancel_token.clone();
                 let destination_address = destination_address;
                 let publisher_id = publisher_id.clone();
-
-                // Bind a local UDP socket for this group
-                let socket = match UdpSocket::bind("0.0.0.0:0").await {
-                    Ok(s) => Arc::new(s),
-                    Err(e) => {
-                        tracing::error!("Failed to bind UDP socket for writer group: {:?}", e);
-                        continue;
-                    }
-                };
-
-                let _ = socket.set_multicast_loop_v4(true);
-                let _ = socket.set_multicast_ttl_v4(32);
 
                 writer_futures.push(async move {
                     let mut sequence_number: u16 = 0;
@@ -485,6 +501,20 @@ mod tests {
 
         // Then: the existing IPv6 support boundary remains unchanged.
         assert_eq!(result, Err(StatusCode::BadNotSupported));
+    }
+
+    #[test]
+    fn publisher_socket_preparation_reports_bind_failure_synchronously() {
+        // OPC-10000-14 transport startup must surface publisher bind failures before spawning.
+        let occupied_socket = std::net::UdpSocket::bind("127.0.0.1:0")
+            .expect("occupied publisher address should bind");
+        let occupied_addr = occupied_socket
+            .local_addr()
+            .expect("occupied publisher socket should have an address");
+
+        let result = bind_publisher_socket(occupied_addr);
+
+        assert!(matches!(result, Err(StatusCode::BadCommunicationError)));
     }
 
     #[tokio::test]

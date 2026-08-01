@@ -11,7 +11,7 @@ use futures::FutureExt;
 use opcua_core::sync::RwLock;
 use opcua_types::{
     DataValue, DiagnosticBits, DiagnosticInfo, NodeId, ReadValueId, StatusCode, TimestampsToReturn,
-    WriteValue,
+    UAString, WriteValue,
 };
 use tokio::sync::oneshot;
 use tracing::debug_span;
@@ -201,6 +201,7 @@ impl SessionActor {
             if ctx.token == token && Arc::ptr_eq(&ctx.user_roles, &user_roles) {
                 return RequestContext {
                     current_node_manager_index,
+                    client_audit_entry_id: UAString::null(),
                     inner: Arc::clone(ctx),
                 };
             }
@@ -223,6 +224,7 @@ impl SessionActor {
 
         RequestContext {
             current_node_manager_index,
+            client_audit_entry_id: UAString::null(),
             inner,
         }
     }

@@ -11,7 +11,7 @@ use std::{
 };
 
 use async_trait::async_trait;
-use opcua_client::{ClientBuilder, IdentityToken, Session};
+use opcua_client::{services::Call, ClientBuilder, IdentityToken, Session, UARequest};
 use opcua_core::sync::RwLock;
 use opcua_crypto::SecurityPolicy;
 use opcua_server::{
@@ -30,7 +30,10 @@ use opcua_types::{
     DataTypeId, EUInformation, ExtensionObject, IdType, LocalizedText, MessageSecurityMode, NodeId,
     ObjectId, StatusCode, UAString, Variant,
 };
-use tokio::net::TcpListener;
+use tokio::{
+    net::TcpListener,
+    sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
+};
 
 const METHOD_NAMESPACE_URI: &str = "urn:async-opcua:method-call-tests:nodes";
 const OBJECT_ID: &str = "CallbackObject";
@@ -92,11 +95,48 @@ async fn custom_in_memory_node_manager_default_method_call_round_trips_extension
     assert_eq!(output.inner_as::<EUInformation>(), Some(&expected));
 }
 
+#[tokio::test]
+async fn call_request_audit_entry_id_reaches_registered_method_callback_context() {
+    // Given a registered in-memory method callback and a distinct audit entry ID.
+    let mut server = MethodServer::start("audit-entry-id-call").await;
+    let audit_entry_id = UAString::from("audit-entry-id-for-method-call");
+
+    // When the client sends a Call request carrying that audit entry ID.
+    let result = Call::new(&server.session)
+        .audit_entry_id(audit_entry_id.clone())
+        .method((
+            NodeId::new(server.namespace_index, OBJECT_ID),
+            NodeId::new(server.namespace_index, METHOD_ID),
+            Some(vec![Variant::from("wort")]),
+        ))
+        .send(server.session.channel());
+    let result = tokio::time::timeout(Duration::from_secs(5), result)
+        .await
+        .expect("Call service should dispatch the method within five seconds")
+        .expect("Call service should return a method response");
+    let callback_audit_entry_id = tokio::time::timeout(
+        Duration::from_secs(5),
+        server.callback_audit_entry_ids.recv(),
+    )
+    .await
+    .expect("registered method callback should observe the request")
+    .expect("audit entry ID observation channel should remain open");
+
+    // Then the callback observes the same request-scoped audit entry ID.
+    let results = result
+        .results
+        .as_ref()
+        .expect("Call response should contain a method result");
+    assert_eq!(results[0].status_code, StatusCode::Good);
+    assert_eq!(callback_audit_entry_id, audit_entry_id);
+}
+
 type CallbackRegistry = Arc<RwLock<HashMap<NodeId, InMemoryMethodCallback>>>;
 
 struct CallbackNodeManagerBuilder {
     namespace_uri: String,
     callbacks: CallbackRegistry,
+    audit_entry_id_sender: Option<UnboundedSender<UAString>>,
 }
 
 impl CallbackNodeManagerBuilder {
@@ -104,7 +144,13 @@ impl CallbackNodeManagerBuilder {
         Self {
             namespace_uri: namespace_uri.to_owned(),
             callbacks: Default::default(),
+            audit_entry_id_sender: None,
         }
+    }
+
+    fn observe_audit_entry_ids(mut self, sender: UnboundedSender<UAString>) -> Self {
+        self.audit_entry_id_sender = Some(sender);
+        self
     }
 }
 
@@ -119,9 +165,13 @@ impl InMemoryNodeManagerImplBuilder for CallbackNodeManagerBuilder {
             .add_namespace(&self.namespace_uri);
         address_space.add_namespace(&self.namespace_uri, namespace_index);
 
+        let audit_entry_id_sender = self.audit_entry_id_sender.clone();
         self.callbacks.write().insert(
             NodeId::new(namespace_index, METHOD_ID),
-            Arc::new(|_context: &RequestContext, args: &[Variant]| {
+            Arc::new(move |context: &RequestContext, args: &[Variant]| {
+                if let Some(sender) = &audit_entry_id_sender {
+                    let _ = sender.send(context.client_audit_entry_id().clone());
+                }
                 let Some(Variant::String(value)) = args.first() else {
                     return Err(StatusCode::BadInvalidArgument);
                 };
@@ -225,6 +275,7 @@ impl InMemoryNodeManagerImpl for CallbackNodeManager {
 struct MethodServer {
     handle: ServerHandle,
     session: Arc<Session>,
+    callback_audit_entry_ids: UnboundedReceiver<UAString>,
     event_loop_task: tokio::task::JoinHandle<StatusCode>,
     server_task: tokio::task::JoinHandle<()>,
     _temp_dir: TempDir,
@@ -233,6 +284,7 @@ struct MethodServer {
 
 impl MethodServer {
     async fn start(test_name: &str) -> Self {
+        let (callback_audit_entry_sender, callback_audit_entry_ids) = unbounded_channel();
         let temp_dir = TempDir::new(test_name);
         let server_pki = temp_dir.path.join("server-pki");
         let client_pki = temp_dir.path.join("client-pki");
@@ -260,7 +312,8 @@ impl MethodServer {
                 ),
             )
             .with_node_manager(InMemoryNodeManagerBuilder::new(
-                CallbackNodeManagerBuilder::new(METHOD_NAMESPACE_URI),
+                CallbackNodeManagerBuilder::new(METHOD_NAMESPACE_URI)
+                    .observe_audit_entry_ids(callback_audit_entry_sender),
             ))
             .build()
             .expect("method test server should build");
@@ -307,6 +360,7 @@ impl MethodServer {
         Self {
             handle,
             session,
+            callback_audit_entry_ids,
             event_loop_task,
             server_task,
             _temp_dir: temp_dir,

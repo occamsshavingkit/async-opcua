@@ -690,10 +690,12 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "thiserror 2.0.18",
  "tokio",
  "tokio-tungstenite 0.21.0",
  "tokio-util",
  "tracing",
+ "url",
  "uuid",
  "xsk-rs",
 ]

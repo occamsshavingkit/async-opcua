@@ -1,15 +1,29 @@
+use futures::stream::FuturesUnordered;
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
 
+use super::supervise_transport;
 use opcua_core::sync::RwLock;
 use opcua_server::address_space::{AddressSpace, NodeType};
 use opcua_types::{
     BinaryEncodable, ContextOwned, DataEncoding, NumericRange, StatusCode, TimestampsToReturn,
 };
-use rumqttc::{AsyncClient, Event, Incoming, MqttOptions, QoS};
+
+mod publisher;
+mod subscriber;
+#[cfg(test)]
+mod tests;
+pub(crate) use subscriber::{
+    parse_broker_address, start_mqtt_subscriber_with_config, MqttBrokerAddress,
+    MqttSubscriberConfig,
+};
+pub use subscriber::{
+    quality_of_service, start_mqtt_subscriber, start_mqtt_subscriber_with_cancel,
+    MqttBrokerAddressError,
+};
 
 use crate::{
     codec::json::{opcua_to_json_value, JsonDataSetMessage, JsonNetworkMessage},
@@ -22,6 +36,21 @@ const MAX_CACHE_SIZE: usize = 1000;
 
 /// Cache of pending (topic, payload) messages awaiting (re)publication.
 type MessageCache = Arc<Mutex<VecDeque<(String, Vec<u8>)>>>;
+
+fn lock_cache(cache: &MessageCache) -> std::sync::MutexGuard<'_, VecDeque<(String, Vec<u8>)>> {
+    match cache.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    }
+}
+
+fn push_cached_message(cache: &MessageCache, topic: String, payload: Vec<u8>) {
+    let mut cache = lock_cache(cache);
+    if cache.len() >= MAX_CACHE_SIZE {
+        let _ = cache.pop_front();
+    }
+    cache.push_back((topic, payload));
+}
 
 /// MQTT implementation of `PubSubPublisher` with reconnection, backoff, and local cache.
 pub struct MqttPublisher {
@@ -40,11 +69,7 @@ impl MqttPublisher {
 
     /// Instantly queues a message in the local bounded cache.
     pub fn publish_immediate(&self, topic: String, payload: Vec<u8>) {
-        let mut cache = self.cache.lock().unwrap();
-        if cache.len() >= MAX_CACHE_SIZE {
-            let _ = cache.pop_front();
-        }
-        cache.push_back((topic, payload));
+        push_cached_message(&self.cache, topic, payload);
     }
 }
 
@@ -54,356 +79,141 @@ impl PubSubPublisher for MqttPublisher {
         connection_config: PubSubConnectionConfig,
         cancel_token: CancellationToken,
     ) -> Result<tokio::task::JoinHandle<()>, StatusCode> {
-        // Parse host and port from address
-        let addr = connection_config
-            .address
-            .strip_prefix("mqtt://")
-            .unwrap_or(&connection_config.address);
-        let parts: Vec<&str> = addr.split(':').collect();
-        let host = parts[0].to_string();
-        let port = if parts.len() > 1 {
-            parts[1].parse::<u16>().unwrap_or(1883)
-        } else {
-            1883
-        };
+        let broker_address = parse_broker_address(&connection_config.address)
+            .map_err(|error| error.status_code())?;
 
         let address_space = self.address_space.clone();
         let cache = self.cache.clone();
         let publisher_id = connection_config.connection_id.clone();
 
-        // 1. Spawn the cyclic publishing task(s)
-        for writer_group in connection_config.writer_groups.clone() {
-            let address_space = address_space.clone();
-            let publisher = self.cache.clone();
-            let cancel_token = cancel_token.clone();
-            let publisher_id = publisher_id.clone();
+        let writer_groups = connection_config.writer_groups;
 
-            tokio::spawn(async move {
-                let mut sequence_number: u16 = 0;
-                loop {
-                    if cancel_token.is_cancelled() {
-                        break;
-                    }
+        let handle = tokio::spawn(async move {
+            let writer_futures = FuturesUnordered::new();
+            for writer_group in writer_groups {
+                let address_space = address_space.clone();
+                let publisher = cache.clone();
+                let cancel_token = cancel_token.clone();
+                let publisher_id = publisher_id.clone();
 
-                    sleep(Duration::from_millis(writer_group.publishing_interval)).await;
+                writer_futures.push(async move {
+                    let mut sequence_number: u16 = 0;
+                    loop {
+                        if cancel_token.is_cancelled() {
+                            break;
+                        }
 
-                    // Query address space
-                    let space = address_space.read();
-                    let mut json_dataset_messages = Vec::new();
-                    let mut uadp_dataset_messages = Vec::new();
+                        tokio::select! {
+                            _ = cancel_token.cancelled() => break,
+                            _ = sleep(Duration::from_millis(writer_group.publishing_interval)) => {}
+                        }
 
-                    for writer in &writer_group.dataset_writers {
-                        let mut payload_map = std::collections::HashMap::new();
-                        let mut uadp_fields = Vec::new();
+                        // Keep the address-space read guard scoped to traversal only. This block
+                        // ends before the next loop iteration can await; the message vectors remain
+                        // owned and usable while payloads are formatted and cached below.
+                        let (json_dataset_messages, uadp_dataset_messages) = {
+                            let space = address_space.read();
+                            let mut json_dataset_messages = Vec::new();
+                            let mut uadp_dataset_messages = Vec::new();
 
-                        for node_id in &writer.published_dataset.published_variables {
-                            if let Some(node) = space.find(node_id) {
-                                if let NodeType::Variable(ref var) = *node {
-                                    // Use standard OPC UA getter
-                                    let ctx_owned = ContextOwned::default();
-                                    let ctx = ctx_owned.context();
-                                    let data_value = var.value(
-                                        TimestampsToReturn::Both,
-                                        &NumericRange::None,
-                                        &DataEncoding::Binary,
-                                        0.0,
-                                    );
+                            for writer in &writer_group.dataset_writers {
+                                let mut payload_map = std::collections::HashMap::new();
+                                let mut uadp_fields = Vec::new();
 
-                                    // For JSON
-                                    if writer_group.encoding == MessageEncoding::Json {
-                                        if let Ok(val) = opcua_to_json_value(&data_value, &ctx) {
-                                            payload_map.insert(node_id.to_string(), val);
+                                for node_id in &writer.published_dataset.published_variables {
+                                    if let Some(node) = space.find(node_id) {
+                                        if let NodeType::Variable(ref var) = *node {
+                                            // Use standard OPC UA getter
+                                            let ctx_owned = ContextOwned::default();
+                                            let ctx = ctx_owned.context();
+                                            let data_value = var.value(
+                                                TimestampsToReturn::Both,
+                                                &NumericRange::None,
+                                                &DataEncoding::Binary,
+                                                0.0,
+                                            );
+
+                                            // For JSON
+                                            if writer_group.encoding == MessageEncoding::Json {
+                                                if let Ok(val) =
+                                                    opcua_to_json_value(&data_value, &ctx)
+                                                {
+                                                    payload_map.insert(node_id.to_string(), val);
+                                                }
+                                            } else if let Some(ref val) = data_value.value {
+                                                // For UADP
+                                                uadp_fields.push(val.clone());
+                                            }
                                         }
-                                    } else if let Some(ref val) = data_value.value {
-                                        // For UADP
-                                        uadp_fields.push(val.clone());
+                                    }
+                                }
+
+                                sequence_number = sequence_number.wrapping_add(1);
+
+                                match writer_group.encoding {
+                                    MessageEncoding::Json => {
+                                        json_dataset_messages.push(JsonDataSetMessage {
+                                            dataset_writer_id: writer.dataset_writer_id,
+                                            sequence_number,
+                                            payload: payload_map,
+                                        });
+                                    }
+                                    MessageEncoding::Uadp => {
+                                        uadp_dataset_messages.push(UadpDataSetMessage {
+                                            dataset_writer_id: writer.dataset_writer_id,
+                                            sequence_number,
+                                            timestamp: Some(opcua_types::DateTime::now()),
+                                            status: Some(StatusCode::Good),
+                                            fields: uadp_fields,
+                                        });
                                     }
                                 }
                             }
-                        }
 
-                        sequence_number = sequence_number.wrapping_add(1);
+                            (json_dataset_messages, uadp_dataset_messages)
+                        };
 
+                        // Format and queue payload
+                        let topic = format!("opcua/telemetry/{}", writer_group.writer_group_id);
                         match writer_group.encoding {
                             MessageEncoding::Json => {
-                                json_dataset_messages.push(JsonDataSetMessage {
-                                    dataset_writer_id: writer.dataset_writer_id,
-                                    sequence_number,
-                                    payload: payload_map,
-                                });
+                                let msg = JsonNetworkMessage {
+                                    message_id: uuid::Uuid::new_v4().to_string(),
+                                    message_type: "ua-data".to_string(),
+                                    publisher_id: publisher_id.clone(),
+                                    writer_group_id: writer_group.writer_group_id,
+                                    messages: json_dataset_messages,
+                                };
+                                if let Ok(json_str) = msg.to_json_string() {
+                                    push_cached_message(&publisher, topic, json_str.into_bytes());
+                                }
                             }
                             MessageEncoding::Uadp => {
-                                uadp_dataset_messages.push(UadpDataSetMessage {
-                                    dataset_writer_id: writer.dataset_writer_id,
+                                let msg = UadpNetworkMessage {
+                                    publisher_id: PublisherId::String(publisher_id.clone()),
+                                    writer_group_id: writer_group.writer_group_id,
+                                    network_message_number: 0,
                                     sequence_number,
-                                    timestamp: Some(opcua_types::DateTime::now()),
-                                    status: Some(StatusCode::Good),
-                                    fields: uadp_fields,
-                                });
+                                    dataset_messages: uadp_dataset_messages,
+                                };
+                                let ctx_owned = ContextOwned::default();
+                                let ctx = ctx_owned.context();
+                                let payload = msg.encode_to_vec(&ctx);
+                                push_cached_message(&publisher, topic, payload);
                             }
                         }
                     }
-
-                    // Format and queue payload
-                    let topic = format!("opcua/telemetry/{}", writer_group.writer_group_id);
-                    match writer_group.encoding {
-                        MessageEncoding::Json => {
-                            let msg = JsonNetworkMessage {
-                                message_id: uuid::Uuid::new_v4().to_string(),
-                                message_type: "ua-data".to_string(),
-                                publisher_id: publisher_id.clone(),
-                                writer_group_id: writer_group.writer_group_id,
-                                messages: json_dataset_messages,
-                            };
-                            if let Ok(json_str) = msg.to_json_string() {
-                                let mut cache = publisher.lock().unwrap();
-                                if cache.len() >= MAX_CACHE_SIZE {
-                                    let _ = cache.pop_front();
-                                }
-                                cache.push_back((topic, json_str.into_bytes()));
-                            }
-                        }
-                        MessageEncoding::Uadp => {
-                            let msg = UadpNetworkMessage {
-                                publisher_id: PublisherId::String(publisher_id.clone()),
-                                writer_group_id: writer_group.writer_group_id,
-                                network_message_number: 0,
-                                sequence_number,
-                                dataset_messages: uadp_dataset_messages,
-                            };
-                            let ctx_owned = ContextOwned::default();
-                            let ctx = ctx_owned.context();
-                            let payload = msg.encode_to_vec(&ctx);
-                            let mut cache = publisher.lock().unwrap();
-                            if cache.len() >= MAX_CACHE_SIZE {
-                                let _ = cache.pop_front();
-                            }
-                            cache.push_back((topic, payload));
-                        }
-                    }
-                }
-            });
-        }
-
-        // 2. Spawn the MQTT connection and sender loop with backoff
-        let handle = tokio::spawn(async move {
-            let mut backoff = Duration::from_secs(1);
-
-            loop {
-                if cancel_token.is_cancelled() {
-                    break;
-                }
-
-                let client_id = format!("opcua-publisher-{}", uuid::Uuid::new_v4());
-                let mut options = MqttOptions::new(client_id, host.clone(), port);
-                options.set_keep_alive(Duration::from_secs(5));
-
-                let (client, mut event_loop) = AsyncClient::new(options, 50);
-
-                // Background loop draining the cache and polling MQTT
-                loop {
-                    if cancel_token.is_cancelled() {
-                        return;
-                    }
-
-                    // Attempt to publish one item from cache
-                    let mut next_item = None;
-                    {
-                        let mut cache_lock = cache.lock().unwrap();
-                        if let Some((topic, payload)) = cache_lock.pop_front() {
-                            next_item = Some((topic, payload));
-                        }
-                    }
-
-                    if let Some((topic, payload)) = next_item {
-                        if client
-                            .publish(topic.clone(), QoS::AtLeastOnce, false, payload.clone())
-                            .await
-                            .is_err()
-                        {
-                            // Put it back at the front and break to reconnect
-                            {
-                                let mut cache_lock = cache.lock().unwrap();
-                                cache_lock.push_front((topic, payload));
-                            }
-                            sleep(backoff).await;
-                            backoff = std::cmp::min(backoff * 2, Duration::from_secs(60));
-                            break;
-                        }
-                        // Success: continue draining cache immediately without polling event loop
-                        continue;
-                    }
-
-                    // Cache is empty, poll the event loop to keep connection alive
-                    tokio::select! {
-                        _ = cancel_token.cancelled() => {
-                            return;
-                        }
-                        res = event_loop.poll() => {
-                            match res {
-                                Ok(_) => {
-                                    // Successful communication, reset backoff
-                                    backoff = Duration::from_secs(1);
-                                }
-                                Err(_) => {
-                                    // Connection lost, sleep and reconnect
-                                    sleep(backoff).await;
-                                    backoff = std::cmp::min(backoff * 2, Duration::from_secs(60));
-                                    break;
-                                }
-                            }
-                        }
-                        _ = sleep(Duration::from_millis(20)) => {
-                            // Wake up to check cache again
-                        }
-                    }
-                }
+                });
             }
+
+            let mut publish_state = publisher::PublishTaskState::new(cache);
+            let transport_loop =
+                publisher::run_transport_loop(&cancel_token, &broker_address, &mut publish_state);
+
+            supervise_transport(&cancel_token, transport_loop, writer_futures).await;
+            publish_state.restore();
         });
 
         Ok(handle)
     }
-}
-
-/// Starts an MQTT subscriber implementing the Broker DataSetReader transport
-/// (OPC-10000-14 §6.4.2.6).
-///
-/// `broker_address` is the `mqtt://host:port` (or bare `host:port`) of the
-/// broker, `topic_filter` is the broker QueueName (§6.4.2.6.1) to subscribe to,
-/// and received payload bytes are forwarded to `sender`.
-///
-/// Forwarding uses a non-blocking `try_send`; when `sender` is a bounded
-/// channel that is full, the payload is rejected and logged as
-/// `BadTooManyPublishRequests` (OPC-10000-14 §9.1.10.1) rather than blocking
-/// the broker poll loop. A closed receiver stops the subscriber.
-///
-/// The subscriber runs as a background tokio task; the returned `JoinHandle`
-/// lets the caller await completion or abort. Reconnects with exponential
-/// backoff (capped at 60s) on connection loss or subscribe failure. The MQTT
-/// QoS defaults to `AtLeastOnce`, matching `MqttPublisher`'s delivery guarantee
-/// and corresponding to the DataSetReader's RequestedDeliveryGuarantee
-/// (§6.4.2.6.4).
-pub fn start_mqtt_subscriber(
-    broker_address: String,
-    topic_filter: String,
-    sender: tokio::sync::mpsc::Sender<Vec<u8>>,
-) -> tokio::task::JoinHandle<()> {
-    start_mqtt_subscriber_with_cancel(
-        broker_address,
-        topic_filter,
-        sender,
-        CancellationToken::new(),
-    )
-}
-
-/// Starts an MQTT subscriber that exits when `cancel_token` is cancelled.
-pub fn start_mqtt_subscriber_with_cancel(
-    broker_address: String,
-    topic_filter: String,
-    sender: tokio::sync::mpsc::Sender<Vec<u8>>,
-    cancel_token: CancellationToken,
-) -> tokio::task::JoinHandle<()> {
-    tokio::spawn(async move {
-        let mut backoff = Duration::from_secs(1);
-
-        loop {
-            if cancel_token.is_cancelled() {
-                break;
-            }
-
-            // Parse host and port from address (mirrors MqttPublisher).
-            let addr = broker_address
-                .strip_prefix("mqtt://")
-                .unwrap_or(&broker_address);
-            let parts: Vec<&str> = addr.split(':').collect();
-            let host = parts[0].to_string();
-            let port = if parts.len() > 1 {
-                parts[1].parse::<u16>().unwrap_or(1883)
-            } else {
-                1883
-            };
-
-            let client_id = format!("opcua-subscriber-{}", uuid::Uuid::new_v4());
-            let mut options = MqttOptions::new(client_id, host, port);
-            options.set_keep_alive(Duration::from_secs(5));
-
-            let (client, mut event_loop) = AsyncClient::new(options, 50);
-
-            // Subscribe to the broker QueueName (§6.4.2.6.1). QoS maps to the
-            // DataSetReader's RequestedDeliveryGuarantee (§6.4.2.6.4).
-            if let Err(error) = client
-                .subscribe(topic_filter.clone(), QoS::AtLeastOnce)
-                .await
-            {
-                tracing::warn!(
-                    topic = %topic_filter,
-                    ?error,
-                    "failed to subscribe to MQTT topic filter"
-                );
-                tokio::select! {
-                    _ = cancel_token.cancelled() => break,
-                    _ = sleep(backoff) => {}
-                }
-                backoff = std::cmp::min(backoff * 2, Duration::from_secs(60));
-                continue;
-            }
-
-            tracing::info!(topic = %topic_filter, "MQTT subscriber connected and subscribed");
-
-            loop {
-                let event = tokio::select! {
-                    _ = cancel_token.cancelled() => return,
-                    event = event_loop.poll() => event,
-                };
-
-                match event {
-                    Ok(Event::Incoming(Incoming::Publish(publish))) => {
-                        backoff = Duration::from_secs(1);
-                        let payload = publish.payload.to_vec();
-                        // Bounded `try_send` honours OPC-10000-14 §9.1.10.1:
-                        // a full datagram queue rejects the payload with the
-                        // equivalent of `BadTooManyPublishRequests` rather
-                        // than blocking the broker poll loop or growing
-                        // memory without bound.
-                        if let Err(err) = sender.try_send(payload) {
-                            use tokio::sync::mpsc::error::TrySendError;
-                            match err {
-                                TrySendError::Full(_) => {
-                                    tracing::warn!(
-                                        topic = %topic_filter,
-                                        "MQTT subscriber datagram rejected; PubSub \
-                                         datagram queue full (BadTooManyPublishRequests)"
-                                    );
-                                }
-                                TrySendError::Closed(_) => {
-                                    tracing::debug!(
-                                        topic = %topic_filter,
-                                        "subscriber channel closed; stopping"
-                                    );
-                                    return;
-                                }
-                            }
-                        }
-                    }
-                    Ok(_) => {
-                        // Other MQTT packets (CONNACK, PINGRESP, etc.); connection is healthy.
-                        backoff = Duration::from_secs(1);
-                    }
-                    Err(error) => {
-                        tracing::warn!(
-                            topic = %topic_filter,
-                            ?error,
-                            "MQTT subscriber connection lost; reconnecting"
-                        );
-                        tokio::select! {
-                            _ = cancel_token.cancelled() => return,
-                            _ = sleep(backoff) => {}
-                        }
-                        backoff = std::cmp::min(backoff * 2, Duration::from_secs(60));
-                        break;
-                    }
-                }
-            }
-        }
-    })
 }

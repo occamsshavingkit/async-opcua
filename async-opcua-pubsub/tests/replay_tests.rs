@@ -6,8 +6,9 @@ use std::time::Duration;
 use opcua_core::sync::RwLock;
 use opcua_crypto::SecurityPolicy;
 use opcua_pubsub::{
-    engine::PubSubEngine, security::ReplayWindow, PublisherId, SecurityGroup, UadpDataSetMessage,
-    UadpNetworkMessage,
+    engine::PubSubEngine,
+    security::{ReplayWindow, UadpSecurityCodec},
+    PublisherId, SecurityGroup, UadpDataSetMessage, UadpNetworkMessage,
 };
 use opcua_server::address_space::AddressSpace;
 use opcua_types::{ContextOwned, MessageSecurityMode, StatusCode};
@@ -17,6 +18,7 @@ fn address_space() -> Arc<RwLock<AddressSpace>> {
 }
 
 const TOKEN: u32 = 1;
+const POLICY: SecurityPolicy = SecurityPolicy::PubSubAes256Ctr;
 
 fn accepts(w: &mut ReplayWindow, seq: u16) -> bool {
     w.check(TOKEN, seq).is_ok()
@@ -157,4 +159,47 @@ fn engine_rejects_replayed_network_message() {
         .decode_subscriber_uadp_message("line-a", mode, policy, &m1, &ctx)
         .unwrap_err();
     assert_eq!(err, StatusCode::BadSecurityChecksFailed);
+}
+
+#[test]
+fn engine_replay_window_follows_next_security_token_epoch() {
+    // Arrange: sequence 1 under the next token is fresh in that token epoch.
+    let ctx_owned = ContextOwned::default();
+    let ctx = ctx_owned.context();
+    let mut engine = PubSubEngine::new(address_space());
+    let group = SecurityGroup::new("line-a", Duration::from_secs(3600)).unwrap();
+    let current = group.current_key_set().clone();
+    let next = group.next_key_set().clone();
+    engine.register_security_group(group);
+
+    let current_message =
+        UadpSecurityCodec::new(MessageSecurityMode::SignAndEncrypt, POLICY, current)
+            .encode_network_message(&sample(5000), &ctx)
+            .unwrap();
+    let next_message = UadpSecurityCodec::new(MessageSecurityMode::SignAndEncrypt, POLICY, next)
+        .encode_network_message(&sample(1), &ctx)
+        .unwrap();
+
+    // Act: seed replay state with a high current-token sequence, then decode next-token seq 1.
+    assert!(engine
+        .decode_subscriber_uadp_message(
+            "line-a",
+            MessageSecurityMode::SignAndEncrypt,
+            POLICY,
+            &current_message,
+            &ctx,
+        )
+        .is_ok());
+    let decoded = engine
+        .decode_subscriber_uadp_message(
+            "line-a",
+            MessageSecurityMode::SignAndEncrypt,
+            POLICY,
+            &next_message,
+            &ctx,
+        )
+        .expect("next-token sequence 1 must be checked in the next token epoch");
+
+    // Assert: the next token starts a fresh replay epoch.
+    assert_eq!(decoded, sample(1));
 }

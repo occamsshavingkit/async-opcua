@@ -1,68 +1,95 @@
 # Contract: Part 14 Subscriber Runtime
 
-This contract describes the public Rust-facing behavior expected from the implementation. Names may be adjusted to match crate conventions, but the behavior and status surfaces must remain.
+This contract describes the current public Rust-facing behavior. Spec 037
+introduced brokerless UDP/UADP subscriber processing; spec 074 later added MQTT
+UADP/JSON subscribers and connection-scoped direct ingress.
 
-## Configuration Contract
-
-### FieldTargetConfig
-
-```rust
-pub struct FieldTargetConfig {
-    pub dataset_field_index: usize,
-    pub dataset_field_id: Option<Guid>,
-    pub target_node_id: NodeId,
-    pub attribute_id: AttributeId,
-    pub index_range: Option<String>,
-    pub override_value_handling: OverrideValueHandling,
-}
-```
-
-Required behavior:
-
-- Value AttributeId is supported.
-- Unsupported AttributeIds, index ranges, or override modes produce validation errors before receive loops start.
-- Existing `subscribed_variables` entries map to `FieldTargetConfig` entries by index for compatibility.
-
-### DataSetReaderConfig extensions
+## Identity And Construction
 
 ```rust
-pub struct DataSetReaderConfig {
-    pub name: Option<String>,
+pub struct DataSetReaderKey {
+    pub connection_id: String,
     pub dataset_reader_id: u16,
-    pub publisher_id: Option<PublisherId>,
-    pub writer_group_id: Option<u16>,
-    pub network_message_number: Option<u16>,
-    pub dataset_writer_id: u16,
-    pub message_receive_timeout: Option<Duration>,
-    pub security_mode: Option<MessageSecurityMode>,
-    pub security_policy_uri: Option<String>,
-    pub security_group_id: Option<String>,
-    pub target_variables: Vec<FieldTargetConfig>,
-    pub subscribed_variables: Vec<NodeId>,
 }
-```
-
-Required behavior:
-
-- `dataset_writer_id == 0` ignores the DataSetWriterId filter. (OPC 10000-14 Section 6.2.9.3)
-- Null, empty, or zero PublisherId ignores the PublisherId filter where represented by local types. (OPC 10000-14 Section 6.2.7.1)
-- Non-INVALID DataSetReader security mode overrides ReaderGroup security mode. (OPC 10000-14 Section 6.2.9.9)
-
-## Runtime Contract
-
-### SubscriberRuntime
-
-```rust
-pub struct SubscriberRuntime;
 
 impl SubscriberRuntime {
-    pub fn validate(config: &PubSubConnectionConfig) -> Result<(), StatusCode>;
+    pub fn with_connections(
+        address_space: Arc<RwLock<AddressSpace>>,
+        connections: Vec<PubSubConnectionConfig>,
+    ) -> Result<Self, StatusCode>;
+}
+```
 
+Required behavior:
+
+- `DataSetReaderKey(connection_id, dataset_reader_id)` is the canonical runtime
+  reader identity. `reader_group_id` is not part of this key.
+- Connection ids are unique across the runtime. DataSetReader ids are unique
+  within one connection, across all of its ReaderGroups.
+- Duplicate identities fail construction with `BadConfigurationError`.
+- DataSetReader names remain unique within their ReaderGroup.
+
+## Direct Ingress
+
+```rust
+impl SubscriberRuntime {
     pub fn process_datagram(
         &mut self,
-        datagram: &[u8],
-        context: &EncodingContext,
+        payload: &[u8],
+        ctx: &Context<'_>,
     ) -> Result<SubscriberApplyOutcome, StatusCode>;
+
+    pub fn process_datagram_for_connection(
+        &mut self,
+        connection_id: &str,
+        payload: &[u8],
+        ctx: &Context<'_>,
+    ) -> Result<SubscriberApplyOutcome, StatusCode>;
+
+    pub fn process_network_message(
+        &mut self,
+        message: &UadpNetworkMessage,
+    ) -> Result<SubscriberApplyOutcome, StatusCode>;
+
+    pub fn process_network_message_for_connection(
+        &mut self,
+        connection_id: &str,
+        message: &UadpNetworkMessage,
+    ) -> Result<SubscriberApplyOutcome, StatusCode>;
+}
+```
+
+Required behavior:
+
+- Connection-scoped methods select only readers belonging to the named
+  connection and return `BadNotFound` for an unknown connection id.
+- Unscoped methods are compatibility APIs for runtimes containing at most one
+  connection. They return `BadInvalidArgument` for multi-connection runtimes.
+- `process_datagram` and `process_datagram_for_connection` accept raw bytes
+  only when every configured reader is effectively unsecured after applying
+  its DataSetReader override. If any reader requires signing or signing and
+  encryption, these methods fail closed with `BadSecurityChecksFailed`.
+  Secured byte ingress must use
+  `PubSubEngine::process_subscriber_datagram`, which owns the security
+  verification, decryption, and anti-replay pipeline.
+- `process_network_message` and `process_network_message_for_connection`
+  accept already decoded, verified, decrypted, and replay-checked UADP
+  NetworkMessages. They are the trusted boundary for the variable-apply path.
+- UADP and JSON key-frame messages are dispatched only to readers configured for
+  the matching encoding.
+- Security verification, decryption, and replay checks complete before payload
+  application or target Variable mutation.
+- Accepted target updates are all-or-nothing per DataSetReader.
+- Malformed or unsupported input never panics and cannot mutate target Variables.
+
+## Status
+
+```rust
+impl SubscriberRuntime {
+    pub fn reader_status_by_key(
+        &self,
+        key: &DataSetReaderKey,
+    ) -> Option<DataSetReaderStatus>;
 
     pub fn reader_status(&self, reader_id: u16) -> Option<DataSetReaderStatus>;
 }
@@ -70,73 +97,71 @@ impl SubscriberRuntime {
 
 Required behavior:
 
-- `validate` checks ReaderGroup/DataSetReader structure, security completeness, target uniqueness, and unsupported settings.
-- `process_datagram` verifies security before UADP payload decode when security is configured.
-- `process_datagram` applies accepted values atomically per DataSetReader.
-- `process_datagram` never panics on malformed input.
-- `reader_status` returns a snapshot suitable for tests and information-model reflection.
+- `reader_status_by_key` is the authoritative lookup.
+- Numeric-only `reader_status` is retained for compatibility and returns a
+  snapshot only when the numeric id is unambiguous across all connections.
+- First accepted data moves a reader from PreOperational to Operational.
+  (OPC 10000-14 Section 6.2.1)
+- MessageReceiveTimeout moves an Operational reader to Error; the next valid new
+  message returns it to Operational. (OPC 10000-14 Section 6.2.9.6)
+  Timeout evaluation is explicit: `SubscriberRuntime::check_timeouts_at` must
+  be called; transport receive loops do not independently schedule timeout
+  checks.
+- `DataSetReaderStatus` snapshots are in-memory counters. The
+  information-model reflection exposes custom `ReaderState`, `AcceptedCount`,
+  `FilteredCount`, and `DroppedCount` properties, but mandatory Part 14 Status
+  Object and State nodes are not yet materialized or live-synchronized.
+- Security failures increment diagnostics without target mutation.
 
-### Engine integration
+## Engine Integration
 
 ```rust
 impl PubSubEngine {
-    pub async fn start_subscribers(&mut self) -> Result<(), StatusCode>;
-    pub async fn stop_subscribers(&mut self) -> Result<(), StatusCode>;
-    pub fn subscriber_status(&self, reader_id: u16) -> Option<DataSetReaderStatus>;
-}
-```
+    pub fn process_subscriber_datagram(
+        &mut self,
+        connection_id: &str,
+        payload: &[u8],
+        ctx: &Context<'_>,
+    ) -> Result<SubscriberApplyOutcome, StatusCode>;
 
-Required behavior:
-
-- `start_subscribers` starts only configured broker-less UADP/UDP ReaderGroups.
-- Unsupported subscriber transports or mappings return `BadNotSupported` before spawning a receive task.
-- `stop_subscribers` cancels all receive loops and awaits task shutdown.
-- Existing publisher lifecycle behavior remains unchanged.
-
-## UDP Receive Contract
-
-```rust
-pub struct UdpSubscriber;
-
-impl UdpSubscriber {
-    pub async fn run(
+    pub fn subscriber_status_by_key(
         &self,
-        endpoint: UdpSubscriberEndpoint,
-        runtime: SubscriberRuntimeHandle,
-        cancel: CancellationToken,
-    ) -> Result<(), StatusCode>;
+        key: &DataSetReaderKey,
+    ) -> Option<DataSetReaderStatus>;
+
+    pub fn subscriber_status(&self, reader_id: u16) -> Option<DataSetReaderStatus>;
+
+    pub async fn start_subscribers(&mut self) -> Result<(), StatusCode>;
+    pub async fn stop_subscribers(&mut self);
 }
 ```
 
 Required behavior:
 
-- The receive loop binds unicast or multicast UDP endpoints from PubSub configuration.
-- One UDP datagram maps to one UADP NetworkMessage.
-- Non-Part-14 custom fragment headers are rejected.
-- Cancellation exits the loop without leaking tasks.
+- `start_subscribers` validates every configured reader before committing any
+  receive task or running state.
+- UDP sockets are prepared before tasks are committed; MQTT starts one broker
+  subscriber task per configured DataSetReader.
+- A running engine whose subscriber configuration changed rejects direct
+  processing with `BadInvalidState` until the runtime is restarted.
+- `stop_subscribers` cancels receive loops and awaits task shutdown.
 
-## Status Contract
+## Current Capability Boundary
 
-```rust
-pub struct DataSetReaderStatus {
-    pub state: PubSubState,
-    pub last_sequence_number: Option<u64>,
-    pub last_receive_time: Option<Instant>,
-    pub last_error: Option<SubscriberError>,
-    pub accepted_count: u64,
-    pub filtered_count: u64,
-    pub dropped_count: u64,
-    pub sequence_gap_count: u64,
-    pub duplicate_count: u64,
-    pub out_of_order_count: u64,
-    pub timeout_count: u64,
-    pub security_failure_count: u64,
-}
-```
+Supported subscriber paths:
 
-Required behavior:
+- Brokerless UDP UADP key-frame DataSetMessages.
+- Brokered MQTT UADP and JSON key-frame DataSetMessages.
+- ReaderGroup/DataSetReader secured UADP with fail-closed verification.
+- Value-attribute target writes with empty index ranges.
 
-- First accepted key-frame DataSetMessage changes PreOperational to Operational. (OPC 10000-14 Section 6.2.1)
-- MessageReceiveTimeout changes Operational to Error. (OPC 10000-14 Section 6.2.9.6)
-- Next valid new DataSetMessage after timeout returns Error to Operational.
-- Security failures increment diagnostics without target mutation.
+Unsupported subscriber paths return `BadNotSupported` during validation or
+processing:
+
+- AMQP and WebSocket subscribers.
+- MQTT TLS through `mqtts://`.
+- TSN hardware scheduling.
+- RawData, delta frame, and event DataSetMessages.
+- Non-Value target attributes and non-empty index ranges.
+- Legacy custom UDP fragmentation headers not defined by OPC 10000-14.
+- Incomplete Part 14 information-model method surfaces.

@@ -1,11 +1,6 @@
-//! TrustList method callbacks for the Push model's `DefaultApplicationGroup` CertificateGroup
-//! (OPC UA Part 12 v1.05 §7.8.2 `TrustListType`), extending Run 1's shared `PushTransaction`
-//! (see `gds::push_methods` and `specs/102-gds-push-trustlist/`).
-//!
-//! Every method here is registered against a real, verified `DefaultApplicationGroup.TrustList`
-//! AddressSpace NodeId (confirmed via a live Read against a running server -- see
-//! `specs/102-gds-push-trustlist/research.md`). `DefaultHttpsGroup`/`DefaultUserTokenGroup` are
-//! out of scope for this run (see spec.md Assumptions).
+//! TrustList method callbacks for the Push model's three standard CertificateGroups (OPC UA Part
+//! 12 v1.05 §7.8.2 `TrustListType`), extending Run 1's shared `PushTransaction` (see
+//! `gds::push_methods` and `specs/102-gds-push-trustlist/`).
 
 use std::{
     sync::{
@@ -16,7 +11,7 @@ use std::{
 };
 
 use opcua_core::sync::Mutex;
-use opcua_crypto::{CertificateStore, Thumbprint, X509};
+use opcua_crypto::{CertificateGroup, CertificateStore, Thumbprint, X509};
 use opcua_types::{
     BinaryDecodable, BinaryEncodable, ByteString, ContextOwned, NodeId, StatusCode,
     TrustListDataType, Variant,
@@ -26,22 +21,73 @@ use opcua_types::{
 use crate::node_manager::memory::CoreNodeManager;
 use crate::node_manager::RequestContext;
 
+#[cfg(test)]
+use super::push_methods::PushTransactionState;
 use super::push_methods::{
     authorize_authenticated_security_admin, non_empty_byte_string_arg, GdsPushRegistry,
     PushTransaction,
 };
 
-const TRUST_LIST_OBJECT_ID: u32 = 12642;
-const OPEN_METHOD_ID: u32 = 12647;
-const CLOSE_METHOD_ID: u32 = 12650;
-const READ_METHOD_ID: u32 = 12652;
-const WRITE_METHOD_ID: u32 = 12655;
-const GET_POSITION_METHOD_ID: u32 = 12657;
-const SET_POSITION_METHOD_ID: u32 = 12660;
-const OPEN_WITH_MASKS_METHOD_ID: u32 = 12663;
-const CLOSE_AND_UPDATE_METHOD_ID: u32 = 12666;
-const ADD_CERTIFICATE_METHOD_ID: u32 = 12668;
-const REMOVE_CERTIFICATE_METHOD_ID: u32 = 12670;
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct TrustListNodeIds {
+    object: u32,
+    open: u32,
+    close: u32,
+    read: u32,
+    write: u32,
+    get_position: u32,
+    set_position: u32,
+    open_with_masks: u32,
+    close_and_update: u32,
+    add_certificate: u32,
+    remove_certificate: u32,
+}
+
+impl TrustListNodeIds {
+    const fn for_group(certificate_group: CertificateGroup) -> Self {
+        match certificate_group {
+            CertificateGroup::DefaultApplication => Self {
+                object: 12642,
+                open: 12647,
+                close: 12650,
+                read: 12652,
+                write: 12655,
+                get_position: 12657,
+                set_position: 12660,
+                open_with_masks: 12663,
+                close_and_update: 12666,
+                add_certificate: 12668,
+                remove_certificate: 12670,
+            },
+            CertificateGroup::DefaultHttps => Self {
+                object: 14089,
+                open: 14095,
+                close: 14098,
+                read: 14100,
+                write: 14103,
+                get_position: 14105,
+                set_position: 14108,
+                open_with_masks: 14111,
+                close_and_update: 14114,
+                add_certificate: 14117,
+                remove_certificate: 14119,
+            },
+            CertificateGroup::DefaultUserToken => Self {
+                object: 14123,
+                open: 14129,
+                close: 14132,
+                read: 14134,
+                write: 14137,
+                get_position: 14139,
+                set_position: 14142,
+                open_with_masks: 14145,
+                close_and_update: 14148,
+                add_certificate: 14151,
+                remove_certificate: 14153,
+            },
+        }
+    }
+}
 
 /// `TrustListMasks` bit values (Part 12 §7.8.2.9).
 mod masks {
@@ -123,19 +169,29 @@ impl TrustListHandleRegistry {
     }
 }
 
-/// Handler for TrustList method calls against `DefaultApplicationGroup.TrustList`.
+/// Handler for TrustList method calls against one standard CertificateGroup.
 pub struct TrustListMethodHandler {
     push_registry: Arc<GdsPushRegistry>,
     handles: TrustListHandleRegistry,
+    certificate_group: CertificateGroup,
 }
 
 impl TrustListMethodHandler {
     /// Creates a handler sharing `push_registry`'s transaction with Run 1's certificate-rotation
     /// methods, so `ApplyChanges`/`CancelChanges` resolve both kinds of pending change together.
     pub fn new(push_registry: Arc<GdsPushRegistry>) -> Self {
+        Self::new_for_group(push_registry, CertificateGroup::DefaultApplication)
+    }
+
+    /// Creates a handler for `certificate_group`, sharing the global push transaction registry.
+    pub fn new_for_group(
+        push_registry: Arc<GdsPushRegistry>,
+        certificate_group: CertificateGroup,
+    ) -> Self {
         Self {
             push_registry,
             handles: TrustListHandleRegistry::new(Duration::from_secs(60)),
+            certificate_group,
         }
     }
 
@@ -153,7 +209,11 @@ impl TrustListMethodHandler {
         let handle = match mode {
             open_mode::READ => {
                 let store = context.info.certificate_store.read();
-                let buffer = encode_trust_list(&build_trust_list_data(&store, masks::ALL))?;
+                let buffer = encode_trust_list(&build_trust_list_data(
+                    &store,
+                    self.certificate_group,
+                    masks::ALL,
+                ))?;
                 self.handles.insert(TrustListFileHandleState {
                     owning_session_id: session_id,
                     mode: HandleMode::Read,
@@ -191,7 +251,11 @@ impl TrustListMethodHandler {
 
         let requested_masks = u32_arg(args, 0)?;
         let store = context.info.certificate_store.read();
-        let buffer = encode_trust_list(&build_trust_list_data(&store, requested_masks))?;
+        let buffer = encode_trust_list(&build_trust_list_data(
+            &store,
+            self.certificate_group,
+            requested_masks,
+        ))?;
         drop(store);
 
         let handle = self.handles.insert(TrustListFileHandleState {
@@ -338,27 +402,41 @@ impl TrustListMethodHandler {
 
         {
             let mut transaction = self.push_registry.transaction.write();
-            match &*transaction {
-                Some(existing) if existing.owning_session_id != session_id => {
+            let mut updated = match transaction.staging_base(session_id) {
+                Err(status) => {
                     self.handles.remove(file_handle);
-                    return Err(StatusCode::BadTransactionPending);
+                    return Err(status);
                 }
-                Some(existing) => {
-                    let mut updated = existing.clone();
-                    updated.pending_trust_list = Some(trust_list);
-                    *transaction = Some(updated);
-                }
-                None => {
-                    *transaction = Some(PushTransaction {
-                        owning_session_id: session_id,
-                        certificate_der: None,
-                        private_key_pem: None,
-                        pending_trust_list: Some(trust_list),
-                    });
-                }
-            }
+                Ok(Some(existing)) => existing.clone(),
+                Ok(None) => PushTransaction {
+                    owning_session_id: session_id,
+                    certificate_der: None,
+                    private_key_pem: None,
+                    certificate_group_id: None,
+                    certificate_type_id: None,
+                    pending_trust_lists: std::collections::HashMap::new(),
+                },
+            };
+            updated
+                .pending_trust_lists
+                .insert(self.certificate_group, trust_list);
+            transaction.stage(updated);
         }
         self.handles.remove(file_handle);
+
+        #[cfg(feature = "events")]
+        #[cfg(feature = "companion-gds")]
+        {
+            let node_ids = TrustListNodeIds::for_group(self.certificate_group);
+            super::audit::trust_list_update_requested(
+                context,
+                NodeId::new(0, node_ids.object),
+                NodeId::new(0, node_ids.close_and_update),
+                NodeId::new(0, node_ids.object),
+                super::audit::AuditAction::CloseAndUpdate,
+                args,
+            );
+        }
 
         Ok(vec![Variant::from(true)])
     }
@@ -396,8 +474,22 @@ impl TrustListMethodHandler {
 
         let store = context.info.certificate_store.read();
         store
-            .store_trusted_cert(&cert)
+            .store_trusted_cert_for_group(self.certificate_group, &cert)
             .map_err(|_| StatusCode::BadInternalError)?;
+
+        #[cfg(feature = "events")]
+        #[cfg(feature = "companion-gds")]
+        {
+            let node_ids = TrustListNodeIds::for_group(self.certificate_group);
+            super::audit::trust_list_updated(
+                context,
+                NodeId::new(0, node_ids.object),
+                NodeId::new(0, node_ids.add_certificate),
+                NodeId::new(0, node_ids.object),
+                super::audit::AuditAction::AddCertificate,
+                args,
+            );
+        }
 
         Ok(vec![])
     }
@@ -425,22 +517,41 @@ impl TrustListMethodHandler {
 
         let store = context.info.certificate_store.read();
 
-        let target = find_cert_by_thumbprint(&store, &thumbprint, is_trusted_certificate)
-            .ok_or(StatusCode::BadInvalidArgument)?;
+        let target = find_cert_by_thumbprint(
+            &store,
+            self.certificate_group,
+            &thumbprint,
+            is_trusted_certificate,
+        )
+        .ok_or(StatusCode::BadInvalidArgument)?;
 
-        if is_cert_still_needed(&store, &target) {
+        if is_cert_still_needed(&store, self.certificate_group, &target) {
             return Err(StatusCode::BadCertificateChainIncomplete);
         }
 
         let removed = if is_trusted_certificate {
-            store.remove_trusted_cert(&thumbprint)
+            store.remove_trusted_cert_for_group(self.certificate_group, &thumbprint)
         } else {
-            store.remove_issuer_cert(&thumbprint)
+            store.remove_issuer_cert_for_group(self.certificate_group, &thumbprint)
         }
         .map_err(|_| StatusCode::BadInternalError)?;
 
         if !removed {
             return Err(StatusCode::BadInvalidArgument);
+        }
+
+        #[cfg(feature = "events")]
+        #[cfg(feature = "companion-gds")]
+        {
+            let node_ids = TrustListNodeIds::for_group(self.certificate_group);
+            super::audit::trust_list_updated(
+                context,
+                NodeId::new(0, node_ids.object),
+                NodeId::new(0, node_ids.remove_certificate),
+                NodeId::new(0, node_ids.object),
+                super::audit::AuditAction::RemoveCertificate,
+                args,
+            );
         }
 
         Ok(vec![])
@@ -451,36 +562,33 @@ impl TrustListMethodHandler {
 /// Only lists whose `TrustListMasks` bit is set in `trust_list.specified_lists` are replaced.
 pub(super) fn apply_trust_list_update(
     store: &CertificateStore,
+    certificate_group: CertificateGroup,
     trust_list: &TrustListDataType,
 ) -> Result<(), String> {
-    type ReplaceFn = fn(&CertificateStore, &[Vec<u8>]) -> Result<(), String>;
     let mask = trust_list.specified_lists;
-    let lists: [(u32, &Option<Vec<ByteString>>, ReplaceFn); 4] = [
-        (
-            masks::TRUSTED_CERTIFICATES,
-            &trust_list.trusted_certificates,
-            CertificateStore::replace_trusted_certs,
-        ),
-        (
-            masks::ISSUER_CERTIFICATES,
-            &trust_list.issuer_certificates,
-            CertificateStore::replace_issuer_certs,
-        ),
-        (
-            masks::TRUSTED_CRLS,
-            &trust_list.trusted_crls,
-            CertificateStore::replace_trusted_crls,
-        ),
-        (
-            masks::ISSUER_CRLS,
-            &trust_list.issuer_crls,
-            CertificateStore::replace_issuer_crls,
-        ),
-    ];
-    for (bit, field, replace) in lists {
-        if mask & bit != 0 {
-            replace(store, &byte_strings_to_der(field))?;
-        }
+    if mask & masks::TRUSTED_CERTIFICATES != 0 {
+        store.replace_trusted_certs_for_group(
+            certificate_group,
+            &byte_strings_to_der(&trust_list.trusted_certificates),
+        )?;
+    }
+    if mask & masks::ISSUER_CERTIFICATES != 0 {
+        store.replace_issuer_certs_for_group(
+            certificate_group,
+            &byte_strings_to_der(&trust_list.issuer_certificates),
+        )?;
+    }
+    if mask & masks::TRUSTED_CRLS != 0 {
+        store.replace_trusted_crls_for_group(
+            certificate_group,
+            &byte_strings_to_der(&trust_list.trusted_crls),
+        )?;
+    }
+    if mask & masks::ISSUER_CRLS != 0 {
+        store.replace_issuer_crls_for_group(
+            certificate_group,
+            &byte_strings_to_der(&trust_list.issuer_crls),
+        )?;
     }
     Ok(())
 }
@@ -509,7 +617,11 @@ fn set_der_list(
     }
 }
 
-fn build_trust_list_data(store: &CertificateStore, mask: u32) -> TrustListDataType {
+fn build_trust_list_data(
+    store: &CertificateStore,
+    certificate_group: CertificateGroup,
+    mask: u32,
+) -> TrustListDataType {
     let mut data = TrustListDataType {
         specified_lists: mask,
         ..Default::default()
@@ -520,14 +632,14 @@ fn build_trust_list_data(store: &CertificateStore, mask: u32) -> TrustListDataTy
         masks::TRUSTED_CERTIFICATES,
         || {
             store
-                .read_trusted_certs()
+                .read_trusted_certs_for_group(certificate_group)
                 .iter()
                 .filter_map(|c| c.to_der().ok())
                 .collect()
         },
     );
     set_der_list(&mut data.trusted_crls, mask, masks::TRUSTED_CRLS, || {
-        store.read_trusted_crls_der()
+        store.read_trusted_crls_der_for_group(certificate_group)
     });
     set_der_list(
         &mut data.issuer_certificates,
@@ -535,14 +647,14 @@ fn build_trust_list_data(store: &CertificateStore, mask: u32) -> TrustListDataTy
         masks::ISSUER_CERTIFICATES,
         || {
             store
-                .read_issuer_certs()
+                .read_issuer_certs_for_group(certificate_group)
                 .iter()
                 .filter_map(|c| c.to_der().ok())
                 .collect()
         },
     );
     set_der_list(&mut data.issuer_crls, mask, masks::ISSUER_CRLS, || {
-        store.read_issuer_crls_der()
+        store.read_issuer_crls_der_for_group(certificate_group)
     });
     data
 }
@@ -590,82 +702,121 @@ fn validate_certificate_time(cert: &X509) -> Result<(), StatusCode> {
 
 fn find_cert_by_thumbprint(
     store: &CertificateStore,
+    certificate_group: CertificateGroup,
     thumbprint: &Thumbprint,
     is_trusted_certificate: bool,
 ) -> Option<X509> {
     let certs = if is_trusted_certificate {
-        store.read_trusted_certs()
+        store.read_trusted_certs_for_group(certificate_group)
     } else {
-        store.read_issuer_certs()
+        store.read_issuer_certs_for_group(certificate_group)
     };
     certs.into_iter().find(|c| c.thumbprint() == *thumbprint)
 }
 
 /// Whether `target` (a candidate for removal) is a CA still needed to validate some *other*
 /// certificate currently in the trusted or issuer store (Part 12 §7.8.2.7).
-fn is_cert_still_needed(store: &CertificateStore, target: &X509) -> bool {
+fn is_cert_still_needed(
+    store: &CertificateStore,
+    certificate_group: CertificateGroup,
+    target: &X509,
+) -> bool {
     let target_thumbprint = target.thumbprint();
     let subject_name = target.subject_name();
     store
-        .read_trusted_certs()
+        .read_trusted_certs_for_group(certificate_group)
         .iter()
-        .chain(store.read_issuer_certs().iter())
+        .chain(store.read_issuer_certs_for_group(certificate_group).iter())
         .any(|other| other.thumbprint() != target_thumbprint && other.issuer_name() == subject_name)
 }
 
 /// Returns the standard `DefaultApplicationGroup.TrustList` object id.
 pub fn trust_list_object_id() -> NodeId {
-    NodeId::new(0, TRUST_LIST_OBJECT_ID)
+    trust_list_object_id_for_group(CertificateGroup::DefaultApplication)
+}
+
+pub(super) fn trust_list_object_id_for_group(certificate_group: CertificateGroup) -> NodeId {
+    NodeId::new(0, TrustListNodeIds::for_group(certificate_group).object)
 }
 
 /// Returns the standard `Open` method id.
 pub fn open_method_id() -> NodeId {
-    NodeId::new(0, OPEN_METHOD_ID)
+    NodeId::new(
+        0,
+        TrustListNodeIds::for_group(CertificateGroup::DefaultApplication).open,
+    )
 }
 
 /// Returns the standard `Close` method id.
 pub fn close_method_id() -> NodeId {
-    NodeId::new(0, CLOSE_METHOD_ID)
+    NodeId::new(
+        0,
+        TrustListNodeIds::for_group(CertificateGroup::DefaultApplication).close,
+    )
 }
 
 /// Returns the standard `Read` method id.
 pub fn read_method_id() -> NodeId {
-    NodeId::new(0, READ_METHOD_ID)
+    NodeId::new(
+        0,
+        TrustListNodeIds::for_group(CertificateGroup::DefaultApplication).read,
+    )
 }
 
 /// Returns the standard `Write` method id.
 pub fn write_method_id() -> NodeId {
-    NodeId::new(0, WRITE_METHOD_ID)
+    NodeId::new(
+        0,
+        TrustListNodeIds::for_group(CertificateGroup::DefaultApplication).write,
+    )
 }
 
 /// Returns the standard `GetPosition` method id.
 pub fn get_position_method_id() -> NodeId {
-    NodeId::new(0, GET_POSITION_METHOD_ID)
+    NodeId::new(
+        0,
+        TrustListNodeIds::for_group(CertificateGroup::DefaultApplication).get_position,
+    )
 }
 
 /// Returns the standard `SetPosition` method id.
 pub fn set_position_method_id() -> NodeId {
-    NodeId::new(0, SET_POSITION_METHOD_ID)
+    NodeId::new(
+        0,
+        TrustListNodeIds::for_group(CertificateGroup::DefaultApplication).set_position,
+    )
 }
 
 /// Returns the standard `OpenWithMasks` method id.
 pub fn open_with_masks_method_id() -> NodeId {
-    NodeId::new(0, OPEN_WITH_MASKS_METHOD_ID)
+    NodeId::new(
+        0,
+        TrustListNodeIds::for_group(CertificateGroup::DefaultApplication).open_with_masks,
+    )
 }
 
 /// Returns the standard `CloseAndUpdate` method id.
 pub fn close_and_update_method_id() -> NodeId {
-    NodeId::new(0, CLOSE_AND_UPDATE_METHOD_ID)
+    NodeId::new(
+        0,
+        TrustListNodeIds::for_group(CertificateGroup::DefaultApplication).close_and_update,
+    )
 }
 
 /// Returns the standard `AddCertificate` method id.
 pub fn add_certificate_method_id() -> NodeId {
-    NodeId::new(0, ADD_CERTIFICATE_METHOD_ID)
+    NodeId::new(
+        0,
+        TrustListNodeIds::for_group(CertificateGroup::DefaultApplication).add_certificate,
+    )
 }
 
 /// Returns the standard `RemoveCertificate` method id.
 pub fn remove_certificate_method_id() -> NodeId {
-    NodeId::new(0, REMOVE_CERTIFICATE_METHOD_ID)
+    NodeId::new(
+        0,
+        TrustListNodeIds::for_group(CertificateGroup::DefaultApplication).remove_certificate,
+    )
 }
 
 /// Registers the TrustList method callbacks on the core (namespace 0) node manager, sharing
@@ -675,40 +826,76 @@ pub fn register_trust_list_methods(
     node_manager: &CoreNodeManager,
     push_registry: Arc<GdsPushRegistry>,
 ) -> Arc<TrustListMethodHandler> {
-    let handler = Arc::new(TrustListMethodHandler::new(push_registry));
+    let application_handler = Arc::new(TrustListMethodHandler::new(push_registry.clone()));
+    register_trust_list_group_methods(node_manager, application_handler.clone());
+    register_trust_list_group_methods(
+        node_manager,
+        Arc::new(TrustListMethodHandler::new_for_group(
+            push_registry.clone(),
+            CertificateGroup::DefaultHttps,
+        )),
+    );
+    register_trust_list_group_methods(
+        node_manager,
+        Arc::new(TrustListMethodHandler::new_for_group(
+            push_registry,
+            CertificateGroup::DefaultUserToken,
+        )),
+    );
 
+    application_handler
+}
+
+#[cfg(all(feature = "method-call", feature = "generated-address-space"))]
+fn register_trust_list_group_methods(
+    node_manager: &CoreNodeManager,
+    handler: Arc<TrustListMethodHandler>,
+) {
     type Handle = fn(
         &TrustListMethodHandler,
         &RequestContext,
         &[Variant],
     ) -> Result<Vec<Variant>, StatusCode>;
+    let node_ids = TrustListNodeIds::for_group(handler.certificate_group);
     let bindings: [(NodeId, Handle); 10] = [
-        (open_method_id(), TrustListMethodHandler::handle_open),
         (
-            open_with_masks_method_id(),
+            NodeId::new(0, node_ids.open),
+            TrustListMethodHandler::handle_open,
+        ),
+        (
+            NodeId::new(0, node_ids.open_with_masks),
             TrustListMethodHandler::handle_open_with_masks,
         ),
-        (read_method_id(), TrustListMethodHandler::handle_read),
-        (write_method_id(), TrustListMethodHandler::handle_write),
         (
-            get_position_method_id(),
+            NodeId::new(0, node_ids.read),
+            TrustListMethodHandler::handle_read,
+        ),
+        (
+            NodeId::new(0, node_ids.write),
+            TrustListMethodHandler::handle_write,
+        ),
+        (
+            NodeId::new(0, node_ids.get_position),
             TrustListMethodHandler::handle_get_position,
         ),
         (
-            set_position_method_id(),
+            NodeId::new(0, node_ids.set_position),
             TrustListMethodHandler::handle_set_position,
         ),
-        (close_method_id(), TrustListMethodHandler::handle_close),
         (
-            close_and_update_method_id(),
+            NodeId::new(0, node_ids.close),
+            TrustListMethodHandler::handle_close,
+        ),
+        (
+            NodeId::new(0, node_ids.close_and_update),
             TrustListMethodHandler::handle_close_and_update,
         ),
         (
-            add_certificate_method_id(),
+            NodeId::new(0, node_ids.add_certificate),
             TrustListMethodHandler::handle_add_certificate,
         ),
         (
-            remove_certificate_method_id(),
+            NodeId::new(0, node_ids.remove_certificate),
             TrustListMethodHandler::handle_remove_certificate,
         ),
     ];
@@ -721,8 +908,6 @@ pub fn register_trust_list_methods(
                 invoke(&h, ctx, args)
             });
     }
-
-    handler
 }
 
 fn byte_arg(args: &[Variant], index: usize) -> Result<u8, StatusCode> {
@@ -773,5 +958,7 @@ fn string_arg(args: &[Variant], index: usize) -> Result<String, StatusCode> {
     }
 }
 
+#[cfg(all(test, feature = "events", feature = "companion-gds"))]
+mod audit_tests;
 #[cfg(test)]
 mod tests;

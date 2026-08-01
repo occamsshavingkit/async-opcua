@@ -29,7 +29,7 @@ pub use cert_chain::{
     validate_certificate_chain, CertificatePurpose, ChainValidationContext, RevocationMode,
     SuppressedFinding, SuppressibleStep, ValidationOptions,
 };
-pub use certificate_store::CertificateStore;
+pub use certificate_store::{CertificateGroup, CertificateStore};
 pub use policy::{AesDerivedKeys, PaddingInfo};
 pub use security_policy::SecurityPolicy;
 pub use thumbprint::Thumbprint;

@@ -5,7 +5,23 @@ use opcua_types::{
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::{collections::HashSet, str::FromStr, time::Duration};
 
-use crate::codec::uadp::PublisherId;
+use crate::{
+    codec::uadp::PublisherId,
+    engine::TransportKind,
+    transport::{
+        mqtt::{parse_broker_address, MqttBrokerAddress},
+        udp::UdpSubscriberEndpoint,
+    },
+};
+
+mod subscriber_security;
+
+pub(crate) use subscriber_security::{reader_groups_require_security, SubscriberSecurityConfig};
+
+pub(crate) enum ParsedSubscriberTransport {
+    Mqtt(MqttBrokerAddress),
+    Udp(UdpSubscriberEndpoint),
+}
 
 /// Message encoding formats supported by the PubSub implementation.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -255,6 +271,9 @@ pub struct DataSetReaderConfig {
         serialize_with = "serialize_node_ids"
     )]
     pub subscribed_variables: Vec<NodeId>,
+    /// MQTT broker transport settings, when configured for this reader.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mqtt_transport: Option<crate::MqttReaderTransportConfig>,
 }
 
 impl Default for DataSetReaderConfig {
@@ -276,6 +295,7 @@ impl Default for DataSetReaderConfig {
             message_kind: DataSetMessageKind::KeyFrame,
             target_variables: Vec::new(),
             subscribed_variables: Vec::new(),
+            mqtt_transport: None,
         }
     }
 }
@@ -360,7 +380,7 @@ pub struct PubSubConnectionConfig {
     pub connection_id: String,
     /// Symbolic name of the connection.
     pub name: String,
-    /// Transport URL (e.g., `mqtt://broker.local:1883` or `udp://239.0.0.1:4840`).
+    /// Transport URL (e.g., `mqtt://broker.local:1883` or `opc.udp://239.0.0.1:4840`).
     pub address: String,
     /// List of writer groups associated with this connection.
     pub writer_groups: Vec<WriterGroupConfig>,
@@ -376,23 +396,50 @@ impl PubSubConnectionConfig {
             return Ok(());
         }
 
-        let address = self.address.trim();
-        let is_subscriber_transport = address.starts_with("udp://")
-            || address.starts_with("mqtt://")
-            || address.starts_with("mqtts://");
-        if !is_subscriber_transport {
-            return Err(StatusCode::BadNotSupported);
-        }
+        self.subscriber_preflight().map(drop)
+    }
 
-        for reader_group in &self.reader_groups {
-            validate_unique_reader_names(reader_group)?;
-            for reader in &reader_group.dataset_readers {
-                reader.validate()?;
-                validate_security(reader_group, reader)?;
+    pub(crate) fn subscriber_preflight(&self) -> Result<ParsedSubscriberTransport, StatusCode> {
+        let address = self.address.trim();
+        let transport = match TransportKind::from_address(address)? {
+            TransportKind::Mqtt => ParsedSubscriberTransport::Mqtt(
+                parse_broker_address(address).map_err(|error| error.status_code())?,
+            ),
+            TransportKind::Udp => {
+                ParsedSubscriberTransport::Udp(UdpSubscriberEndpoint::parse(address)?)
+            }
+            TransportKind::Amqp | TransportKind::WebSocket => {
+                return Err(StatusCode::BadNotSupported);
+            }
+            #[cfg(feature = "tsn")]
+            TransportKind::Tsn => {
+                return Err(StatusCode::BadNotSupported);
+            }
+        };
+
+        self.validate_subscriber_readers()?;
+        Ok(transport)
+    }
+
+    pub(crate) fn validate_subscriber_readers(&self) -> Result<(), StatusCode> {
+        let mut reader_ids = HashSet::new();
+        for reader in self
+            .reader_groups
+            .iter()
+            .flat_map(|reader_group| reader_group.dataset_readers.iter())
+        {
+            if !reader_ids.insert(reader.dataset_reader_id) {
+                return Err(StatusCode::BadConfigurationError);
             }
         }
 
-        Ok(())
+        self.validated_subscriber_security().map(drop)
+    }
+
+    pub(crate) fn validated_subscriber_security(
+        &self,
+    ) -> Result<Option<SubscriberSecurityConfig>, StatusCode> {
+        subscriber_security::validated_subscriber_security(self)
     }
 }
 
@@ -406,33 +453,6 @@ fn validate_unique_reader_names(reader_group: &ReaderGroupConfig) -> Result<(), 
             return Err(StatusCode::BadConfigurationError);
         }
     }
-    Ok(())
-}
-
-fn validate_security(
-    reader_group: &ReaderGroupConfig,
-    reader: &DataSetReaderConfig,
-) -> Result<(), StatusCode> {
-    let mode = reader.security_mode.or(reader_group.security_mode);
-    if matches!(
-        mode,
-        Some(MessageSecurityMode::Sign | MessageSecurityMode::SignAndEncrypt)
-    ) {
-        let policy = reader
-            .security_policy_uri
-            .as_deref()
-            .or(reader_group.security_policy_uri.as_deref())
-            .unwrap_or_default();
-        let group_id = reader
-            .security_group_id
-            .as_deref()
-            .or(reader_group.security_group_id.as_deref())
-            .unwrap_or_default();
-        if policy.is_empty() || group_id.is_empty() {
-            return Err(StatusCode::BadConfigurationError);
-        }
-    }
-
     Ok(())
 }
 

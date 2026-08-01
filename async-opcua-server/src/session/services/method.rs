@@ -14,7 +14,9 @@ use tracing::debug_span;
 use tracing_futures::Instrument;
 
 pub(crate) async fn call(node_managers: NodeManagers, request: Request<CallRequest>) -> Response {
-    let context = request.context();
+    let context = request
+        .context()
+        .with_client_audit_entry_id(request.request.request_header.audit_entry_id.clone());
     #[cfg(feature = "events")]
     let subscriptions = request.subscriptions.clone();
     let info = request.info.clone();

@@ -285,7 +285,7 @@ async fn main() {
         #[cfg(feature = "pubsub")]
         let _pubsub_engine = {
             let mut engine = opcua::pubsub::PubSubEngine::new(pubsub_address_space);
-            if let Err(status) = engine.start_subscribers() {
+            if let Err(status) = engine.start_subscribers().await {
                 error!("Failed to start PubSub subscribers: {:?}", status);
             }
             tokio::spawn(async move {
@@ -293,7 +293,7 @@ async fn main() {
                     let connections = pubsub_config_rx.borrow().clone();
                     engine.stop_subscribers().await;
                     engine.replace_connections(connections);
-                    if let Err(status) = engine.start_subscribers() {
+                    if let Err(status) = engine.start_subscribers().await {
                         error!("Failed to apply PubSub config update: {:?}", status);
                     }
                 }

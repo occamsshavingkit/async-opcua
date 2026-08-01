@@ -1,5 +1,5 @@
 use opcua_core::sync::RwLock;
-use opcua_crypto::{SecurityPolicy, X509Data};
+use opcua_crypto::{CertificateGroup, SecurityPolicy, X509Data};
 use opcua_types::{AnonymousIdentityToken, ApplicationDescription, MessageSecurityMode, UAString};
 
 use crate::{
@@ -22,6 +22,39 @@ fn method_ids_match_the_verified_standard_nodeset() {
     assert_eq!(close_and_update_method_id(), NodeId::new(0, 12666));
     assert_eq!(add_certificate_method_id(), NodeId::new(0, 12668));
     assert_eq!(remove_certificate_method_id(), NodeId::new(0, 12670));
+
+    assert_eq!(
+        TrustListNodeIds::for_group(CertificateGroup::DefaultHttps),
+        TrustListNodeIds {
+            object: 14089,
+            open: 14095,
+            close: 14098,
+            read: 14100,
+            write: 14103,
+            get_position: 14105,
+            set_position: 14108,
+            open_with_masks: 14111,
+            close_and_update: 14114,
+            add_certificate: 14117,
+            remove_certificate: 14119,
+        }
+    );
+    assert_eq!(
+        TrustListNodeIds::for_group(CertificateGroup::DefaultUserToken),
+        TrustListNodeIds {
+            object: 14123,
+            open: 14129,
+            close: 14132,
+            read: 14134,
+            write: 14137,
+            get_position: 14139,
+            set_position: 14142,
+            open_with_masks: 14145,
+            close_and_update: 14148,
+            add_certificate: 14151,
+            remove_certificate: 14153,
+        }
+    );
 }
 
 fn unique_test_pki_dir() -> std::path::PathBuf {
@@ -82,7 +115,7 @@ fn request_context(
     (context, handle)
 }
 
-fn security_admin_request_context(
+pub(super) fn security_admin_request_context(
     security_mode: MessageSecurityMode,
 ) -> (RequestContext, crate::ServerHandle) {
     request_context(security_mode, vec![WellKnownRole::SecurityAdmin.node_id()])
@@ -103,8 +136,15 @@ fn self_signed_cert_with_cn(cn: &str) -> X509 {
     cert
 }
 
-fn handler(push_registry: Arc<GdsPushRegistry>) -> TrustListMethodHandler {
+pub(super) fn handler(push_registry: Arc<GdsPushRegistry>) -> TrustListMethodHandler {
     TrustListMethodHandler::new(push_registry)
+}
+
+fn handler_for_group(
+    push_registry: Arc<GdsPushRegistry>,
+    certificate_group: CertificateGroup,
+) -> TrustListMethodHandler {
+    TrustListMethodHandler::new_for_group(push_registry, certificate_group)
 }
 
 #[tokio::test]
@@ -229,7 +269,117 @@ async fn open_write_write_close_and_update_stages_pending_change_without_mutatin
         .read()
         .read_trusted_certs()
         .is_empty());
-    assert!(registry.transaction.read().is_some());
+    assert!(registry.transaction.read().staged().is_some());
+}
+
+#[tokio::test]
+async fn close_and_update_during_apply_stages_fresh_replacement_without_cloning_current() {
+    // Given: this session owns an applying transaction containing every optional field and a
+    // pending TrustList for a different certificate group.
+    let (context, _handle) = security_admin_request_context(MessageSecurityMode::SignAndEncrypt);
+    let registry = Arc::new(GdsPushRegistry::default());
+    let h = handler(registry.clone());
+    let current_certificate_der = vec![1, 2, 3];
+    let current_private_key_pem = vec![4, 5, 6];
+    let current_certificate_group_id = NodeId::new(0, 12555);
+    let current_certificate_type_id = NodeId::new(0, 12560);
+    let applying_trust_list = TrustListDataType {
+        specified_lists: masks::TRUSTED_CRLS,
+        trusted_crls: Some(vec![ByteString::from(vec![7, 8, 9])]),
+        ..Default::default()
+    };
+    *registry.transaction.write() = PushTransactionState::Applying {
+        current: PushTransaction {
+            owning_session_id: context.session_id(),
+            certificate_der: Some(current_certificate_der.clone()),
+            private_key_pem: Some(current_private_key_pem.clone()),
+            certificate_group_id: Some(current_certificate_group_id.clone()),
+            certificate_type_id: Some(current_certificate_type_id.clone()),
+            pending_trust_lists: std::collections::HashMap::from([(
+                CertificateGroup::DefaultHttps,
+                applying_trust_list.clone(),
+            )]),
+        },
+        replacement: None,
+    };
+    let new_cert = self_signed_cert_with_cn("replacement-trusted");
+    let replacement_trust_list = TrustListDataType {
+        specified_lists: masks::TRUSTED_CERTIFICATES,
+        trusted_certificates: Some(vec![ByteString::from(
+            new_cert.to_der().expect("cert should encode"),
+        )]),
+        ..Default::default()
+    };
+    let payload = encode_trust_list(&replacement_trust_list).expect("should encode");
+
+    // When: the owning session uploads the new TrustList through Open, Write, and
+    // CloseAndUpdate while ApplyChanges is active.
+    let open_out = h
+        .handle_open(
+            &context,
+            &[Variant::from(open_mode::WRITE | open_mode::ERASE_EXISTING)],
+        )
+        .expect("open for write should succeed");
+    let Variant::UInt32(file_handle) = open_out[0] else {
+        panic!("expected UInt32 file handle");
+    };
+    h.handle_write(
+        &context,
+        &[
+            Variant::from(file_handle),
+            Variant::from(ByteString::from(payload)),
+        ],
+    )
+    .expect("write should succeed");
+    assert_eq!(
+        h.handle_close_and_update(&context, &[Variant::from(file_handle)]),
+        Ok(vec![Variant::from(true)])
+    );
+
+    // Then: the applying transaction is unchanged and its replacement contains exactly the new
+    // TrustList, with none of the fields or TrustLists already being committed.
+    let transaction = registry.transaction.read();
+    let PushTransactionState::Applying {
+        current,
+        replacement: Some(replacement),
+    } = &*transaction
+    else {
+        panic!("expected applying transaction with replacement");
+    };
+    assert_eq!(current.owning_session_id, context.session_id());
+    assert_eq!(
+        current.certificate_der.as_deref(),
+        Some(current_certificate_der.as_slice())
+    );
+    assert_eq!(
+        current.private_key_pem.as_deref(),
+        Some(current_private_key_pem.as_slice())
+    );
+    assert_eq!(
+        current.certificate_group_id.as_ref(),
+        Some(&current_certificate_group_id)
+    );
+    assert_eq!(
+        current.certificate_type_id.as_ref(),
+        Some(&current_certificate_type_id)
+    );
+    assert_eq!(
+        &current.pending_trust_lists,
+        &std::collections::HashMap::from([(CertificateGroup::DefaultHttps, applying_trust_list,)])
+    );
+
+    assert_eq!(replacement.owning_session_id, context.session_id());
+    assert_eq!(replacement.certificate_der, None);
+    assert_eq!(replacement.private_key_pem, None);
+    assert_eq!(replacement.certificate_group_id, None);
+    assert_eq!(replacement.certificate_type_id, None);
+    assert_eq!(
+        &replacement.pending_trust_lists,
+        &std::collections::HashMap::from([(
+            CertificateGroup::DefaultApplication,
+            replacement_trust_list,
+        )])
+    );
 }
 
 #[tokio::test]
@@ -314,6 +464,32 @@ async fn add_certificate_immediately_adds_a_trusted_certificate() {
 
     let trusted = context.info.certificate_store.read().read_trusted_certs();
     assert_eq!(trusted.len(), 1);
+}
+
+#[tokio::test]
+async fn add_certificate_to_default_https_group_uses_its_own_trust_store() {
+    let (context, _handle) = security_admin_request_context(MessageSecurityMode::SignAndEncrypt);
+    let h = handler_for_group(
+        Arc::new(GdsPushRegistry::default()),
+        CertificateGroup::DefaultHttps,
+    );
+    let cert = self_signed_cert_with_cn("https-added-directly");
+    let der = cert.to_der().expect("cert should encode");
+
+    h.handle_add_certificate(
+        &context,
+        &[Variant::from(ByteString::from(der)), Variant::from(true)],
+    )
+    .expect("HTTPS add certificate should succeed");
+
+    let store = context.info.certificate_store.read();
+    assert_eq!(
+        store
+            .read_trusted_certs_for_group(CertificateGroup::DefaultHttps)
+            .len(),
+        1
+    );
+    assert!(store.read_trusted_certs().is_empty());
 }
 
 #[tokio::test]
@@ -421,11 +597,13 @@ async fn add_certificate_rejects_while_write_transaction_open_elsewhere() {
     // context1's Open(write) doesn't itself reserve the transaction (only CloseAndUpdate
     // does, per Part 12 §7.8.2.2) -- stage one directly to simulate an in-progress
     // transaction from session 1.
-    *registry.transaction.write() = Some(PushTransaction {
+    *registry.transaction.write() = PushTransactionState::Staged(PushTransaction {
         owning_session_id: 1,
         certificate_der: None,
         private_key_pem: None,
-        pending_trust_list: None,
+        certificate_group_id: None,
+        certificate_type_id: None,
+        pending_trust_lists: std::collections::HashMap::new(),
     });
 
     let cert = self_signed_cert_with_cn("blocked-add");

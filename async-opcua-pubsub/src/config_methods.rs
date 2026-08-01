@@ -5,15 +5,13 @@ use std::sync::Arc;
 use opcua_core::sync::{Mutex, RwLock};
 use opcua_server::{address_space::AddressSpace, node_manager::memory::CoreNodeManager};
 use opcua_types::{
-    AttributeId, ConfigurationVersionDataType, DataSetReaderDataType, DataSetWriterDataType,
-    ExtensionObject, FieldTargetDataType, JsonDataSetReaderMessageDataType, MessageSecurityMode,
-    MethodId, NetworkAddressUrlDataType, NodeId, NumericRange, PubSubConnectionDataType,
-    PublishedVariableDataType, ReaderGroupDataType, StatusCode, TargetVariablesDataType, UAString,
-    Variant, WriterGroupDataType,
+    ConfigurationVersionDataType, DataSetReaderDataType, DataSetWriterDataType, ExtensionObject,
+    MessageSecurityMode, MethodId, NetworkAddressUrlDataType, NodeId, PubSubConnectionDataType,
+    PublishedVariableDataType, ReaderGroupDataType, StatusCode, UAString, Variant,
+    WriterGroupDataType,
 };
 
 use crate::{
-    codec::uadp::PublisherId,
     config::{
         DataSetReaderConfig, DataSetWriterConfig, MessageEncoding, PubSubConnectionConfig,
         PublishedDataItemsConfig, PublishedDataSetConfig, ReaderGroupConfig, WriterGroupConfig,
@@ -249,87 +247,6 @@ impl ReaderGroupConfig {
                 })
                 .collect(),
         }
-    }
-}
-
-impl DataSetReaderConfig {
-    /// Converts a Part 14 `DataSetReaderDataType` into the local dataset-reader config model.
-    ///
-    /// `DataSetReaderDataType` has no reader identifier, so the caller supplies one.
-    #[must_use]
-    pub fn from_data_type(
-        value: &DataSetReaderDataType,
-        dataset_reader_id: u16,
-    ) -> DataSetReaderConfig {
-        DataSetReaderConfig {
-            name: non_empty_ua_string(&value.name),
-            dataset_reader_id,
-            dataset_writer_id: value.data_set_writer_id,
-            publisher_id: publisher_id_from_variant(&value.publisher_id),
-            writer_group_id: Some(value.writer_group_id),
-            network_message_number: None,
-            message_receive_timeout: duration_from_millis(value.message_receive_timeout),
-            metadata_major_version: Some(
-                value.data_set_meta_data.configuration_version.major_version,
-            ),
-            security_mode: security_mode_option(value.security_mode),
-            security_policy_uri: None,
-            security_group_id: non_empty_ua_string(&value.security_group_id),
-            message_encoding: message_encoding_from_settings(&value.message_settings),
-            target_variables: target_variables_from_subscribed_data_set(&value.subscribed_data_set),
-            subscribed_variables: Vec::new(),
-            ..DataSetReaderConfig::default()
-        }
-    }
-}
-
-fn message_encoding_from_settings(settings: &ExtensionObject) -> MessageEncoding {
-    if settings.inner_is::<JsonDataSetReaderMessageDataType>() {
-        MessageEncoding::Json
-    } else {
-        MessageEncoding::Uadp
-    }
-}
-
-fn target_variables_from_subscribed_data_set(
-    subscribed_data_set: &ExtensionObject,
-) -> Vec<crate::config::FieldTargetConfig> {
-    let Some(targets) = subscribed_data_set.inner_as::<TargetVariablesDataType>() else {
-        return Vec::new();
-    };
-    targets
-        .target_variables
-        .as_deref()
-        .unwrap_or_default()
-        .iter()
-        .enumerate()
-        .map(|(index, target)| field_target_from_data_type(index, target))
-        .collect()
-}
-
-fn field_target_from_data_type(
-    dataset_field_index: usize,
-    target: &FieldTargetDataType,
-) -> crate::config::FieldTargetConfig {
-    crate::config::FieldTargetConfig {
-        dataset_field_index,
-        dataset_field_id: if target.data_set_field_id == opcua_types::Guid::null() {
-            None
-        } else {
-            Some(target.data_set_field_id.clone())
-        },
-        target_node_id: target.target_node_id.clone(),
-        attribute_id: AttributeId::from_u32(target.attribute_id).unwrap_or(AttributeId::Value),
-        index_range: numeric_range_to_option(&target.write_index_range),
-        override_value_handling: target.override_value_handling,
-    }
-}
-
-fn numeric_range_to_option(range: &NumericRange) -> Option<String> {
-    if range.is_none() {
-        None
-    } else {
-        Some(range.to_string())
     }
 }
 
@@ -1204,26 +1121,6 @@ fn non_empty_ua_string(value: &UAString) -> Option<String> {
 
 fn security_mode_option(value: MessageSecurityMode) -> Option<MessageSecurityMode> {
     (value != MessageSecurityMode::Invalid).then_some(value)
-}
-
-fn duration_from_millis(value: f64) -> Option<std::time::Duration> {
-    value
-        .is_finite()
-        .then_some(value)
-        .filter(|millis| *millis > 0.0)
-        .map(|millis| std::time::Duration::from_secs_f64(millis / 1000.0))
-}
-
-fn publisher_id_from_variant(value: &Variant) -> Option<PublisherId> {
-    match value {
-        Variant::Byte(value) => Some(PublisherId::Byte(*value)),
-        Variant::UInt16(value) => Some(PublisherId::UInt16(*value)),
-        Variant::UInt32(value) => Some(PublisherId::UInt32(*value)),
-        Variant::UInt64(value) => Some(PublisherId::UInt64(*value)),
-        Variant::String(value) => Some(PublisherId::String(ua_string_to_string(value))),
-        Variant::Empty => None,
-        _ => None,
-    }
 }
 
 fn empty_published_dataset() -> PublishedDataSetConfig {

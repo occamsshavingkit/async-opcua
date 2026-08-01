@@ -21,7 +21,7 @@ use std::sync::{
 use opcua_crypto::{PrivateKey, X509};
 use opcua_types::{
     ApplicationDescription, ApplicationType, Array, ByteString, DateTime, LocalizedText,
-    MessageSecurityMode, NodeId, ServerOnNetwork, StatusCode, UAString, Variant,
+    MessageSecurityMode, NodeId, ObjectTypeId, ServerOnNetwork, StatusCode, UAString, Variant,
 };
 
 #[cfg(all(feature = "generated-address-space", feature = "companion-gds"))]
@@ -46,7 +46,7 @@ const DEFAULT_NEW_KEY_PAIR_BITS: u32 = 2048;
 const DEFAULT_CERTIFICATE_DURATION_DAYS: u32 = 365;
 
 /// `FinishRequest`'s `(Certificate, PrivateKey, IssuerCertificates)` output (Part 12 §7.9.5).
-type CompletedRequestBundle = (Vec<u8>, Option<Vec<u8>>, Vec<Vec<u8>>);
+type CompletedRequestBundle = (Vec<u8>, Option<Vec<u8>>, Vec<Vec<u8>>, NodeId, NodeId);
 
 /// A registered application. Originally a minimal, self-contained stand-in for the Pull-model's
 /// own internal certificate-issuance workflow; feature 108 extends it with the real
@@ -144,6 +144,42 @@ impl GdsApplicationRecord {
     }
 }
 
+/// Validates explicit certificate identifiers and resolves null identifiers to the defaults
+/// required by Part 12 §7.9.3/§7.9.4. The first registered group is the application's default:
+/// both registration paths seed `certificate_group_ids` with that group deterministically.
+fn validate_certificate_identifiers(
+    application: &GdsApplicationRecord,
+    certificate_group_id: &NodeId,
+    certificate_type_id: &NodeId,
+) -> Result<(NodeId, NodeId), StatusCode> {
+    let certificate_group_id = if certificate_group_id.is_null() {
+        application
+            .certificate_group_ids
+            .first()
+            .cloned()
+            .ok_or(StatusCode::BadInvalidArgument)?
+    } else if application
+        .certificate_group_ids
+        .contains(certificate_group_id)
+    {
+        certificate_group_id.clone()
+    } else {
+        return Err(StatusCode::BadInvalidArgument);
+    };
+
+    let default_certificate_type_id =
+        NodeId::from(ObjectTypeId::RsaSha256ApplicationCertificateType);
+    let certificate_type_id = if certificate_type_id.is_null() {
+        default_certificate_type_id
+    } else if certificate_type_id == &default_certificate_type_id {
+        certificate_type_id.clone()
+    } else {
+        return Err(StatusCode::BadInvalidArgument);
+    };
+
+    Ok((certificate_group_id, certificate_type_id))
+}
+
 fn uastring_array(values: &[String]) -> Option<Vec<UAString>> {
     (!values.is_empty()).then(|| values.iter().map(|v| UAString::from(v.as_str())).collect())
 }
@@ -180,6 +216,8 @@ enum PullRequestState {
 #[derive(Clone, Debug)]
 struct GdsPullRequest {
     application_id: NodeId,
+    certificate_group_id: NodeId,
+    certificate_type_id: NodeId,
     state: PullRequestState,
 }
 
@@ -419,6 +457,8 @@ impl GdsPullMethodRegistry {
         &self,
         ns: u16,
         application_id: NodeId,
+        certificate_group_id: NodeId,
+        certificate_type_id: NodeId,
         certificate_der: Vec<u8>,
         private_key: Option<Vec<u8>>,
     ) -> NodeId {
@@ -427,6 +467,8 @@ impl GdsPullMethodRegistry {
             request_id.clone(),
             GdsPullRequest {
                 application_id,
+                certificate_group_id,
+                certificate_type_id,
                 state: PullRequestState::Completed {
                     certificate_der,
                     private_key,
@@ -446,6 +488,8 @@ impl GdsPullMethodRegistry {
             request_id.clone(),
             GdsPullRequest {
                 application_id,
+                certificate_group_id: NodeId::null(),
+                certificate_type_id: NodeId::null(),
                 state: PullRequestState::Pending,
             },
         );
@@ -473,7 +517,13 @@ impl GdsPullMethodRegistry {
                 issuer_certificates,
             } => {
                 self.inner.requests.invalidate(request_id);
-                Ok((certificate_der, private_key, issuer_certificates))
+                Ok((
+                    certificate_der,
+                    private_key,
+                    issuer_certificates,
+                    request.certificate_group_id,
+                    request.certificate_type_id,
+                ))
             }
         }
     }
@@ -519,14 +569,19 @@ impl GdsPullMethodHandler {
             return Err(StatusCode::BadArgumentsMissing);
         }
         let application_id = node_id_arg(args, 0)?;
-        let _certificate_group_id = node_id_arg(args, 1)?;
-        let _certificate_type_id = node_id_arg(args, 2)?;
+        let certificate_group_id = node_id_arg(args, 1)?;
+        let certificate_type_id = node_id_arg(args, 2)?;
         let csr = non_empty_byte_string_arg(args, 3)?;
 
         let application = self
             .registry
             .application(&application_id)
             .ok_or(StatusCode::BadNotFound)?;
+        let (certificate_group_id, certificate_type_id) = validate_certificate_identifiers(
+            &application,
+            &certificate_group_id,
+            &certificate_type_id,
+        )?;
 
         let csr_der: Vec<u8> = csr
             .value
@@ -558,8 +613,22 @@ impl GdsPullMethodHandler {
         let request_id = self.registry.stage_completed_request(
             application_id.namespace,
             application_id,
+            certificate_group_id.clone(),
+            certificate_type_id.clone(),
             certificate_der,
             None,
+        );
+
+        #[cfg(feature = "events")]
+        #[cfg(feature = "companion-gds")]
+        super::audit::certificate_requested(
+            context,
+            self.directory.directory_object_id.clone(),
+            self.directory.start_signing_request_id.clone(),
+            certificate_group_id,
+            certificate_type_id,
+            super::audit::AuditAction::StartSigningRequest,
+            args,
         );
 
         Ok(vec![Variant::from(request_id)])
@@ -578,8 +647,8 @@ impl GdsPullMethodHandler {
             return Err(StatusCode::BadArgumentsMissing);
         }
         let application_id = node_id_arg(args, 0)?;
-        let _certificate_group_id = node_id_arg(args, 1)?;
-        let _certificate_type_id = node_id_arg(args, 2)?;
+        let certificate_group_id = node_id_arg(args, 1)?;
+        let certificate_type_id = node_id_arg(args, 2)?;
         let subject_name = opt_string_arg(args, 3)?;
         let _domain_names = args.get(4);
         let private_key_format = opt_string_arg(args, 5)?.unwrap_or_default();
@@ -589,6 +658,11 @@ impl GdsPullMethodHandler {
             .registry
             .application(&application_id)
             .ok_or(StatusCode::BadNotFound)?;
+        let (certificate_group_id, certificate_type_id) = validate_certificate_identifiers(
+            &application,
+            &certificate_group_id,
+            &certificate_type_id,
+        )?;
 
         if !private_key_format.is_empty()
             && !private_key_format.eq_ignore_ascii_case("PEM")
@@ -635,8 +709,22 @@ impl GdsPullMethodHandler {
         let request_id = self.registry.stage_completed_request(
             application_id.namespace,
             application_id,
+            certificate_group_id.clone(),
+            certificate_type_id.clone(),
             certificate_der,
             Some(private_key_pem),
+        );
+
+        #[cfg(feature = "events")]
+        #[cfg(feature = "companion-gds")]
+        super::audit::certificate_requested(
+            context,
+            self.directory.directory_object_id.clone(),
+            self.directory.start_new_key_pair_request_id.clone(),
+            certificate_group_id,
+            certificate_type_id,
+            super::audit::AuditAction::StartNewKeyPairRequest,
+            args,
         );
 
         Ok(vec![Variant::from(request_id)])
@@ -660,7 +748,13 @@ impl GdsPullMethodHandler {
             return Err(StatusCode::BadNotFound);
         }
 
-        let (certificate_der, private_key, issuer_certificates) = self
+        let (
+            certificate_der,
+            private_key,
+            issuer_certificates,
+            _certificate_group_id,
+            _certificate_type_id,
+        ) = self
             .registry
             .take_completed_request(&application_id, &request_id)?;
 
@@ -677,11 +771,24 @@ impl GdsPullMethodHandler {
         )
         .map_err(|_| StatusCode::BadUnexpectedError)?;
 
-        Ok(vec![
+        let outputs = vec![
             Variant::from(ByteString::from(certificate_der)),
             Variant::from(ByteString::from(private_key.unwrap_or_default())),
             Variant::Array(Box::new(issuer_certificates_array)),
-        ])
+        ];
+
+        #[cfg(feature = "events")]
+        #[cfg(feature = "companion-gds")]
+        super::audit::certificate_delivered(
+            context,
+            self.directory.directory_object_id.clone(),
+            self.directory.finish_request_id.clone(),
+            _certificate_group_id,
+            _certificate_type_id,
+            args,
+        );
+
+        Ok(outputs)
     }
 
     /// Handles `GetCertificateGroups` (§7.9.7).
@@ -790,6 +897,15 @@ impl GdsPullMethodHandler {
             record,
             self.directory.default_application_group_id.clone(),
         )?;
+        #[cfg(feature = "events")]
+        #[cfg(feature = "companion-gds")]
+        super::audit::application_registration_changed(
+            context,
+            self.directory.directory_object_id.clone(),
+            self.directory.register_application_id.clone(),
+            super::audit::AuditAction::RegisterApplication,
+            args,
+        );
         Ok(vec![Variant::from(application_id)])
     }
 
@@ -807,6 +923,15 @@ impl GdsPullMethodHandler {
         }
         let record = application_record_arg(args, 0)?;
         self.registry.update_full(record)?;
+        #[cfg(feature = "events")]
+        #[cfg(feature = "companion-gds")]
+        super::audit::application_registration_changed(
+            context,
+            self.directory.directory_object_id.clone(),
+            self.directory.update_application_id.clone(),
+            super::audit::AuditAction::UpdateApplication,
+            args,
+        );
         Ok(vec![])
     }
 
@@ -825,6 +950,15 @@ impl GdsPullMethodHandler {
         }
         let application_id = node_id_arg(args, 0)?;
         self.registry.unregister(&application_id)?;
+        #[cfg(feature = "events")]
+        #[cfg(feature = "companion-gds")]
+        super::audit::application_registration_changed(
+            context,
+            self.directory.directory_object_id.clone(),
+            self.directory.unregister_application_id.clone(),
+            super::audit::AuditAction::UnregisterApplication,
+            args,
+        );
         Ok(vec![])
     }
 

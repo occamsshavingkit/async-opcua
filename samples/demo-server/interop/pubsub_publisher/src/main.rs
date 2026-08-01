@@ -60,7 +60,9 @@ async fn main() {
     );
 
     let cancel = CancellationToken::new();
-    let _handle = bridge.start(cancel.clone());
+    let _handle = bridge
+        .start(cancel.clone())
+        .expect("interop UDP bridge should start with a valid destination");
 
     println!("Publishing UADP to udp://239.0.0.1:4840 (publisher=InteropPublisher1, writerGroup=1, writer=101, value=72.5)");
 

@@ -1,9 +1,39 @@
-use std::str::FromStr;
+use std::{fmt, str::FromStr};
 
 use lapin::uri::AMQPUri;
 use opcua_types::StatusCode;
 
 use super::{AmqpAddressSettings, DEFAULT_AMQP_PORT, DEFAULT_ROUTING_KEY};
+
+struct SanitizedAmqpEndpoint<'a> {
+    scheme: &'static str,
+    authority: &'a str,
+}
+
+impl fmt::Display for SanitizedAmqpEndpoint<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "{}://{}", self.scheme, self.authority)
+    }
+}
+
+impl AmqpAddressSettings {
+    pub(super) fn sanitized_endpoint(&self) -> impl fmt::Display + '_ {
+        let (scheme, authority) = match self.broker_url.strip_prefix("amqps://") {
+            Some(authority) => ("amqps", authority),
+            None => (
+                "amqp",
+                self.broker_url
+                    .strip_prefix("amqp://")
+                    .unwrap_or(&self.broker_url),
+            ),
+        };
+        let authority = authority
+            .rsplit_once('@')
+            .map_or(authority, |(_, authority)| authority);
+
+        SanitizedAmqpEndpoint { scheme, authority }
+    }
+}
 
 /// Parses an AMQP address into broker URL + routing key, applying sensible
 /// defaults for the port and routing key when the caller omits them.

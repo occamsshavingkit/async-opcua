@@ -12,11 +12,12 @@ use opcua_types::{
 };
 use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
+use tracing::instrument::WithSubscriber;
 
 use crate::{
     codec::json::{opcua_to_json_value, JsonDataSetMessage, JsonNetworkMessage},
     codec::uadp::{PublisherId, UadpDataSetMessage, UadpNetworkMessage},
-    transport::supervise_transport,
+    transport::{supervise_transport, wait_for_reconnect},
     MessageEncoding, PubSubConnectionConfig, PubSubPublisher,
 };
 
@@ -88,8 +89,8 @@ impl PubSubPublisher for AmqpPublisher {
                         Ok(connection) => connection,
                         Err(error) => {
                             tracing::warn!(
-                                broker_url = %settings.broker_url,
-                                ?error,
+                                broker_endpoint = %settings.sanitized_endpoint(),
+                                error = %error,
                                 "failed to connect AMQP publisher"
                             );
                             wait_for_reconnect(&cancel_token, &mut backoff).await;
@@ -155,7 +156,8 @@ impl PubSubPublisher for AmqpPublisher {
             };
 
             supervise_transport(&cancel_token, transport_loop, writer_futures).await;
-        });
+        }
+        .with_current_subscriber());
 
         Ok(handle)
     }
@@ -259,13 +261,4 @@ async fn publish_payload(
         .await?;
     let _ = confirmation.await?;
     Ok(())
-}
-
-async fn wait_for_reconnect(cancel_token: &CancellationToken, backoff: &mut Duration) {
-    tokio::select! {
-        _ = cancel_token.cancelled() => {}
-        _ = sleep(*backoff) => {
-            *backoff = std::cmp::min(*backoff * 2, Duration::from_secs(60));
-        }
-    }
 }

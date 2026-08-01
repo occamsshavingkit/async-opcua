@@ -10,6 +10,8 @@ use crate::{MessageEncoding, PubSubConnectionConfig, PubSubPublisher};
 
 use super::*;
 
+mod logging;
+
 #[tokio::test]
 async fn start_publishing_rejects_malformed_broker_before_spawn() {
     // Given: an AMQP publisher configured with a malformed broker address.

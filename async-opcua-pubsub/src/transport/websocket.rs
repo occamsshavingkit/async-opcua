@@ -1,7 +1,8 @@
+use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
 
-use futures::SinkExt;
+use futures::{stream::FuturesUnordered, SinkExt};
 use opcua_core::sync::RwLock;
 use opcua_server::address_space::{AddressSpace, NodeType};
 use opcua_types::{
@@ -11,16 +12,44 @@ use tokio::time::sleep;
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_util::sync::CancellationToken;
+use url::{Host, Url};
 
 use crate::{
     codec::json::{opcua_to_json_value, JsonDataSetMessage, JsonNetworkMessage},
     codec::uadp::{PublisherId, UadpDataSetMessage, UadpNetworkMessage},
+    transport::{supervise_transport, wait_for_reconnect},
     MessageEncoding, PubSubConnectionConfig, PubSubPublisher,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct WebSocketAddressSettings {
-    url: String,
+    url: Url,
+}
+
+struct SanitizedWebSocketEndpoint<'a> {
+    url: &'a Url,
+}
+
+impl fmt::Display for SanitizedWebSocketEndpoint<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "{}://", self.url.scheme())?;
+        match self.url.host() {
+            Some(Host::Domain(domain)) => formatter.write_str(domain)?,
+            Some(Host::Ipv4(address)) => write!(formatter, "{address}")?,
+            Some(Host::Ipv6(address)) => write!(formatter, "[{address}]")?,
+            None => formatter.write_str("<unknown>")?,
+        }
+        if let Some(port) = self.url.port_or_known_default() {
+            write!(formatter, ":{port}")?;
+        }
+        Ok(())
+    }
+}
+
+impl WebSocketAddressSettings {
+    fn sanitized_endpoint(&self) -> impl fmt::Display + '_ {
+        SanitizedWebSocketEndpoint { url: &self.url }
+    }
 }
 
 /// WebSocket implementation of `PubSubPublisher`.
@@ -48,11 +77,7 @@ impl WebSocketPublisher {
             let settings = match parse_websocket_address(&destination_address) {
                 Ok(settings) => settings,
                 Err(error) => {
-                    tracing::warn!(
-                        address = %destination_address,
-                        ?error,
-                        "invalid WebSocket PubSub destination"
-                    );
+                    tracing::warn!(error = %error, "invalid WebSocket PubSub destination");
                     return;
                 }
             };
@@ -62,14 +87,22 @@ impl WebSocketPublisher {
                 return;
             };
 
-            match connect_async(&settings.url).await {
+            match connect_async(settings.url.as_str()).await {
                 Ok((mut websocket, _)) => {
                     if let Err(error) = websocket.send(frame).await {
-                        tracing::warn!(url = %settings.url, ?error, "failed to publish WebSocket payload");
+                        tracing::warn!(
+                            websocket_endpoint = %settings.sanitized_endpoint(),
+                            error = %error,
+                            "failed to publish WebSocket payload"
+                        );
                     }
                 }
                 Err(error) => {
-                    tracing::warn!(url = %settings.url, ?error, "failed to connect WebSocket publisher");
+                    tracing::warn!(
+                        websocket_endpoint = %settings.sanitized_endpoint(),
+                        error = %error,
+                        "failed to connect WebSocket publisher"
+                    );
                 }
             }
         });
@@ -87,15 +120,15 @@ impl PubSubPublisher for WebSocketPublisher {
         let publisher_id = connection_config.connection_id.clone();
 
         let handle = tokio::spawn(async move {
-            let mut group_handles = Vec::with_capacity(connection_config.writer_groups.len());
+            let writer_futures = FuturesUnordered::new();
 
             for writer_group in connection_config.writer_groups {
                 let address_space = address_space.clone();
                 let cancel_token = cancel_token.clone();
                 let publisher_id = publisher_id.clone();
-                let url = settings.url.clone();
+                let settings = settings.clone();
 
-                group_handles.push(tokio::spawn(async move {
+                writer_futures.push(async move {
                     let mut sequence_number: u16 = 0;
                     let mut backoff = Duration::from_secs(1);
 
@@ -104,10 +137,15 @@ impl PubSubPublisher for WebSocketPublisher {
                             break;
                         }
 
-                        let (mut websocket, _) = match connect_async(&url).await {
+                        let (mut websocket, _) =
+                            match connect_async(settings.url.as_str()).await {
                             Ok(connection) => connection,
                             Err(error) => {
-                                tracing::warn!(%url, ?error, "failed to connect WebSocket publisher");
+                                tracing::warn!(
+                                    websocket_endpoint = %settings.sanitized_endpoint(),
+                                    error = %error,
+                                    "failed to connect WebSocket publisher"
+                                );
                                 wait_for_reconnect(&cancel_token, &mut backoff).await;
                                 continue;
                             }
@@ -147,20 +185,20 @@ impl PubSubPublisher for WebSocketPublisher {
                             };
 
                             if let Err(error) = websocket.send(frame).await {
-                                tracing::warn!(%url, ?error, "failed to publish WebSocket payload");
+                                tracing::warn!(
+                                    websocket_endpoint = %settings.sanitized_endpoint(),
+                                    error = %error,
+                                    "failed to publish WebSocket payload"
+                                );
                                 wait_for_reconnect(&cancel_token, &mut backoff).await;
                                 break;
                             }
                         }
                     }
-                }));
+                });
             }
 
-            cancel_token.cancelled().await;
-
-            for group_handle in group_handles {
-                group_handle.abort();
-            }
+            supervise_transport(&cancel_token, std::future::pending(), writer_futures).await;
         });
 
         Ok(handle)
@@ -188,6 +226,8 @@ pub(crate) fn parse_websocket_address(
     } else {
         format!("ws://{address}")
     };
+
+    let url = Url::parse(&url).map_err(|_| StatusCode::BadInvalidArgument)?;
 
     Ok(WebSocketAddressSettings { url })
 }
@@ -281,15 +321,6 @@ fn build_writer_group_payload(
     }
 }
 
-async fn wait_for_reconnect(cancel_token: &CancellationToken, backoff: &mut Duration) {
-    tokio::select! {
-        _ = cancel_token.cancelled() => {}
-        _ = sleep(*backoff) => {
-            *backoff = std::cmp::min(*backoff * 2, Duration::from_secs(60));
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -298,28 +329,28 @@ mod tests {
     fn parses_websocket_address_with_prefix() {
         let settings = parse_websocket_address("ws://broker.local:9001/opcua").unwrap();
 
-        assert_eq!(settings.url, "ws://broker.local:9001/opcua");
+        assert_eq!(settings.url.as_str(), "ws://broker.local:9001/opcua");
     }
 
     #[test]
     fn parses_mixed_case_ws_scheme_as_lowercase() {
         let settings = parse_websocket_address("Ws://broker.local:9001/opcua").unwrap();
 
-        assert_eq!(settings.url, "ws://broker.local:9001/opcua");
+        assert_eq!(settings.url.as_str(), "ws://broker.local:9001/opcua");
     }
 
     #[test]
     fn parses_mixed_case_wss_scheme_as_lowercase() {
         let settings = parse_websocket_address("WSS://broker.local:9001/opcua").unwrap();
 
-        assert_eq!(settings.url, "wss://broker.local:9001/opcua");
+        assert_eq!(settings.url.as_str(), "wss://broker.local:9001/opcua");
     }
 
     #[test]
     fn parses_websocket_address_without_prefix_as_ws_url() {
         let settings = parse_websocket_address("broker.local:9001/opcua").unwrap();
 
-        assert_eq!(settings.url, "ws://broker.local:9001/opcua");
+        assert_eq!(settings.url.as_str(), "ws://broker.local:9001/opcua");
     }
 
     #[test]

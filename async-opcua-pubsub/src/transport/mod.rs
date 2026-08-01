@@ -1,4 +1,4 @@
-use std::{future::Future, panic::AssertUnwindSafe};
+use std::{future::Future, panic::AssertUnwindSafe, time::Duration};
 
 use futures::{stream::FuturesUnordered, FutureExt, StreamExt};
 use tokio_util::sync::CancellationToken;
@@ -49,6 +49,15 @@ pub(crate) async fn supervise_transport<F, W>(
                     tracing::error!("transport writer future panicked");
                 }
             }
+        }
+    }
+}
+
+pub(crate) async fn wait_for_reconnect(cancel_token: &CancellationToken, backoff: &mut Duration) {
+    tokio::select! {
+        _ = cancel_token.cancelled() => {}
+        _ = tokio::time::sleep(*backoff) => {
+            *backoff = std::cmp::min(*backoff * 2, Duration::from_secs(60));
         }
     }
 }

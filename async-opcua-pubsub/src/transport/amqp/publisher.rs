@@ -169,6 +169,8 @@ fn build_writer_group_payload(
     publisher_id: &str,
     sequence_number: &mut u16,
 ) -> Option<Vec<u8>> {
+    let ctx_owned = ContextOwned::default();
+    let ctx = ctx_owned.context();
     let mut json_dataset_messages = Vec::new();
     let mut uadp_dataset_messages = Vec::new();
 
@@ -178,8 +180,6 @@ fn build_writer_group_payload(
 
         for node_id in &writer.published_dataset.published_variables {
             if let Some(NodeType::Variable(var)) = space.find(node_id).as_deref() {
-                let ctx_owned = ContextOwned::default();
-                let ctx = ctx_owned.context();
                 let data_value = var.value(
                     TimestampsToReturn::Both,
                     &NumericRange::None,
@@ -238,8 +238,6 @@ fn build_writer_group_payload(
                 sequence_number: *sequence_number,
                 dataset_messages: uadp_dataset_messages,
             };
-            let ctx_owned = ContextOwned::default();
-            let ctx = ctx_owned.context();
             Some(msg.encode_to_vec(&ctx))
         }
     }

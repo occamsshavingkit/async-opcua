@@ -81,8 +81,6 @@ impl PubSubPublisher for MqttPublisher {
     ) -> Result<tokio::task::JoinHandle<()>, StatusCode> {
         let broker_address = parse_broker_address(&connection_config.address)
             .map_err(|error| error.status_code())?;
-        let host = broker_address.host().to_owned();
-        let port = broker_address.port();
 
         let address_space = self.address_space.clone();
         let cache = self.cache.clone();
@@ -110,63 +108,70 @@ impl PubSubPublisher for MqttPublisher {
                             _ = sleep(Duration::from_millis(writer_group.publishing_interval)) => {}
                         }
 
-                        // Query address space
-                        let space = address_space.read();
-                        let mut json_dataset_messages = Vec::new();
-                        let mut uadp_dataset_messages = Vec::new();
+                        // Keep the address-space read guard scoped to traversal only. This block
+                        // ends before the next loop iteration can await; the message vectors remain
+                        // owned and usable while payloads are formatted and cached below.
+                        let (json_dataset_messages, uadp_dataset_messages) = {
+                            let space = address_space.read();
+                            let mut json_dataset_messages = Vec::new();
+                            let mut uadp_dataset_messages = Vec::new();
 
-                        for writer in &writer_group.dataset_writers {
-                            let mut payload_map = std::collections::HashMap::new();
-                            let mut uadp_fields = Vec::new();
+                            for writer in &writer_group.dataset_writers {
+                                let mut payload_map = std::collections::HashMap::new();
+                                let mut uadp_fields = Vec::new();
 
-                            for node_id in &writer.published_dataset.published_variables {
-                                if let Some(node) = space.find(node_id) {
-                                    if let NodeType::Variable(ref var) = *node {
-                                        // Use standard OPC UA getter
-                                        let ctx_owned = ContextOwned::default();
-                                        let ctx = ctx_owned.context();
-                                        let data_value = var.value(
-                                            TimestampsToReturn::Both,
-                                            &NumericRange::None,
-                                            &DataEncoding::Binary,
-                                            0.0,
-                                        );
+                                for node_id in &writer.published_dataset.published_variables {
+                                    if let Some(node) = space.find(node_id) {
+                                        if let NodeType::Variable(ref var) = *node {
+                                            // Use standard OPC UA getter
+                                            let ctx_owned = ContextOwned::default();
+                                            let ctx = ctx_owned.context();
+                                            let data_value = var.value(
+                                                TimestampsToReturn::Both,
+                                                &NumericRange::None,
+                                                &DataEncoding::Binary,
+                                                0.0,
+                                            );
 
-                                        // For JSON
-                                        if writer_group.encoding == MessageEncoding::Json {
-                                            if let Ok(val) = opcua_to_json_value(&data_value, &ctx)
-                                            {
-                                                payload_map.insert(node_id.to_string(), val);
+                                            // For JSON
+                                            if writer_group.encoding == MessageEncoding::Json {
+                                                if let Ok(val) =
+                                                    opcua_to_json_value(&data_value, &ctx)
+                                                {
+                                                    payload_map.insert(node_id.to_string(), val);
+                                                }
+                                            } else if let Some(ref val) = data_value.value {
+                                                // For UADP
+                                                uadp_fields.push(val.clone());
                                             }
-                                        } else if let Some(ref val) = data_value.value {
-                                            // For UADP
-                                            uadp_fields.push(val.clone());
                                         }
+                                    }
+                                }
+
+                                sequence_number = sequence_number.wrapping_add(1);
+
+                                match writer_group.encoding {
+                                    MessageEncoding::Json => {
+                                        json_dataset_messages.push(JsonDataSetMessage {
+                                            dataset_writer_id: writer.dataset_writer_id,
+                                            sequence_number,
+                                            payload: payload_map,
+                                        });
+                                    }
+                                    MessageEncoding::Uadp => {
+                                        uadp_dataset_messages.push(UadpDataSetMessage {
+                                            dataset_writer_id: writer.dataset_writer_id,
+                                            sequence_number,
+                                            timestamp: Some(opcua_types::DateTime::now()),
+                                            status: Some(StatusCode::Good),
+                                            fields: uadp_fields,
+                                        });
                                     }
                                 }
                             }
 
-                            sequence_number = sequence_number.wrapping_add(1);
-
-                            match writer_group.encoding {
-                                MessageEncoding::Json => {
-                                    json_dataset_messages.push(JsonDataSetMessage {
-                                        dataset_writer_id: writer.dataset_writer_id,
-                                        sequence_number,
-                                        payload: payload_map,
-                                    });
-                                }
-                                MessageEncoding::Uadp => {
-                                    uadp_dataset_messages.push(UadpDataSetMessage {
-                                        dataset_writer_id: writer.dataset_writer_id,
-                                        sequence_number,
-                                        timestamp: Some(opcua_types::DateTime::now()),
-                                        status: Some(StatusCode::Good),
-                                        fields: uadp_fields,
-                                    });
-                                }
-                            }
-                        }
+                            (json_dataset_messages, uadp_dataset_messages)
+                        };
 
                         // Format and queue payload
                         let topic = format!("opcua/telemetry/{}", writer_group.writer_group_id);
@@ -201,9 +206,12 @@ impl PubSubPublisher for MqttPublisher {
                 });
             }
 
-            let transport_loop = publisher::run_transport_loop(&cancel_token, &host, port, &cache);
+            let mut publish_state = publisher::PublishTaskState::new(cache);
+            let transport_loop =
+                publisher::run_transport_loop(&cancel_token, &broker_address, &mut publish_state);
 
             supervise_transport(&cancel_token, transport_loop, writer_futures).await;
+            publish_state.restore();
         });
 
         Ok(handle)

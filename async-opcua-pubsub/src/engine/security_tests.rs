@@ -9,9 +9,11 @@ use crate::{
     PublisherId, UadpDataSetMessage, UadpNetworkMessage,
 };
 
-use super::super::{CandidateTokenSnapshot, PubSubEngine, ReplayGroupState, ReplayStreamIdentity};
+use super::super::{
+    CandidateTokenSnapshot, PubSubEngine, ReplayGroupKey, ReplayGroupState, ReplayStreamIdentity,
+    MAX_REPLAY_STREAMS_PER_SECURITY_GROUP,
+};
 
-const TEST_REPLAY_STREAM_CAPACITY: usize = 1024;
 const TEST_SECURITY_GROUP_ID: &str = "replay-capacity-group";
 const TEST_SECURITY_MODE: MessageSecurityMode = MessageSecurityMode::SignAndEncrypt;
 const TEST_SECURITY_POLICY: SecurityPolicy = SecurityPolicy::PubSubAes256Ctr;
@@ -112,10 +114,12 @@ fn authenticated_unseen_stream_is_rejected_at_capacity_without_evicting_establis
 
     {
         let mut replay_groups = engine.replay_windows.write();
-        let replay_group = replay_groups.get_mut(TEST_SECURITY_GROUP_ID).unwrap();
+        let replay_group = replay_groups
+            .get_mut(&ReplayGroupKey::global(TEST_SECURITY_GROUP_ID))
+            .unwrap();
         // inv: before offset k, replay state contains the established stream plus k unique seeded streams.
         // term: publisher_offset increases by one toward the fixed capacity-minus-one bound.
-        for publisher_offset in 0..(TEST_REPLAY_STREAM_CAPACITY - 1) {
+        for publisher_offset in 0..(MAX_REPLAY_STREAMS_PER_SECURITY_GROUP - 1) {
             let publisher_id = u32::try_from(publisher_offset).unwrap();
             let identity = ReplayStreamIdentity::new(&PublisherId::UInt32(publisher_id), 99);
             let previous = replay_group
@@ -123,7 +127,10 @@ fn authenticated_unseen_stream_is_rejected_at_capacity_without_evicting_establis
                 .insert(identity, HashMap::from([(token_id, ReplayWindow::new())]));
             assert!(previous.is_none());
         }
-        assert_eq!(replay_group.streams.len(), TEST_REPLAY_STREAM_CAPACITY);
+        assert_eq!(
+            replay_group.streams.len(),
+            MAX_REPLAY_STREAMS_PER_SECURITY_GROUP
+        );
     }
 
     engine
@@ -157,11 +164,11 @@ fn authenticated_unseen_stream_is_rejected_at_capacity_without_evicting_establis
         engine
             .replay_windows
             .read()
-            .get(TEST_SECURITY_GROUP_ID)
+            .get(&ReplayGroupKey::global(TEST_SECURITY_GROUP_ID))
             .unwrap()
             .streams
             .len(),
-        TEST_REPLAY_STREAM_CAPACITY
+        MAX_REPLAY_STREAMS_PER_SECURITY_GROUP
     );
 }
 
@@ -207,7 +214,7 @@ fn stale_authenticated_token_is_rejected_after_rotation_prunes_it() {
 
     engine
         .check_authenticated_replay(
-            TEST_SECURITY_GROUP_ID,
+            ReplayGroupKey::global(TEST_SECURITY_GROUP_ID),
             stale_candidates,
             &seed_message,
             seed_token_id,
@@ -224,12 +231,12 @@ fn stale_authenticated_token_is_rejected_after_rotation_prunes_it() {
     engine
         .replay_windows
         .write()
-        .get_mut(TEST_SECURITY_GROUP_ID)
+        .get_mut(&ReplayGroupKey::global(TEST_SECURITY_GROUP_ID))
         .unwrap()
         .reconcile_candidate_tokens(live_candidates);
 
     let result = engine.check_authenticated_replay(
-        TEST_SECURITY_GROUP_ID,
+        ReplayGroupKey::global(TEST_SECURITY_GROUP_ID),
         stale_candidates,
         &stale_message,
         stale_token_id,
@@ -239,7 +246,7 @@ fn stale_authenticated_token_is_rejected_after_rotation_prunes_it() {
     assert!(engine
         .replay_windows
         .read()
-        .get(TEST_SECURITY_GROUP_ID)
+        .get(&ReplayGroupKey::global(TEST_SECURITY_GROUP_ID))
         .unwrap()
         .streams
         .is_empty());

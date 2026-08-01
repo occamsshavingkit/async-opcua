@@ -29,7 +29,7 @@ use crate::{
 };
 
 // Bounds retained authenticated identities to resist key-holder memory exhaustion.
-const MAX_REPLAY_STREAMS_PER_SECURITY_GROUP: usize = 1024;
+pub(super) const MAX_REPLAY_STREAMS_PER_SECURITY_GROUP: usize = 1024;
 
 #[derive(Eq, Hash, PartialEq)]
 enum ReplayPublisherId {
@@ -65,6 +65,37 @@ impl ReplayStreamIdentity {
         Self {
             publisher_id: publisher_id.into(),
             writer_group_id,
+        }
+    }
+}
+
+#[derive(Eq, Hash, PartialEq)]
+enum ReplayGroupKey {
+    Global(String),
+    Connection {
+        security_group_id: String,
+        connection_id: String,
+    },
+}
+
+impl ReplayGroupKey {
+    fn global(security_group_id: &str) -> Self {
+        Self::Global(security_group_id.to_string())
+    }
+
+    fn connection(security_group_id: &str, connection_id: &str) -> Self {
+        Self::Connection {
+            security_group_id: security_group_id.to_string(),
+            connection_id: connection_id.to_string(),
+        }
+    }
+
+    fn security_group_id(&self) -> &str {
+        match self {
+            Self::Global(security_group_id)
+            | Self::Connection {
+                security_group_id, ..
+            } => security_group_id,
         }
     }
 }
@@ -122,7 +153,7 @@ pub struct PubSubEngine {
     address_space: Arc<RwLock<AddressSpace>>,
     connections: Vec<PubSubConnectionConfig>,
     security_groups: HashMap<String, SharedSecurityGroup>,
-    replay_windows: RwLock<HashMap<String, ReplayGroupState>>,
+    replay_windows: RwLock<HashMap<ReplayGroupKey, ReplayGroupState>>,
     cancel_token: Option<CancellationToken>,
     publisher_handles: Vec<JoinHandle<()>>,
     subscriber_runtime: Option<Arc<RwLock<SubscriberRuntime>>>,

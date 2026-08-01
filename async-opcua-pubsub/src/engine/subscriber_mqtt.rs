@@ -1,13 +1,8 @@
-use std::sync::Arc;
-
-use opcua_core::sync::RwLock;
 use opcua_types::ContextOwned;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    config::DataSetReaderConfig,
-    subscriber::SubscriberRuntime,
     transport::mqtt::{
         quality_of_service, start_mqtt_subscriber_with_config, MqttBrokerAddress,
         MqttSubscriberConfig,
@@ -15,11 +10,11 @@ use crate::{
     MqttDeliveryGuarantee, PubSubConnectionConfig,
 };
 
-use super::{DatagramQueue, PubSubEngine};
+use super::{subscriber::SubscriberDatagramProcessor, DatagramQueue, PubSubEngine};
 
 struct MqttForwarder {
-    runtime: Arc<RwLock<SubscriberRuntime>>,
-    reader: DataSetReaderConfig,
+    processor: SubscriberDatagramProcessor,
+    reader_id: u16,
     payload_rx: tokio::sync::mpsc::Receiver<Vec<u8>>,
     cancel: CancellationToken,
     connection_id: String,
@@ -39,16 +34,12 @@ impl MqttForwarder {
                     _ = self.cancel.cancelled() => break,
                     payload = self.payload_rx.recv() => {
                         let Some(payload) = payload else { break };
-                        if let Err(status) = self
-                            .runtime
-                            .write()
-                            .process_datagram_for_reader(&self.reader, &payload, &ctx)
-                        {
+                        if let Err(status) = self.processor.process(&payload, &ctx) {
                             tracing::debug!(
                                 ?status,
                                 connection_id = %self.connection_id,
                                 topic = %self.topic,
-                                reader_id = self.reader.dataset_reader_id,
+                                reader_id = self.reader_id,
                                 "dropped PubSub subscriber MQTT payload"
                             );
                         }
@@ -74,55 +65,60 @@ impl PubSubEngine {
         &self,
         connection: PubSubConnectionConfig,
         broker_address: MqttBrokerAddress,
-        runtime: Arc<RwLock<SubscriberRuntime>>,
+        processors: Vec<SubscriberDatagramProcessor>,
         cancel_token: CancellationToken,
     ) -> Vec<JoinHandle<()>> {
         let connection_id = connection.connection_id.clone();
         let mut handles: Vec<JoinHandle<()>> = Vec::new();
 
-        for reader_group in &connection.reader_groups {
-            for reader in &reader_group.dataset_readers {
-                let reader = reader.clone();
-                let topic_filter = reader.mqtt_topic_filter(reader_group.reader_group_id);
-                let delivery_guarantee = reader
-                    .mqtt_transport
-                    .as_ref()
-                    .map_or(MqttDeliveryGuarantee::AtLeastOnce, |transport| {
-                        transport.delivery_guarantee
-                    });
-                let subscriber_config = MqttSubscriberConfig::new(
-                    broker_address.clone(),
-                    topic_filter.clone(),
-                    quality_of_service(delivery_guarantee),
-                );
+        let readers = connection.reader_groups.iter().flat_map(|reader_group| {
+            reader_group
+                .dataset_readers
+                .iter()
+                .cloned()
+                .map(move |reader| (reader_group.reader_group_id, reader))
+        });
+        for ((reader_group_id, reader), processor) in readers.zip(processors) {
+            let reader_id = reader.dataset_reader_id;
+            let topic_filter = reader.mqtt_topic_filter(reader_group_id);
+            let delivery_guarantee = reader
+                .mqtt_transport
+                .as_ref()
+                .map_or(MqttDeliveryGuarantee::AtLeastOnce, |transport| {
+                    transport.delivery_guarantee
+                });
+            let subscriber_config = MqttSubscriberConfig::new(
+                broker_address.clone(),
+                topic_filter.clone(),
+                quality_of_service(delivery_guarantee),
+            );
 
-                let (queue, payload_rx) = DatagramQueue::new(self.datagram_queue_capacity);
-                // Raw sender for the broker subscriber task, which uses
-                // `try_send` and treats `Full` as `BadTooManyPublishRequests`
-                // (see `transport::mqtt::start_mqtt_subscriber`).
-                let payload_tx = queue.sender();
+            let (queue, payload_rx) = DatagramQueue::new(self.datagram_queue_capacity);
+            // Raw sender for the broker subscriber task, which uses
+            // `try_send` and treats `Full` as `BadTooManyPublishRequests`
+            // (see `transport::mqtt::start_mqtt_subscriber`).
+            let payload_tx = queue.sender();
 
-                // Subscriber task: connects to the broker (with reconnect
-                // backoff) and forwards published payloads to the channel.
-                let subscriber_handle = start_mqtt_subscriber_with_config(
-                    subscriber_config,
-                    payload_tx,
-                    cancel_token.clone(),
-                );
-                handles.push(subscriber_handle);
+            // Subscriber task: connects to the broker (with reconnect
+            // backoff) and forwards published payloads to the channel.
+            let subscriber_handle = start_mqtt_subscriber_with_config(
+                subscriber_config,
+                payload_tx,
+                cancel_token.clone(),
+            );
+            handles.push(subscriber_handle);
 
-                handles.push(
-                    MqttForwarder {
-                        runtime: runtime.clone(),
-                        reader,
-                        payload_rx,
-                        cancel: cancel_token.clone(),
-                        connection_id: connection_id.clone(),
-                        topic: topic_filter,
-                    }
-                    .spawn(),
-                );
-            }
+            handles.push(
+                MqttForwarder {
+                    processor,
+                    reader_id,
+                    payload_rx,
+                    cancel: cancel_token.clone(),
+                    connection_id: connection_id.clone(),
+                    topic: topic_filter,
+                }
+                .spawn(),
+            );
         }
 
         handles

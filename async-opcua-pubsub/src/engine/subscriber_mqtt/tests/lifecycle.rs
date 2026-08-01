@@ -9,7 +9,7 @@ use tokio_util::sync::CancellationToken;
 use super::{connection, reader};
 use crate::{
     codec::uadp::{PublisherId, UadpDataSetMessage, UadpNetworkMessage},
-    engine::subscriber_mqtt::MqttForwarder,
+    engine::{subscriber::SubscriberDatagramProcessor, subscriber_mqtt::MqttForwarder},
     MessageEncoding, SubscriberError, SubscriberRuntime,
 };
 
@@ -27,9 +27,11 @@ async fn mqtt_forwarder_records_custom_fragment_drop_only_for_owner() {
         .expect("reader fixture should be valid"),
     ));
     let (payload_tx, payload_rx) = tokio::sync::mpsc::channel(1);
+    let processor =
+        SubscriberDatagramProcessor::new(runtime.clone(), "mqtt-conn", vec![owner], None);
     let forwarder = MqttForwarder {
-        runtime: runtime.clone(),
-        reader: owner,
+        processor,
+        reader_id: 1,
         payload_rx,
         cancel: CancellationToken::new(),
         connection_id: "mqtt-conn".to_string(),
@@ -74,9 +76,10 @@ async fn mqtt_forwarder_stops_when_cancelled_without_payload() {
     ));
     let (_payload_tx, payload_rx) = tokio::sync::mpsc::channel(1);
     let cancel = CancellationToken::new();
+    let processor = SubscriberDatagramProcessor::new(runtime, "mqtt-conn", vec![owner], None);
     let forwarder = MqttForwarder {
-        runtime,
-        reader: owner,
+        processor,
+        reader_id: 1,
         payload_rx,
         cancel: cancel.clone(),
         connection_id: "mqtt-conn".to_string(),
@@ -133,11 +136,13 @@ async fn mqtt_forwarder_prioritizes_ready_cancellation_over_queued_payload() {
         .expect("bounded test channel should accept one payload");
     let cancel = CancellationToken::new();
     cancel.cancel();
+    let processor =
+        SubscriberDatagramProcessor::new(runtime.clone(), "mqtt-conn", vec![owner], None);
 
     // When the forwarder starts with both select branches ready.
     let forwarder = MqttForwarder {
-        runtime: runtime.clone(),
-        reader: owner,
+        processor,
+        reader_id: 1,
         payload_rx,
         cancel,
         connection_id: "mqtt-conn".to_string(),

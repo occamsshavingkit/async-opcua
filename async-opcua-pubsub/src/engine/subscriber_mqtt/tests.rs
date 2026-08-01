@@ -12,6 +12,7 @@ use tokio_util::sync::CancellationToken;
 use super::MqttForwarder;
 use crate::{
     codec::uadp::{PublisherId, UadpDataSetMessage, UadpNetworkMessage},
+    engine::subscriber::SubscriberDatagramProcessor,
     DataSetReaderConfig, FieldTargetConfig, MessageEncoding, PubSubConnectionConfig,
     ReaderGroupConfig, SubscriberRuntime,
 };
@@ -57,9 +58,16 @@ fn reader(
 }
 
 fn connection(readers: Vec<DataSetReaderConfig>) -> PubSubConnectionConfig {
+    connection_with_id("mqtt-conn", readers)
+}
+
+fn connection_with_id(
+    connection_id: &str,
+    readers: Vec<DataSetReaderConfig>,
+) -> PubSubConnectionConfig {
     PubSubConnectionConfig {
-        connection_id: "mqtt-conn".to_string(),
-        name: "mqtt-conn".to_string(),
+        connection_id: connection_id.to_string(),
+        name: connection_id.to_string(),
         address: "mqtt://127.0.0.1:1883".to_string(),
         writer_groups: Vec::new(),
         reader_groups: vec![ReaderGroupConfig {
@@ -75,20 +83,40 @@ async fn forward_payload(
     owner: DataSetReaderConfig,
     payload: Vec<u8>,
 ) {
-    let (payload_tx, payload_rx) = tokio::sync::mpsc::channel(1);
+    let reader_id = owner.dataset_reader_id;
+    let processor = SubscriberDatagramProcessor::new(runtime, "mqtt-conn", vec![owner], None);
+    forward_processed_payload(processor, reader_id, payload).await;
+}
+
+async fn forward_processed_payload(
+    processor: SubscriberDatagramProcessor,
+    reader_id: u16,
+    payload: Vec<u8>,
+) {
+    forward_processed_payloads(processor, reader_id, vec![payload]).await;
+}
+
+async fn forward_processed_payloads(
+    processor: SubscriberDatagramProcessor,
+    reader_id: u16,
+    payloads: Vec<Vec<u8>>,
+) {
+    let (payload_tx, payload_rx) = tokio::sync::mpsc::channel(payloads.len().max(1));
     let forwarder = MqttForwarder {
-        runtime,
-        reader: owner,
+        processor,
+        reader_id,
         payload_rx,
         cancel: CancellationToken::new(),
         connection_id: "mqtt-conn".to_string(),
         topic: "opcua/telemetry/7".to_string(),
     }
     .spawn();
-    payload_tx
-        .send(payload)
-        .await
-        .expect("bounded test channel should remain open");
+    for payload in payloads {
+        payload_tx
+            .send(payload)
+            .await
+            .expect("bounded test channel should remain open");
+    }
     drop(payload_tx);
     timeout(Duration::from_secs(1), forwarder)
         .await
@@ -152,3 +180,4 @@ async fn mqtt_forwarder_applies_uadp_only_to_owner_when_json_reader_exists() {
 
 mod isolation;
 mod lifecycle;
+mod security;

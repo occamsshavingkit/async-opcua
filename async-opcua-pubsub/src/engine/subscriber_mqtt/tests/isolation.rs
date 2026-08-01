@@ -1,13 +1,19 @@
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use opcua_core::sync::RwLock;
+use opcua_crypto::SecurityPolicy;
 use opcua_server::address_space::AddressSpace;
-use opcua_types::{ContextOwned, NodeId, PubSubState, Variant};
+use opcua_types::{ContextOwned, MessageSecurityMode, NodeId, PubSubState, Variant};
 
-use super::{connection, forward_payload, insert_target, reader, target_value};
+use super::{
+    connection, connection_with_id, forward_payload, forward_processed_payload, insert_target,
+    reader, target_value,
+};
 use crate::{
     codec::uadp::{PublisherId, UadpDataSetMessage, UadpNetworkMessage},
-    DataSetReaderConfig, MessageEncoding, SubscriberError, SubscriberRuntime,
+    engine::subscriber::SubscriberDatagramProcessor,
+    DataSetReaderConfig, DataSetReaderKey, MessageEncoding, PubSubEngine, SecurityGroup,
+    SubscriberError, SubscriberRuntime,
 };
 use opcua_types::BinaryEncodable;
 
@@ -36,6 +42,101 @@ fn uadp_payload(dataset_writer_id: u16, value: f64) -> Vec<u8> {
         }],
     };
     message.encode_to_vec(&ContextOwned::default().context())
+}
+
+#[tokio::test]
+async fn mqtt_forwarder_rejects_plaintext_for_secured_owner() {
+    // Given a secured MQTT reader and a plaintext UADP payload that otherwise matches it.
+    let space = AddressSpace::new();
+    space.add_namespace("urn:test", 1);
+    let target = insert_target(&space, "SecuredOwnerTarget");
+    let address_space = Arc::new(RwLock::new(space));
+    let mut owner = reader(1, MessageEncoding::Uadp, target.clone());
+    owner.security_mode = Some(MessageSecurityMode::SignAndEncrypt);
+    owner.security_policy_uri = Some(SecurityPolicy::PubSubAes256Ctr.to_uri().to_string());
+    owner.security_group_id = Some("line-a".to_string());
+    let runtime = runtime(address_space.clone(), vec![owner.clone()]);
+    let config = connection(vec![owner.clone()]);
+    let mut engine = PubSubEngine::with_connections(address_space.clone(), vec![config.clone()]);
+    engine.register_security_group(
+        SecurityGroup::new("line-a", Duration::from_secs(3600))
+            .expect("security group fixture should be valid"),
+    );
+    let security = engine
+        .prepare_subscriber_security_processor(&config)
+        .expect("secured reader fixture should prepare");
+    let processor =
+        SubscriberDatagramProcessor::new(runtime.clone(), "mqtt-conn", vec![owner], security);
+
+    // When the owning forwarder receives the unauthenticated payload.
+    forward_processed_payload(processor, 1, uadp_payload(42, 23.5)).await;
+
+    // Then the secured reader rejects it without mutating its target.
+    assert_eq!(
+        target_value(&address_space.read(), &target),
+        Some(Variant::Double(0.0))
+    );
+    assert_eq!(
+        runtime
+            .read()
+            .reader_status(1)
+            .expect("owner status should exist")
+            .security_failure_count,
+        1
+    );
+}
+
+#[tokio::test]
+async fn mqtt_forwarder_keeps_duplicate_numeric_ids_connection_scoped() {
+    // Given two MQTT connections whose readers share a numeric id and filter.
+    let space = AddressSpace::new();
+    space.add_namespace("urn:test", 1);
+    let first_target = insert_target(&space, "FirstConnectionTarget");
+    let second_target = insert_target(&space, "SecondConnectionTarget");
+    let address_space = Arc::new(RwLock::new(space));
+    let owner = reader(1, MessageEncoding::Uadp, first_target.clone());
+    let unrelated = reader(1, MessageEncoding::Uadp, second_target.clone());
+    let runtime = Arc::new(RwLock::new(
+        SubscriberRuntime::with_connections(
+            address_space.clone(),
+            vec![
+                connection_with_id("first-mqtt", vec![owner.clone()]),
+                connection_with_id("second-mqtt", vec![unrelated]),
+            ],
+        )
+        .expect("duplicate numeric ids on distinct connections should be valid"),
+    ));
+    let processor =
+        SubscriberDatagramProcessor::new(runtime.clone(), "first-mqtt", vec![owner], None);
+
+    // When the first connection's forwarder receives a matching payload.
+    forward_processed_payload(processor, 1, uadp_payload(42, 23.5)).await;
+
+    // Then only the first connection's target and status are updated.
+    assert_eq!(
+        target_value(&address_space.read(), &first_target),
+        Some(Variant::Double(23.5))
+    );
+    assert_eq!(
+        target_value(&address_space.read(), &second_target),
+        Some(Variant::Double(0.0))
+    );
+    assert_eq!(
+        runtime
+            .read()
+            .reader_status_by_key(&DataSetReaderKey::new("first-mqtt", 1))
+            .expect("first reader status should exist")
+            .accepted_count,
+        1
+    );
+    assert_eq!(
+        runtime
+            .read()
+            .reader_status_by_key(&DataSetReaderKey::new("second-mqtt", 1))
+            .expect("second reader status should exist")
+            .accepted_count,
+        0
+    );
 }
 
 #[tokio::test]

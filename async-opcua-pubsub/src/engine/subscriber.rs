@@ -9,13 +9,19 @@ use tokio_util::sync::CancellationToken;
 use super::PubSubEngine;
 use crate::{
     config::ParsedSubscriberTransport,
-    subscriber::{DataSetReaderStatus, SubscriberApplyOutcome, SubscriberRuntime},
+    subscriber::{
+        DataSetReaderKey, DataSetReaderStatus, SubscriberApplyOutcome, SubscriberRuntime,
+    },
     transport::{
         mqtt::MqttBrokerAddress,
         udp::{bind_subscriber_socket, UdpSubscriberEndpoint},
     },
-    PubSubConnectionConfig,
+    DataSetReaderConfig, PubSubConnectionConfig,
 };
+
+mod datagram_processor;
+
+pub(super) use datagram_processor::SubscriberDatagramProcessor;
 
 enum SubscriberConnectionPlan {
     Udp(PubSubConnectionConfig, UdpSubscriberEndpoint),
@@ -23,8 +29,16 @@ enum SubscriberConnectionPlan {
 }
 
 enum PreparedSubscriberConnection {
-    Udp(PubSubConnectionConfig, UdpSocket),
-    Mqtt(PubSubConnectionConfig, MqttBrokerAddress),
+    Udp(
+        PubSubConnectionConfig,
+        UdpSocket,
+        SubscriberDatagramProcessor,
+    ),
+    Mqtt(
+        PubSubConnectionConfig,
+        MqttBrokerAddress,
+        Vec<SubscriberDatagramProcessor>,
+    ),
 }
 
 enum PreparedSubscriberRuntime {
@@ -55,15 +69,16 @@ impl PubSubEngine {
         payload: &[u8],
         ctx: &Context<'_>,
     ) -> Result<SubscriberApplyOutcome, StatusCode> {
-        let connection = self
+        if self.subscribers_are_running() && self.subscriber_runtime_dirty {
+            return Err(StatusCode::BadInvalidState);
+        }
+
+        let security = self
             .connections
             .iter()
             .find(|connection| connection.connection_id == connection_id)
-            .cloned()
-            .ok_or(StatusCode::BadNotFound)?;
-
-        let reader_ids = connection_reader_ids(&connection);
-        let security = connection.validated_subscriber_security()?;
+            .ok_or(StatusCode::BadNotFound)?
+            .validated_subscriber_security()?;
         let runtime = self.ensure_subscriber_runtime()?;
 
         if let Some(security) = security {
@@ -71,9 +86,9 @@ impl PubSubEngine {
             let decoded = if security_policy == SecurityPolicy::Unknown {
                 Err(StatusCode::BadSecurityChecksFailed)
             } else {
-                self.decode_subscriber_uadp_message(
-                    &security.security_group_id,
-                    security.security_mode,
+                self.decode_connection_subscriber_uadp_message(
+                    connection_id,
+                    &security,
                     security_policy,
                     payload,
                     ctx,
@@ -81,25 +96,45 @@ impl PubSubEngine {
             };
 
             return match decoded {
-                Ok(message) => runtime.write().process_network_message(&message),
+                Ok(message) => runtime
+                    .write()
+                    .process_network_message_for_connection(connection_id, &message),
                 Err(status) => {
                     runtime
                         .write()
-                        .record_security_failure_for_readers(&reader_ids);
+                        .record_security_failure_for_connection(connection_id);
                     Err(status)
                 }
             };
         }
 
-        return runtime.write().process_datagram(payload, ctx);
+        let outcome = runtime
+            .write()
+            .process_datagram_for_connection(connection_id, payload, ctx);
+        outcome
     }
 
     /// Returns a subscriber DataSetReader status snapshot.
+    ///
+    /// This compatibility lookup returns `None` when multiple connections
+    /// contain the same numeric DataSetReader id. Use
+    /// [`Self::subscriber_status_by_key`] when ids may repeat.
     #[must_use]
     pub fn subscriber_status(&self, reader_id: u16) -> Option<DataSetReaderStatus> {
         self.subscriber_runtime
             .as_ref()
             .and_then(|runtime| runtime.read().reader_status(reader_id))
+    }
+
+    /// Returns a subscriber status by connection-scoped DataSetReader key.
+    ///
+    /// The key pairs connection_id with dataset_reader_id to prevent
+    /// cross-connection collisions when numeric reader ids repeat.
+    #[must_use]
+    pub fn subscriber_status_by_key(&self, key: &DataSetReaderKey) -> Option<DataSetReaderStatus> {
+        self.subscriber_runtime
+            .as_ref()
+            .and_then(|runtime| runtime.read().reader_status_by_key(key))
     }
 
     /// Returns true when subscriber receive loops are running.
@@ -156,46 +191,65 @@ impl PubSubEngine {
                 Arc::new(RwLock::new(SubscriberRuntime::from_connections(
                     self.address_space.clone(),
                     self.connections.clone(),
-                ))),
+                )?)),
             ),
         };
 
+        let runtime = prepared_runtime.runtime();
         let mut prepared_connections = Vec::with_capacity(connection_plans.len());
         for connection in connection_plans {
             match connection {
                 SubscriberConnectionPlan::Udp(connection, endpoint) => {
+                    let processor = SubscriberDatagramProcessor::new(
+                        runtime.clone(),
+                        &connection.connection_id,
+                        connection_readers(&connection),
+                        self.prepare_subscriber_security_processor(&connection)?,
+                    );
                     let socket = bind_subscriber_socket(endpoint).await?;
-                    prepared_connections
-                        .push(PreparedSubscriberConnection::Udp(connection, socket));
+                    prepared_connections.push(PreparedSubscriberConnection::Udp(
+                        connection, socket, processor,
+                    ));
                 }
                 SubscriberConnectionPlan::Mqtt(connection, broker_address) => {
+                    let processors = connection_readers(&connection)
+                        .into_iter()
+                        .map(|reader| {
+                            Ok(SubscriberDatagramProcessor::new(
+                                runtime.clone(),
+                                &connection.connection_id,
+                                vec![reader],
+                                self.prepare_subscriber_security_processor(&connection)?,
+                            ))
+                        })
+                        .collect::<Result<Vec<_>, StatusCode>>()?;
                     prepared_connections.push(PreparedSubscriberConnection::Mqtt(
                         connection,
                         broker_address,
+                        processors,
                     ));
                 }
             }
         }
 
-        let runtime = prepared_runtime.runtime();
         let cancel_token = CancellationToken::new();
         let mut handles = Vec::with_capacity(prepared_connections.len());
 
         for connection in prepared_connections {
             match connection {
-                PreparedSubscriberConnection::Udp(connection, socket) => {
+                PreparedSubscriberConnection::Udp(connection, socket, processor) => {
                     handles.extend(self.spawn_udp_subscriber(
                         connection,
                         socket,
-                        runtime.clone(),
+                        processor,
                         cancel_token.clone(),
                     ));
                 }
-                PreparedSubscriberConnection::Mqtt(connection, broker_address) => {
+                PreparedSubscriberConnection::Mqtt(connection, broker_address, processors) => {
                     handles.extend(self.spawn_mqtt_subscribers(
                         connection,
                         broker_address,
-                        runtime.clone(),
+                        processors,
                         cancel_token.clone(),
                     ));
                 }
@@ -238,11 +292,11 @@ impl PubSubEngine {
     }
 }
 
-fn connection_reader_ids(connection: &PubSubConnectionConfig) -> Vec<u16> {
+fn connection_readers(connection: &PubSubConnectionConfig) -> Vec<DataSetReaderConfig> {
     connection
         .reader_groups
         .iter()
         .flat_map(|reader_group| reader_group.dataset_readers.iter())
-        .map(|reader| reader.dataset_reader_id)
+        .cloned()
         .collect()
 }

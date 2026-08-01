@@ -6,13 +6,14 @@ use std::time::Duration;
 use opcua_core::sync::RwLock;
 use opcua_crypto::SecurityPolicy;
 use opcua_pubsub::{
-    engine::PubSubEngine, DataSetReaderConfig, MqttPublisher, PubSubConnectionConfig,
-    PubSubPublisher, PublisherId, ReaderGroupConfig, SecurityGroup, TransportKind,
-    UadpDataSetMessage, UadpNetworkMessage, UadpSecurityCodec, WriterGroupConfig,
+    engine::PubSubEngine, DataSetReaderConfig, FieldTargetConfig, MqttPublisher,
+    PubSubConnectionConfig, PubSubPublisher, PublisherId, ReaderGroupConfig, SecurityGroup,
+    TransportKind, UadpDataSetMessage, UadpNetworkMessage, UadpSecurityCodec, WriterGroupConfig,
 };
-use opcua_server::address_space::AddressSpace;
+use opcua_server::address_space::{AddressSpace, VariableBuilder};
 use opcua_types::{
-    BinaryEncodable, ContextOwned, DateTime, MessageSecurityMode, StatusCode, Variant,
+    AttributeId, BinaryEncodable, ContextOwned, DataEncoding, DataTypeId, DateTime,
+    MessageSecurityMode, NodeId, NumericRange, StatusCode, TimestampsToReturn, Variant,
 };
 use tokio::net::UdpSocket;
 use tokio_util::sync::CancellationToken;
@@ -229,6 +230,81 @@ async fn adding_connection_while_subscribers_run_rebuilds_runtime_on_restart() {
 
     // Then: the restarted runtime exposes the newly added reader status.
     assert!(engine.subscriber_status(10).is_some());
+}
+
+#[tokio::test]
+async fn direct_processing_rejects_added_connection_while_running_runtime_is_dirty() {
+    // Given a running loopback subscriber and a target absent from its active runtime snapshot.
+    let space = AddressSpace::new();
+    space.add_namespace("urn:test", 1);
+    let target = NodeId::new(1, "AddedConnectionTarget");
+    VariableBuilder::new(&target, "AddedConnectionTarget", "AddedConnectionTarget")
+        .data_type(DataTypeId::Double)
+        .value(Variant::Double(0.0))
+        .insert(&space);
+    let address_space = Arc::new(RwLock::new(space));
+    let mut initial = empty_connection("active", "udp://127.0.0.1:0");
+    initial.reader_groups.push(ReaderGroupConfig {
+        reader_group_id: 1,
+        dataset_readers: vec![DataSetReaderConfig {
+            dataset_reader_id: 9,
+            dataset_writer_id: 7,
+            ..DataSetReaderConfig::default()
+        }],
+        ..ReaderGroupConfig::default()
+    });
+    let mut engine = PubSubEngine::with_connections(address_space.clone(), vec![initial]);
+    engine.start_subscribers().await.unwrap();
+
+    let mut added = empty_connection("added", "udp://127.0.0.1:0");
+    added.reader_groups.push(ReaderGroupConfig {
+        reader_group_id: 2,
+        dataset_readers: vec![DataSetReaderConfig {
+            dataset_reader_id: 10,
+            dataset_writer_id: 8,
+            target_variables: vec![FieldTargetConfig::value(0, target.clone())],
+            ..DataSetReaderConfig::default()
+        }],
+        ..ReaderGroupConfig::default()
+    });
+    engine.add_connection(added);
+    let context = ContextOwned::default();
+    let payload = UadpNetworkMessage {
+        publisher_id: PublisherId::UInt16(11),
+        writer_group_id: 7,
+        network_message_number: 3,
+        sequence_number: 1,
+        dataset_messages: vec![UadpDataSetMessage {
+            dataset_writer_id: 8,
+            sequence_number: 1,
+            timestamp: None,
+            status: None,
+            fields: vec![Variant::Double(77.0)],
+        }],
+    }
+    .encode_to_vec(&context.context());
+
+    // When direct processing targets the newly added connection before subscriber restart.
+    let result = engine.process_subscriber_datagram("added", &payload, &context.context());
+    let observed_value = {
+        let space = address_space.read();
+        space
+            .find(&target)
+            .and_then(|node| {
+                node.as_node().get_attribute(
+                    TimestampsToReturn::Neither,
+                    AttributeId::Value,
+                    &NumericRange::None,
+                    &DataEncoding::Binary,
+                )
+            })
+            .and_then(|value| value.value)
+    };
+    engine.stop_subscribers().await;
+
+    // Then dirty writable configuration is rejected and cannot mutate the address space.
+    assert_eq!(result, Err(StatusCode::BadInvalidState));
+    assert_eq!(observed_value, Some(Variant::Double(0.0)));
 }
 
 #[tokio::test]

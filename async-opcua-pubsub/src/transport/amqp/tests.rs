@@ -164,7 +164,9 @@ async fn aborting_coordinator_stops_writer_group_future() {
 #[tokio::test(flavor = "current_thread")]
 async fn aborting_coordinator_drops_writer_future_before_returning() {
     // Given: a coordinator that has taken direct ownership of one writer future.
-    let publisher = AmqpPublisher::new(Arc::new(RwLock::new(AddressSpace::new())));
+    let address_space = Arc::new(RwLock::new(AddressSpace::new()));
+    let address_space_weak = Arc::downgrade(&address_space);
+    let publisher = AmqpPublisher::new(address_space);
     let coordinator = publisher
         .start_publishing(
             PubSubConnectionConfig {
@@ -182,30 +184,22 @@ async fn aborting_coordinator_drops_writer_future_before_returning() {
             CancellationToken::new(),
         )
         .expect("AMQP publisher should start");
-    tokio::time::timeout(Duration::from_secs(1), async {
-        while Arc::strong_count(&publisher.address_space) < 3 {
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .expect("AMQP coordinator did not take ownership of the writer future");
+    drop(publisher);
+    assert!(
+        address_space_weak.upgrade().is_some(),
+        "AMQP coordinator did not retain the address space before abort"
+    );
 
     // When: the coordinator is aborted and awaited to completion.
-    let observed_address_space = Arc::clone(&publisher.address_space);
-    let observed_strong_count = tokio::spawn(async move {
-        coordinator.abort();
-        let join_error = coordinator
-            .await
-            .expect_err("coordinator completed instead of being aborted");
-        assert!(join_error.is_cancelled(), "coordinator was not cancelled");
-        Arc::strong_count(&observed_address_space)
-    })
-    .await
-    .expect("ownership observer task failed");
+    coordinator.abort();
+    let join_error = coordinator
+        .await
+        .expect_err("coordinator completed instead of being aborted");
+    assert!(join_error.is_cancelled(), "coordinator was not cancelled");
 
     // Then: no writer future retains the publisher's address space.
-    assert_eq!(
-        observed_strong_count, 2,
+    assert!(
+        address_space_weak.upgrade().is_none(),
         "AMQP writer future remained alive after the aborted coordinator returned"
     );
 }

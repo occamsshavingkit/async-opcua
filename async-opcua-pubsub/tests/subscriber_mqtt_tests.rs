@@ -18,14 +18,18 @@ use std::time::Duration;
 
 use opcua_core::sync::RwLock;
 use opcua_pubsub::{
-    transport::mqtt::{start_mqtt_subscriber, start_mqtt_subscriber_with_cancel},
+    engine::resolve_mqtt_topic_filter,
+    transport::mqtt::{
+        delivery_guarantee_to_mqtt_qos, start_mqtt_subscriber, start_mqtt_subscriber_with_cancel,
+    },
     DataSetReaderConfig, FieldTargetConfig, PubSubConnectionConfig, PubSubEngine, PublisherId,
     ReaderGroupConfig, SubscriberRuntime, UadpDataSetMessage, UadpNetworkMessage,
 };
 use opcua_server::address_space::{AddressSpace, VariableBuilder};
 use opcua_types::{
-    AttributeId, BinaryEncodable, ContextOwned, DataEncoding, DataTypeId, NodeId, NumericRange,
-    TimestampsToReturn, Variant,
+    AttributeId, BinaryEncodable, BrokerDataSetReaderTransportDataType,
+    BrokerTransportQualityOfService, ContextOwned, DataEncoding, DataSetReaderDataType, DataTypeId,
+    ExtensionObject, NodeId, NumericRange, TimestampsToReturn, UAString, Variant,
 };
 use rumqttc::{AsyncClient, MqttOptions, QoS};
 use tokio_util::sync::CancellationToken;
@@ -322,6 +326,7 @@ async fn start_mqtt_subscriber_stops_when_cancelled() {
     let handle = start_mqtt_subscriber_with_cancel(
         "mqtt://127.0.0.1:1".to_string(),
         "opcua/telemetry/7".to_string(),
+        QoS::AtLeastOnce,
         payload_tx,
         cancel.clone(),
     );
@@ -415,6 +420,7 @@ async fn start_mqtt_subscriber_returns_abortable_handle_without_broker() {
     let handle = start_mqtt_subscriber(
         "mqtt://127.0.0.1:1".to_string(),
         "opcua/telemetry/7".to_string(),
+        QoS::AtLeastOnce,
         payload_tx,
     );
 
@@ -429,4 +435,231 @@ async fn start_mqtt_subscriber_returns_abortable_handle_without_broker() {
     handle.abort();
     // Await to propagate the abort so the runtime drops the task cleanly.
     let _ = handle.await;
+}
+
+// --- T011: RequestedDeliveryGuarantee → MQTT QoS (OPC-10000-14 §7.3.4.5) ------
+
+/// `delivery_guarantee_to_mqtt_qos` maps the four concrete
+/// `BrokerTransportQualityOfService` values per OPC-10000-14 §7.3.4.5
+/// (AtMostOnce/BestEffort → QoS 0, AtLeastOnce → QoS 1, ExactlyOnce → QoS 2).
+/// `None` (absent broker transport) has no mapping and defaults to AtLeastOnce
+/// (QoS 1), the prior hard-coded QoS. An explicit `NotSpecified` is rejected
+/// upstream by config validation (§6.4.2.6.4 — see
+/// `broker_reader_with_not_specified_delivery_guarantee_is_rejected`); its arm
+/// here is a defensive fallback, also AtLeastOnce.
+#[test]
+fn mqtt_qos_maps_each_delivery_guarantee_per_spec() {
+    use opcua_types::BrokerTransportQualityOfService as Qos;
+
+    // §7.3.4.5 concrete mappings.
+    assert_eq!(
+        delivery_guarantee_to_mqtt_qos(Some(Qos::BestEffort)),
+        QoS::AtMostOnce
+    );
+    assert_eq!(
+        delivery_guarantee_to_mqtt_qos(Some(Qos::AtMostOnce)),
+        QoS::AtMostOnce
+    );
+    assert_eq!(
+        delivery_guarantee_to_mqtt_qos(Some(Qos::AtLeastOnce)),
+        QoS::AtLeastOnce
+    );
+    assert_eq!(
+        delivery_guarantee_to_mqtt_qos(Some(Qos::ExactlyOnce)),
+        QoS::ExactlyOnce
+    );
+    // Absent guarantee (no broker transport): operational default.
+    assert_eq!(delivery_guarantee_to_mqtt_qos(None), QoS::AtLeastOnce);
+    // Explicit NotSpecified: defensive fallback only (validation rejects it).
+    assert_eq!(
+        delivery_guarantee_to_mqtt_qos(Some(Qos::NotSpecified)),
+        QoS::AtLeastOnce
+    );
+}
+
+// --- T012: QueueName → MQTT topic filter (OPC-10000-14 §6.4.2.6.1) -----------
+
+/// `resolve_mqtt_topic_filter` honours the reader's broker `QueueName`
+/// (§6.4.2.6.1) and only falls back to the group-id topic convention when no
+/// QueueName is configured, so pre-existing configs keep working.
+#[test]
+fn mqtt_topic_filter_prefers_reader_queue_name() {
+    // Explicit QueueName wins outright.
+    let mut with_queue = reader(Vec::new());
+    with_queue.queue_name = Some("factory/line-a/telemetry".to_string());
+    assert_eq!(
+        resolve_mqtt_topic_filter(&with_queue, 7),
+        "factory/line-a/telemetry"
+    );
+
+    // No QueueName: fall back to the writer_group_id convention.
+    let mut with_writer_group = reader(Vec::new());
+    with_writer_group.writer_group_id = Some(9);
+    assert_eq!(
+        resolve_mqtt_topic_filter(&with_writer_group, 7),
+        "opcua/telemetry/9"
+    );
+
+    // No QueueName and no writer_group_id: fall back to the reader_group_id.
+    let mut with_neither = reader(Vec::new());
+    with_neither.writer_group_id = None;
+    assert_eq!(
+        resolve_mqtt_topic_filter(&with_neither, 7),
+        "opcua/telemetry/7"
+    );
+}
+
+// --- T011 + T012 config model: from_data_type preserves broker transport ----
+
+/// `DataSetReaderConfig::from_data_type` carries the broker
+/// `QueueName` and `RequestedDeliveryGuarantee` out of
+/// `BrokerDataSetReaderTransportDataType` transport settings (§6.4.2.6).
+#[test]
+fn dataset_reader_from_data_type_preserves_broker_transport_settings() {
+    let transport = BrokerDataSetReaderTransportDataType {
+        queue_name: UAString::from("sensors/temperature"),
+        requested_delivery_guarantee: BrokerTransportQualityOfService::ExactlyOnce,
+        ..BrokerDataSetReaderTransportDataType::default()
+    };
+    let source = DataSetReaderDataType {
+        name: UAString::from("broker-reader"),
+        transport_settings: ExtensionObject::from_message(transport),
+        ..DataSetReaderDataType::default()
+    };
+
+    let config = DataSetReaderConfig::from_data_type(&source, 1);
+
+    assert_eq!(config.queue_name.as_deref(), Some("sensors/temperature"));
+    assert_eq!(
+        config.requested_delivery_guarantee,
+        Some(BrokerTransportQualityOfService::ExactlyOnce)
+    );
+}
+
+/// An empty `QueueName` normalizes to `None` (so the group-id topic convention
+/// applies), while an explicit `NotSpecified` guarantee is PRESERVED as
+/// `Some(NotSpecified)` — not folded to `None` — so config validation can reject
+/// it per §6.4.2.6.4 (see `broker_reader_with_not_specified_delivery_guarantee_is_rejected`).
+#[test]
+fn dataset_reader_from_data_type_preserves_default_broker_transport_settings() {
+    let source = DataSetReaderDataType {
+        name: UAString::from("broker-reader"),
+        transport_settings: ExtensionObject::from_message(
+            BrokerDataSetReaderTransportDataType::default(),
+        ),
+        ..DataSetReaderDataType::default()
+    };
+
+    let config = DataSetReaderConfig::from_data_type(&source, 1);
+
+    // Null/empty QueueName → None (group-id topic fallback applies).
+    assert_eq!(config.queue_name, None);
+    // Explicit NotSpecified is preserved, not silently defaulted.
+    assert_eq!(
+        config.requested_delivery_guarantee,
+        Some(BrokerTransportQualityOfService::NotSpecified)
+    );
+}
+
+/// OPC-10000-14 §6.4.2.6.4: "NotSpecified is not allowed on the DataSetReader."
+/// A broker reader with an explicit `NotSpecified` delivery guarantee is
+/// rejected at subscriber-config validation rather than silently defaulting the
+/// QoS; an absent guarantee (`None`) is accepted.
+#[test]
+fn broker_reader_with_not_specified_delivery_guarantee_is_rejected() {
+    let mut rejected = reader(Vec::new());
+    rejected.requested_delivery_guarantee = Some(BrokerTransportQualityOfService::NotSpecified);
+    assert_eq!(
+        mqtt_connection(rejected).validate_subscriber_config(),
+        Err(opcua_types::StatusCode::BadConfigurationError)
+    );
+
+    // An absent guarantee (the common case) is accepted and defaults the QoS.
+    let accepted = mqtt_connection(reader(Vec::new()));
+    assert!(accepted.validate_subscriber_config().is_ok());
+}
+
+/// End-to-end proof of T012: a DataSetReader whose broker `QueueName` is set
+/// subscribes to that exact topic, so a publisher writing the QueueName topic
+/// reaches the target variable through the live broker.
+#[tokio::test]
+async fn mqtt_subscriber_receives_uadp_on_configured_queue_name_from_live_mosquitto() {
+    let Some(broker) = start_mosquitto_broker().await else {
+        return;
+    };
+
+    let space = AddressSpace::new();
+    space.add_namespace("urn:test", 1);
+    let target = insert_target(&space, "LiveMqttQueueNameTarget", Variant::Double(0.0));
+    let address_space = Arc::new(RwLock::new(space));
+
+    let mut reader = reader(vec![target.clone()]);
+    // T012: the configured QueueName becomes the MQTT subscription topic.
+    reader.queue_name = Some("opcua/custom/queue-name".to_string());
+
+    let mut engine = PubSubEngine::with_connections(
+        address_space.clone(),
+        vec![mqtt_connection_at(
+            format!("mqtt://127.0.0.1:{}", broker.port),
+            reader,
+        )],
+    );
+    engine.start_subscribers().unwrap();
+
+    let mut options = MqttOptions::new(
+        format!("async-opcua-test-publisher-{}", std::process::id()),
+        "127.0.0.1",
+        broker.port,
+    );
+    options.set_keep_alive(Duration::from_secs(5));
+    let (client, mut event_loop) = AsyncClient::new(options, 10);
+    let event_loop_handle = tokio::spawn(async move {
+        loop {
+            if event_loop.poll().await.is_err() {
+                break;
+            }
+        }
+    });
+
+    let ctx_owned = ContextOwned::default();
+    let ctx = ctx_owned.context();
+    let payload = network_msg(dataset_msg(42, 1, vec![Variant::Double(222.0)])).encode_to_vec(&ctx);
+
+    let mut observed = false;
+    for _ in 0..20 {
+        // Publish to the *QueueName* topic, not the group-id-derived one.
+        client
+            .publish(
+                "opcua/custom/queue-name",
+                QoS::AtLeastOnce,
+                false,
+                payload.clone(),
+            )
+            .await
+            .unwrap();
+
+        if target_reaches(
+            address_space.clone(),
+            &target,
+            Variant::Double(222.0),
+            Duration::from_millis(100),
+        )
+        .await
+        {
+            observed = true;
+            break;
+        }
+    }
+
+    event_loop_handle.abort();
+    let _ = event_loop_handle.await;
+    engine.stop_subscribers().await;
+
+    assert!(
+        observed,
+        "target {:?} never reached {:?} through the configured QueueName topic (got {:?})",
+        target,
+        Variant::Double(222.0),
+        target_value(&address_space.read(), &target)
+    );
 }

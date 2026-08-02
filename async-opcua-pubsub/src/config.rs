@@ -1,6 +1,6 @@
 use opcua_types::{
-    AttributeId, ConfigurationVersionDataType, Guid, MessageSecurityMode, NodeId,
-    OverrideValueHandling, StatusCode,
+    AttributeId, BrokerTransportQualityOfService, ConfigurationVersionDataType, Guid,
+    MessageSecurityMode, NodeId, OverrideValueHandling, StatusCode,
 };
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::{collections::HashSet, str::FromStr, time::Duration};
@@ -255,6 +255,20 @@ pub struct DataSetReaderConfig {
         serialize_with = "serialize_node_ids"
     )]
     pub subscribed_variables: Vec<NodeId>,
+    /// Broker DataSetReader transport `QueueName` (OPC-10000-14 §6.4.2.6.1),
+    /// used as the MQTT topic filter for this reader. When absent the
+    /// subscriber falls back to the group-id topic convention.
+    #[serde(default)]
+    pub queue_name: Option<String>,
+    /// Broker DataSetReader transport `RequestedDeliveryGuarantee`
+    /// (OPC-10000-14 §6.4.2.6.4), mapped to the MQTT subscribe QoS. `None`
+    /// (an unset or `NotSpecified` guarantee) yields the default QoS.
+    #[serde(
+        default,
+        serialize_with = "serialize_optional_broker_qos",
+        deserialize_with = "deserialize_optional_broker_qos"
+    )]
+    pub requested_delivery_guarantee: Option<BrokerTransportQualityOfService>,
 }
 
 impl Default for DataSetReaderConfig {
@@ -276,6 +290,8 @@ impl Default for DataSetReaderConfig {
             message_kind: DataSetMessageKind::KeyFrame,
             target_variables: Vec::new(),
             subscribed_variables: Vec::new(),
+            queue_name: None,
+            requested_delivery_guarantee: None,
         }
     }
 }
@@ -308,6 +324,15 @@ impl DataSetReaderConfig {
         }
         if self.message_kind != DataSetMessageKind::KeyFrame {
             return Err(StatusCode::BadNotSupported);
+        }
+        // OPC-10000-14 §6.4.2.6.4: "The value NotSpecified is not allowed on the
+        // DataSetReader." An explicit NotSpecified broker delivery guarantee is a
+        // configuration error (the spec directs the reader to the Error state);
+        // reject it rather than silently defaulting the subscribe QoS. An absent
+        // guarantee (`None`) is allowed and defaults the QoS operationally.
+        if self.requested_delivery_guarantee == Some(BrokerTransportQualityOfService::NotSpecified)
+        {
+            return Err(StatusCode::BadConfigurationError);
         }
 
         let targets = self.effective_target_variables();
@@ -546,6 +571,44 @@ fn message_security_mode_from_i32<E: serde::de::Error>(
         3 => Ok(MessageSecurityMode::SignAndEncrypt),
         value => Err(serde::de::Error::custom(format!(
             "Invalid MessageSecurityMode: {value}"
+        ))),
+    }
+}
+
+fn serialize_optional_broker_qos<S>(
+    value: &Option<BrokerTransportQualityOfService>,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    value
+        .as_ref()
+        .map(|value| *value as i32)
+        .serialize(serializer)
+}
+
+fn deserialize_optional_broker_qos<'de, D>(
+    deserializer: D,
+) -> Result<Option<BrokerTransportQualityOfService>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = Option::<i32>::deserialize(deserializer)?;
+    value.map(broker_qos_from_i32).transpose()
+}
+
+fn broker_qos_from_i32<E: serde::de::Error>(
+    value: i32,
+) -> Result<BrokerTransportQualityOfService, E> {
+    match value {
+        0 => Ok(BrokerTransportQualityOfService::NotSpecified),
+        1 => Ok(BrokerTransportQualityOfService::BestEffort),
+        2 => Ok(BrokerTransportQualityOfService::AtLeastOnce),
+        3 => Ok(BrokerTransportQualityOfService::AtMostOnce),
+        4 => Ok(BrokerTransportQualityOfService::ExactlyOnce),
+        value => Err(serde::de::Error::custom(format!(
+            "Invalid BrokerTransportQualityOfService: {value}"
         ))),
     }
 }

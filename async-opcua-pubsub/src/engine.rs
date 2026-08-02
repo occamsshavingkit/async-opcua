@@ -23,8 +23,31 @@ use crate::{
         udp::{bind_subscriber_socket, UdpPublisher, UdpSubscriberEndpoint},
         websocket::WebSocketPublisher,
     },
-    PubSubConnectionConfig, PubSubPublisher,
+    DataSetReaderConfig, PubSubConnectionConfig, PubSubPublisher,
 };
+
+/// Resolves the MQTT topic filter for a broker DataSetReader
+/// (OPC-10000-14 §6.4.2).
+///
+/// A configured broker `QueueName` (§6.4.2.6.1) is used verbatim as the
+/// subscription topic. When no QueueName is configured the reader falls back to
+/// the publisher's `opcua/telemetry/{writer_group_id}` topic convention (or the
+/// `reader_group_id` when no writer-group filter is set), preserving
+/// compatibility with pre-existing configurations.
+#[must_use]
+pub fn resolve_mqtt_topic_filter(reader: &DataSetReaderConfig, reader_group_id: u16) -> String {
+    if let Some(queue_name) = reader
+        .queue_name
+        .as_deref()
+        .filter(|queue_name| !queue_name.is_empty())
+    {
+        return queue_name.to_string();
+    }
+    match reader.writer_group_id {
+        Some(writer_group_id) => format!("opcua/telemetry/{writer_group_id}"),
+        None => format!("opcua/telemetry/{reader_group_id}"),
+    }
+}
 
 /// Supported OPC UA PubSub transport mappings.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -655,11 +678,11 @@ impl PubSubEngine {
     /// logged and retried with backoff inside the subscriber task, so they
     /// never crash the engine or abort the remaining readers.
     ///
-    /// TODO(config): the topic filter should come from the reader's
-    /// `BrokerDataSetReaderTransportDataType.QueueName` (§6.4.1.6.4) once the
-    /// config model exposes it. Until then it is derived from the reader's
-    /// writer-group filter to match the publisher's
-    /// `opcua/telemetry/{writer_group_id}` topic convention.
+    /// The topic filter comes from the reader's broker `QueueName`
+    /// (§6.4.2.6.1) via [`resolve_mqtt_topic_filter`], falling back to the
+    /// publisher's `opcua/telemetry/{writer_group_id}` convention when no
+    /// QueueName is configured. The subscribe QoS comes from the reader's
+    /// `RequestedDeliveryGuarantee` (§6.4.2.6.4 → §7.3.4.5).
     fn spawn_mqtt_subscribers(
         &self,
         connection: PubSubConnectionConfig,
@@ -673,10 +696,10 @@ impl PubSubEngine {
         for reader_group in &connection.reader_groups {
             for reader in &reader_group.dataset_readers {
                 let reader_id = reader.dataset_reader_id;
-                let topic_filter = match reader.writer_group_id {
-                    Some(writer_group_id) => format!("opcua/telemetry/{writer_group_id}"),
-                    None => format!("opcua/telemetry/{}", reader_group.reader_group_id),
-                };
+                let topic_filter = resolve_mqtt_topic_filter(reader, reader_group.reader_group_id);
+                let qos = crate::transport::mqtt::delivery_guarantee_to_mqtt_qos(
+                    reader.requested_delivery_guarantee,
+                );
 
                 let (queue, mut payload_rx) = DatagramQueue::new(self.datagram_queue_capacity);
                 // Raw sender for the broker subscriber task, which uses
@@ -689,6 +712,7 @@ impl PubSubEngine {
                 let subscriber_handle = crate::transport::mqtt::start_mqtt_subscriber_with_cancel(
                     broker_address.clone(),
                     topic_filter.clone(),
+                    qos,
                     payload_tx,
                     cancel_token.clone(),
                 );

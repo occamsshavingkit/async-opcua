@@ -5,9 +5,10 @@ use std::sync::Arc;
 use opcua_core::sync::{Mutex, RwLock};
 use opcua_server::{address_space::AddressSpace, node_manager::memory::CoreNodeManager};
 use opcua_types::{
-    AttributeId, ConfigurationVersionDataType, DataSetReaderDataType, DataSetWriterDataType,
-    ExtensionObject, FieldTargetDataType, JsonDataSetReaderMessageDataType, MessageSecurityMode,
-    MethodId, NetworkAddressUrlDataType, NodeId, NumericRange, PubSubConnectionDataType,
+    AttributeId, BrokerDataSetReaderTransportDataType, BrokerTransportQualityOfService,
+    ConfigurationVersionDataType, DataSetReaderDataType, DataSetWriterDataType, ExtensionObject,
+    FieldTargetDataType, JsonDataSetReaderMessageDataType, MessageSecurityMode, MethodId,
+    NetworkAddressUrlDataType, NodeId, NumericRange, PubSubConnectionDataType,
     PublishedVariableDataType, ReaderGroupDataType, StatusCode, TargetVariablesDataType, UAString,
     Variant, WriterGroupDataType,
 };
@@ -278,9 +279,33 @@ impl DataSetReaderConfig {
             message_encoding: message_encoding_from_settings(&value.message_settings),
             target_variables: target_variables_from_subscribed_data_set(&value.subscribed_data_set),
             subscribed_variables: Vec::new(),
+            queue_name: broker_queue_name(&value.transport_settings),
+            requested_delivery_guarantee: broker_delivery_guarantee(&value.transport_settings),
             ..DataSetReaderConfig::default()
         }
     }
+}
+
+/// Extracts the broker `QueueName` (OPC-10000-14 §6.4.2.6.1) from a
+/// DataSetReader's broker transport settings, when present and non-empty.
+fn broker_queue_name(transport_settings: &ExtensionObject) -> Option<String> {
+    let broker = transport_settings.inner_as::<BrokerDataSetReaderTransportDataType>()?;
+    non_empty_ua_string(&broker.queue_name)
+}
+
+/// Extracts the broker `RequestedDeliveryGuarantee` (OPC-10000-14 §6.4.2.6.4)
+/// from a DataSetReader's broker transport settings.
+///
+/// An explicit `NotSpecified` is PRESERVED (not folded to `None`) so that
+/// [`DataSetReaderConfig::validate`] can reject it per §6.4.2.6.4 ("NotSpecified
+/// is not allowed on the DataSetReader"). Only an absent broker transport
+/// (no `BrokerDataSetReaderTransportDataType`) yields `None`, which the
+/// subscriber treats as an unset guarantee and defaults the QoS.
+fn broker_delivery_guarantee(
+    transport_settings: &ExtensionObject,
+) -> Option<BrokerTransportQualityOfService> {
+    let broker = transport_settings.inner_as::<BrokerDataSetReaderTransportDataType>()?;
+    Some(broker.requested_delivery_guarantee)
 }
 
 fn message_encoding_from_settings(settings: &ExtensionObject) -> MessageEncoding {
@@ -1194,12 +1219,23 @@ fn decode_u32_array(args: &[Variant], index: usize) -> Vec<u32> {
 }
 
 fn ua_string_to_string(value: &UAString) -> String {
+    // A null UAString stringifies to the placeholder "[null]"; normalize it to
+    // an empty string so the placeholder never leaks into config values, names,
+    // publisher ids, or reflected AddressSpace display text. Callers that need
+    // to distinguish "unset" from "empty" use `non_empty_ua_string`.
+    if value.is_null() {
+        return String::new();
+    }
     value.to_string()
 }
 
 fn non_empty_ua_string(value: &UAString) -> Option<String> {
-    let value = ua_string_to_string(value);
-    (!value.is_empty()).then_some(value)
+    // `UAString::is_empty` is true for both null and empty strings; a null
+    // UAString stringifies to "[null]", which must not leak through as a value.
+    if value.is_empty() {
+        return None;
+    }
+    Some(ua_string_to_string(value))
 }
 
 fn security_mode_option(value: MessageSecurityMode) -> Option<MessageSecurityMode> {

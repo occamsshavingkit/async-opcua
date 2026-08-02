@@ -7,7 +7,8 @@ use tokio_util::sync::CancellationToken;
 use opcua_core::sync::RwLock;
 use opcua_server::address_space::{AddressSpace, NodeType};
 use opcua_types::{
-    BinaryEncodable, ContextOwned, DataEncoding, NumericRange, StatusCode, TimestampsToReturn,
+    BinaryEncodable, BrokerTransportQualityOfService, ContextOwned, DataEncoding, NumericRange,
+    StatusCode, TimestampsToReturn,
 };
 use rumqttc::{AsyncClient, Event, Incoming, MqttOptions, QoS};
 
@@ -265,12 +266,40 @@ impl PubSubPublisher for MqttPublisher {
     }
 }
 
+/// Maps a DataSetReader's broker `RequestedDeliveryGuarantee`
+/// (OPC-10000-14 §6.4.2.6.4) to the rumqttc subscribe `QoS` per the MQTT
+/// mapping in §7.3.4.5:
+///
+/// - `AtMostOnce` and `BestEffort` → QoS 0 (`AtMostOnce`)
+/// - `AtLeastOnce` → QoS 1 (`AtLeastOnce`)
+/// - `ExactlyOnce` → QoS 2 (`ExactlyOnce`)
+///
+/// `None` (an absent broker transport / unset guarantee) has no MQTT mapping and
+/// defaults to `AtLeastOnce` (QoS 1), the subscriber's prior hard-coded QoS. An
+/// explicit `NotSpecified` is rejected upstream by `DataSetReaderConfig`
+/// validation per §6.4.2.6.4 ("NotSpecified is not allowed on the DataSetReader");
+/// its arm here is a defensive fallback that is never reached for a validated
+/// reader.
+#[must_use]
+pub fn delivery_guarantee_to_mqtt_qos(requested: Option<BrokerTransportQualityOfService>) -> QoS {
+    match requested {
+        Some(BrokerTransportQualityOfService::AtMostOnce)
+        | Some(BrokerTransportQualityOfService::BestEffort) => QoS::AtMostOnce,
+        Some(BrokerTransportQualityOfService::ExactlyOnce) => QoS::ExactlyOnce,
+        Some(BrokerTransportQualityOfService::AtLeastOnce)
+        | Some(BrokerTransportQualityOfService::NotSpecified)
+        | None => QoS::AtLeastOnce,
+    }
+}
+
 /// Starts an MQTT subscriber implementing the Broker DataSetReader transport
 /// (OPC-10000-14 §6.4.2.6).
 ///
 /// `broker_address` is the `mqtt://host:port` (or bare `host:port`) of the
 /// broker, `topic_filter` is the broker QueueName (§6.4.2.6.1) to subscribe to,
-/// and received payload bytes are forwarded to `sender`.
+/// `qos` is the MQTT subscribe QoS (map the DataSetReader's
+/// `RequestedDeliveryGuarantee` with [`delivery_guarantee_to_mqtt_qos`]), and
+/// received payload bytes are forwarded to `sender`.
 ///
 /// Forwarding uses a non-blocking `try_send`; when `sender` is a bounded
 /// channel that is full, the payload is rejected and logged as
@@ -279,18 +308,17 @@ impl PubSubPublisher for MqttPublisher {
 ///
 /// The subscriber runs as a background tokio task; the returned `JoinHandle`
 /// lets the caller await completion or abort. Reconnects with exponential
-/// backoff (capped at 60s) on connection loss or subscribe failure. The MQTT
-/// QoS defaults to `AtLeastOnce`, matching `MqttPublisher`'s delivery guarantee
-/// and corresponding to the DataSetReader's RequestedDeliveryGuarantee
-/// (§6.4.2.6.4).
+/// backoff (capped at 60s) on connection loss or subscribe failure.
 pub fn start_mqtt_subscriber(
     broker_address: String,
     topic_filter: String,
+    qos: QoS,
     sender: tokio::sync::mpsc::Sender<Vec<u8>>,
 ) -> tokio::task::JoinHandle<()> {
     start_mqtt_subscriber_with_cancel(
         broker_address,
         topic_filter,
+        qos,
         sender,
         CancellationToken::new(),
     )
@@ -300,6 +328,7 @@ pub fn start_mqtt_subscriber(
 pub fn start_mqtt_subscriber_with_cancel(
     broker_address: String,
     topic_filter: String,
+    qos: QoS,
     sender: tokio::sync::mpsc::Sender<Vec<u8>>,
     cancel_token: CancellationToken,
 ) -> tokio::task::JoinHandle<()> {
@@ -330,11 +359,8 @@ pub fn start_mqtt_subscriber_with_cancel(
             let (client, mut event_loop) = AsyncClient::new(options, 50);
 
             // Subscribe to the broker QueueName (§6.4.2.6.1). QoS maps to the
-            // DataSetReader's RequestedDeliveryGuarantee (§6.4.2.6.4).
-            if let Err(error) = client
-                .subscribe(topic_filter.clone(), QoS::AtLeastOnce)
-                .await
-            {
+            // DataSetReader's RequestedDeliveryGuarantee (§6.4.2.6.4 → §7.3.4.5).
+            if let Err(error) = client.subscribe(topic_filter.clone(), qos).await {
                 tracing::warn!(
                     topic = %topic_filter,
                     ?error,

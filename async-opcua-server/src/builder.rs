@@ -43,6 +43,13 @@ pub struct ServerBuilder {
     pub(crate) type_loaders: TypeLoaderCollection,
     pub(crate) token: CancellationToken,
     pub(crate) build_info: BuildInfo,
+    /// Whether to auto-load every compiled-in companion-spec nodeset (e.g. GDS)
+    /// into the default address space at build time. Defaults to `false`:
+    /// companion loading is opt-in, so a server's address space stays
+    /// deterministic regardless of which features the surrounding workspace
+    /// unifies onto `async-opcua-server`. Enable for a server that wants all
+    /// compiled-in companion specs loaded.
+    pub(crate) load_companion_nodesets: bool,
 }
 
 impl Default for ServerBuilder {
@@ -58,6 +65,7 @@ impl Default for ServerBuilder {
             type_tree_getter: None,
             build_info: BuildInfo::default(),
             type_loaders: TypeLoaderCollection::new(),
+            load_companion_nodesets: false,
         };
         #[cfg(feature = "generated-address-space")]
         let builder = builder.with_node_manager(
@@ -352,6 +360,16 @@ impl ServerBuilder {
     /// Autocreates public / private keypair if they do not exist.
     pub fn create_sample_keypair(mut self, create_sample_keypair: bool) -> Self {
         self.config.create_sample_keypair = create_sample_keypair;
+        self
+    }
+
+    /// Enables auto-loading every compiled-in companion-spec nodeset (e.g. GDS)
+    /// into the default address space at build time. Off by default so a
+    /// server's address space is deterministic regardless of workspace feature
+    /// unification; enable for a server that wants all compiled-in companion
+    /// specs loaded.
+    pub fn load_companion_nodesets(mut self, load: bool) -> Self {
+        self.load_companion_nodesets = load;
         self
     }
 

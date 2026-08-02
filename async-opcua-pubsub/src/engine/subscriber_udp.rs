@@ -61,12 +61,12 @@ impl PubSubEngine {
     /// Spawns a single UDP datagram receive loop for a broker-less PubSub
     /// connection (OPC-10000-14 §6.4.1).
     ///
-    /// Received payloads are forwarded across a bounded
-    /// [`DatagramQueue`] (OPC-10000-14 §9.1.10.1) to a consumer task that
-    /// hands them to `SubscriberRuntime::process_datagram`. When the queue is
-    /// full (processing can't keep up), the producer rejects the datagram with
-    /// `StatusCode::BadTooManyPublishRequests` and drops it rather than
-    /// blocking the receive loop or growing memory without bound.
+    /// Received payloads are forwarded across a bounded [`DatagramQueue`] (an
+    /// internal processing limit) to a consumer task that hands them to
+    /// `SubscriberRuntime::process_datagram`. When the queue is full
+    /// (processing can't keep up), the producer rejects the datagram with
+    /// `StatusCode::BadResourceUnavailable` and drops it rather than blocking
+    /// the receive loop or growing memory without bound.
     ///
     /// Returns the producer and consumer task handles so the engine can await
     /// both on shutdown.
@@ -108,7 +108,7 @@ impl PubSubEngine {
         }));
 
         // Producer task: receives UDP datagrams and enqueues them on the
-        // bounded queue. On `BadTooManyPublishRequests` the datagram is
+        // bounded queue. On `BadResourceUnavailable` the datagram is
         // dropped (logged) so the receive loop never blocks on a full queue.
         handles.push(tokio::spawn(async move {
             let mut buf = vec![0_u8; 65_535];
@@ -124,7 +124,7 @@ impl PubSubEngine {
                                 receive_error_state.on_receive_success();
                                 match queue.try_enqueue(buf[..len].to_vec()) {
                                     Ok(()) => queue_full_log_state.on_enqueue_success(),
-                                    Err(status) if status == StatusCode::BadTooManyPublishRequests => {
+                                    Err(status) if status == StatusCode::BadResourceUnavailable => {
                                         if queue_full_log_state.on_queue_full() == tracing::Level::WARN {
                                             tracing::warn!(
                                                 ?status,

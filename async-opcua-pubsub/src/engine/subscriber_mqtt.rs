@@ -95,7 +95,7 @@ impl PubSubEngine {
 
             let (queue, payload_rx) = DatagramQueue::new(self.datagram_queue_capacity);
             // Raw sender for the broker subscriber task, which uses
-            // `try_send` and treats `Full` as `BadTooManyPublishRequests`
+            // `try_send` and treats `Full` as `BadResourceUnavailable`
             // (see `transport::mqtt::start_mqtt_subscriber`).
             let payload_tx = queue.sender();
 

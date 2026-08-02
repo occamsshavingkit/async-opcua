@@ -208,10 +208,10 @@ impl PubSubEngine {
     }
 
     /// Sets the bounded datagram queue capacity used by subscriber receive
-    /// loops (OPC-10000-14 §9.1.10.1).
+    /// loops (an internal processing limit; see [`DatagramQueue`]).
     ///
     /// Datagrams received while the queue is full are rejected with
-    /// `StatusCode::BadTooManyPublishRequests`. Must be called before
+    /// `StatusCode::BadResourceUnavailable`. Must be called before
     /// [`PubSubEngine::start_subscribers`]; later changes only apply to the
     /// next subscriber start. The capacity is clamped to a minimum of 1.
     pub fn set_datagram_queue_capacity(&mut self, capacity: usize) {

@@ -251,7 +251,7 @@ fn uadp_network_message_rejects_dataset_message_count_above_decoding_limit() {
 }
 
 #[test]
-fn datagram_queue_full_returns_bad_too_many_publish_requests() {
+fn datagram_queue_full_returns_bad_resource_unavailable() {
     use opcua_pubsub::DatagramQueue;
     use opcua_types::StatusCode;
 
@@ -260,5 +260,5 @@ fn datagram_queue_full_returns_bad_too_many_publish_requests() {
 
     queue.try_enqueue(b"first".to_vec()).unwrap();
     let err = queue.try_enqueue(b"second".to_vec()).unwrap_err();
-    assert_eq!(err, StatusCode::BadTooManyPublishRequests);
+    assert_eq!(err, StatusCode::BadResourceUnavailable);
 }

@@ -253,7 +253,7 @@ pub(crate) fn start_mqtt_subscriber_with_config(
                                     tracing::warn!(
                                         topic = %config.topic_filter,
                                         "MQTT subscriber datagram rejected; PubSub \
-                                         datagram queue full (BadTooManyPublishRequests)"
+                                         datagram queue full (BadResourceUnavailable)"
                                     );
                                 }
                                 TrySendError::Closed(_) => {

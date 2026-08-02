@@ -117,8 +117,9 @@ receives and processes it.
 ### User Story 4 — PubSub Status Codes and Limits (Priority: P3)
 
 As an OPC UA compliance test tool, when I send a request that exceeds the server's
-PubSub processing capacity, the server returns `BadTooManyPublishRequests` or an
-equivalent limit-enforcing status code.
+PubSub processing capacity, the server enforces the limit — dropping excess
+datagrams with `BadResourceUnavailable` (an internal processing limit) and/or
+transitioning the DataSetReader to `Error`.
 
 **Why this priority**: The Gauntlet expects the server to enforce operational limits
 on PubSub subscriber processing. This is a status-code addition to the existing
@@ -132,9 +133,10 @@ a limit-enforcing status code or transitions the DataSetReader to Error state.
 
 1. **Subscriber enforces processing limits**: **Given** a subscriber receiving
    NetworkMessages at a rate exceeding its configured capacity, **When** the
-   subscriber's internal queue reaches its limit, **Then** the server returns
-   `BadTooManyPublishRequests` or transitions the DataSetReader Status to `Error`
-   (OPC-10000-14 §9.1.10.1).
+   subscriber's internal queue reaches its limit, **Then** the server drops the
+   datagram with `BadResourceUnavailable` (internal processing limit) and, for
+   persistent overload, transitions the DataSetReader Status to `Error`
+   (OPC-10000-14 §6.2.1).
 
 ### Edge Cases
 
@@ -192,8 +194,11 @@ a limit-enforcing status code or transitions the DataSetReader to Error state.
 #### PubSub Status Codes
 
 - **FR-010**: The subscriber runtime MUST enforce a bounded queue for incoming
-  NetworkMessages and return `BadTooManyPublishRequests` when the queue is full
-  or set the DataSetReader Status to `Error` (OPC-10000-14 §9.1.10.1, §9.1.8.2).
+  NetworkMessages, dropping excess datagrams with `BadResourceUnavailable` (an
+  internal processing limit) when the queue is full; for persistent overload it
+  sets the DataSetReader Status to `Error` (OPC-10000-14 §6.2.1, §9.1.8.2).
+  (`BadTooManyPublishRequests` is a Part-4 Publish-service code, OPC-10000-4
+  §5.14.5.1, not a PubSub-internal status.)
 - **FR-011**: The subscriber MUST expose per-DataSetReader Status objects with
   `State` property indicating Disabled, PreOperational, Operational, or Error
   as defined by the PubSub state machine (OPC-10000-14 §6.2.1).
@@ -221,8 +226,11 @@ a limit-enforcing status code or transitions the DataSetReader to Error state.
   decodes UADP NetworkMessages delivered over broker transport.
 - **SC-004**: Gauntlet tests P14-S06.3-001 and P14-S06.3-002 (broker connection/QoS) pass —
   the subscriber connects to an MQTT broker and negotiates QoS.
-- **SC-005**: Gauntlet test P14-S08-001 (PubSub StatusCodes) passes — the server returns
-  `BadTooManyPublishRequests` or appropriate status when limits are exceeded.
+- **SC-005**: Gauntlet test P14-S08-001 — per investigation, this case exercises the
+  Part-4 Publish-service request-queue limit (`Bad_TooManyPublishRequests`,
+  OPC-10000-4 §5.14.5.1), already enforced in `SessionSubscriptions`, not a
+  PubSub-internal condition. The PubSub subscriber enforces its own internal
+  processing limit separately (`BadResourceUnavailable`).
 - **SC-006**: No existing integration tests regress — all existing PubSub tests
   (`async-opcua-pubsub/tests/*.rs`, `async-opcua/tests/integration/pubsub.rs`)
   continue to pass.

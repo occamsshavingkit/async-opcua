@@ -116,16 +116,21 @@ impl Drop for FotaFileHandleState {
 /// holds a real `std::fs::File` per handle instead of an in-memory buffer.
 struct FotaFileHandleRegistry {
     handles: moka::sync::Cache<u32, Arc<Mutex<FotaFileHandleState>>>,
-    next_handle: AtomicU32,
+    /// Held behind an `Arc` so several per-file handlers (e.g. one
+    /// `TemporaryFileTransferType` managing many concurrent temp files) can draw file handles from
+    /// a single globally-unique space -- a client's `fileHandle` must resolve to exactly one open
+    /// file regardless of which `FileType` instance issued it.
+    next_handle: Arc<AtomicU32>,
 }
 
 impl FotaFileHandleRegistry {
-    fn new(idle_timeout: Duration) -> Self {
+    /// Builds a registry whose file handles are drawn from the shared `counter`.
+    fn with_counter(idle_timeout: Duration, counter: Arc<AtomicU32>) -> Self {
         Self {
             handles: moka::sync::Cache::builder()
                 .time_to_idle(idle_timeout)
                 .build(),
-            next_handle: AtomicU32::new(1),
+            next_handle: counter,
         }
     }
 
@@ -167,6 +172,12 @@ pub struct FotaFileAccessHandler {
     handles: FotaFileHandleRegistry,
     backing_path: PathBuf,
     max_byte_string_length: u32,
+    /// Optional cap on the *total* backing-file size, enforced on every `Write`. `None` (the
+    /// default for a standalone FileType) leaves the file size unbounded beyond the per-call
+    /// `max_byte_string_length` cap; `TemporaryFileTransferType` sets this to its per-transfer
+    /// `max_total_bytes` so a client cannot exhaust disk by writing many small chunks to a single
+    /// write transfer (Constitution Principle IV -- disk-exhaustion DoS).
+    max_file_size: Option<u64>,
     shared: Arc<FileAccessShared>,
     /// Serializes the check-then-increment sequence in `handle_open` so two concurrent `Open`
     /// calls can't both observe a clear conflict check before either has incremented the
@@ -176,11 +187,13 @@ pub struct FotaFileAccessHandler {
 
 impl FotaFileAccessHandler {
     /// Creates a handler backed by `backing_path`, bounding `Read`/`Write` payloads at
-    /// `max_byte_string_length` (OPC-10000-20 §4.2.1) and expiring abandoned handles after
+    /// `max_byte_string_length` (OPC-10000-20 §4.2.1), expiring abandoned handles after
     /// `idle_timeout` of inactivity (matching `TrustListHandleRegistry`'s `ActivityTimeout`-style
-    /// precedent, see research.md).
+    /// precedent, see research.md), optionally capping the total backing-file size at
+    /// `max_file_size` (enforced per `Write`), and drawing file handles from the shared `counter`
+    /// so several per-file handlers can issue globally-unique handles.
     #[allow(clippy::too_many_arguments)]
-    fn new(
+    fn new_full(
         backing_path: PathBuf,
         max_byte_string_length: u32,
         address_space: Arc<RwLock<AddressSpace>>,
@@ -188,11 +201,14 @@ impl FotaFileAccessHandler {
         size_id: NodeId,
         writable: bool,
         idle_timeout: Duration,
+        max_file_size: Option<u64>,
+        counter: Arc<AtomicU32>,
     ) -> Self {
         Self {
-            handles: FotaFileHandleRegistry::new(idle_timeout),
+            handles: FotaFileHandleRegistry::with_counter(idle_timeout, counter),
             backing_path,
             max_byte_string_length,
+            max_file_size,
             shared: Arc::new(FileAccessShared {
                 read_opens: AtomicU16::new(0),
                 write_opens: AtomicU16::new(0),
@@ -385,6 +401,18 @@ impl FotaFileAccessHandler {
         }
 
         let position = state.position;
+        // Enforce the optional total file-size cap *before* touching the file. Without this a
+        // client could grow a write transfer's backing file without bound by issuing many small
+        // (each individually under `max_byte_string_length`) `Write` calls -- the per-call cap
+        // bounds one allocation, not the cumulative file size.
+        if let Some(max_file_size) = self.max_file_size {
+            let end = position
+                .checked_add(bytes.len() as u64)
+                .ok_or(StatusCode::BadInvalidArgument)?;
+            if end > max_file_size {
+                return Err(StatusCode::BadInvalidArgument);
+            }
+        }
         state
             .file
             .seek(SeekFrom::Start(position))
@@ -506,7 +534,32 @@ pub fn register_file_access_methods(
     max_byte_string_length: u32,
     writable: bool,
 ) -> Arc<FotaFileAccessHandler> {
-    let handler = Arc::new(FotaFileAccessHandler::new(
+    register_file_access_methods_full(
+        node_manager,
+        file_node,
+        backing_path,
+        max_byte_string_length,
+        writable,
+        None,
+        Arc::new(AtomicU32::new(1)),
+    )
+}
+
+/// Full variant of [`register_file_access_methods`]: additionally accepts a per-file total
+/// `max_file_size` cap (enforced on every `Write`) and a shared handle `counter`, used by
+/// `TemporaryFileTransferType` so that handles across all of its concurrent temp files form one
+/// globally-unique space.
+#[allow(clippy::too_many_arguments)]
+pub fn register_file_access_methods_full(
+    node_manager: &SimpleNodeManager,
+    file_node: &TemporaryFileNode,
+    backing_path: PathBuf,
+    max_byte_string_length: u32,
+    writable: bool,
+    max_file_size: Option<u64>,
+    counter: Arc<AtomicU32>,
+) -> Arc<FotaFileAccessHandler> {
+    let handler = Arc::new(FotaFileAccessHandler::new_full(
         backing_path,
         max_byte_string_length,
         node_manager.address_space().clone(),
@@ -514,6 +567,8 @@ pub fn register_file_access_methods(
         file_node.size_id.clone(),
         writable,
         Duration::from_secs(60),
+        max_file_size,
+        counter,
     ));
 
     type Handle =

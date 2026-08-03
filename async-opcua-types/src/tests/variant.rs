@@ -1900,6 +1900,107 @@ fn set_range_of_multidim_non_array_target() {
     );
 }
 
+// --- set_range_of scalar String/ByteString substring writes (Part 4 §7.27 / §5.11.4.2) ---
+// Writes are asymmetric with reads: the replacement size must match the addressed range
+// (no growth/shrink), and an out-of-range bound errors rather than clamping.
+
+/// An IndexRange Index write into a scalar String replaces the single addressed character.
+#[test]
+fn set_range_of_string_index_replaces_one_char() {
+    let mut v = Variant::String(UAString::from("hello"));
+    v.set_range_of(&nr("1"), &Variant::String(UAString::from("E")))
+        .unwrap();
+    assert_eq!(v, Variant::String(UAString::from("hEllo")));
+}
+
+/// A same-size Range write replaces the addressed character substring.
+#[test]
+fn set_range_of_string_range_replaces_substring() {
+    let mut v = Variant::String(UAString::from("hello world"));
+    v.set_range_of(&nr("0:4"), &Variant::String(UAString::from("HELLO")))
+        .unwrap();
+    assert_eq!(v, Variant::String(UAString::from("HELLO world")));
+}
+
+/// A replacement whose size differs from the addressed range is rejected (Part 4 §7.27 size-match;
+/// mirrors the multi-dimensional write path). No silent growth/shrink of the String.
+#[test]
+fn set_range_of_string_size_mismatch_is_data_mismatch() {
+    let mut v = Variant::String(UAString::from("abcde"));
+    // range 1:2 addresses 2 chars; "WXYZ" is 4 chars.
+    let err = v
+        .set_range_of(&nr("1:2"), &Variant::String(UAString::from("WXYZ")))
+        .unwrap_err();
+    assert_eq!(err, StatusCode::BadIndexRangeDataMismatch);
+}
+
+/// Write then read back the same range round-trips the written substring (symmetry with range_of).
+#[test]
+fn set_range_of_string_then_range_of_round_trips() {
+    let mut v = Variant::String(UAString::from("abcdefgh"));
+    let written = Variant::String(UAString::from("XYZ"));
+    v.set_range_of(&nr("2:4"), &written).unwrap();
+    assert_eq!(v, Variant::String(UAString::from("abXYZfgh")));
+    assert_eq!(v.range_of(&nr("2:4")).unwrap(), written);
+}
+
+/// A same-size Range write into a scalar ByteString replaces the addressed byte substring.
+#[test]
+fn set_range_of_bytestring_range_replaces_substring() {
+    let mut v = Variant::ByteString(ByteString::from(vec![0, 1, 2, 3, 4]));
+    v.set_range_of(
+        &nr("1:2"),
+        &Variant::ByteString(ByteString::from(vec![9, 9])),
+    )
+    .unwrap();
+    assert_eq!(
+        v,
+        Variant::ByteString(ByteString::from(vec![0, 9, 9, 3, 4]))
+    );
+}
+
+/// A range whose min is past the end is rejected with BadIndexRangeNoData.
+#[test]
+fn set_range_of_string_out_of_range_is_no_data() {
+    let mut v = Variant::String(UAString::from("hi"));
+    let err = v
+        .set_range_of(&nr("5:9"), &Variant::String(UAString::from("X")))
+        .unwrap_err();
+    assert_eq!(err, StatusCode::BadIndexRangeNoData);
+}
+
+/// A range whose max is past the end is rejected: a write must place every addressed element
+/// (Part 4 §7.27), so — unlike the read side — the upper bound is not clamped to len-1.
+#[test]
+fn set_range_of_string_max_past_end_is_no_data() {
+    let mut v = Variant::String(UAString::from("hi"));
+    // range 0:9: min in range, max past the 2-char end.
+    let err = v
+        .set_range_of(&nr("0:9"), &Variant::String(UAString::from("AB")))
+        .unwrap_err();
+    assert_eq!(err, StatusCode::BadIndexRangeNoData);
+}
+
+/// A data-type mismatch (String recipient, non-String replacement) is rejected up front.
+#[test]
+fn set_range_of_string_data_type_mismatch() {
+    let mut v = Variant::String(UAString::from("hi"));
+    let err = v
+        .set_range_of(&nr("0:1"), &Variant::from(7i32))
+        .unwrap_err();
+    assert_eq!(err, StatusCode::BadIndexRangeDataMismatch);
+}
+
+/// A null String cannot be substring-written (BadIndexRangeNoData).
+#[test]
+fn set_range_of_null_string_is_no_data() {
+    let mut v = Variant::String(UAString::null());
+    let err = v
+        .set_range_of(&nr("0:1"), &Variant::String(UAString::from("X")))
+        .unwrap_err();
+    assert_eq!(err, StatusCode::BadIndexRangeNoData);
+}
+
 /// US4: the Part 4 §7.27 Table 166 SINGLE-dimension read rows behave as before (back-compat).
 #[test]
 fn range_of_table166_single_dimension_rows() {

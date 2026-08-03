@@ -60,6 +60,54 @@ fn is_attribute_readable(
     Ok(())
 }
 
+/// The `AttributeId` → `WriteMask`-bit mapping for attributes the address space allows clients to
+/// write (Part 3 §8.60 Table 44). Single source of truth shared by the write path (`is_writable`)
+/// and the per-user `UserWriteMask` computation.
+const WRITABLE_ATTRIBUTES: &[(AttributeId, WriteMask)] = &[
+    (AttributeId::BrowseName, WriteMask::BROWSE_NAME),
+    (AttributeId::DisplayName, WriteMask::DISPLAY_NAME),
+    (AttributeId::Description, WriteMask::DESCRIPTION),
+    (AttributeId::WriteMask, WriteMask::WRITE_MASK),
+    (AttributeId::UserWriteMask, WriteMask::USER_WRITE_MASK),
+    (AttributeId::IsAbstract, WriteMask::IS_ABSTRACT),
+    (AttributeId::Symmetric, WriteMask::SYMMETRIC),
+    (AttributeId::InverseName, WriteMask::INVERSE_NAME),
+    (AttributeId::ContainsNoLoops, WriteMask::CONTAINS_NO_LOOPS),
+    (AttributeId::EventNotifier, WriteMask::EVENT_NOTIFIER),
+    (AttributeId::Value, WriteMask::VALUE_FOR_VARIABLE_TYPE),
+    (AttributeId::DataType, WriteMask::DATA_TYPE),
+    (AttributeId::ValueRank, WriteMask::VALUE_RANK),
+    (AttributeId::ArrayDimensions, WriteMask::ARRAY_DIMENSIONS),
+    (AttributeId::AccessLevel, WriteMask::ACCESS_LEVEL),
+    (AttributeId::UserAccessLevel, WriteMask::USER_ACCESS_LEVEL),
+    (
+        AttributeId::MinimumSamplingInterval,
+        WriteMask::MINIMUM_SAMPLING_INTERVAL,
+    ),
+    (AttributeId::Historizing, WriteMask::HISTORIZING),
+    (AttributeId::Executable, WriteMask::EXECUTABLE),
+    (AttributeId::UserExecutable, WriteMask::USER_EXECUTABLE),
+    (
+        AttributeId::DataTypeDefinition,
+        WriteMask::DATA_TYPE_DEFINITION,
+    ),
+    (AttributeId::RolePermissions, WriteMask::ROLE_PERMISSIONS),
+    (
+        AttributeId::AccessRestrictions,
+        WriteMask::ACCESS_RESTRICTIONS,
+    ),
+    (AttributeId::AccessLevelEx, WriteMask::ACCESS_LEVEL_EX),
+];
+
+/// Returns the `WriteMask` bit governing `attribute_id`, or `None` if the attribute is not
+/// client-writable. Part 3 §8.60.
+pub(crate) fn write_mask_bit_for_attribute(attribute_id: AttributeId) -> Option<WriteMask> {
+    WRITABLE_ATTRIBUTES
+        .iter()
+        .find(|(attr, _)| *attr == attribute_id)
+        .map(|(_, bit)| WriteMask::from_bits_truncate(bit.bits()))
+}
+
 /// Validate that the user given by `context` can write to the
 /// attribute given by `attribute_id`.
 pub fn is_writable(
@@ -82,34 +130,10 @@ pub fn is_writable(
 
         Ok(())
     } else {
-        let mask_value = match attribute_id {
-            // The default address space does not support modifying node class or node id,
-            // Custom node managers are allowed to.
-            AttributeId::BrowseName => WriteMask::BROWSE_NAME,
-            AttributeId::DisplayName => WriteMask::DISPLAY_NAME,
-            AttributeId::Description => WriteMask::DESCRIPTION,
-            AttributeId::WriteMask => WriteMask::WRITE_MASK,
-            AttributeId::UserWriteMask => WriteMask::USER_WRITE_MASK,
-            AttributeId::IsAbstract => WriteMask::IS_ABSTRACT,
-            AttributeId::Symmetric => WriteMask::SYMMETRIC,
-            AttributeId::InverseName => WriteMask::INVERSE_NAME,
-            AttributeId::ContainsNoLoops => WriteMask::CONTAINS_NO_LOOPS,
-            AttributeId::EventNotifier => WriteMask::EVENT_NOTIFIER,
-            AttributeId::Value => WriteMask::VALUE_FOR_VARIABLE_TYPE,
-            AttributeId::DataType => WriteMask::DATA_TYPE,
-            AttributeId::ValueRank => WriteMask::VALUE_RANK,
-            AttributeId::ArrayDimensions => WriteMask::ARRAY_DIMENSIONS,
-            AttributeId::AccessLevel => WriteMask::ACCESS_LEVEL,
-            AttributeId::UserAccessLevel => WriteMask::USER_ACCESS_LEVEL,
-            AttributeId::MinimumSamplingInterval => WriteMask::MINIMUM_SAMPLING_INTERVAL,
-            AttributeId::Historizing => WriteMask::HISTORIZING,
-            AttributeId::Executable => WriteMask::EXECUTABLE,
-            AttributeId::UserExecutable => WriteMask::USER_EXECUTABLE,
-            AttributeId::DataTypeDefinition => WriteMask::DATA_TYPE_DEFINITION,
-            AttributeId::RolePermissions => WriteMask::ROLE_PERMISSIONS,
-            AttributeId::AccessRestrictions => WriteMask::ACCESS_RESTRICTIONS,
-            AttributeId::AccessLevelEx => WriteMask::ACCESS_LEVEL_EX,
-            _ => return Err(StatusCode::BadNotWritable),
+        // The default address space does not support modifying node class or node id;
+        // custom node managers are allowed to.
+        let Some(mask_value) = write_mask_bit_for_attribute(attribute_id) else {
+            return Err(StatusCode::BadNotWritable);
         };
 
         let write_mask = node.as_node().write_mask();
@@ -140,6 +164,30 @@ pub fn user_access_level(context: &RequestContext, node: &NodeType) -> AccessLev
         }
     }
     access_level
+}
+
+/// The per-user `UserWriteMask` for `node`: the node's `WriteMask` restricted to only the bits the
+/// current user is authorized to write (Part 3 §5.2.8 / §8.55). Mirrors what the write path
+/// (`is_writable`) actually permits, so the advertised mask no longer lies. When RBAC enforcement
+/// is off, `authorize_ctx` grants everything, so the result equals the operator-set `WriteMask`
+/// (the spec's "can only further restrict" rule). Returns `None` when the node has no `WriteMask`.
+pub fn user_write_mask(context: &RequestContext, node: &NodeType) -> Option<WriteMask> {
+    let mut result_bits = node.as_node().write_mask()?.bits();
+    for (attribute, bit) in WRITABLE_ATTRIBUTES {
+        // Part 3 §8.55: a UserWriteMask bit is set only if WriteMask allows the attribute AND the
+        // current user's effective RolePermissions grant the governing permission.
+        let bit = bit.bits();
+        if result_bits & bit != 0
+            && !rbac::decision::authorize_ctx(
+                context,
+                node,
+                rbac::decision::permission_for_write_attribute(*attribute),
+            )
+        {
+            result_bits &= !bit;
+        }
+    }
+    Some(WriteMask::from_bits_truncate(result_bits))
 }
 
 fn authenticator_user_access_level(context: &RequestContext, node: &NodeType) -> AccessLevel {
@@ -398,6 +446,17 @@ pub fn read_node_value(
                 context.user_roles(),
             ))
         });
+        return result_value;
+    }
+
+    if node_to_read.attribute_id == AttributeId::UserWriteMask {
+        // Part 3 §5.2.8: UserWriteMask is per-user — computed from the effective RolePermissions,
+        // not the static stored value — so it never advertises bits the write path will deny.
+        result_value.value = Some(Variant::from(
+            user_write_mask(context, node)
+                .map(|mask| mask.bits())
+                .unwrap_or(0u32),
+        ));
         return result_value;
     }
 
@@ -1074,6 +1133,95 @@ mod tests {
 
         assert!(access_level.contains(AccessLevel::CURRENT_READ));
         assert!(access_level.contains(AccessLevel::CURRENT_WRITE));
+    }
+
+    #[tokio::test]
+    async fn user_write_mask_equals_write_mask_when_enforcement_off() {
+        let operator = NodeId::new(0, "Operator");
+        let context = request_context_with_roles(vec![operator.clone()]);
+        let mut node = variable_with_user_access_level(AccessLevel::CURRENT_READ);
+        node.as_mut_node()
+            .set_write_mask(WriteMask::BROWSE_NAME | WriteMask::DESCRIPTION);
+        node.as_mut_node()
+            .set_role_permissions(vec![role_permission(
+                &operator,
+                PermissionType::WriteAttribute,
+            )]);
+
+        let mask = user_write_mask(&context, &node).expect("write mask is set");
+
+        // Enforcement off => authorize grants everything => UserWriteMask == WriteMask.
+        assert!(mask.contains(WriteMask::BROWSE_NAME));
+        assert!(mask.contains(WriteMask::DESCRIPTION));
+    }
+
+    #[tokio::test]
+    async fn user_write_mask_keeps_authorized_bits_when_enforcement_on() {
+        let operator = NodeId::new(0, "Operator");
+        let context = request_context_with_roles_enforced(vec![operator.clone()]);
+        let mut node = variable_with_user_access_level(AccessLevel::CURRENT_READ);
+        node.as_mut_node()
+            .set_write_mask(WriteMask::BROWSE_NAME | WriteMask::DESCRIPTION);
+        node.as_mut_node()
+            .set_role_permissions(vec![role_permission(
+                &operator,
+                PermissionType::WriteAttribute,
+            )]);
+
+        let mask = user_write_mask(&context, &node).expect("write mask is set");
+
+        // Operator has WriteAttribute => both writable attributes stay.
+        assert!(mask.contains(WriteMask::BROWSE_NAME));
+        assert!(mask.contains(WriteMask::DESCRIPTION));
+    }
+
+    #[tokio::test]
+    async fn user_write_mask_clears_bits_when_user_role_lacks_permission() {
+        let operator = NodeId::new(0, "Operator");
+        let observer = NodeId::new(0, "Observer");
+        let context = request_context_with_roles_enforced(vec![observer.clone()]);
+        let mut node = variable_with_user_access_level(AccessLevel::CURRENT_READ);
+        node.as_mut_node()
+            .set_write_mask(WriteMask::BROWSE_NAME | WriteMask::DESCRIPTION);
+        // Only Operator is granted WriteAttribute; the user is Observer.
+        node.as_mut_node()
+            .set_role_permissions(vec![role_permission(
+                &operator,
+                PermissionType::WriteAttribute,
+            )]);
+
+        let mask = user_write_mask(&context, &node).expect("write mask is set");
+
+        assert!(!mask.contains(WriteMask::BROWSE_NAME));
+        assert!(!mask.contains(WriteMask::DESCRIPTION));
+    }
+
+    #[tokio::test]
+    async fn user_write_mask_historizing_requires_write_historizing() {
+        let operator = NodeId::new(0, "Operator");
+        let context = request_context_with_roles_enforced(vec![operator.clone()]);
+        let mut node = variable_with_user_access_level(AccessLevel::CURRENT_READ);
+        node.as_mut_node()
+            .set_write_mask(WriteMask::DESCRIPTION | WriteMask::HISTORIZING);
+        // WriteAttribute governs Description; WriteHistorizing governs Historizing.
+        node.as_mut_node()
+            .set_role_permissions(vec![role_permission(
+                &operator,
+                PermissionType::WriteAttribute,
+            )]);
+
+        let mask = user_write_mask(&context, &node).expect("write mask is set");
+
+        assert!(mask.contains(WriteMask::DESCRIPTION));
+        assert!(!mask.contains(WriteMask::HISTORIZING));
+    }
+
+    #[tokio::test]
+    async fn user_write_mask_none_when_write_mask_unset() {
+        let context = request_context();
+        let node = variable_with_user_access_level(AccessLevel::CURRENT_READ);
+
+        assert!(user_write_mask(&context, &node).is_none());
     }
 
     #[tokio::test]

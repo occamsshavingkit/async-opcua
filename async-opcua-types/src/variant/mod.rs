@@ -1657,16 +1657,18 @@ impl Variant {
             return Err(StatusCode::BadIndexRangeDataMismatch);
         }
 
-        let other_array = if let Variant::Array(other) = other {
-            other
-        } else {
-            return Err(StatusCode::BadIndexRangeNoData);
-        };
-        let other_values = &other_array.values;
-
-        // Check value is same type as our array
         match self {
+            // OPC UA Part 4 §7.27 / §5.11.4.2: an IndexRange write into a scalar String or
+            // ByteString replaces the addressed character/byte substring (symmetric with
+            // `range_of`); `other` is the scalar replacement value.
+            Variant::String(target) => Self::set_string_substring(target, range, other),
+            Variant::ByteString(target) => Self::set_bytestring_substring(target, range, other),
             Variant::Array(ref mut array) => {
+                let other_array = match other {
+                    Variant::Array(other) => other,
+                    _ => return Err(StatusCode::BadIndexRangeNoData),
+                };
+                let other_values = &other_array.values;
                 match range {
                     NumericRange::None => Err(StatusCode::BadIndexRangeNoData),
                     NumericRange::Invalid(_) => Err(StatusCode::BadIndexRangeInvalid),
@@ -1770,10 +1772,102 @@ impl Variant {
                 }
             }
             _ => {
-                error!("Writing a range is not supported when the recipient is not an array");
+                error!(
+                    "Writing a range is not supported for this recipient \
+                     (expected an array, String, or ByteString)"
+                );
                 Err(StatusCode::BadWriteNotSupported)
             }
         }
+    }
+
+    /// Validates a scalar substring write's `[min, max]` against `len` using the WRITE-side rules
+    /// of Part 4 §7.27 (asymmetric with the read-side `substring`): a write must place EVERY
+    /// addressed element, so both `min` and `max` must be in range (`min < len`, `max < len`) and
+    /// the range must not be inverted (`max >= min`). An out-of-range bound is an error, not a
+    /// partial write. `None` (no range) and `MultipleRanges` (a scalar has one dimension) are not
+    /// valid for a scalar substring; `Invalid` maps to `BadIndexRangeInvalid`.
+    fn substring_write_bounds(
+        range: &NumericRange,
+        len: usize,
+    ) -> Result<(usize, usize), StatusCode> {
+        let (min, max) = match range {
+            NumericRange::Index(idx) => {
+                let idx = (*idx) as usize;
+                (idx, idx)
+            }
+            NumericRange::Range(min, max) => ((*min) as usize, (*max) as usize),
+            NumericRange::Invalid(_) => return Err(StatusCode::BadIndexRangeInvalid),
+            NumericRange::None | NumericRange::MultipleRanges(_) => {
+                return Err(StatusCode::BadIndexRangeNoData)
+            }
+        };
+        // Writes must address only in-range elements (Part 4 §7.27); unlike the read-side
+        // substring, an out-of-range or inverted range is an error, not a partial write.
+        if len == 0 || min >= len || max >= len || max < min {
+            return Err(StatusCode::BadIndexRangeNoData);
+        }
+        Ok((min, max))
+    }
+
+    /// Replaces the addressed character substring of `target` with `other` (a scalar String),
+    /// char-indexed to match `UAString::substring` / `range_of`.
+    fn set_string_substring(
+        target: &mut UAString,
+        range: &NumericRange,
+        other: &Variant,
+    ) -> Result<(), StatusCode> {
+        let replacement = match other {
+            Variant::String(replacement) => replacement,
+            // The caller's data_type check makes this unreachable in practice.
+            _ => return Err(StatusCode::BadIndexRangeDataMismatch),
+        };
+        let src = match target.value() {
+            Some(value) => value,
+            None => return Err(StatusCode::BadIndexRangeNoData),
+        };
+        let chars: Vec<char> = src.chars().collect();
+        let (min, max) = Self::substring_write_bounds(range, chars.len())?;
+        let replacement_text: String = replacement.value().as_ref().cloned().unwrap_or_default();
+        // Part 4 §7.27: the replacement size must match the addressed range (no growth/shrink),
+        // mirroring the multi-dimensional write path's size-match rule.
+        if replacement_text.chars().count() != max - min + 1 {
+            return Err(StatusCode::BadIndexRangeDataMismatch);
+        }
+        let mut result: String = chars.iter().take(min).collect();
+        result.push_str(&replacement_text);
+        result.extend(chars.iter().skip(max + 1));
+        target.set_value(Some(result));
+        Ok(())
+    }
+
+    /// Replaces the addressed byte substring of `target` with `other` (a scalar ByteString),
+    /// byte-indexed to match `ByteString::substring` / `range_of`.
+    fn set_bytestring_substring(
+        target: &mut ByteString,
+        range: &NumericRange,
+        other: &Variant,
+    ) -> Result<(), StatusCode> {
+        let replacement = match other {
+            Variant::ByteString(replacement) => replacement,
+            _ => return Err(StatusCode::BadIndexRangeDataMismatch),
+        };
+        if target.value.is_none() {
+            return Err(StatusCode::BadIndexRangeNoData);
+        }
+        let bytes = target.as_ref();
+        let (min, max) = Self::substring_write_bounds(range, bytes.len())?;
+        let replacement_bytes = replacement.as_ref();
+        // Part 4 §7.27: the replacement size must match the addressed range (no growth/shrink),
+        // mirroring the multi-dimensional write path's size-match rule.
+        if replacement_bytes.len() != max - min + 1 {
+            return Err(StatusCode::BadIndexRangeDataMismatch);
+        }
+        let mut result: Vec<u8> = bytes.get(..min).unwrap_or(&[]).to_vec();
+        result.extend_from_slice(replacement_bytes);
+        result.extend_from_slice(bytes.get(max + 1..).unwrap_or(&[]));
+        *target = ByteString::from(result);
+        Ok(())
     }
 
     /// This function gets a range of values from the variant if it is an array,

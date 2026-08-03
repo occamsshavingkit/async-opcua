@@ -102,7 +102,7 @@ fn test_handler_with_writable(
     };
     let open_count_id = file_node.open_count_id.clone();
     let backing_path = dir.path().join("test.bin");
-    let handler = Arc::new(FotaFileAccessHandler::new(
+    let handler = Arc::new(FotaFileAccessHandler::new_full(
         backing_path,
         1024,
         address_space,
@@ -110,6 +110,8 @@ fn test_handler_with_writable(
         file_node.size_id.clone(),
         writable,
         Duration::from_secs(60),
+        None,
+        Arc::new(AtomicU32::new(1)),
     ));
     (handler, open_count_id)
 }
@@ -589,7 +591,7 @@ async fn write_updates_the_size_property() {
         .expect("temporary file node should be created")
     };
     let backing_path = dir.path().join("test.bin");
-    let handler = Arc::new(FotaFileAccessHandler::new(
+    let handler = Arc::new(FotaFileAccessHandler::new_full(
         backing_path,
         1024,
         address_space.clone(),
@@ -597,6 +599,8 @@ async fn write_updates_the_size_property() {
         file_node.size_id.clone(),
         true,
         Duration::from_secs(60),
+        None,
+        Arc::new(AtomicU32::new(1)),
     ));
     let (context, _server) = test_context(1);
 
@@ -703,7 +707,7 @@ async fn open_count_reconciles_when_a_handle_is_evicted_instead_of_closed() {
     let backing_path = dir.path().join("test.bin");
     // A near-zero idle timeout so the handle is evicted on the next cache operation without
     // an explicit Close -- simulating an abandoned connection.
-    let handler = Arc::new(FotaFileAccessHandler::new(
+    let handler = Arc::new(FotaFileAccessHandler::new_full(
         backing_path,
         1024,
         address_space,
@@ -711,6 +715,8 @@ async fn open_count_reconciles_when_a_handle_is_evicted_instead_of_closed() {
         file_node.size_id.clone(),
         true,
         Duration::from_millis(1),
+        None,
+        Arc::new(AtomicU32::new(1)),
     ));
     let (context, _server) = test_context(1);
 

@@ -6,3 +6,5 @@ pub mod cleanup;
 pub mod file_access;
 /// Session-bound temporary FileType node creation.
 pub mod file_node;
+/// `TemporaryFileTransferType` (OPC-10000-20 §4.4): on-demand temp file generation.
+pub mod temporary_transfer;

@@ -56,6 +56,12 @@ pub struct TypeCodeGenTarget {
     #[serde(default)]
     /// Extra header to add to each generated file.
     pub extra_header: String,
+    /// Extra attributes to add to each generated struct.
+    #[serde(default)]
+    pub extra_struct_attributes: Vec<String>,
+    /// Extra attributes to add to each generated enum.
+    #[serde(default)]
+    pub extra_enum_attributes: Vec<String>,
     #[serde(default = "defaults::id_path")]
     /// Path to the crate where the `DataTypeIds` and `ObjectIds` enums are located.
     /// Defaults to `crate`.
@@ -79,6 +85,8 @@ impl Default for TypeCodeGenTarget {
             enums_single_file: false,
             structs_single_file: false,
             extra_header: String::new(),
+            extra_enum_attributes: Vec::new(),
+            extra_struct_attributes: Vec::new(),
             id_path: defaults::id_path(),
             node_ids_from_nodeset: false,
             dependent_nodesets: Vec::new(),
@@ -193,6 +201,8 @@ fn generate_types_inner(
             enums_single_file: target.enums_single_file,
             structs_single_file: target.structs_single_file,
             node_ids_from_nodeset: target.node_ids_from_nodeset,
+            extra_struct_attributes: target.extra_struct_attributes.clone(),
+            extra_enum_attributes: target.extra_enum_attributes.clone(),
         },
         target_namespace.clone(),
         target.id_path.clone(),

@@ -3,8 +3,8 @@ use std::collections::{HashMap, HashSet};
 use convert_case::{Case, Casing};
 use proc_macro2::Span;
 use syn::{
-    parse_quote, parse_str, punctuated::Punctuated, FieldsNamed, File, Generics, Item, ItemEnum,
-    ItemMacro, ItemStruct, Lit, LitByte, Path, Token, Type, Visibility,
+    parse::Parser, parse_quote, parse_str, punctuated::Punctuated, Attribute, FieldsNamed, File,
+    Generics, Item, ItemEnum, ItemMacro, ItemStruct, Lit, LitByte, Path, Token, Type, Visibility,
 };
 use tracing::warn;
 
@@ -76,6 +76,8 @@ pub struct CodeGenItemConfig {
     pub enums_single_file: bool,
     pub structs_single_file: bool,
     pub node_ids_from_nodeset: bool,
+    pub extra_struct_attributes: Vec<String>,
+    pub extra_enum_attributes: Vec<String>,
 }
 
 struct ImportType {
@@ -197,6 +199,18 @@ impl CodeGenerator {
                 e.option || e.default_value.is_some() || e.values.iter().any(|v| v.value == 0)
             }
         }
+    }
+
+    fn parse_extra_attributes(attrs: &[String]) -> Result<Vec<Attribute>, CodeGenError> {
+        let mut parsed = Vec::new();
+        for attr in attrs {
+            let p = Attribute::parse_outer;
+            let mut parsed_attr = p.parse_str(attr).map_err(|e| {
+                CodeGenError::from(e).with_context(format!("Parsing attribute: {attr}"))
+            })?;
+            parsed.append(&mut parsed_attr);
+        }
+        Ok(parsed)
     }
 
     /// Generate types from the loaded input.
@@ -459,6 +473,9 @@ impl CodeGenerator {
         attrs.push(parse_quote! {
             #[repr(#ty)]
         });
+        attrs.extend(Self::parse_extra_attributes(
+            &self.config.extra_enum_attributes,
+        )?);
 
         for field in &item.values {
             let (name, renamed) = safe_ident(&field.name);
@@ -597,6 +614,9 @@ impl CodeGenerator {
                 #[derive(Default)]
             });
         }
+        attrs.extend(Self::parse_extra_attributes(
+            &self.config.extra_struct_attributes,
+        )?);
 
         let mut impls = Vec::new();
         let (struct_ident, renamed) = safe_ident(&item.name);

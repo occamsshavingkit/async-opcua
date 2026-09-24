@@ -846,6 +846,46 @@ impl Server {
         .await
     }
 
+    /// Run the server using externally accepted TCP streams for `opc.wss`
+    /// connections and caller-owned per-connection tokens.
+    ///
+    /// Accepted sockets are upgraded with TLS and WebSocket framing before the
+    /// normal OPC UA binary transport handshake. WSS TLS must be configured.
+    /// Endpoint descriptions use the configured `host` and the port of
+    /// `local_addr`. Callers must set `host` to match their listener and pass its
+    /// bound address as `local_addr`. The server exits after the stream channel
+    /// closes and active connections finish.
+    ///
+    /// The token is never inspected by the server. It is moved into the spawned
+    /// connection task and dropped when that task exits; if the stream is
+    /// rejected by `max_connections`, the token is dropped with the stream.
+    #[cfg(feature = "wss")]
+    pub async fn run_with_wss_streams<T: Send + 'static>(
+        mut self,
+        rx: mpsc::Receiver<(TcpStream, SocketAddr, T)>,
+        local_addr: SocketAddr,
+    ) -> Result<(), String> {
+        let Some(tls_config) = self.config.wss_tls.as_ref().map(|config| config.0.clone()) else {
+            return Err("Cannot run WSS listener without a WSS rustls ServerConfig".to_string());
+        };
+
+        let context = self.server_context();
+        self.prepare_to_run(&context).await?;
+
+        self.info
+            .port
+            .store(local_addr.port(), std::sync::atomic::Ordering::Relaxed);
+        info!("Now accepting handed-off WSS connections on {local_addr}");
+
+        self.log_endpoint_info();
+        self.run_connection_loop(
+            &context,
+            ConnectionSource::Streams(rx),
+            AcceptedTransport::Wss(tls_config),
+        )
+        .await
+    }
+
     /// Run the server. The provided `token` can be used to stop the server gracefully.
     pub async fn run(self) -> Result<(), String> {
         let addr = self.get_socket_address();
